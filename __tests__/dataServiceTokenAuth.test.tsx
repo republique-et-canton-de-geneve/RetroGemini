@@ -167,7 +167,7 @@ describe('dataService token-preferred auth (stage 7b)', () => {
   describe('token-only session (restore-session, stage 7e server)', () => {
     beforeEach(async () => {
       const restored = await dataService.restoreSession('token-restored');
-      expect(restored).not.toBeNull();
+      expect(restored).toHaveProperty('team');
       mockFetch.mockClear();
     });
 

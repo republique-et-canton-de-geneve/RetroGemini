@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../services/dataService', () => ({ dataService: mocks.dataService }));
 
 import { jiraService, JiraServiceError } from '../services/jiraService';
+import { registerRevocationResolver } from '../services/sessionRevocation';
 
 type Answer =
   | { json: unknown; status?: number }
@@ -110,6 +111,29 @@ describe('jiraService', () => {
 
       await expect(jiraService.getStatus('team-1')).resolves.toEqual(STATUS);
       expect(calls).toEqual([{ url: '/api/team/team-1/jira/status', body: { sessionToken: 'token-1' } }]);
+    });
+
+    // Decision D3b: a token a password change revoked. Sent again once, with
+    // the token held now, when this page holds another one by then (the
+    // change was made here, or another tab's token was adopted); otherwise
+    // the refusal stands, and the session is revoked.
+    it('sends a request refused for a revoked token again once, with the token that replaced it', async () => {
+      registerRevocationResolver(async () => {
+        mocks.dataService.getSessionToken = () => 'token-2';
+        return 'retry';
+      });
+      queue(json({ error: 'session_revoked' }, 401), json(STATUS));
+
+      await expect(jiraService.getStatus('team-1')).resolves.toEqual(STATUS);
+      expect(calls.map(c => c.body.sessionToken)).toEqual(['token-1', 'token-2']);
+    });
+
+    it('stops on a revoked token nothing replaced, without a loop', async () => {
+      registerRevocationResolver(async () => 'revoked');
+      queue(json({ error: 'session_revoked' }, 401));
+
+      await expect(jiraService.getStatus('team-1')).rejects.toMatchObject({ message: 'session_revoked' });
+      expect(calls).toHaveLength(1);
     });
 
     it('reads the credential when the call runs, never earlier', async () => {

@@ -66,6 +66,7 @@ const KNOWN_ERRORS: Record<string, MessageKey> = {
   team_not_found: 'errors.teamNotFound',
   invalid_password: 'errors.invalidPassword',
   invalid_token: 'errors.invalidToken',
+  session_revoked: 'errors.sessionRevoked',
   too_many_requests: 'errors.tooManyRequests',
   unknown_error: 'errors.unknown',
   // The Jira routes: services/jiraService.ts rejects with the route's code as

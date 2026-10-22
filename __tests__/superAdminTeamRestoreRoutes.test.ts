@@ -354,6 +354,27 @@ describe('super-admin single-team restore', () => {
     expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.id)).not.toContain(`f1-${suffix}`);
   });
 
+  it('keeps the sessions of a team that still exists, and signs out the tokens a team deleted since outlived (decision D3b)', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    const login = await server.post('/api/team/login', { teamName: target.name, password: OLD_PASSWORD });
+    const token = login.body.sessionToken as string;
+
+    // The team still exists: its password is kept, and so are its sessions.
+    expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    expect((await server.post(`/api/team/${target.id}`, { sessionToken: token })).status).toBe(200);
+
+    // Deleted since: the archived password comes back, and a token minted
+    // before the deletion must not come back to life with it.
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+    expect((await restoreTeam(backupId, target.id)).body).toMatchObject({ recreated: true });
+
+    const refused = await server.post(`/api/team/${target.id}`, { sessionToken: token });
+    expect(refused).toEqual({ status: 401, body: { error: 'session_revoked' } });
+    const relogin = await server.post('/api/team/login', { teamName: target.name, password: OLD_PASSWORD });
+    expect((await server.post(`/api/team/${target.id}`, { sessionToken: relogin.body.sessionToken })).status).toBe(200);
+  });
+
   it('refuses a deleted team whose name was taken since, writing nothing, then restores it under another name', async () => {
     const { target } = await seedTeams();
     const backupId = await takeBackup();

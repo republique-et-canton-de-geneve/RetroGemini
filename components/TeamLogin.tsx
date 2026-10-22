@@ -11,6 +11,7 @@ import { Team, TeamSummary, User, RetroSession, ActionItem } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import { translateErrorMessage } from '../i18n/errorMessages';
 import type { MessageKey, TranslationParams } from '../i18n/translate';
+import { noticeText, type Notice } from '../i18n/notice';
 import LanguageSwitcher from './common/LanguageSwitcher';
 
 /**
@@ -51,9 +52,13 @@ interface Props {
   onJoin?: (team: Team, user: User) => void;
   inviteData?: InviteData | null;
   onSuperAdminLogin?: (sessionToken: string) => void;
+  // Why this screen is shown when the user did not choose it (decision D3b:
+  // the team's password was changed). Shown on the team list and the sign-in
+  // form, which is where such a user lands and where they act on it.
+  signedOutNotice?: Notice | null;
 }
 
-const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminLogin }) => {
+const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminLogin, signedOutNotice = null }) => {
   const { t, tp, tRich } = useTranslation();
   const [view, setView] = useState<'LIST' | 'CREATE' | 'LOGIN' | 'JOIN' | 'FORGOT_PASSWORD' | 'RESET_PASSWORD' | 'SUPER_ADMIN_LOGIN'>('LIST');
   const [selectedTeam, setSelectedTeam] = useState<Team | TeamSummary | null>(null);
@@ -551,6 +556,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         and silently discarded, and the user lands on the team
                         list with no idea why. */}
                     {error && <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
+                    {signedOutNotice && <div role="status" className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-sm mb-4 text-sm">{noticeText(signedOutNotice, t)}</div>}
                     {infoMessage && (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
                             <div className="flex items-start gap-2">
@@ -813,6 +819,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         <p className="text-slate-500 text-sm">{t('login.signIn.subtitle')}</p>
                     </div>
                     {error && <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>}
+                    {signedOutNotice && <div role="status" className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded-sm mb-4 text-sm">{noticeText(signedOutNotice, t)}</div>}
                     <form onSubmit={handleLogin} className="space-y-4">
                         <div>
                             <label htmlFor="team-login-password" className="block text-sm font-bold text-slate-500 mb-1">{t('login.signIn.passwordLabel')}</label>

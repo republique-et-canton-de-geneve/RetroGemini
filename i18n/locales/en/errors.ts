@@ -46,6 +46,8 @@ const errors = {
   'errors.connectionFailed': 'Connection failed',
   // A team credential the server no longer accepts, and the per-IP limiters.
   'errors.invalidToken': 'Your session has expired. Please sign in to the team again.',
+  // Decision D3b: a token a password change revoked (`session_revoked`).
+  'errors.sessionRevoked': 'The team password was changed. Please sign in to the team again with the new password.',
   'errors.tooManyRequests': 'Too many requests right now. Please wait a moment and try again.',
   // The Jira routes (`/api/team/:teamId/jira/*`, `/api/super-admin/*jira*`)
   // and the codes a `/jira/issues` batch stops with. Jira's own refusal of one

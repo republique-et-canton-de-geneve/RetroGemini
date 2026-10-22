@@ -27,7 +27,8 @@ import { getAssignableMembers } from './session/assignableMembers';
 import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessionRoster';
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import SyncStalledBanner from './session/SyncStalledBanner';
-import { SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
+import { JOIN_DENIED_REVOKED, SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
+import { isSessionLive, useSessionRevoked } from './session/useSessionRevoked';
 import LanguageSwitcher from './common/LanguageSwitcher';
 import { useTranslation } from '../i18n/I18nContext';
 import { localizeDecimal } from '../i18n/formatNumber';
@@ -146,6 +147,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // this never heals on its own, so it must survive a later `connect` event.
   const [joinDeniedReason, setJoinDeniedReason] = useState<string | null>(null);
   const joinDeniedRef = useRef<string | null>(null);
+  // Decision D3b: the team's password was changed under this session (see
+  // Session.tsx; the behaviour is the shared hook's).
+  const sessionRevoked = useSessionRevoked({ isLiveRef, setIsLive, joinDeniedRef });
+  const deniedReason = sessionRevoked ? JOIN_DENIED_REVOKED : joinDeniedReason;
   const presenceBroadcasted = useRef(false);
   const sessionRef = useRef(session);
 
@@ -425,7 +430,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         extendOwnChanges(ownChangesRef.current, Date.now() - offlineSinceRef.current);
         offlineSinceRef.current = null;
       }
-      const live = connected && joinDeniedRef.current === null;
+      const live = isSessionLive(connected, joinDeniedRef.current);
       isLiveRef.current = live;
       setIsLive(live);
     });
@@ -879,7 +884,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         {/* Real-time sync indicator. As in the retro header, the reassuring
             "live" chip steps aside on the narrowest phones; a lost connection,
             a refused join or a stalled sync always shows (the chip decides). */}
-        <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
+        <SessionSyncChip isLive={isLive} joinDeniedReason={deniedReason} />
 
         {/* Participant progress - shown when panel is collapsed or on smaller screens */}
         {(participantsPanelCollapsed || window.innerWidth < 1024) && (
@@ -1696,7 +1701,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       {renderHeader()}
       <SessionConnectionBanner
         isLive={isLive}
-        joinDeniedReason={joinDeniedReason}
+        joinDeniedReason={deniedReason}
         onReturnToLogin={onSessionExpired ?? onExit}
       />
       <SyncStalledBanner />

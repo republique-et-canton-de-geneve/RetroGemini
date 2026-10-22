@@ -4,6 +4,7 @@
 // `teamRoutes.js`, and converting a legacy record lives in
 // `passwordMigration.js` — the authentication path does no writes at all now.
 import { verifyPassword } from './passwordHashing.js';
+import { sessionVerdict } from './sessionEpoch.js';
 
 // The per-team invite epoch (hardening stage 7e) is the revocation counter for
 // invite credentials: every password rotation bumps it, invalidating all
@@ -58,6 +59,23 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
     return await verifyPassword(password, team.passwordHash);
   };
 
+  // Decision D3b: a session token is good only while the team's session epoch
+  // is the one it carries (`sessionEpoch.js`). The verdict for a token on its
+  // own — `/api/team/restore-session`, the AI routes — read from the team's
+  // small auth row, never from its record. Answers `{ claims, state, error }`
+  // with `error` one of null, 'invalid_token', 'team_not_found' and
+  // 'session_revoked'. `teamId` binds the token to one team when given.
+  const verifySessionToken = async (sessionToken, { teamId = null } = {}) => {
+    const claims = tokenService ? tokenService.validateSessionToken(sessionToken) : null;
+    if (!claims || (teamId !== null && claims.teamId !== teamId)) {
+      return { claims: null, state: null, error: 'invalid_token' };
+    }
+    const state = await dataStore.loadTeamAuthState(claims.teamId);
+    const verdict = sessionVerdict(claims, state);
+    if (verdict === 'current') return { claims, state, error: null };
+    return { claims, state, error: verdict === 'revoked' ? 'session_revoked' : 'team_not_found' };
+  };
+
   // Hardening stage 7a: a signed team session token is accepted as an
   // alternative credential to the plaintext password. Either valid credential
   // grants access; the token must be minted for the exact team being
@@ -69,21 +87,42 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
   //
   // `needsTeam: false` is for a caller that only needs the verdict: most are
   // writes that then go through atomicUpdateTeam, which reads the record itself.
-  // A valid token is then checked against the record's existence alone:
-  // loading it parses the team's whole history (about 60 ms per MB on
-  // PostgreSQL), which the write parses again right after, on every persist
-  // of a live session. The answer is the same either way, `team` aside, which
-  // is then null. A password still loads the record, to verify the hash.
+  // A valid token is then checked against the team's auth row alone
+  // (`dataStore.loadTeamAuthState`: whether the record exists and the team's
+  // session epoch, one statement, the record's value never read). Loading the
+  // record parses the team's whole history (about 60 ms per MB on PostgreSQL),
+  // which the write parses again right after, on every persist of a live
+  // session. The answer is the same either way, `team` aside, which is then
+  // null. A password still loads the record, to verify the hash.
+  //
+  // Decision D3b: a token whose epoch a password rotation replaced is refused
+  // with `session_revoked` — on its own, and beside the old password a client
+  // that logged in by password still sends — so the client has one code to
+  // react to. Beside the *current* password it authenticates through the
+  // password, as any stale token always did. A revoked token sent with no
+  // password is answered from the auth row alone, before the record is read:
+  // right after a rotation every invite-link participant's in-flight write
+  // arrives exactly so, and each one used to cost a full parse only to be
+  // refused. The codes stay string literals in this function
+  // (`__tests__/jiraErrorCodes.test.ts` reads them from its source).
   const authenticateTeam = async (teamId, password, sessionToken, { needsTeam = true } = {}) => {
-    // Decided once, so the two paths below cannot disagree on what a valid
-    // token is.
+    // Decided once, so the paths below cannot disagree on what a valid token
+    // is: null (no token for this team), 'current' or 'revoked'.
     const claims = sessionToken && tokenService ? tokenService.validateSessionToken(sessionToken) : null;
-    const tokenValid = Boolean(claims) && claims.teamId === teamId;
-
-    if (tokenValid && !needsTeam) {
-      return (await dataStore.teamExists(teamId))
-        ? { team: null, error: null, via: 'session-token' }
-        : { team: null, error: 'team_not_found' };
+    let token = null;
+    if (claims && claims.teamId === teamId) {
+      const verdict = sessionVerdict(claims, await dataStore.loadTeamAuthState(teamId));
+      if (verdict === 'team_not_found') {
+        return { team: null, error: 'team_not_found' };
+      }
+      token = verdict;
+      if (token === 'current' && !needsTeam) {
+        return { team: null, error: null, via: 'session-token' };
+      }
+      // Nothing else could authenticate this request.
+      if (token === 'revoked' && !password) {
+        return { team: null, error: 'session_revoked' };
+      }
     }
 
     const team = await dataStore.loadTeam(teamId);
@@ -98,7 +137,7 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
     // purely for its side effect — which no longer has one.
     // `migrateLegacyPasswords` covers that record now, at startup and after a
     // restore, without an authentication path doing hidden writes.
-    if (tokenValid) {
+    if (token === 'current') {
       return { team, error: null, via: 'session-token' };
     }
 
@@ -109,16 +148,23 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
       return { team, error: null, via: 'team-password' };
     }
 
+    if (token === 'revoked') {
+      return { team: null, error: 'session_revoked' };
+    }
+
     return { team: null, error: password ? 'invalid_password' : sessionToken ? 'invalid_token' : 'invalid_password' };
   };
 
-  const atomicUpdateTeam = async (teamId, updater) => {
-    return await dataStore.atomicTeamUpdate(teamId, updater);
+  // `options` reach `dataStore.atomicTeamUpdate` as they are: the password
+  // route passes `{ rotateSessionEpoch: true }` (decision D3b).
+  const atomicUpdateTeam = async (teamId, updater, options) => {
+    return await dataStore.atomicTeamUpdate(teamId, updater, options);
   };
 
   return {
     sanitizeTeamForClient,
     authenticateTeam,
+    verifySessionToken,
     atomicUpdateTeam,
     verifyTeamPassword
   };

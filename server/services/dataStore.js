@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import pg from 'pg';
 import { createKeyedQueue } from './keyedQueue.js';
 import { carryJiraLinks, carryJiraParents } from '../../utils/actionImpact.js';
+import { DEFAULT_SESSION_EPOCH, newSessionEpoch, parseTeamAuthRow } from './sessionEpoch.js';
 
 const TEAM_PREFIX = 'team:';
 const SESSION_PREFIX = 'session:';
@@ -11,6 +12,12 @@ const SESSION_PREFIX = 'session:';
 // Its fifth character is `-`, so no `LIKE 'team:%'` scan ever reads it as a
 // team — which is what keeps it out of summaries, the console and backups.
 const TEAM_SECRET_PREFIX = 'team-secret:';
+// A team's session epoch (decision D3b, see loadTeamAuthState). The same
+// fifth-character `-` as `team-secret:`, for the same reason: no `team:%`
+// scan — summaries, the console, `loadAllTeams`, archives, an older pod's
+// restore — ever reads it as a team, so no archive carries it and no restore
+// rolls it back.
+const TEAM_AUTH_PREFIX = 'team-auth:';
 const JIRA_SETTINGS_KEY = 'jira-settings';
 const GLOBAL_SETTINGS_KEY = 'global-settings';
 
@@ -423,7 +430,28 @@ const createDataStore = ({ rootDir }) => {
     return { team: updatedTeam, payload };
   };
 
-  const updateTeamOnPostgres = async (key, updater) => {
+  // The value a rotation writes into `team-auth:{teamId}`: blind, so it never
+  // depends on the row it replaces (and a corrupt row is simply repaired).
+  const nextTeamAuthRow = () => ({ v: 1, sessionEpoch: newSessionEpoch(), revokedAt: Date.now() });
+
+  const upsertTeamAuthOnPostgres = (client, teamId, row) => client.query(
+    `INSERT INTO kv_store (key, value, updated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET
+       value = EXCLUDED.value,
+       updated_at = NOW()`,
+    [teamAuthKey(teamId), JSON.stringify(row)]
+  );
+
+  const upsertTeamAuthOnSqlite = (teamId, row) => sqliteDb.prepare(
+    `INSERT INTO kv_store (key, value, updated_at)
+     VALUES (?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(key) DO UPDATE SET
+       value = excluded.value,
+       updated_at = CURRENT_TIMESTAMP`
+  ).run(teamAuthKey(teamId), JSON.stringify(row));
+
+  const updateTeamOnPostgres = async (key, updater, teamId, { rotateSessionEpoch = false } = {}) => {
     const client = await pgPool.connect();
     try {
       await client.query('BEGIN');
@@ -439,9 +467,15 @@ const createDataStore = ({ rootDir }) => {
         return { success: true, team };
       }
       await client.query('UPDATE kv_store SET value = $2, updated_at = NOW() WHERE key = $1', [key, payload]);
+      // Decision D3b: the new session epoch commits with the password it
+      // belongs to, under the team row's lock (see atomicTeamUpdate).
+      const authRow = rotateSessionEpoch ? nextTeamAuthRow() : null;
+      if (authRow) await upsertTeamAuthOnPostgres(client, teamId, authRow);
       await client.query('COMMIT');
       forgetTeamSummary(key);
-      return { success: true, team };
+      return authRow
+        ? { success: true, team, sessionEpoch: authRow.sessionEpoch, revokedAt: authRow.revokedAt }
+        : { success: true, team };
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       throw err;
@@ -450,27 +484,40 @@ const createDataStore = ({ rootDir }) => {
     }
   };
 
-  const updateTeamOnSqlite = (key, updater) => {
+  const updateTeamOnSqlite = (key, updater, teamId, { rotateSessionEpoch = false } = {}) => {
     let wrote = false;
     const result = sqliteDb.transaction(() => {
       const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(key);
       const stored = row?.value ? JSON.parse(row.value) : null;
       if (!stored) return { success: false, error: 'team_not_found' };
       const { team, payload } = applyTeamUpdater(stored, updater);
-      if (payload) {
-        sqliteDb.prepare('UPDATE kv_store SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?').run(payload, key);
-        wrote = true;
-      }
-      return { success: true, team };
+      if (!payload) return { success: true, team };
+      sqliteDb.prepare('UPDATE kv_store SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?').run(payload, key);
+      wrote = true;
+      if (!rotateSessionEpoch) return { success: true, team };
+      const authRow = nextTeamAuthRow();
+      upsertTeamAuthOnSqlite(teamId, authRow);
+      return { success: true, team, sessionEpoch: authRow.sessionEpoch, revokedAt: authRow.revokedAt };
     })();
     if (wrote) forgetTeamSummary(key);
     return result;
   };
 
-  const atomicTeamUpdate = (teamId, updater) => {
+  // `rotateSessionEpoch` (decision D3b): when the updater wrote the team, the
+  // same transaction gives the team a new session epoch, and the result
+  // carries it (`sessionEpoch`, `revokedAt`) — every session token minted
+  // before stops validating. It is the password rotations' option. It must be
+  // the same transaction: two rotations A and B serialize on the team row
+  // lock, and an epoch written after the commit could interleave as "hash A,
+  // hash B, epoch B, epoch A", leaving B's password with A's epoch — and A,
+  // who does not know B's password, with a valid token. Inside the lock the
+  // last rotation wins both fields. Lock order is the team row, then the auth
+  // row, on every path that takes both; `rotateTeamSessionEpoch` takes the
+  // auth row alone, so no two paths can deadlock.
+  const atomicTeamUpdate = (teamId, updater, options = {}) => {
     const key = `team:${teamId}`;
     return teamWriteQueue.run(key, () => (
-      usePostgres ? updateTeamOnPostgres(key, updater) : updateTeamOnSqlite(key, updater)
+      usePostgres ? updateTeamOnPostgres(key, updater, teamId, options) : updateTeamOnSqlite(key, updater, teamId, options)
     ));
   };
 
@@ -710,6 +757,97 @@ const createDataStore = ({ rootDir }) => {
     return !!sqliteDb.prepare('SELECT 1 FROM kv_store WHERE key = ? AND octet_length(value) > 0').get(key);
   };
 
+  // ---------------------------------------------------------------------------
+  // Team session epochs (`team-auth:{teamId}`, decision D3b)
+  //
+  // A team session token is valid only while the epoch it carries is the
+  // team's current one, so every team route and every socket join reads this.
+  // It is a row of its own rather than a field of the team record because the
+  // hot path cannot afford the record: a token-authenticated persist must not
+  // parse the team's history (38.1), and any projection of a field inside the
+  // record's value casts the whole value on PostgreSQL. It is also out of
+  // every archive, merge and `/update`, so nothing can carry it or roll it
+  // back. A team with no row has never rotated: epoch '0', revoked never.
+  // ---------------------------------------------------------------------------
+
+  const teamAuthKey = (teamId) => {
+    // `team-auth:undefined` would be one epoch shared by every caller bug.
+    if (typeof teamId !== 'string' || teamId === '') {
+      throw new TypeError('team auth: the team id must be a non-empty string');
+    }
+    return `${TEAM_AUTH_PREFIX}${teamId}`;
+  };
+
+  /**
+   * Whether the team exists, and its session epoch, from one statement: both
+   * values come from one snapshot, and the team record's value is never read
+   * (`octet_length` reads the stored length, as `teamExists` does). Answers
+   * `{ exists, sessionEpoch, revokedAt }` — `'0'` and `null` with no row. The
+   * row is read strictly (`parseTeamAuthRow`): one that does not parse throws
+   * `TeamAuthRowCorruptError`, and a query error throws as itself; a caller
+   * never accepts a token on either.
+   */
+  const loadTeamAuthState = async (teamId) => {
+    const teamKey = `team:${teamId}`;
+    const authKey = teamAuthKey(teamId);
+    let row;
+    if (usePostgres) {
+      const result = await pgPool.query(
+        `SELECT EXISTS (SELECT 1 FROM kv_store WHERE key = $1 AND octet_length(value) > 0) AS team_exists,
+                (SELECT value FROM kv_store WHERE key = $2) AS auth`,
+        [teamKey, authKey]
+      );
+      row = result.rows[0];
+    } else {
+      row = sqliteDb.prepare(
+        `SELECT EXISTS (SELECT 1 FROM kv_store WHERE key = ? AND octet_length(value) > 0) AS team_exists,
+                (SELECT value FROM kv_store WHERE key = ?) AS auth`
+      ).get(teamKey, authKey);
+    }
+    const exists = Boolean(row?.team_exists);
+    if (typeof row?.auth !== 'string' || row.auth === '') {
+      return { exists, sessionEpoch: DEFAULT_SESSION_EPOCH, revokedAt: null };
+    }
+    const { sessionEpoch, revokedAt } = parseTeamAuthRow(row.auth, teamId);
+    return { exists, sessionEpoch, revokedAt };
+  };
+
+  /**
+   * Gives the team a new session epoch outside any team write, and answers
+   * `{ sessionEpoch, revokedAt }`. A blind upsert: the restores call it before
+   * and after writing a team whose password they change, where the write is
+   * not an `atomicTeamUpdate` that could carry the rotation.
+   */
+  const rotateTeamSessionEpoch = async (teamId) => {
+    const row = nextTeamAuthRow();
+    if (usePostgres) {
+      await upsertTeamAuthOnPostgres(pgPool, teamId, row);
+    } else {
+      upsertTeamAuthOnSqlite(teamId, row);
+    }
+    return { sessionEpoch: row.sessionEpoch, revokedAt: row.revokedAt };
+  };
+
+  // Deleted *after* the team record, best-effort (see deleteTeamRecord): the
+  // other order would reset a team that still exists to epoch '0' and revive
+  // every token minted under '0' before its first rotation.
+  const deleteTeamAuthRow = async (teamId) => {
+    await kvDelete(teamAuthKey(teamId));
+  };
+
+  // Removes every auth row whose team record is gone, and answers how many: a
+  // deletion whose last step failed, or a pod from before this release that
+  // deleted a team without it. Run at startup, beside the secrets' sweep.
+  const sweepOrphanedTeamAuthRows = async () => {
+    let removed = 0;
+    for (const key of await kvKeysByPrefix(TEAM_AUTH_PREFIX)) {
+      if (await teamExists(key.slice(TEAM_AUTH_PREFIX.length))) continue;
+      await kvDelete(key);
+      removed += 1;
+    }
+    return removed;
+  };
+
   const saveTeam = async (teamId, teamData) => {
     const rev = Number(teamData._rev ?? 0);
     const data = { ...teamData, _rev: rev + 1, _updatedAt: new Date().toISOString() };
@@ -796,9 +934,19 @@ const createDataStore = ({ rootDir }) => {
   // The secret goes first. The other order would leave, on a failure, a secret
   // nobody can reach or remove: the record is gone, and with it every way to
   // authenticate a retry. This way a failure throws with the team intact.
+  //
+  // The session epoch goes last, and its failure does not fail the deletion:
+  // deleting it while the record still exists would reset a live team to epoch
+  // '0' and revive every token minted under '0'. Left behind, it is an orphan
+  // nobody can reach, removed by the boot sweep (sweepOrphanedTeamAuthRows).
   const deleteTeamRecord = async (teamId) => {
     await deleteTeamSecret(teamId);
     await kvDelete(`team:${teamId}`);
+    try {
+      await deleteTeamAuthRow(teamId);
+    } catch (err) {
+      console.warn(`[Server] The session epoch of deleted team ${JSON.stringify(String(teamId))} could not be removed; the boot sweep removes it`, err);
+    }
   };
 
   const loadAllTeams = async () => {
@@ -1433,22 +1581,53 @@ const createDataStore = ({ rootDir }) => {
     // restore never holds every team in memory at once. A record that cannot
     // be read is restored without the carry: losing links is recoverable, a
     // failed restore may not be.
-    const withCurrentJiraLinks = async (team) => {
+    //
+    // The same read decides the team's sessions (decision D3b): a session
+    // never outlives the password it was opened with. `current` is null when
+    // the record could not be read, which is told apart (`readable`) because
+    // an unknown password is treated as a changed one.
+    const readCurrentTeam = async (team) => {
       try {
-        const current = await loadTeam(team.id);
-        return current ? carryJiraParents(carryJiraLinks(team, current), current) : team;
+        return { current: await loadTeam(team.id), readable: true };
       } catch (err) {
         console.warn(`[Server] Restore: team ${JSON.stringify(String(team.id))} is restored without carrying its current Jira links (its record could not be read)`, err);
-        return team;
+        return { current: null, readable: false };
+      }
+    };
+
+    // Best-effort, and logged: a restore that really happened must not be
+    // reported as failed because a tiny write did not land. The rotation on
+    // the other side of the team write is what covers a failure of this one.
+    const rotateRestoredTeamEpoch = async (teamId, when) => {
+      try {
+        await rotateTeamSessionEpoch(teamId);
+      } catch (err) {
+        console.warn(`[Server] Restore: the session epoch of team ${JSON.stringify(teamId)} could not be rotated ${when} its record was written`, err);
       }
     };
 
     const archiveTeamIds = new Set();
     const indexMap = new Map();
     for (const team of normalized.teams) {
-      const restored = replace && teamIdsBefore.has(String(team.id)) ? await withCurrentJiraLinks(team) : team;
+      const teamId = String(team.id);
+      const existedBefore = replace && teamIdsBefore.has(teamId);
+      const { current, readable } = existedBefore ? await readCurrentTeam(team) : { current: null, readable: true };
+      const restored = current ? carryJiraParents(carryJiraLinks(team, current), current) : team;
+      // Decision D3b. A restore that changes which password opens a team signs
+      // that team out: the team did not exist before (it comes back with the
+      // archived password), its record could not be read, or the archived hash
+      // differs from the current one — a re-hash of the same password counts
+      // too, which errs on the safe side. A restore that keeps a team's
+      // password signs nobody out of it (zero downtime). Rotated before *and*
+      // after the write: after alone has a hole a retry makes permanent (the
+      // write lands, the rotation does not, and the retry compares two equal
+      // hashes), before alone lets a login made in between — with the password
+      // about to be rolled away — mint a token under the new epoch.
+      const signsOut = replace && (!existedBefore || !readable || !current || current.passwordHash !== team.passwordHash);
+      if (signsOut) await rotateRestoredTeamEpoch(teamId, 'before');
       await saveTeam(team.id, restored);
-      archiveTeamIds.add(String(team.id));
+      if (signsOut) await rotateRestoredTeamEpoch(teamId, 'after');
+      archiveTeamIds.add(teamId);
       indexMap.set(team.name.toLowerCase(), team.id);
     }
     await saveTeamIndex(indexMap);
@@ -1478,6 +1657,18 @@ const createDataStore = ({ rootDir }) => {
         const teamId = key.slice(TEAM_PREFIX.length);
         if (!archiveTeamIds.has(teamId)) {
           await kvDelete(key);
+        }
+      }
+      // The session epochs of the teams the replace deleted, after their
+      // records (the deleteTeamRecord order), and only of teams the archive
+      // does not hold: removing a live team's row would reset it to epoch '0'.
+      // Best-effort: a row left behind is an orphan the boot sweep removes.
+      for (const key of await kvKeysByPrefix(TEAM_AUTH_PREFIX)) {
+        if (archiveTeamIds.has(key.slice(TEAM_AUTH_PREFIX.length))) continue;
+        try {
+          await kvDelete(key);
+        } catch (err) {
+          console.warn(`[Server] Restore: the session epoch row ${JSON.stringify(key)} could not be removed; the boot sweep removes it`, err);
         }
       }
       await kvDeleteByPrefix(SESSION_PREFIX);
@@ -1946,6 +2137,12 @@ const createDataStore = ({ rootDir }) => {
     teamExists,
     saveTeam,
     deleteTeamRecord,
+
+    // Team session epochs (decision D3b): one cheap read for every token check,
+    // a blind rotation for the restores, and the boot sweep
+    loadTeamAuthState,
+    rotateTeamSessionEpoch,
+    sweepOrphanedTeamAuthRows,
     loadAllTeams,
     loadAllTeamFeedbacks,
     loadTeamSummaries,

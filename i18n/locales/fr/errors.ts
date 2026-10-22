@@ -39,6 +39,7 @@ const errors: Record<keyof typeof en, string> = {
   'errors.aiNotConfigured': 'L’IA n’est pas activée ou n’est pas configurée',
   'errors.connectionFailed': 'La connexion a échoué',
   'errors.invalidToken': 'Votre session a expiré. Veuillez vous reconnecter à l’équipe.',
+  'errors.sessionRevoked': 'Le mot de passe de l’équipe a été changé. Veuillez vous reconnecter à l’équipe avec le nouveau mot de passe.',
   'errors.tooManyRequests': 'Trop de requêtes pour le moment. Patientez un instant puis réessayez.',
   'errors.jiraNotConfigured': 'Jira n’est pas configuré sur ce serveur. Demandez à votre administrateur de l’activer.',
   'errors.jiraTokenMissing': 'Saisissez le jeton d’accès Jira de l’équipe dans Paramètres → Jira.',

@@ -4,6 +4,7 @@ import type { AddressInfo } from 'net';
 import { createTeamService } from '../server/services/teamService.js';
 import { createTokenService } from '../server/services/sessionTokens.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * The Jira fields of a team record, as the existing team routes must treat
@@ -42,6 +43,8 @@ const createMockDataStore = () => {
     loadTeam: async (teamId: string) => structuredClone(teams.get(teamId) ?? null),
     loadTeamRaw: async (teamId: string) => structuredClone(teams.get(teamId) ?? null),
     teamExists: async (teamId: string) => teams.has(teamId),
+    // Decision D3b: the session epoch every token check reads.
+    loadTeamAuthState: createTeamAuthStateDouble((teamId) => teams.has(teamId)).loadTeamAuthState,
     saveTeam: async (teamId: string, teamData: Team) => {
       teams.set(teamId, structuredClone(teamData));
     },

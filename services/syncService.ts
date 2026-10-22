@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { RetroSession, HealthCheckSession, ParticipantActivity } from '../types';
 import { getTeamSessionToken } from './dataService';
+import { SESSION_REVOKED, isSessionRevoked, noteRevokedAnswer, onSessionTokenChanged } from './sessionRevocation';
 
 type SyncedSession = RetroSession | HealthCheckSession;
 type SessionUpdateCallback = (session: SyncedSession) => void;
@@ -8,6 +9,9 @@ type MemberEventCallback = (data: { userId: string; userName: string }) => void;
 type RosterEventCallback = (data: { id: string; name: string }[]) => void;
 type ActivityEventCallback = (data: { userId: string; userName: string; activity: ParticipantActivity | null }) => void;
 type JoinTarget = { sessionId: string; userId: string; userName: string };
+// What a `join-denied` carries. `cause` and `joinId` come from a server of
+// decision D3b or later; an older one sends neither.
+type JoinDenial = { sessionId: string; reason: string; cause?: string; joinId?: string };
 
 /**
  * Whether this client's writes are reaching the server. `stalled` means the
@@ -67,7 +71,7 @@ class SyncService {
   private currentUserId: string | null = null;
   private currentUserName: string | null = null;
   private pendingJoin: JoinTarget | null = null;
-  private joinDeniedCallbacks: ((data: { sessionId: string; reason: string }) => void)[] = [];
+  private joinDeniedCallbacks: ((data: JoinDenial) => void)[] = [];
   private connectionPromise: Promise<void> | null = null;
   // Callers of connect() waiting for the next 'connect' of the one socket.
   private connectWaiters: (() => void)[] = [];
@@ -119,6 +123,25 @@ class SyncService {
   private resendStreak = 0;
   private resendStreakStartedAt = 0;
   private lastRefusalRejoinAt = Number.NEGATIVE_INFINITY;
+  // Decision D3b: the id and token of the latest join sent. A denial naming
+  // another join id answers an earlier join — one made with a token this
+  // client has since replaced — and must not sign it out.
+  private joinSeq = 0;
+  private lastJoin: { joinId: string; token: string | null } | null = null;
+
+  constructor() {
+    // A new team token (the password change made here, or adopted from
+    // another tab): the server judges a joined socket by the token it joined
+    // with, so the current session is joined again with the new one. On the
+    // server the re-join is idempotent, and a cut computed later skips it.
+    onSessionTokenChanged(() => {
+      const target = this.currentJoinTarget();
+      if (!target || !this.socket?.connected || isSessionRevoked()) return;
+      console.info('[SyncService] Team token changed - re-joining session:', target.sessionId);
+      this.emitJoin(target);
+      this.flushQueuedSession();
+    });
+  }
 
   // Bounds the queue if answers never come (a socket that dies mid-flight
   // leaves its writes unanswered forever). Far above any realistic number of
@@ -171,11 +194,21 @@ class SyncService {
   // token is read here, at emit time, rather than captured when the component
   // called joinSession — so a re-login and every automatic re-join after a
   // reconnect present the current credential, not a stale one.
+  //
+  // Nothing is sent while the session is revoked (decision D3b), and nothing is
+  // marked: recording a join that was never sent would let the next write go
+  // out on a socket that is in no room.
   private emitJoin(join: JoinTarget) {
+    if (isSessionRevoked()) return;
+    this.joinSeq += 1;
+    const joinId = `${Date.now().toString(36)}-${this.joinSeq}`;
+    const token = getTeamSessionToken();
     this.socket!.emit('join-session', {
       ...join,
-      sessionToken: getTeamSessionToken() ?? undefined
+      sessionToken: token ?? undefined,
+      joinId
     });
+    this.lastJoin = { joinId, token };
     this.joinedOnConnection = join.sessionId;
   }
 
@@ -252,7 +285,7 @@ class SyncService {
     // Re-sending can never cure 'not-joined': the server-side socket is in no
     // room. Re-joining does, and the join snapshot lets the merge re-send
     // whatever is still unconfirmed.
-    if (refusal.reason === 'not-joined') {
+    if (refusal.reason === 'not-joined' && !isSessionRevoked()) {
       const target = this.currentJoinTarget();
       if (
         target &&
@@ -432,11 +465,33 @@ class SyncService {
     // The server refused the join: the credential is missing, expired, or was
     // minted for another team. Retrying cannot help, so surface it instead of
     // leaving the UI spinning on a "reconnecting" state that will never clear.
-    socket.on('join-denied', (data: { sessionId: string; reason: string }) => {
-      console.error('[SyncService] Join denied by server:', data?.reason);
+    //
+    // Decision D3b: a denial whose `cause` is `session_revoked` — at join, or
+    // sent to a joined socket the server cut after a password change — is
+    // resolved like a `401 session_revoked`: re-joined with the current token
+    // when it changed since that join, otherwise the session is revoked and
+    // the screens say so through `useSessionRevoked`. Either way the denial
+    // subscribers are not called for it.
+    socket.on('join-denied', (data: JoinDenial) => {
+      if (data?.joinId && this.lastJoin && data.joinId !== this.lastJoin.joinId) {
+        console.info('[SyncService] Ignoring the denial of an earlier join');
+        return;
+      }
+      console.error('[SyncService] Join denied by server:', data?.reason, data?.cause ?? '');
       // A refused join is not a join: writes wait instead of being sent into
       // a room this socket is not in.
       if (data?.sessionId === this.joinedOnConnection) this.joinedOnConnection = null;
+      if (data?.cause === SESSION_REVOKED) {
+        const sentToken = this.lastJoin?.token ?? null;
+        void noteRevokedAnswer(401, SESSION_REVOKED, sentToken).then((outcome) => {
+          if (outcome !== 'retry') return;
+          const target = this.currentJoinTarget();
+          if (!target || !this.socket?.connected) return;
+          this.emitJoin(target);
+          this.flushQueuedSession();
+        });
+        return;
+      }
       this.joinDeniedCallbacks.forEach(cb => cb(data));
     });
 
@@ -561,6 +616,16 @@ class SyncService {
   updateSession(session: SyncedSession, options?: { resend?: boolean }) {
     if (options?.resend) this.countResend();
 
+    // Revoked (decision D3b): held, latest wins, exactly as a write waiting
+    // for its join is. Another tab's token clears the revocation and the
+    // re-join that follows sends it; otherwise "Log in again" leaves the
+    // session and `leaveSession` discards it.
+    if (isSessionRevoked()) {
+      console.warn('[SyncService] Session revoked by a password change - holding the update');
+      this.queuedSession = session;
+      return;
+    }
+
     // If not connected yet, queue the latest session and ensure a connection attempt
     if (!this.socket?.connected) {
       console.warn('[SyncService] Cannot update session - not connected. Queuing update.');
@@ -640,7 +705,7 @@ class SyncService {
    * presented no valid team credential for the session, which a reconnect will
    * never fix — the user has to log in again.
    */
-  onJoinDenied(callback: (data: { sessionId: string; reason: string }) => void) {
+  onJoinDenied(callback: (data: JoinDenial) => void) {
     this.joinDeniedCallbacks.push(callback);
     return () => {
       this.joinDeniedCallbacks = this.joinDeniedCallbacks.filter(cb => cb !== callback);

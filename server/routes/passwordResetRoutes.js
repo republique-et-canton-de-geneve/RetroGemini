@@ -4,6 +4,7 @@ import { hashPassword } from '../services/passwordHashing.js';
 import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
+import { NO_OP_SESSION_REVOCATION } from '../services/sessionRevocation.js';
 import { createPublicOriginResolver } from '../services/publicOrigin.js';
 import { buildPasswordResetEmail } from '../services/emailTemplates.js';
 import { INVALID_EMAIL_ERROR, parseEmailInput, sameEmail } from '../../utils/emailAddress.js';
@@ -46,7 +47,10 @@ const registerPasswordResetRoutes = ({
   // Audit H4: the mailed link's origin comes from the server, never from the
   // caller — a reset mail carries a live token, so a caller-named host is
   // account takeover through the deployment's own SMTP identity.
-  publicOrigin = createPublicOriginResolver()
+  publicOrigin = createPublicOriginResolver(),
+  // Decision D3b — cuts the team's live-session sockets after the reset. A
+  // no-op by default, like `securityEvents`; `server.js` is the wiring.
+  sessionRevocation = NO_OP_SESSION_REVOCATION
 }) => {
   const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 
@@ -272,6 +276,9 @@ const registerPasswordResetRoutes = ({
 
       if (targetTeamId) {
         const newPasswordHash = await hashPassword(newPassword);
+        // Decision D3b: and every session token, in the same transaction. The
+        // caller is anonymous — it holds a mailbox, not a session — so no
+        // token is handed back: the screen says "log in" next.
         const result = await dataStore.atomicTeamUpdate(targetTeamId, (team) => {
           teamName = team.name;
           team.passwordHash = newPasswordHash;
@@ -279,7 +286,7 @@ const registerPasswordResetRoutes = ({
           team.inviteEpoch = getTeamInviteEpoch(team) + 1;
           updated = true;
           return team;
-        });
+        }, { rotateSessionEpoch: true });
         if (!result.success) {
           updated = false;
         }
@@ -297,7 +304,13 @@ const registerPasswordResetRoutes = ({
         action: SECURITY_ACTIONS.TEAM_PASSWORD_CHANGE,
         actor: 'password-reset',
         outcome: 'success',
-        target: targetTeamId
+        target: targetTeamId,
+        detail: { sessionsRevoked: true }
+      });
+
+      // Best-effort and never awaited by the answer: HTTP is revoked already.
+      sessionRevocation.revokeTeamSessions(targetTeamId).catch((err) => {
+        console.warn('[Server] Session revocation after a password reset failed', err);
       });
 
       return res.json({

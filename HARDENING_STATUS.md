@@ -129,6 +129,32 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **D3b — a password change signs out the team's open sessions, on every
+  route and on the socket, without cutting off the facilitator who made it**
+  (Jira plan decision D3b; this branch, 2026-10-22). Team session tokens carry
+  the team's *session epoch* (an additive claim on the unchanged `rg1`/`v: 1`
+  format), kept in a row of its own (`team-auth:{teamId}`, random, never on the
+  record, never archived) and rotated in the password's own transaction by the
+  three password routes; a whole-store or single-team restore that changes
+  which password opens a team rotates it before and after the write. Every team
+  route answers an older token `401 session_revoked` from that row alone, never
+  parsing the record (the 38.1 hot path holds); `restore-session` does not meter
+  revoked tokens. The socket refuses them at join and cuts joined sockets on
+  every pod (`team-sessions-revoked`, re-read on each pod, plus a 60 s sweep).
+  The rotating client keeps working with the token the change hands back, its
+  other tabs adopt it, and every other client stops writing and says why where
+  it is — a banner in a session and on the Dashboard, so a draft can still be
+  copied — with "Log in again" to the login screen and a translated reason. Tests: `sessionEpoch`,
+  `sessionTokens`, `sessionTokenCompatibility` (a frozen 41.0 validator),
+  `sessionTokenMint`, `teamAuthState`, `teamAuthWithoutRecord`,
+  `sessionRevocationRoutes`, `jiraRouteAuth`, `socketSessionRevocation`,
+  `sessionRevocationWiring`, `dataStoreRestore`,
+  `superAdminTeamRestoreRoutes`, `sessionRevocationClient`, `syncService`,
+  `appSessionRevoked`, `appSessionRevokedDashboard`, `teamFeedbackTokenRetry`,
+  `feedbackSubmission`, `restorePasswordMigration`, `sessionRevokedShared`,
+  `e2e/session-revocation`.
+  Residuals are in `SECURITY.md` → *Session Tokens* (the rollout, tokens with
+  no epoch, a request in flight, a lost answer, the login limiter) and in H10.
 - **H45 — privileged actions now leave a durable, append-only trace.** Every
   super-admin login (**including the failures**), team deletion and rename,
   password change on all three paths, backup create/download/restore/delete,
@@ -1226,10 +1252,66 @@ grave, rien faire"*, which is why it is P2 now rather than P1.
   persist after a rename does not revert it.
 - **Effort:** M. **Regression risk:** high — it is the sync path.
 
+### H53 — [P1, blocked on D24] A password sent to any other team route is not metered as a guess
+
+**Problem.** `loginLimiter` (20 rejected attempts per 15 minutes, keyed on the
+IP and the team name, per pod) is on `/api/team/login` alone. Every other route
+that accepts the team password verifies it too: `POST /api/team/:teamId` and
+its sub-routes (`authenticateTeam(teamId, password)` → `invalid_password`,
+`401`), `/api/feedbacks/*` and the Jira team routes. Those are metered only by
+the general per-IP request limiters — team reads 120/min, team writes 300/min,
+feedback 120 + 60/min, Jira 120 + 60 + 60/min — which are independent
+instances, so their budgets add up, and each is counted per pod. Team ids are
+public (`GET /api/team/list`, anonymous). `SECURITY.md` → *Team Passwords*
+stated the login limiter as "the only brake on guessing", and D18's rationale
+for the 8-character minimum rests on that bound. Found while reviewing D3b,
+which neither widens nor narrows it.
+
+- **Files:** `server/routes/teamRoutes.js` (the limiters, `/api/team/:teamId`
+  and its sub-routes), `server/routes/feedbackRoutes.js`,
+  `server/routes/jiraRoutes.js`, `server/services/teamService.js`
+  (`authenticateTeam`).
+- **Failure scenario:** an anonymous caller who can reach the deployment reads
+  a team id from `/api/team/list` and posts guesses to `POST
+  /api/team/:teamId` and the other routes: hundreds a minute from one address,
+  where the login route allows 20 per quarter hour. Eight random lowercase
+  characters still take centuries; a password from before the minimum (four
+  characters, H39) falls within a day.
+- **Acceptance:** D24 answered. Option 1: a rejected password (`401
+  invalid_password` only, never a refused token, never a success) on any route
+  that verifies one is counted against the same key as the login route (IP and
+  team), so the bound `SECURITY.md` states is the bound the server enforces.
+  Option 2: the general limiters are accepted as the bound, and `SECURITY.md`
+  and D18's rationale say so with the real figures.
+- **Tests:** for option 1, a route suite that sends 20 wrong passwords to
+  `POST /api/team/:teamId` and is then refused on `/api/team/login` for that
+  team (and the reverse), while a valid token and a correct password are never
+  counted. For option 2, none — a documentation change.
+- **Effort:** S (option 1: one shared limiter keyed like `loginLimiter`,
+  scoped to `401 invalid_password`). **Regression risk:** medium — a limiter on
+  every team route must never count what a legitimate user does, which is the
+  lesson of `AUTH_RATE_LIMIT_MAX` (`restore-session` runs on every page load).
+
 ### H10 — [P2] Accepted residuals (documented, not scheduled)
 
 Keep visible so nobody "rediscovers" them as bugs:
 
+- **An invite credential can come back after a rollback followed by a password
+  change (D3b).** A whole-store restore rolls each team's `inviteEpoch` back
+  with the archive, and the invite credential is deterministic from the team
+  and that counter, so a later password change can bring the counter back to a
+  value an outstanding link was minted under, and that link opens the team
+  again. The session epoch (random) does not have this flaw; the invite epoch
+  was left as it was so that this lane changes no invite-link semantics. The
+  fix, for a later change: in the replace, `inviteEpoch = max(archived,
+  current) + (password changed ? 1 : 0)`.
+- **People signed out by a password change can reach the login limiter
+  (D3b).** It is unchanged — 20 rejected attempts per 15 minutes per IP and
+  team name — so a room behind one address all retrying the *old* password can
+  lock that team's login from there for a quarter of an hour. The login screen
+  tells them to use the new password or ask for a new invitation link. Raising
+  the limit or exempting anything would weaken the login brake (the other
+  routes that verify a password are H53, not accepted).
 - **CodeQL `js/request-forgery` on `/api/super-admin/test-jira` — expected, to
   be dismissed as "won't fix" with this rationale (40.0, the Jira
   integration).** `server/routes/jiraRoutes.js` → the `test-jira` handler is
@@ -1485,12 +1567,41 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None is open.** D23 was answered on 2026-10-12 (incident ISS); D22 on 2026-08-27; D18 (c), D19 and D20 on
+**One is open: D24.** Jira plan decision D3b was answered on 2026-10-22; D23 on 2026-10-12 (incident ISS); D22 on 2026-08-27; D18 (c), D19 and D20 on
 2026-08-25; D21 on 2026-08-26. Four of those five were answered *not to act*,
 which is a decision rather than a deferral, and is why each is written down
 instead of left implied. The dependent items (H41, H49, H46's network half) are
 closed in §3 with what would reopen them. **D22 is the one that was answered
 *to* act**, so it leaves work behind rather than a boundary: lot L25.
+
+### Open
+
+### D24 — open: how far is guessing a team password bounded on the routes other than login?
+
+Blocks H53. The login route meters rejected passwords (20 per 15 minutes per
+IP and team, per pod); every other route that verifies the team password is
+bounded only by the general per-IP request limiters, whose budgets add up to
+hundreds of attempts a minute from one address. Two options:
+
+1. **Meter rejected passwords everywhere.** A `401 invalid_password` on any
+   `/api/team/:teamId/*`, `/api/feedbacks/*` or Jira team route counts against
+   the login route's key (IP and team), the way `loginLimiter` does. The bound
+   `SECURITY.md` states becomes true. Cost: one limiter, and the care that it
+   counts nothing a legitimate user does.
+2. **Accept the general limiters as the bound.** No code change; `SECURITY.md`
+   and D18's rationale state the real figures (a password of 8 random lowercase
+   characters stays out of reach; one from before the minimum does not).
+
+### Answered 2026-10-22
+
+### Jira plan decision D3b — answered: sessions revoked on a password rotation
+
+Named so it is not confused with D3, the public origin (below). *"A password
+rotation invalidates the open sessions (an epoch in the token), on every route
+and on the socket, without cutting off the facilitator who changes the
+password."* Shipped; see *Recently closed* and `SECURITY.md` → *Session
+Tokens*. It replaces the earlier statement that a token kept a member working
+for up to seven days after a password change.
 
 ### Answered 2026-10-12
 
@@ -1887,6 +1998,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | ~~**L24**~~ | ~~H52 — icon-only buttons named by their ligature~~ — **done 2026-08-27.** **72**, not the 17 recorded: all three earlier counts came from one bad line in the measuring script (`<button[^>]*>` stops at the `>` in `onClick={() => …}`). The guard is a TypeScript AST walk now. It also found a switch with no accessible name at all. 54 icon-plus-text buttons are measured, named as gap 3 in `ACCESSIBILITY.md`, and deliberately not swept | — | done |
 | ~~**L19b**~~ | ~~Roll the manifests to a non-production project~~ — **done 2026-08-26.** The database pod is admitted and runs; the NetworkPolicies proved inert and are now opt-in (decision D21). Nothing is left here except, if anyone wants the isolation, one question to the platform team: *can `expose-all-pod-from-outside` be narrowed on these projects?* | — | done |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
+| **L26** | H53 — meter a rejected password on every route that verifies one, or state the general limiters as the bound | **D24** (open) | `SECURITY.md`'s guessing bound is the one the server enforces, with a route test that counts a wrong password sent to `POST /api/team/:teamId` against the login key |
 | **L25** | H44's remaining half — the four numbers | ~~D22~~ — **answered 2026-08-27: (a), an anonymous `/metrics`.** Nothing blocks it now | `/metrics` answers in Prometheus text with active sessions, socket connections, CAS rejections and heal round-trips, and carries no team, session or user identifier |
 | ~~**L13**~~ | ~~H35's remaining half (a live session's persist still overwrites a rename)~~ — **done 2026-10-12**, forced by incident ISS (see H35). It changes the shared sync path, so §7.4's `npm run test:load` against staging is owed before the release is deployed | — | done |
 

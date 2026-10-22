@@ -68,6 +68,9 @@ describe('session concurrency: a stale write cannot clobber a completed retro', 
 
     dataStore = createDataStore({ rootDir: dir });
     await dataStore.initDatabase();
+    // The team the token is minted for exists: a join presenting a token of a
+    // deleted team is refused (decision D3b).
+    await dataStore.saveTeam('teamConcurrency', { id: 'teamConcurrency', name: 'teamConcurrency', passwordHash: 'x', members: [], retrospectives: [] });
 
     httpServer = createServer();
     io = new Server(httpServer, { path: '/socket.io' });

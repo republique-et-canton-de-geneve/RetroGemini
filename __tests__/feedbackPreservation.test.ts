@@ -11,6 +11,7 @@ import { hashPassword } from '../server/services/passwordHashing.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
 import { registerFeedbackRoutes } from '../server/routes/feedbackRoutes.js';
 import { registerSuperAdminRoutes } from '../server/routes/superAdminRoutes.js';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * Feedback preservation on team deletion.
@@ -89,6 +90,8 @@ const createMockDataStore = () => {
       return team ? clone(team) : null;
     },
     teamExists: async (teamId: string) => teams.has(teamId),
+    // Decision D3b: the session epoch every token check reads.
+    loadTeamAuthState: createTeamAuthStateDouble((teamId) => teams.has(teamId)).loadTeamAuthState,
     loadAllTeams: async () => Array.from(teams.values()).map((team) => clone(team)),
     loadAllTeamFeedbacks: async () =>
       Array.from(teams.values()).map((team) => ({

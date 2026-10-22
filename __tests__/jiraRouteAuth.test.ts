@@ -80,10 +80,14 @@ const BODIES: [string, Record<string, unknown>][] = [
   ['a malformed body', { actionIds: [], target: 'x', projectKey: 'bad', parentKey: 'bad', token: 42, email: 'a@b' }]
 ];
 
-const CREDENTIALS: [string, () => Record<string, unknown>][] = [
-  ['a forged token', () => ({ sessionToken: 'rg1.forged.token' })],
-  ['a valid token of another team', () => ({ sessionToken: tokenService.createSessionToken(OTHER_TEAM_ID, null) })],
-  ['a wrong password', () => ({ password: 'not-the-team-password' })]
+// Decision D3b: the team's password was changed since this token was minted
+// (beforeAll rotates the team's session epoch), so it is the team's own
+// token and still refused, with the code the client reacts to.
+const CREDENTIALS: [string, () => Record<string, unknown>, RegExp][] = [
+  ['a forged token', () => ({ sessionToken: 'rg1.forged.token' }), /^invalid_token$/],
+  ['a valid token of another team', () => ({ sessionToken: tokenService.createSessionToken(OTHER_TEAM_ID, null, { sessionEpoch: '0' }) }), /^invalid_token$/],
+  ['a wrong password', () => ({ password: 'not-the-team-password' }), /^invalid_password$/],
+  ['a token a password change revoked', () => ({ sessionToken: tokenService.createSessionToken(TEAM_ID, null, { sessionEpoch: '0' }) }), /^session_revoked$/]
 ];
 
 const listJiraTeamPostRoutes = (): string[] => {
@@ -126,6 +130,7 @@ beforeAll(async () => {
   for (const id of [TEAM_ID, OTHER_TEAM_ID]) {
     await dataStore.saveTeam(id, { id, name: id, passwordHash, members: [], retrospectives: [], globalActions: [] });
   }
+  await dataStore.rotateTeamSessionEpoch(TEAM_ID);
   await dataStore.saveJiraSettings({ enabled: true, baseUrl: jira.url, allowSelfSignedCerts: false });
   await createJiraCredentials({ dataStore, tokenService }).save(TEAM_ID, {
     baseUrl: jira.url,
@@ -155,7 +160,7 @@ describe('the team Jira routes, derived from the router', () => {
   });
 
   describe.each(REGISTERED.flatMap((path) => BODIES.map(([label, body]) => [path, label, body] as const)))('%s, %s', (path, _bodyLabel, body) => {
-    it.each(CREDENTIALS)('refuses %s with 401, before Jira, the secret or the audit trail', async (_label, credential) => {
+    it.each(CREDENTIALS)('refuses %s with 401, before Jira, the secret or the audit trail', async (_label, credential, expectedError) => {
       const secretAccess = {
         loadTeamSecret: vi.fn(dataStore.loadTeamSecret),
         saveTeamSecret: vi.fn(dataStore.saveTeamSecret),
@@ -187,7 +192,7 @@ describe('the team Jira routes, derived from the router', () => {
           body: JSON.stringify({ ...body, ...credential() })
         });
         expect(response.status).toBe(401);
-        expect((await response.json()).error).toMatch(/^invalid_(token|password)$/);
+        expect((await response.json()).error).toMatch(expectedError);
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }

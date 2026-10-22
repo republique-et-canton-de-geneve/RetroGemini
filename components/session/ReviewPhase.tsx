@@ -4,6 +4,7 @@ import { createTranslator } from '../../i18n/translate';
 import { Language, toLanguage } from '../../i18n/languages';
 import { ActionItem, JiraLink, JiraStatus, RetroSession, Team, Ticket, User } from '../../types';
 import { dataService } from '../../services/dataService';
+import { noteRevokedResponse } from '../../services/sessionRevocation';
 import { getTicketOriginColumn } from '../../utils/retroGrouping';
 import { ROTI_FOLLOW_UP_LINK_ID } from './retroConstants';
 import TicketOriginBadge from './TicketOriginBadge';
@@ -280,11 +281,12 @@ const ReviewPhase: React.FC<Props> = ({
   const handleGenerateSummary = async () => {
     setAiGenerating(true);
     try {
+      const sentToken = dataService.getSessionToken();
       const response = await fetch('/api/ai/generate-retro-summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sessionToken: dataService.getSessionToken(),
+          sessionToken: sentToken,
           sessionData: {
             name: session.name,
             columns: session.columns,
@@ -304,6 +306,10 @@ const ReviewPhase: React.FC<Props> = ({
             draft.reviewSummary = data.summary;
           });
         }
+      } else {
+        // Decision D3b: a password change signs the session out, which the
+        // session screen then says.
+        await noteRevokedResponse(response, sentToken);
       }
     } catch (err) {
       console.error('Failed to generate AI summary', err);

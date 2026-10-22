@@ -45,4 +45,47 @@ describe('cross-pod sessions-invalidated listener', () => {
     expect(sessionCache.has('s1')).toBe(false);
     expect(sessionCache.has('s2')).toBe(false);
   });
+
+  it('re-checks every joined socket against its team\'s session epoch (decision D3b)', async () => {
+    // The restore on the other pod may have rolled a team's password back,
+    // and with it given the team a new epoch: a socket joined under the old
+    // one must leave its session here too.
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const { io, listeners } = captureIo();
+    const emit = vi.fn();
+    const socket = {
+      id: 'sock-1',
+      sessionId: 's1',
+      userId: 'par1',
+      userName: 'Paul',
+      data: { authClaims: { teamId: 't1', sessionEpoch: '0', createdAt: 1 }, joinId: 'j1' },
+      leave: vi.fn(),
+      to: () => ({ emit: vi.fn() }),
+      emit
+    };
+    io.sockets.sockets.set('sock-1', socket);
+    const loadTeamAuthState = vi.fn(async () => ({ exists: true, sessionEpoch: 'rotated', revokedAt: 5 }));
+
+    registerSocketHandlers({
+      io: io as never,
+      dataStore: { loadTeamAuthState } as never,
+      sessionCache: createBoundedCache({ max: 10 }),
+      tokenService: {} as never,
+      revocationSweepMs: 0
+    });
+
+    listeners.get('sessions-invalidated')!();
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith('join-denied', {
+      sessionId: 's1',
+      reason: 'unauthenticated',
+      cause: 'session_revoked',
+      joinId: 'j1'
+    }));
+    expect(loadTeamAuthState).toHaveBeenCalledWith('t1');
+    expect(socket.leave).toHaveBeenCalledWith('s1');
+    expect(socket.sessionId).toBeNull();
+    vi.restoreAllMocks();
+  });
 });

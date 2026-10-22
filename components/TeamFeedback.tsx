@@ -13,6 +13,7 @@ import {
   type PreparedFeedbackImage
 } from '../utils/feedbackImages';
 import { newFeedbackSubmissionId, type FeedbackSubmitResult } from '../services/feedbackSubmission';
+import { noteRevokedResponse } from '../services/sessionRevocation';
 
 // How a submission ended, as the board needs to know it: a feedback the server
 // did not store must keep its draft on screen.
@@ -72,6 +73,12 @@ interface TeamFeedbackProps {
   teamName: string;
   teamPassword: string;
   sessionToken?: string | null;
+  /**
+   * The token this client holds when a request is sent (decision D3b). The
+   * `sessionToken` prop is the one of the last render, and a token adopted
+   * from another tab after a password change arrives before the next one.
+   */
+  getSessionToken?: () => string | null | undefined;
   currentUserId: string;
   currentUserName: string;
   feedbacks: TeamFeedbackType[];
@@ -95,6 +102,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   teamName,
   teamPassword,
   sessionToken,
+  getSessionToken,
   currentUserId,
   currentUserName,
   feedbacks: localFeedbacks,
@@ -155,6 +163,31 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     });
   };
 
+  // Posts to a feedback route with the team credential (decision D3b): the
+  // token is the one the client holds when the request leaves, and a refusal
+  // of it as revoked is reported. When the client holds a newer token by then
+  // (another tab changed the password and its token was adopted: 'retry'),
+  // the request goes once more with it — once, never in a loop. Otherwise the
+  // session is revoked, App shows why above the Dashboard, and whatever the
+  // user typed stays on the board.
+  const postToFeedbackRoute = async (url: string, payload: Record<string, unknown>): Promise<Response> => {
+    const send = (token: string | null | undefined) =>
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teamId, password: teamPassword, sessionToken: token ?? undefined, ...payload })
+      });
+    const currentToken = () => (getSessionToken ? getSessionToken() : sessionToken) ?? null;
+    const sent = currentToken();
+    const response = await send(sent);
+    if ((await noteRevokedResponse(response, sent)) !== 'retry') return response;
+    const now = currentToken();
+    if (!now || now === sent) return response;
+    const retried = await send(now);
+    await noteRevokedResponse(retried, now);
+    return retried;
+  };
+
   // Load all feedbacks on mount
   useEffect(() => {
     loadAllFeedbacks();
@@ -163,11 +196,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   const loadAllFeedbacks = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/feedbacks/all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teamId, password: teamPassword, sessionToken: sessionToken ?? undefined })
-      });
+      const response = await postToFeedbackRoute('/api/feedbacks/all', {});
       if (response.ok) {
         const data = await response.json();
         setAllFeedbacks(data.feedbacks || []);
@@ -330,19 +359,12 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
 
     setSubmittingComment(true);
     try {
-      const response = await fetch('/api/feedbacks/comment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teamId,
-          password: teamPassword,
-          sessionToken: sessionToken ?? undefined,
-          feedbackTeamId,
-          feedbackId,
-          authorId: currentUserId,
-          authorName: currentUserName,
-          content
-        })
+      const response = await postToFeedbackRoute('/api/feedbacks/comment', {
+        feedbackTeamId,
+        feedbackId,
+        authorId: currentUserId,
+        authorName: currentUserName,
+        content
       });
       if (response.ok) {
         clearCommentDraft(feedbackId);
@@ -356,6 +378,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
         clearCommentDraft(feedbackId);
         loadAllFeedbacks();
       }
+      // Any other answer keeps the draft: after a revocation, the user can
+      // copy it before signing in again (App keeps the Dashboard mounted).
     } catch (err) {
       console.error('Failed to add comment', err);
     } finally {
@@ -367,17 +391,10 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     if (!confirm(t('feedback.confirm.deleteComment'))) return;
 
     try {
-      const response = await fetch('/api/feedbacks/comment/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teamId,
-          password: teamPassword,
-          sessionToken: sessionToken ?? undefined,
-          feedbackTeamId,
-          feedbackId,
-          commentId
-        })
+      const response = await postToFeedbackRoute('/api/feedbacks/comment/delete', {
+        feedbackTeamId,
+        feedbackId,
+        commentId
       });
       // A 404 means the write found no target — the comment or its feedback is
       // already gone. Reload on both outcomes so the board stops showing an
@@ -395,16 +412,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
     if (!confirm(t('feedback.confirm.deleteFeedback'))) return;
 
     try {
-      const response = await fetch('/api/feedbacks/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teamId,
-          password: teamPassword,
-          sessionToken: sessionToken ?? undefined,
-          feedbackId
-        })
-      });
+      const response = await postToFeedbackRoute('/api/feedbacks/delete', { feedbackId });
       // A 404 means the write found no target — the feedback is already gone,
       // or it was never this team's to delete. Reload on both outcomes so the
       // board stops showing an entry the server refused to remove; before the

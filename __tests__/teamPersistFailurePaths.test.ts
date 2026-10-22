@@ -3,6 +3,7 @@ import express from 'express';
 import type { AddressInfo } from 'net';
 import { createTeamService } from '../server/services/teamService.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * `teamRoutes.js` is the lowest-covered route in the gate (75.9% statements,
@@ -51,6 +52,8 @@ const createMockDataStore = () => {
     control,
     loadTeam: async (teamId: string) => teams.get(teamId) || null,
     teamExists: async (teamId: string) => teams.has(teamId),
+    // Decision D3b: the session epoch every token check reads.
+    loadTeamAuthState: createTeamAuthStateDouble((teamId) => teams.has(teamId)).loadTeamAuthState,
     loadTeamRaw: async (teamId: string) => teams.get(teamId) || null,
     saveTeam: async (teamId: string, teamData: Team) => {
       teams.set(teamId, { ...teamData });

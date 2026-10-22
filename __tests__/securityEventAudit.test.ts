@@ -13,6 +13,7 @@ import { registerSuperAdminRoutes } from '../server/routes/superAdminRoutes.js';
 import { registerPasswordResetRoutes } from '../server/routes/passwordResetRoutes.js';
 import { SECURITY_ACTIONS } from '../server/services/securityEvents.js';
 import { JIRA_MOCK_CLOUD_EMAIL, JIRA_MOCK_CLOUD_TOKEN, startJiraMock, type JiraMock } from './helpers/jiraMock';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * Audit H45, the wiring half — **every privileged route records what it did.**
@@ -57,6 +58,7 @@ const createMockDataStore = () => {
   // The Jira connection and the teams' sealed tokens live in rows of their own.
   let jiraSettings: Record<string, unknown> | null = null;
   const secrets = new Map<string, Record<string, unknown>>();
+  const authState = createTeamAuthStateDouble((teamId) => teams.has(teamId));
 
   return {
     seed: (team: Team) => {
@@ -95,14 +97,14 @@ const createMockDataStore = () => {
     deleteTeamRecord: async (teamId: string) => {
       teams.delete(teamId);
     },
-    atomicTeamUpdate: async (teamId: string, updater: (team: Team) => Team | null) => {
+    atomicTeamUpdate: authState.withRotation(async (teamId: string, updater: (team: Team) => Team | null) => {
       const existing = teams.get(teamId);
       if (!existing) return { success: false, error: 'team_not_found' };
       const updated = updater(clone(existing));
       if (!updated) return { success: true, team: clone(existing) };
       teams.set(teamId, clone(updated));
       return { success: true, team: clone(updated) };
-    },
+    }),
     loadTeamIndex: async () => new Map(indexMap),
     atomicTeamIndexUpdate: async (updater: (index: Map<string, string>) => Map<string, string> | null) => {
       const next = updater(new Map(indexMap));
@@ -125,6 +127,10 @@ const createMockDataStore = () => {
     },
     loadSessionState: async () => null,
     teamExists: async (teamId: string) => teams.has(teamId),
+    // Decision D3b: the session epoch every token check reads, rotated by the
+    // password routes through `atomicTeamUpdate` below.
+    loadTeamAuthState: authState.loadTeamAuthState,
+    rotateTeamSessionEpoch: authState.rotateTeamSessionEpoch,
     loadTeamSummary: async (teamId: string) => {
       const team = teams.get(teamId);
       return team ? { id: team.id, name: team.name, members: [], jiraTarget: clone(team.jiraTarget ?? null) } : null;
@@ -635,6 +641,11 @@ describe('H45 — every privileged route records a security event', () => {
     });
     await post('/api/super-admin/update-password', {
       password: SUPER_ADMIN_PASSWORD, teamId: TEAM_ID, newPassword: NEW_PASSWORD
+    });
+    // The console's password change revoked every session token of the team
+    // (decision D3b): the team routes below need one minted since.
+    teamToken = harness.tokenService.createSessionToken(TEAM_ID, null, {
+      sessionEpoch: (await harness.dataStore.loadTeamAuthState(TEAM_ID)).sessionEpoch
     });
     for (const [path, body] of [
       ['/api/super-admin/backups/create', {}],

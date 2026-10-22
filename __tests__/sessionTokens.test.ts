@@ -1,4 +1,4 @@
-import { hkdfSync } from 'crypto';
+import { createHmac, hkdfSync } from 'crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTokenService } from '../server/services/sessionTokens.js';
 
@@ -115,6 +115,44 @@ describe('session token service', () => {
 
     expect(service.validateSuperAdminAuth({ password: 'admin' })).toBe(true);
     expect(service.validateSuperAdminAuth({ password: 'wrong' })).toBe(false);
+  });
+
+  describe('the session epoch claim (decision D3b)', () => {
+    const signLegacy = (payload: Record<string, unknown>) => {
+      const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+      const signature = createHmac('sha256', tokenSecret).update(encoded).digest('base64url');
+      return `rg1.${encoded}.${signature}`;
+    };
+
+    it('carries the epoch it was minted with', () => {
+      const service = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+      const token = service.createSessionToken('team-1', null, { sessionEpoch: 'abc' });
+
+      expect(service.validateSessionToken(token)).toMatchObject({ teamId: 'team-1', sessionEpoch: 'abc' });
+    });
+
+    it("mints the epoch '0' of a team that never rotated when none is given", () => {
+      const service = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+
+      expect(service.validateSessionToken(service.createSessionToken('team-1', null))).toMatchObject({ sessionEpoch: '0' });
+    });
+
+    it('reads a token minted without the claim as a legacy token', () => {
+      const service = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+      const iat = Date.now();
+      const token = signLegacy({ v: 1, type: 'team-session', iat, exp: iat + 60_000, nonce: 'n', teamId: 'team-1', visitorId: null });
+
+      expect(service.validateSessionToken(token)).toMatchObject({ teamId: 'team-1', sessionEpoch: null, createdAt: iat });
+    });
+
+    it('reads an empty or non-string claim as no claim at all', () => {
+      const service = createTokenService({ secureCompare, superAdminPassword: 'admin', tokenSecret });
+      for (const sessionEpoch of ['', 7]) {
+        const iat = Date.now();
+        const token = signLegacy({ v: 1, type: 'team-session', iat, exp: iat + 60_000, nonce: 'n', teamId: 'team-1', visitorId: null, sessionEpoch });
+        expect(service.validateSessionToken(token)?.sessionEpoch).toBeNull();
+      }
+    });
   });
 
   describe('invite credentials (stage 7e)', () => {

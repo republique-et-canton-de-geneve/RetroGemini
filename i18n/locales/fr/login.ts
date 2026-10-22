@@ -5,6 +5,8 @@ import type en from '../en/login';
 const login: Record<keyof typeof en, string> = {
   'login.brand.tagline': 'Des rétrospectives collaboratives qui aident votre équipe à grandir, à s’améliorer et à célébrer ses réussites ensemble.',
   'login.genericError': 'Une erreur est survenue',
+  'login.notice.sessionRevoked':
+    'Le mot de passe de l’équipe a été changé et votre session a été fermée. Connectez-vous avec le nouveau mot de passe ou demandez un nouveau lien d’invitation au facilitateur.',
   'login.emailPlaceholder': 'votre@email.com',
 
   // Team picker
