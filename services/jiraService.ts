@@ -17,6 +17,7 @@ import {
   isJiraUncertain
 } from '../utils/jira.js';
 import { dataService } from './dataService';
+import { noteRevokedAnswer } from './sessionRevocation';
 
 /**
  * The browser's side of the Jira routes (`/api/team/:teamId/jira/*`).
@@ -125,10 +126,16 @@ const readAnswer = async (res: Response): Promise<Answer> => {
 // One POST, with the team credential as it stands now: the password when this
 // login holds one, and the session token. JSON drops the undefined ones, as
 // `apiCall` in dataService.ts does; the server accepts either.
-const post = async (endpoint: string, payload: Record<string, unknown>): Promise<Answer> => {
+//
+// Decision D3b: a `401 session_revoked` is reported, and sent again once when
+// this page holds another token by then — the password change made here, or
+// adopted from another tab. A batch then carries on instead of stopping on a
+// refusal of a token that is already replaced.
+const post = async (endpoint: string, payload: Record<string, unknown>, retried = false): Promise<Answer> => {
+  const sentToken = dataService.getSessionToken();
   const credential = {
     password: dataService.getAuthenticatedPassword() ?? undefined,
-    sessionToken: dataService.getSessionToken() ?? undefined
+    sessionToken: sentToken ?? undefined
   };
   let res: Response;
   try {
@@ -140,7 +147,12 @@ const post = async (endpoint: string, payload: Record<string, unknown>): Promise
   } catch {
     return { kind: 'unknown', status: 0 };
   }
-  return readAnswer(res);
+  const answer = await readAnswer(res);
+  if (answer.kind === 'refused' && answer.status === 401) {
+    const outcome = await noteRevokedAnswer(answer.status, answer.code, sentToken);
+    if (outcome === 'retry' && !retried) return post(endpoint, payload, true);
+  }
+  return answer;
 };
 
 const isOlderPod = (answer: Answer) => answer.kind === 'older-pod';

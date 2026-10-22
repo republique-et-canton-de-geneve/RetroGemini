@@ -13,6 +13,7 @@ import {
   type PreparedFeedbackImage
 } from '../utils/feedbackImages';
 import { newFeedbackSubmissionId, type FeedbackSubmitResult } from '../services/feedbackSubmission';
+import { noteRevokedResponse } from '../services/sessionRevocation';
 
 // How a submission ended, as the board needs to know it: a feedback the server
 // did not store must keep its draft on screen.
@@ -171,6 +172,10 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
       if (response.ok) {
         const data = await response.json();
         setAllFeedbacks(data.feedbacks || []);
+      } else {
+        // Decision D3b: a token a password change revoked signs the Dashboard
+        // out (App.tsx), with the reason on the login screen.
+        void noteRevokedResponse(response, sessionToken);
       }
     } catch (err) {
       console.error('Failed to load feedbacks', err);
@@ -355,6 +360,9 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
         // so the entry that no longer exists stops being offered.
         clearCommentDraft(feedbackId);
         loadAllFeedbacks();
+      } else {
+        // The draft stays: the user can copy it before signing in again.
+        void noteRevokedResponse(response, sessionToken);
       }
     } catch (err) {
       console.error('Failed to add comment', err);
@@ -385,6 +393,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
       // path answered `ok` either way and the comment just came back.
       if (response.ok || response.status === 404) {
         loadAllFeedbacks();
+      } else {
+        void noteRevokedResponse(response, sessionToken);
       }
     } catch (err) {
       console.error('Failed to delete comment', err);
@@ -412,6 +422,8 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
       if (response.ok || response.status === 404) {
         loadAllFeedbacks();
         onRefresh();
+      } else {
+        void noteRevokedResponse(response, sessionToken);
       }
     } catch (err) {
       console.error('Failed to delete feedback', err);

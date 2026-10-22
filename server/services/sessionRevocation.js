@@ -27,9 +27,9 @@
 export const TEAM_SESSIONS_REVOKED_EVENT = 'team-sessions-revoked';
 
 export const NO_OP_SESSION_REVOCATION = Object.freeze({
-  revokeTeamSessions: async () => undefined,
+  revokeTeamSessions: async (_teamId) => undefined,
   sweepAllLocal: async () => undefined,
-  attachLocalSweeper: () => undefined
+  attachLocalSweeper: (_sweep) => undefined
 });
 
 export const createSessionRevocation = ({ io, serverRuntime }) => {

@@ -1,6 +1,6 @@
 import express from 'express';
 import { createHmac } from 'crypto';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import type { AddressInfo } from 'net';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -50,8 +50,8 @@ describe('a password rotation revokes the team\'s session tokens (decision D3b)'
   let tokenService: ReturnType<typeof createTokenService>;
   let baseUrl: string;
   let close: () => Promise<void>;
-  let revokeTeamSessions: ReturnType<typeof vi.fn>;
-  let record: ReturnType<typeof vi.fn>;
+  let revokeTeamSessions: Mock<(teamId: string) => void>;
+  let record: Mock<(req: unknown, event: unknown) => void>;
   const savedEnv: Record<string, string | undefined> = {};
 
   const post = (path: string, body: unknown) =>
@@ -62,10 +62,14 @@ describe('a password rotation revokes the team\'s session tokens (decision D3b)'
     app.use(express.json({ limit: '10mb' }));
     tokenService = createTokenService({ secureCompare, superAdminPassword: SUPER_ADMIN_PASSWORD, tokenSecret: SECRET });
     const teamService = createTeamService({ dataStore, tokenService });
-    revokeTeamSessions = vi.fn(async () => undefined);
-    const sessionRevocation = { revokeTeamSessions, sweepAllLocal: vi.fn(async () => undefined), attachLocalSweeper: vi.fn() };
-    record = vi.fn(async () => undefined);
-    const securityEvents = { record };
+    revokeTeamSessions = vi.fn();
+    const sessionRevocation = {
+      revokeTeamSessions: async (teamId: string) => { revokeTeamSessions(teamId); },
+      sweepAllLocal: async () => undefined,
+      attachLocalSweeper: () => undefined
+    };
+    record = vi.fn();
+    const securityEvents = { record: async (req: { ip?: string }, event: unknown) => { record(req, event); } };
     const mailerService = { smtpEnabled: false, mailer: null };
     const logService = { addServerLog: () => {}, getServerLogs: () => [], clearServerLogs: () => {} };
     const escapeHtml = (s: string) => String(s ?? '');
@@ -102,7 +106,6 @@ describe('a password rotation revokes the team\'s session tokens (decision D3b)'
     });
     registerAiRoutes({
       app,
-      dataStore,
       tokenService,
       teamService,
       aiService: { suggestGroupTitle: async () => 'A title' }

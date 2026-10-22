@@ -34,7 +34,7 @@ const adminTeams = {
   'adminTeams.notice.emailSaved': 'Email updated successfully',
   'adminTeams.notice.emailInvalid': 'Enter one valid email address, or leave the field empty',
   'adminTeams.notice.passwordFailed': 'Failed to update password',
-  'adminTeams.notice.passwordSaved': 'Password updated successfully',
+  'adminTeams.notice.passwordSaved': 'Password updated. Every session of this team has been closed.',
   'adminTeams.notice.renameFailed': 'Failed to rename team',
   'adminTeams.notice.renamed': 'Team renamed successfully',
 };

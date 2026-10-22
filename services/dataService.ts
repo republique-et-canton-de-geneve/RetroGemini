@@ -29,6 +29,18 @@ import {
 import { getActiveLanguage, Language, toLanguage } from '../i18n/languages';
 import { getRetroTemplatePresets } from '../i18n/content/retroTemplates';
 import { getDefaultIcebreaker, localizeIcebreaker } from '../i18n/content/icebreakers';
+import {
+  SESSION_REVOKED,
+  clearSessionRevoked,
+  isSessionRevoked,
+  markSessionRevoked,
+  noteRevokedAnswer,
+  notifySessionTokenChanged,
+  registerRevocationResolver,
+  tokenIssuedAt,
+  trackCredentialChange,
+  whenCredentialsSettled
+} from './sessionRevocation';
 
 // ==================== SECURE API CLIENT ====================
 // Uses team-scoped endpoints that require authentication
@@ -294,6 +306,9 @@ const setAuthCredentials = (teamId: string, password: string, team: Team, sessio
   if (sessionToken) {
     authenticatedSessionToken = sessionToken;
   }
+  // A login is a credential the server just accepted (decision D3b).
+  triedAdoptions.clear();
+  clearSessionRevoked();
 };
 
 /**
@@ -305,6 +320,7 @@ const clearAuthCredentials = () => {
   authenticatedTeam = null;
   authenticatedSessionToken = null;
   inviteCredentialCache = null;
+  triedAdoptions.clear();
 };
 
 /**
@@ -312,17 +328,99 @@ const clearAuthCredentials = () => {
  * feedback routes: the plaintext password or the HMAC session token.
  * Stage 7b — either credential authenticates; the server checks the password
  * first and a valid token rescues a stale password, so sending both is safe.
+ *
+ * Decision D3b: never once the session was revoked by a password change.
+ * Every persist, the queue, the ledger re-sends and the rollout retries stop
+ * at once — no storm of refused writes — while the cached team stays in
+ * memory, so the screens keep rendering until the user logs in again.
  */
 const hasTeamCredentials = (): boolean =>
-  Boolean(authenticatedTeamPassword || authenticatedSessionToken);
+  !isSessionRevoked() && Boolean(authenticatedTeamPassword || authenticatedSessionToken);
+
+// ==================== SESSION REVOCATION (decision D3b) ====================
+
+// Tokens this page already tried to adopt from another tab, so a token that is
+// revoked too is tried once, never in a loop.
+const triedAdoptions = new Set<string>();
+
+const readStoredSessionToken = (): string | null => {
+  try {
+    const raw = localStorage.getItem(OPEN_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as { teamId?: unknown; sessionToken?: unknown } | null;
+    if (!saved || saved.teamId !== authenticatedTeamId || typeof saved.sessionToken !== 'string') return null;
+    return saved.sessionToken || null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Takes the token another tab of this browser stored for the same team, when
+ * it is newer than `refused`: that tab changed the password, or logged in
+ * again, and the token it holds is the current one. App.tsx keeps the newest
+ * token of the team in that key, so a stale tab never writes an older one
+ * over it.
+ */
+const adoptStoredSessionToken = (refused: string | null): boolean => {
+  const stored = readStoredSessionToken();
+  if (!stored || stored === refused || stored === authenticatedSessionToken || triedAdoptions.has(stored)) return false;
+  if (tokenIssuedAt(stored) <= tokenIssuedAt(refused)) return false;
+  triedAdoptions.add(stored);
+  authenticatedSessionToken = stored;
+  clearSessionRevoked();
+  notifySessionTokenChanged();
+  return true;
+};
+
+/**
+ * What a `401 session_revoked` means for this page: `'retry'` when the token
+ * it holds now is not the one that was refused, `'revoked'` otherwise. A
+ * password change in flight finishes first, since its answer — the new token
+ * — can arrive after a refusal its own commit caused.
+ */
+const resolveRevokedCredential = async (sentToken: string | null): Promise<'retry' | 'revoked'> => {
+  await whenCredentialsSettled();
+  // Nobody is signed in any more (a logout while the request was out): there
+  // is nothing to revoke and nothing to retry.
+  if (!authenticatedTeamId) return 'revoked';
+  if (authenticatedSessionToken && authenticatedSessionToken !== sentToken) return 'retry';
+  if (adoptStoredSessionToken(sentToken)) return 'retry';
+  markSessionRevoked();
+  return 'revoked';
+};
+
+registerRevocationResolver(resolveRevokedCredential);
+
+// The other order: the revocation reached this tab before the tab that changed
+// the password stored its new token. Only while revoked: a tab holding a
+// current token must never take one another tab writes back.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('storage', (event: StorageEvent) => {
+    if (event.key !== OPEN_SESSION_STORAGE_KEY || !isSessionRevoked()) return;
+    adoptStoredSessionToken(authenticatedSessionToken);
+  });
+}
 
 /**
  * Make an authenticated API call to the server
  */
 const apiCall = async <T>(
   endpoint: string,
-  body: Record<string, unknown> = {}
+  body: Record<string, unknown> = {},
+  { retryRevoked = true }: { retryRevoked?: boolean } = {}
 ): Promise<{ data: T | null; error: string | null }> => {
+  // The token this request carries, for the revocation decision below. A
+  // caller that sets `sessionToken` itself (the password change sends none)
+  // is answered with that one.
+  const ownsToken = 'sessionToken' in body;
+  const sentToken = ownsToken ? ((body.sessionToken as string | null | undefined) ?? null) : authenticatedSessionToken;
+  // Revoked (decision D3b): the server would refuse the token this page holds,
+  // so nothing is sent until a login or another tab's token replaces it. A
+  // caller that brings its own credential (the password change) still goes.
+  if (isSessionRevoked() && !ownsToken) {
+    return { data: null, error: SESSION_REVOKED };
+  }
   try {
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -338,6 +436,15 @@ const apiCall = async <T>(
 
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({ error: 'unknown_error' }));
+      // Decision D3b: a token a password change revoked. Sent again once when
+      // this page holds another token by now; otherwise the session is marked
+      // revoked and every write stops (`hasTeamCredentials`).
+      if (res.status === 401 && errorData.error === SESSION_REVOKED) {
+        const outcome = await noteRevokedAnswer(res.status, errorData.error, sentToken);
+        if (outcome === 'retry' && retryRevoked && !ownsToken) {
+          return apiCall<T>(endpoint, body, { retryRevoked: false });
+        }
+      }
       return { data: null, error: errorData.error || 'request_failed' };
     }
 
@@ -435,7 +542,8 @@ const postAcrossRollout = async (
 
   const { error } = await apiCall(endpoint, body);
 
-  if (!error || isFinal(error) || attempt >= ROLLOUT_RETRIES) return error;
+  // A revoked token is final: no pod will take it (decision D3b).
+  if (!error || isFinal(error) || error === SESSION_REVOKED || attempt >= ROLLOUT_RETRIES) return error;
 
   await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
   return postAcrossRollout(endpoint, body, isFinal, attempt + 1);
@@ -1054,7 +1162,14 @@ export const dataService = {
    * from a server-derived invite credential, and changing the team password
    * prompts for the current one.
    */
-  restoreSession: async (sessionToken: string): Promise<Team | null> => {
+  //
+  // Answers the team, or why there is none. `rejected` (a 401 or 404) means the
+  // saved session can never be restored, and App deletes it; `transient` (429,
+  // a 5xx, an answer that is not JSON, no answer) means this load could not
+  // tell, and the saved session is kept for the next one. Deleting it on any
+  // failure used to sign a whole office out when the restore meter blocked an
+  // address, or when the database hiccuped.
+  restoreSession: async (sessionToken: string): Promise<{ team: Team } | { failure: 'rejected' | 'transient' }> => {
     try {
       const res = await fetch('/api/team/restore-session', {
         method: 'POST',
@@ -1063,15 +1178,22 @@ export const dataService = {
       });
 
       if (!res.ok) {
-        return null;
+        if (res.status === 401) {
+          const errorData = await res.json().catch(() => null) as { error?: unknown } | null;
+          // Decision D3b: the team's password was changed. Nothing is held
+          // yet that could replace the token, so it is revoked outright, and
+          // the login screen says why.
+          if (errorData?.error === SESSION_REVOKED) markSessionRevoked();
+        }
+        return { failure: res.status === 401 || res.status === 404 ? 'rejected' : 'transient' };
       }
 
       const { team } = await res.json();
       if (!team.archivedMembers) team.archivedMembers = [];
       setAuthCredentials(team.id, '', team, sessionToken);
-      return team;
+      return { team };
     } catch {
-      return null;
+      return { failure: 'transient' };
     }
   },
 
@@ -2346,14 +2468,18 @@ export const dataService = {
       throw new Error('Current password required');
     }
 
-    const { error } = await apiCall(`/api/team/${teamId}/password`, {
+    // Tracked (decision D3b): the rotation revokes every token minted before,
+    // this page's included, and a refusal its own commit causes can arrive
+    // before this answer. Such a refusal waits for it, and is retried with
+    // the token it hands back instead of signing the facilitator out.
+    const { data, error } = await trackCredentialChange(apiCall<{ success?: boolean; sessionToken?: unknown }>(`/api/team/${teamId}/password`, {
       newPassword,
       password: effectiveCurrentPassword,
       // Changing the credential requires the current credential: without this
       // override a session holding a still-valid token but a rotated-away
       // password could change the team password again (review finding).
       sessionToken: undefined
-    });
+    }));
 
     if (error) {
       throw new Error(error === 'invalid_password' ? 'Current password is incorrect' : 'Failed to change password');
@@ -2363,6 +2489,16 @@ export const dataService = {
     // rotation bumped the team's invite epoch, revoking the old credential.
     authenticatedTeamPassword = newPassword;
     inviteCredentialCache = null;
+    // The token minted under the team's new session epoch: this page keeps
+    // working, App stores it for a reload and the other tabs, and the sync
+    // socket re-joins with it. A pod from before decision D3b answers none
+    // and revoked nothing, so the old token stays.
+    if (typeof data?.sessionToken === 'string' && data.sessionToken) {
+      authenticatedSessionToken = data.sessionToken;
+      triedAdoptions.clear();
+      clearSessionRevoked();
+      notifySessionTokenChanged();
+    }
   },
 
   renameTeam: async (teamId: string, newName: string): Promise<void> => {

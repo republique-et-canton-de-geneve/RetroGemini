@@ -36,7 +36,10 @@ const phases: Record<keyof typeof en, string> = {
     "Cette session appartient à une autre équipe. Rien de ce que vous faites ici n'est enregistré — connectez-vous avec cette équipe pour la rejoindre.",
   'phases.sync.deniedExpired':
     "Votre session a expiré\u00a0: rien de ce que vous faites ici n'est enregistré. Reconnectez-vous pour rejoindre la session.",
+  'phases.sync.deniedRevoked':
+    "Le mot de passe de l'équipe a été changé\u00a0: rien de ce que vous faites ici n'est plus enregistré. Reconnectez-vous avec le nouveau mot de passe ou un nouveau lien d'invitation pour rejoindre la session.",
   'phases.sync.signedOutTitle': 'Session expirée — reconnectez-vous pour la rejoindre',
+  'phases.sync.signedOutRevokedTitle': 'Mot de passe changé — reconnectez-vous pour rejoindre la session',
   'phases.sync.signedOut': 'Session expirée',
   'phases.sync.reconnectingTitle': 'Connexion perdue — reconnexion en cours',
   'phases.sync.reconnecting': 'Reconnexion…',

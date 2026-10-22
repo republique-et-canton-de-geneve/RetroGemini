@@ -25,8 +25,18 @@ import { useSyncHealth } from './useSyncHealth';
 /** Reason strings the server sends with `join-denied`. */
 export const JOIN_DENIED_FORBIDDEN = 'forbidden';
 
-const deniedCopy = (reason: string | null, t: Translator) =>
-  reason === JOIN_DENIED_FORBIDDEN ? t('phases.sync.deniedForbidden') : t('phases.sync.deniedExpired');
+/**
+ * Decision D3b: the team's password was changed, so this client's session was
+ * signed out (`useSessionRevoked`). Not a reason the server sends — the
+ * session screens pass it in place of the denial's own reason.
+ */
+export const JOIN_DENIED_REVOKED = 'session_revoked';
+
+const deniedCopy = (reason: string | null, t: Translator) => {
+  if (reason === JOIN_DENIED_FORBIDDEN) return t('phases.sync.deniedForbidden');
+  if (reason === JOIN_DENIED_REVOKED) return t('phases.sync.deniedRevoked');
+  return t('phases.sync.deniedExpired');
+};
 
 interface ChipProps {
   isLive: boolean;
@@ -58,7 +68,7 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
     return (
       <div
         className="hidden min-[400px]:flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
-        title={t('phases.sync.signedOutTitle')}
+        title={joinDeniedReason === JOIN_DENIED_REVOKED ? t('phases.sync.signedOutRevokedTitle') : t('phases.sync.signedOutTitle')}
       >
         <span className="material-symbols-outlined text-lg md:mr-1">lock</span>
         <span className="text-xs font-bold hidden md:inline">{t('phases.sync.signedOut')}</span>

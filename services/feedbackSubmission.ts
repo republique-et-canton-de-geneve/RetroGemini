@@ -1,5 +1,6 @@
 import type { TeamFeedback } from '../types';
 import { randomId } from '../utils/randomId';
+import { noteRevokedResponse } from './sessionRevocation';
 
 /**
  * Sending a feedback from the board, and what its answer means for the draft.
@@ -71,7 +72,12 @@ export const submitTeamFeedback = async (
     // 413: the JSON body limit (server.js), which the images budget in
     // utils/feedbackImages.ts is meant to stay under.
     if (response.status === 413) return 'too_large';
-    if (response.status === 401) return 'session_expired';
+    if (response.status === 401) {
+      // Decision D3b: a token a password change revoked is reported, and the
+      // Dashboard then signs out with the reason; the draft stays on the form.
+      await noteRevokedResponse(response, submission.sessionToken);
+      return 'session_expired';
+    }
     return 'not_saved';
   } catch (err) {
     // No answer, or a 2xx that is not the route's JSON (a proxy answering in

@@ -84,7 +84,8 @@ describe('syncService', () => {
       sessionId: 's1',
       userId: 'u1',
       userName: 'Alice',
-      sessionToken: 'rg1.team-session-token'
+      sessionToken: 'rg1.team-session-token',
+      joinId: expect.any(String)
     });
   });
 
@@ -378,7 +379,8 @@ describe('syncService', () => {
       sessionId: 's1',
       userId: 'u1',
       userName: 'Alice',
-      sessionToken: undefined
+      sessionToken: undefined,
+      joinId: expect.any(String)
     });
   });
 
@@ -893,6 +895,114 @@ describe('syncService', () => {
       refuse({ sessionId: 's1', reason: 'throttled' });
 
       expect(emit).not.toHaveBeenCalledWith('join-session', expect.anything());
+    });
+  });
+
+  // Decision D3b: a password change cuts the team's sockets. The client tells
+  // the denial of its latest join from an earlier one by the join id it sent,
+  // retries when its token changed since, and otherwise stops — no join, no
+  // write — until a new credential arrives.
+  describe('session revocation (decision D3b)', () => {
+    let revocation: typeof import('../services/sessionRevocation');
+
+    const joinsSent = () =>
+      emit.mock.calls.filter(([event]) => event === 'join-session').map(([, payload]) => payload as { sessionId: string; sessionToken?: string; joinId: string });
+    const lastJoinId = () => joinsSent().at(-1)!.joinId;
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    beforeEach(async () => {
+      revocation = await import('../services/sessionRevocation');
+      // What dataService registers: retry when the token changed since.
+      revocation.registerRevocationResolver(async (sent) => {
+        if (currentToken && currentToken !== sent) return 'retry';
+        revocation.markSessionRevoked();
+        return 'revoked';
+      });
+      const connection = service.connect();
+      connected = true;
+      trigger('connect');
+      await connection;
+    });
+
+    it('names each join with a new join id', () => {
+      service.joinSession('s1', 'u1', 'Alice');
+      service.joinSession('s2', 'u1', 'Alice');
+
+      const [first, second] = joinsSent().map((join) => join.joinId);
+      expect(first).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+      expect(second).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+      expect(second).not.toBe(first);
+    });
+
+    it('is revoked by a revoking denial of its latest join, without calling the denial subscribers, and stops re-joining', async () => {
+      const denied = vi.fn();
+      service.onJoinDenied(denied);
+      service.joinSession('s1', 'u1', 'Alice');
+
+      trigger('join-denied', { sessionId: 's1', reason: 'unauthenticated', cause: 'session_revoked', joinId: lastJoinId() });
+      await settle();
+
+      expect(revocation.isSessionRevoked()).toBe(true);
+      expect(denied).not.toHaveBeenCalled();
+      emit.mockClear();
+      trigger('session-update-refused', { sessionId: null, reason: 'not-joined' });
+      expect(emit).not.toHaveBeenCalledWith('join-session', expect.anything());
+    });
+
+    it('re-joins with the new token, and revokes nothing, when the token changed since the join', async () => {
+      service.joinSession('s1', 'u1', 'Alice');
+      const refusedJoin = lastJoinId();
+      currentToken = 'rg1.fresh-token';
+
+      trigger('join-denied', { sessionId: 's1', reason: 'unauthenticated', cause: 'session_revoked', joinId: refusedJoin });
+      await settle();
+
+      expect(revocation.isSessionRevoked()).toBe(false);
+      expect(joinsSent().at(-1)).toMatchObject({ sessionId: 's1', sessionToken: 'rg1.fresh-token' });
+      expect(lastJoinId()).not.toBe(refusedJoin);
+    });
+
+    it('ignores the denial of an earlier join', async () => {
+      const denied = vi.fn();
+      service.onJoinDenied(denied);
+      service.joinSession('s1', 'u1', 'Alice');
+      const earlier = lastJoinId();
+      service.joinSession('s1', 'u1', 'Alice');
+
+      trigger('join-denied', { sessionId: 's1', reason: 'unauthenticated', cause: 'session_revoked', joinId: earlier });
+      await settle();
+
+      expect(revocation.isSessionRevoked()).toBe(false);
+      expect(denied).not.toHaveBeenCalled();
+    });
+
+    it('re-joins the current session when the token changes', () => {
+      service.joinSession('s1', 'u1', 'Alice');
+      currentToken = 'rg1.rotated-token';
+      emit.mockClear();
+
+      revocation.notifySessionTokenChanged();
+
+      expect(joinsSent()).toEqual([expect.objectContaining({ sessionId: 's1', sessionToken: 'rg1.rotated-token' })]);
+    });
+
+    it('holds a write while revoked, joins nothing, and sends both once another tab\'s token clears it', async () => {
+      service.joinSession('s1', 'u1', 'Alice');
+      trigger('join-denied', { sessionId: 's1', reason: 'unauthenticated', cause: 'session_revoked', joinId: lastJoinId() });
+      await settle();
+      emit.mockClear();
+
+      service.updateSession({ id: 's1', phase: 'BRAINSTORM', _rev: 3 } as never);
+      service.joinSession('s1', 'u1', 'Alice');
+      service.updateSession({ id: 's1', phase: 'GROUP', _rev: 3 } as never);
+      expect(emit).not.toHaveBeenCalled();
+
+      currentToken = 'rg1.adopted-token';
+      revocation.clearSessionRevoked();
+      revocation.notifySessionTokenChanged();
+
+      expect(emittedOrder()).toEqual([['join-session', 's1'], ['update-session', 's1']]);
+      expect((emit.mock.calls.at(-1)![1] as { phase: string }).phase).toBe('GROUP');
     });
   });
 });

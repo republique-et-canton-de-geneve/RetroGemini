@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import {
+  JOIN_DENIED_REVOKED,
   SessionConnectionBanner,
   SessionSyncChip
 } from '../components/session/SessionConnectionStatus';
@@ -113,6 +114,43 @@ describe('SessionSyncChip', () => {
 
     expect(screen.queryByText(/Reconnecting/i)).toBeNull();
     expect(screen.getByText(/Signed out/i)).toBeTruthy();
+  });
+});
+
+/**
+ * Decision D3b — the team's password was changed under the session. Not an
+ * expiry: the person must use the new password, or a new invitation link, so
+ * the banner and the chip say that, in both languages.
+ */
+describe('a session signed out by a password change', () => {
+  it('says the password was changed, and offers the login screen', () => {
+    const onReturnToLogin = vi.fn();
+    render(<SessionConnectionBanner isLive={false} joinDeniedReason={JOIN_DENIED_REVOKED} onReturnToLogin={onReturnToLogin} />);
+
+    const banner = screen.getByRole('alert');
+    expect(banner.textContent).toContain('The team password was changed, so nothing you do here is being saved any more.');
+    expect(banner.textContent).not.toMatch(/expired/i);
+    fireEvent.click(screen.getByRole('button', { name: 'Log in again' }));
+    expect(onReturnToLogin).toHaveBeenCalledTimes(1);
+  });
+
+  it('titles the chip with the reason', () => {
+    render(<SessionSyncChip isLive={false} joinDeniedReason={JOIN_DENIED_REVOKED} />);
+
+    expect(screen.getByTitle('Password changed — log in again to rejoin')).toBeTruthy();
+  });
+
+  it('says so in French', () => {
+    render(
+      <LanguageProvider initialLanguage="fr">
+        <SessionConnectionBanner isLive={false} joinDeniedReason={JOIN_DENIED_REVOKED} onReturnToLogin={() => undefined} />
+        <SessionSyncChip isLive={false} joinDeniedReason={JOIN_DENIED_REVOKED} />
+      </LanguageProvider>
+    );
+
+    expect(screen.getByRole('alert').textContent).toContain('Le mot de passe de l\'équipe a été changé\u00a0: rien de ce que vous faites ici n\'est plus enregistré.');
+    expect(screen.getByTitle('Mot de passe changé — reconnectez-vous pour rejoindre la session')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Se reconnecter' })).toBeTruthy();
   });
 });
 

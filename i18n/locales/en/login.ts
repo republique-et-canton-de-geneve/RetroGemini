@@ -4,6 +4,10 @@
 const login = {
   'login.brand.tagline': 'Collaborative retrospectives that help your team grow, improve, and celebrate together.',
   'login.genericError': 'An error occurred',
+  // Why the login screen came up by itself: the team's password was changed
+  // and every session opened before was signed out (decision D3b).
+  'login.notice.sessionRevoked':
+    'The team password was changed, so you were signed out. Log in with the new password, or ask the facilitator for a new invitation link.',
   'login.emailPlaceholder': 'your@email.com',
 
   // Team picker

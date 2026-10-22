@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Team, User, AppVersion, VersionAnnouncement } from './types';
 import { dataService, OPEN_SESSION_STORAGE_KEY } from './services/dataService';
 import TeamLogin, { InviteData } from './components/TeamLogin';
@@ -10,11 +10,26 @@ import AnnouncementModal from './components/AnnouncementModal';
 import LanguageSwitcher from './components/common/LanguageSwitcher';
 import { useTranslation } from './i18n/I18nContext';
 import { isSessionInProgress } from './utils/sessionStatus';
+import { isSessionRevoked, newerToken, onSessionRevokedChange, onSessionTokenChanged } from './services/sessionRevocation';
+import type { Notice } from './i18n/notice';
 
 const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
 // Shared with dataService, which patches the blob's teamPassword in place
 // when the team password is rotated.
 const STORAGE_KEY = OPEN_SESSION_STORAGE_KEY;
+
+// The session token stored for `teamId` by any tab of this browser, or null.
+const readStoredToken = (teamId: string | null | undefined): string | null => {
+  if (!teamId) return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as { teamId?: unknown; sessionToken?: unknown } | null;
+    return saved?.teamId === teamId && typeof saved.sessionToken === 'string' ? saved.sessionToken : null;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Compare two version strings (e.g., "1.0" vs "1.1")
@@ -51,6 +66,23 @@ const getNewAnnouncements = (
 
 const App: React.FC = () => {
   const { t } = useTranslation();
+  // Decision D3b: bumped when the team session token changes (the password
+  // change made here, or a token adopted from another tab), so the effect that
+  // persists the open session stores the new one. Without it the facilitator
+  // who changed the password would be signed out by the next reload, since the
+  // old token would still be the stored one. The re-render also refreshes the
+  // token the Dashboard hands its feedback board.
+  const [tokenVersion, setTokenVersion] = useState(0);
+  useEffect(() => onSessionTokenChanged(() => setTokenVersion((version) => version + 1)), []);
+  // Why the login screen is shown, when it was not the user's choice: the
+  // team's password was changed (a key, never a sentence — see i18n/notice.ts).
+  const [signedOutNotice, setSignedOutNotice] = useState<Notice>(null);
+  // Set by every sign-out of this page life. The saved session is restored on
+  // a page load, never right after a sign-out: a sign-out that keeps another
+  // tab's newer saved session (decision D3b) would otherwise be undone at
+  // once by the restore below — the team is still in memory — and a revoked
+  // session would sign out and back in for ever.
+  const signedOutRef = useRef(false);
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [view, setView] = useState<'LOGIN' | 'DASHBOARD' | 'SESSION' | 'HEALTH_CHECK' | 'SUPER_ADMIN'>('LOGIN');
@@ -162,7 +194,7 @@ const App: React.FC = () => {
   }, [hydrated, superAdminToken]);
 
   useEffect(() => {
-    if (!hydrated || currentTeam) return;
+    if (!hydrated || currentTeam || signedOutRef.current) return;
 
     // If the URL contains an invite payload, skip restoring local session state.
     const params = new URLSearchParams(window.location.search);
@@ -184,12 +216,17 @@ const App: React.FC = () => {
           // Restore session using the secure session token only. No password
           // is persisted locally (stage 7e): invite links are minted from a
           // server-derived invite credential instead.
-          team = await dataService.restoreSession(saved.sessionToken);
-          if (!team) {
-            // Token invalid or expired - clear stored session
-            localStorage.removeItem(STORAGE_KEY);
+          const restored = await dataService.restoreSession(saved.sessionToken);
+          if (!restored) return;
+          if ('failure' in restored) {
+            // Deleted only when the token can never work again (a 401 or a
+            // 404). A refused or failed answer — the restore meter, a
+            // database hiccup, no network — keeps it for the next load: it
+            // used to sign out everyone behind one address at once.
+            if (restored.failure === 'rejected') localStorage.removeItem(STORAGE_KEY);
             return;
           }
+          team = restored.team;
         }
 
         if (!team) return;
@@ -266,13 +303,20 @@ const App: React.FC = () => {
     restoreSession();
   }, [hydrated, currentTeam]);
 
+  // Persists the open session, for a reload and for the other tabs of this
+  // browser. It no longer removes the key when no team is open: the sign-out
+  // paths below do that, each by its own rule, and the restore deletes a saved
+  // session only when it can never work again (the key used to be removed on
+  // every page load, before the restore had even answered).
   useEffect(() => {
-    if (!currentTeam || !currentUser) {
-      if (hydrated) {
-        localStorage.removeItem(STORAGE_KEY);
-      }
-      return;
-    }
+    if (!currentTeam || !currentUser) return;
+
+    // Decision D3b: the key is shared by every tab of the browser, and each
+    // one rewrites it whenever its team changes. A tab still holding the token
+    // from before a password change must never write it over the newer token
+    // another tab stored: the other tab would be signed out by its next
+    // reload. Of two tokens of one team, the one issued later wins.
+    const sessionToken = newerToken(readStoredToken(currentTeam.id), dataService.getSessionToken());
 
     const payload = {
       teamId: currentTeam.id,
@@ -286,11 +330,15 @@ const App: React.FC = () => {
       // password never touches localStorage anymore — invite links are minted
       // from a server-derived invite credential and changing the password
       // prompts for the current one after a restore.
-      sessionToken: dataService.getSessionToken(),
+      sessionToken,
     };
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [currentTeam, currentUser, view, activeSessionId, activeHealthCheckId, hydrated]);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // Storage unavailable (a private window): a reload signs in again.
+    }
+  }, [currentTeam, currentUser, view, activeSessionId, activeHealthCheckId, hydrated, tokenVersion]);
 
   useEffect(() => {
     if (view !== 'DASHBOARD' || !currentTeam) return;
@@ -332,6 +380,48 @@ const App: React.FC = () => {
     }
   }, [view, activeSessionId, activeHealthCheckId, hydrated]);
 
+  // `keepNewerSession`: a sign-out this tab did not choose (its session was
+  // revoked or expired) leaves the saved session alone when it holds a newer
+  // token of the same team than this tab's — another tab's, after a password
+  // change made there — so that tab's next reload still finds it. Logging out
+  // by hand removes it as before: that is the user signing this browser out.
+  const signOut = useCallback(({ keepNewerSession }: { keepNewerSession: boolean }) => {
+    const stored = keepNewerSession ? readStoredToken(currentTeam?.id) : null;
+    const mine = dataService.getSessionToken();
+    const keep = !!stored && stored !== mine && newerToken(mine, stored) === stored;
+    signedOutRef.current = true;
+    setCurrentTeam(null);
+    setCurrentUser(null);
+    setView('LOGIN');
+    if (!keep) {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        // Nothing stored that could be removed.
+      }
+    }
+  }, [currentTeam]);
+
+  const handleLogout = useCallback(() => signOut({ keepNewerSession: false }), [signOut]);
+  const handleSessionExpired = useCallback(() => signOut({ keepNewerSession: true }), [signOut]);
+
+  // Decision D3b: the team's password was changed and this client's token is
+  // revoked. In a session the screen says so itself, with "Log in again"
+  // (useSessionRevoked), so a participant halfway through a card can still
+  // copy it; everywhere else the login screen comes at once, saying why.
+  useEffect(() => {
+    const react = () => {
+      setSignedOutNotice({ key: 'login.notice.sessionRevoked' });
+      if (currentTeam && view !== 'SESSION' && view !== 'HEALTH_CHECK') {
+        signOut({ keepNewerSession: true });
+      }
+    };
+    if (isSessionRevoked()) react();
+    return onSessionRevokedChange((revoked) => {
+      if (revoked) react();
+    });
+  }, [currentTeam, view, signOut]);
+
   // Participants should never remain on the dashboard; force them into a session or log them out.
   useEffect(() => {
     if (!hydrated || !currentTeam || !currentUser) return;
@@ -361,7 +451,7 @@ const App: React.FC = () => {
     }
 
     handleLogout();
-  }, [hydrated, currentTeam, currentUser, view, activeSessionId, activeHealthCheckId]);
+  }, [hydrated, currentTeam, currentUser, view, activeSessionId, activeHealthCheckId, handleLogout]);
 
   // Check for invitation link on mount
   useEffect(() => {
@@ -437,6 +527,7 @@ const App: React.FC = () => {
   };
 
   const handleLogin = (team: Team) => {
+    setSignedOutNotice(null);
     setCurrentTeam(team);
     setCurrentUser(team.members[0]); // Default to facilitator on login
     setInviteData(null);
@@ -444,6 +535,7 @@ const App: React.FC = () => {
   };
 
   const handleJoin = (team: Team, user: User) => {
+    setSignedOutNotice(null);
     setCurrentTeam(team);
     setCurrentUser(user);
 
@@ -491,12 +583,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogout = () => {
-    setCurrentTeam(null);
-    setCurrentUser(null);
-    setView('LOGIN');
-    localStorage.removeItem(STORAGE_KEY);
-  };
 
   const handleOpenSession = (sessionId: string) => {
     if (currentUser?.role === 'participant') return;
@@ -538,7 +624,7 @@ const App: React.FC = () => {
   }
 
   if (!currentTeam) {
-    return <TeamLogin onLogin={handleLogin} onJoin={handleJoin} inviteData={inviteData} onSuperAdminLogin={handleSuperAdminLogin} />;
+    return <TeamLogin onLogin={handleLogin} onJoin={handleJoin} inviteData={inviteData} onSuperAdminLogin={handleSuperAdminLogin} signedOutNotice={signedOutNotice} />;
   }
 
   // Common Header Logic
@@ -625,7 +711,7 @@ const App: React.FC = () => {
                 // A refused socket join means the team credential is gone or
                 // expired (audit H12): send the user back to the login screen
                 // rather than to a dashboard that cannot authenticate either.
-                onSessionExpired={handleLogout}
+                onSessionExpired={handleSessionExpired}
                 onExit={() => {
                     // Refresh data before exiting
                     const updated = dataService.getTeam(currentTeam.id);
@@ -649,7 +735,7 @@ const App: React.FC = () => {
                 currentUser={currentUser!}
                 sessionId={activeHealthCheckId}
                 // See the retrospective session above (audit H12).
-                onSessionExpired={handleLogout}
+                onSessionExpired={handleSessionExpired}
                 onExit={() => {
                     // Refresh data before exiting
                     const updated = dataService.getTeam(currentTeam.id);
