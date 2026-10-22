@@ -436,8 +436,9 @@ export interface Team {
   healthChecks?: HealthCheckSession[];
   customHealthCheckTemplates?: HealthCheckTemplate[];
   lastConnectionDate?: string;
-  // Team feedbacks
-  teamFeedbacks?: TeamFeedback[];
+  // No `teamFeedbacks`: the record stores them, but the server leaves them out
+  // of every team answer and the Feedback Hub reads `/api/feedbacks/all`. The
+  // field is absent here so no screen can start reading data that never comes.
   // Impact rating on closed actions. Absent means enabled: the feature ships on
   // for everyone, and a team that does not want it turns it off here once.
   actionImpactRatingEnabled?: boolean;

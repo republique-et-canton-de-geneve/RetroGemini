@@ -58,7 +58,6 @@ vi.mock('../components/Dashboard', async () => {
         sessionToken={mocked.getSessionToken()}
         currentUserId={currentUser.id}
         currentUserName={currentUser.name}
-        feedbacks={[]}
         onSubmitFeedback={(feedback) => submitTeamFeedback({ teamId: team.id, sessionToken: mocked.getSessionToken(), feedback })}
         onRefresh={onRefresh}
       />

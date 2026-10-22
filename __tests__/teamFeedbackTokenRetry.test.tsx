@@ -54,7 +54,6 @@ const renderBoard = () =>
       getSessionToken={() => held}
       currentUserId="user-1"
       currentUserName="User One"
-      feedbacks={[]}
       onSubmitFeedback={vi.fn()}
       onRefresh={vi.fn()}
     />

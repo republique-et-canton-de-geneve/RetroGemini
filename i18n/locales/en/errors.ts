@@ -24,6 +24,11 @@ const errors = {
   'errors.deleteTeamFailed': 'The team could not be deleted. Please try again.',
   'errors.recoveryEmailNotSaved': 'The recovery email could not be saved. Please try again.',
   'errors.invalidInviteLink': 'Failed to join team - invalid invite link',
+  // The other ways an invite import fails: the login limiter, an answer worth
+  // retrying (a 5xx, a gateway during a rolling update), and no answer at all.
+  'errors.inviteRateLimited': 'Too many attempts to join this team from this network. Please wait a few minutes, then try again.',
+  'errors.inviteUnavailable': 'The team could not be joined right now. Please try again in a moment.',
+  'errors.serverUnreachable': 'The server could not be reached. Check your connection, then try again.',
   'errors.nameReserved': 'This name is reserved. Please use a different name or contact the team administrator.',
   'errors.invitationRequired': 'An invitation is required to join this team.',
   'errors.invitationNotVerified': 'Invitation could not be verified. Please join manually.',

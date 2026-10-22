@@ -19,8 +19,8 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * The number of warnings this repository currently tolerates. Lower it whenever
  * the count drops — never raise it without saying why in the pull request.
  *
- * Current composition (2026-10-21): **82 pre-existing** — 11 no-explicit-any,
- * 18 no-unused-vars, 17 no-non-null-assertion, 14 react-hooks/exhaustive-deps,
+ * Current composition (2026-10-22): **81 pre-existing** — 11 no-explicit-any,
+ * 17 no-unused-vars, 17 no-non-null-assertion, 14 react-hooks/exhaustive-deps,
  * 14 no-console, 7 no-alert, 1 unattributed — plus **17 accessibility**
  * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 8
  * click-events-have-key-events, 7 no-static-element-interactions, 1
@@ -61,7 +61,9 @@ import { evaluateLintBudget } from './lintBudget.mjs';
 // the reader of the Jira discovery note and who requested each issue.
 // 100 -> 99: the backups table's download, reworked so its blob URL is revoked
 // after the download starts, dropped the `catch (err)` it never read.
-const BUDGET = 99;
+// 99 -> 98: the feedback board's `feedbacks` prop, renamed `localFeedbacks`
+// and never read, left with `teamFeedbacks` from the team answers.
+const BUDGET = 98;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

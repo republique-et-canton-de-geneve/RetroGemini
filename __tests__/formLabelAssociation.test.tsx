@@ -325,7 +325,6 @@ describe('L23 — TeamFeedback names every field', () => {
         sessionToken="token"
         currentUserId="u1"
         currentUserName="Alice"
-        feedbacks={[]}
         onSubmitFeedback={vi.fn()}
         onRefresh={vi.fn()}
       />

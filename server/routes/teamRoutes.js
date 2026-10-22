@@ -1389,9 +1389,11 @@ const registerTeamRoutes = ({
         return res.status(500).json({ error: result.error });
       }
 
-      res.json({
-        team: sanitizeTeamForClient(result.team)
-      });
+      // Every join writes the roster, and the joiner's client never read the
+      // answer (`persistMembers` reads only `error`, in every release since
+      // the route exists): sending the whole team back cost each new
+      // participant a second copy of the history.
+      res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update members', err);
       res.status(500).json({ error: 'failed_to_update' });

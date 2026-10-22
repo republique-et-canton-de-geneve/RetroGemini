@@ -2308,7 +2308,6 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           getSessionToken={dataService.getSessionToken}
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
-          feedbacks={team.teamFeedbacks || []}
           onSubmitFeedback={async (feedback): Promise<FeedbackSubmitResult> => {
             // The answer goes back to the form, which keeps the draft unless the
             // feedback was stored (services/feedbackSubmission.ts).

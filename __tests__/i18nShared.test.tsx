@@ -63,7 +63,6 @@ describe('TeamFeedback in French', () => {
         sessionToken="token"
         currentUserId="user-1"
         currentUserName="User One"
-        feedbacks={[]}
         onSubmitFeedback={vi.fn()}
         onRefresh={vi.fn()}
       />

@@ -7,9 +7,10 @@ import { dismissAnnouncementsIfPresent } from './helpers/announcements';
  * TeamLogin initialises that screen (member picker, nothing selected) and used
  * to undo the user's first choice on it twice over: the reset ran one task
  * after the commit that shows the screen, and it re-ran every time the team was
- * re-imported, which happens several times on load (StrictMode, App
- * re-renders). A slow phone hits that window; a test clicking through
- * Playwright's actionability checks never does.
+ * re-imported, which used to happen several times on load (StrictMode, App
+ * re-renders) until the invite import ran once per link. A slow phone hits
+ * that window; a test clicking through Playwright's actionability checks never
+ * does.
  *
  * So the click here is made from a MutationObserver installed before the page
  * loads, which runs right after the commit that first shows the button —

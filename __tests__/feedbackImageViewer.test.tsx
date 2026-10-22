@@ -126,7 +126,6 @@ describe('Feedback images open inside the app', () => {
         sessionToken="token"
         currentUserId="user-1"
         currentUserName="User One"
-        feedbacks={[]}
         onSubmitFeedback={vi.fn()}
         onRefresh={vi.fn()}
       />

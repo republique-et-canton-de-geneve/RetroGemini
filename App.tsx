@@ -18,6 +18,12 @@ const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
 // Shared with dataService, which patches the blob's teamPassword in place
 // when the team password is rotated.
 const STORAGE_KEY = OPEN_SESSION_STORAGE_KEY;
+// A Dashboard entry within this long of a login, a creation, a restore or an
+// invite join is served from the team that load just downloaded, once
+// (`dataService.refreshFromServer`). Kept here rather than exported from
+// dataService: App suites mock that module with a factory, and vitest throws
+// on an export the factory does not define.
+const DASHBOARD_REFRESH_MAX_AGE_MS = 5000;
 
 // Module-level so useSyncExternalStore keeps one subscription for the life of
 // the app (the same shape as useSessionRevoked).
@@ -351,7 +357,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (view !== 'DASHBOARD' || !currentTeam) return;
 
-    dataService.refreshFromServer().then(() => {
+    dataService.refreshFromServer({ maxAgeMs: DASHBOARD_REFRESH_MAX_AGE_MS }).then(() => {
       const refreshedTeam = dataService.getTeam(currentTeam.id);
       if (!refreshedTeam) return;
 

@@ -413,8 +413,7 @@ describe('Jira fields on the team record, through the existing team routes', () 
         await post('/api/team/login', { teamName: 'Alpha', password: 'secret-passphrase' }),
         await post('/api/team/restore-session', { sessionToken }),
         await post(`/api/team/${teamId}`, { sessionToken }),
-        await post(`/api/team/${teamId}/update`, { sessionToken, updates: { actionImpactRatingEnabled: true } }),
-        await post(`/api/team/${teamId}/members`, { sessionToken, members: [] })
+        await post(`/api/team/${teamId}/update`, { sessionToken, updates: { actionImpactRatingEnabled: true } })
       ];
 
       for (const res of responses) {
@@ -428,6 +427,15 @@ describe('Jira fields on the team record, through the existing team routes', () 
         expect(res.body.team).not.toHaveProperty('jiraParentClaims');
         expect(JSON.stringify(res.body)).not.toContain('req-parent-1');
       }
+    });
+
+    // A roster write answers no team at all (synthesis item 8): nothing on
+    // it can leak, claims included.
+    it('answers a roster write with { success: true } and no team', async () => {
+      const res = await post(`/api/team/${teamId}/members`, { sessionToken, members: [] });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true });
     });
   });
 });

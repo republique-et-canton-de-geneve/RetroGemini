@@ -31,7 +31,22 @@ const isPlainObject = (value) => {
   return prototype === Object.prototype || prototype === null;
 };
 
-const createDataStore = ({ rootDir }) => {
+// What one pod keeps of every team's feedbacks (loadAllTeamFeedbacks), in
+// characters of their JSON text: images ride inline as data: URIs, and a pod
+// has a 384 Mi memory limit. A team that does not fit is read from the
+// database on every request instead. Overridable for tests only.
+const TEAM_FEEDBACK_CACHE_MAX_CHARS = 16 * 1024 * 1024;
+
+// Freezes plain objects and arrays, all the way down: what JSON.parse built.
+const deepFreeze = (value) => {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+};
+
+const createDataStore = ({ rootDir, teamFeedbackCacheMaxChars = TEAM_FEEDBACK_CACHE_MAX_CHARS }) => {
   const buildPostgresConfig = () => {
     if (process.env.DATABASE_URL) {
       return { connectionString: process.env.DATABASE_URL };
@@ -221,14 +236,20 @@ const createDataStore = ({ rootDir }) => {
   // Low-level KV helpers
   // ---------------------------------------------------------------------------
 
-  // key -> { stamp, size, summary }: the team summaries this pod has projected
-  // (see loadTeamSummaries). Every write of a `team:` record below forgets its
-  // entry once the write is done.
+  // The two per-pod projection caches of the team rows. Every write of a
+  // `team:` record below forgets its entry in both once the write is done
+  // (`forgetTeamProjections`); a write that bypassed these helpers could not be
+  // forgotten, which is why every `team:` writer goes through them.
+  // key -> { stamp, size, summary }: the team summaries (loadTeamSummaries).
   const teamSummaryCache = new Map();
+  // key -> { stamp, size, chars, row }: each team's id, name and frozen
+  // feedbacks (loadAllTeamFeedbacks), within teamFeedbackCacheMaxChars.
+  const teamFeedbackCache = new Map();
 
-  const forgetTeamSummary = (key) => {
+  const forgetTeamProjections = (key) => {
     if (typeof key === 'string' && key.startsWith(TEAM_PREFIX)) {
       teamSummaryCache.delete(key);
+      teamFeedbackCache.delete(key);
     }
   };
 
@@ -267,7 +288,7 @@ const createDataStore = ({ rootDir }) => {
            updated_at = CURRENT_TIMESTAMP`
       ).run(key, payload);
     }
-    forgetTeamSummary(key);
+    forgetTeamProjections(key);
   };
 
   const kvDelete = async (key) => {
@@ -276,7 +297,7 @@ const createDataStore = ({ rootDir }) => {
     } else {
       sqliteDb.prepare('DELETE FROM kv_store WHERE key = ?').run(key);
     }
-    forgetTeamSummary(key);
+    forgetTeamProjections(key);
   };
 
   // Prefix scans use `LIKE 'prefix%'` rather than a `key >= lower AND key <
@@ -359,7 +380,7 @@ const createDataStore = ({ rootDir }) => {
             [key, payload]
           );
           await client.query('COMMIT');
-          forgetTeamSummary(key);
+          forgetTeamProjections(key);
           return { success: true, data: nextData };
         } catch (txErr) {
           await client.query('ROLLBACK').catch(() => {});
@@ -386,7 +407,7 @@ const createDataStore = ({ rootDir }) => {
           ).run(key, payload);
           return { success: true, data: nextData };
         })();
-        if (result.success) forgetTeamSummary(key);
+        if (result.success) forgetTeamProjections(key);
         return result;
       }
     } catch (err) {
@@ -473,7 +494,7 @@ const createDataStore = ({ rootDir }) => {
       const authRow = rotateSessionEpoch ? nextTeamAuthRow() : null;
       if (authRow) await upsertTeamAuthOnPostgres(client, teamId, authRow);
       await client.query('COMMIT');
-      forgetTeamSummary(key);
+      forgetTeamProjections(key);
       return authRow
         ? { success: true, team, sessionEpoch: authRow.sessionEpoch, revokedAt: authRow.revokedAt }
         : { success: true, team };
@@ -500,7 +521,7 @@ const createDataStore = ({ rootDir }) => {
       upsertTeamAuthOnSqlite(teamId, authRow);
       return { success: true, team, sessionEpoch: authRow.sessionEpoch, revokedAt: authRow.revokedAt };
     })();
-    if (wrote) forgetTeamSummary(key);
+    if (wrote) forgetTeamProjections(key);
     return result;
   };
 
@@ -1011,7 +1032,7 @@ const createDataStore = ({ rootDir }) => {
   // whoever writes it (a pod from an older release included) and owes nothing
   // to a clock; `updated_at` on SQLite, read only when another connection has
   // committed (see readTeamSummaryRowsSqlite). This pod's own writes drop their
-  // entry at once (`forgetTeamSummary`). Residual, accepted: on SQLite, a
+  // entry at once (`forgetTeamProjections`). Residual, accepted: on SQLite, a
   // second process writing a team twice in one second at the same length stays
   // invisible until that team's next write — SQLite deployments run one
   // process. The cache itself is declared with the KV helpers, which forget an
@@ -1050,11 +1071,11 @@ const createDataStore = ({ rootDir }) => {
   // read, so a write of this pod that forgets an entry while the projection is
   // awaited cannot make a team vanish from this answer: the entry taken here
   // is the state the fingerprint read saw.
-  const partitionByFreshness = (rows) => {
+  const partitionByFreshness = (rows, cache) => {
     const known = new Map();
     const stale = [];
     for (const row of rows) {
-      const cached = teamSummaryCache.get(row.key);
+      const cached = cache.get(row.key);
       if (isFresh(cached, row)) known.set(row.key, cached);
       else stale.push(row.key);
     }
@@ -1100,7 +1121,7 @@ const createDataStore = ({ rootDir }) => {
        FROM kv_store WHERE key LIKE $1`,
       [TEAM_PREFIX + '%']
     );
-    const { known, stale } = partitionByFreshness(stamps.rows);
+    const { known, stale } = partitionByFreshness(stamps.rows, teamSummaryCache);
     let projected = [];
     if (stale.length > 0) {
       const result = await pgPool.query(summaryProjectionSql('key = ANY($1)'), [stale]);
@@ -1125,7 +1146,7 @@ const createDataStore = ({ rootDir }) => {
        FROM kv_store WHERE key LIKE ?`
     ).all(TEAM_PREFIX + '%');
     sqliteDataVersionSeen = dataVersion;
-    const { known, stale } = partitionByFreshness(stamps);
+    const { known, stale } = partitionByFreshness(stamps, teamSummaryCache);
     const projected = stale.length === 0 ? [] : sqliteDb.prepare(
       summaryProjectionSql('key IN (SELECT value FROM json_each(?))')
     ).all(JSON.stringify(stale));
@@ -1211,7 +1232,7 @@ const createDataStore = ({ rootDir }) => {
       const projected = result.rows[0];
       // Deleted between the two queries.
       if (!projected || !(Number(projected.size) > 0)) {
-        forgetTeamSummary(key);
+        forgetTeamProjections(key);
         return null;
       }
       const entry = projectSummaryRow(projected);
@@ -1235,7 +1256,7 @@ const createDataStore = ({ rootDir }) => {
     );
     const row = result.rows[0];
     if (!row || !(Number(row.size) > 0)) {
-      forgetTeamSummary(key);
+      forgetTeamProjections(key);
       return null;
     }
     const cached = teamSummaryCache.get(key);
@@ -1255,14 +1276,14 @@ const createDataStore = ({ rootDir }) => {
        FROM kv_store WHERE key = ?`
     ).get(key);
     if (!row || !(Number(row.size) > 0)) {
-      forgetTeamSummary(key);
+      forgetTeamProjections(key);
       return null;
     }
     const cached = teamSummaryCache.get(key);
     if (isFresh(cached, row)) return cached;
     const projected = sqliteDb.prepare(summaryProjectionSql('key = ?')).get(key);
     if (!projected) {
-      forgetTeamSummary(key);
+      forgetTeamProjections(key);
       return null;
     }
     const entry = projectSummaryRow(projected);
@@ -1332,42 +1353,122 @@ const createDataStore = ({ rootDir }) => {
     }));
   };
 
-  // Feedback projection for the Feedback Hub and the super-admin feedback view.
-  // Like loadTeamSummaries, it extracts only each team's id, name and
-  // teamFeedbacks array directly in SQL, so those endpoints never deserialize
-  // every team's full retrospective/health-check history in JS just to collect
-  // bug reports and feature requests (audit R10). The heavy history fields never
-  // leave the database. Returns [{ id, name, teamFeedbacks }]; teams with no
-  // feedback key yield an empty array.
-  const loadAllTeamFeedbacks = async () => {
-    if (usePostgres) {
-      // One cast per record, not one per column: see loadTeamSummaries.
-      const result = await pgPool.query(
-        `SELECT j->>'id' AS id,
-                j->>'name' AS name,
-                j->'teamFeedbacks' AS team_feedbacks
-         FROM (SELECT value::jsonb AS j FROM kv_store WHERE key LIKE $1 OFFSET 0) AS team_rows`,
-        [TEAM_PREFIX + '%']
-      );
-      return result.rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        teamFeedbacks: normalizeJsonArray(row.team_feedbacks)
-      }));
-    }
+  // Feedback projection for the Feedback Hub (`/api/feedbacks/all`, on every
+  // open and after every create, comment and delete) and the console's
+  // feedback tab. It extracts only each team's id, name and teamFeedbacks in
+  // SQL, so the heavy history never leaves the database (audit R10), and it is
+  // cached per pod by the summaries' rule (see loadTeamSummaries): a
+  // fingerprint that costs no parse, one cast per row whose fingerprint moved,
+  // and this pod's own writes forgetting their entry. Uncached, it parsed every
+  // team row on every call: 233 to 331 ms on PostgreSQL at 25 MB.
+  //
+  // Its own rules:
+  // - **The SQLite marker of another connection's commit is its own.** Shared
+  //   with the summaries, a summary read would mark the commit as seen, and the
+  //   next feedback read would judge on length alone and miss a same-length
+  //   foreign edit (a status `pending` -> `resolved` from another process).
+  // - **The stamp and size of a projected entry come from the projection
+  //   query's own row**, never from the fingerprint read: a write that lands in
+  //   between is then re-projected on the next read.
+  // - **The arrays are shared and frozen; callers build new objects, never edit
+  //   them.** Both routes spread every feedback and sort a new outer array, and
+  //   an edit throws (ES modules are strict) instead of corrupting the next
+  //   answer.
+  // - **A character budget bounds it, decided again at the end of every read**
+  //   in storage order, so no admission state outlives a read: a team that does
+  //   not fit is answered but not kept, and is projected again next time.
+  // Orphaned feedbacks (`retro-meta`) are one row and are read by the routes.
+  // Returns [{ id, name, teamFeedbacks }]; a team with no feedback key yields
+  // an empty array.
+  const projectFeedbackRow = (row) => {
+    const text = typeof row.team_feedbacks === 'string' ? row.team_feedbacks : null;
+    return {
+      stamp: String(row.stamp),
+      size: Number(row.size),
+      chars: text ? text.length : 0,
+      row: { id: row.id, name: row.name, teamFeedbacks: deepFreeze(normalizeJsonArray(text)) }
+    };
+  };
 
-    const rows = sqliteDb.prepare(
-      `SELECT json_extract(value, '$.id') AS id,
-              json_extract(value, '$.name') AS name,
-              json_extract(value, '$.teamFeedbacks') AS team_feedbacks
+  const readTeamFeedbackRowsPostgres = async () => {
+    const stamps = await pgPool.query(
+      `SELECT key, xmin::text AS stamp, octet_length(value) AS size
+       FROM kv_store WHERE key LIKE $1`,
+      [TEAM_PREFIX + '%']
+    );
+    const { known, stale } = partitionByFreshness(stamps.rows, teamFeedbackCache);
+    let projected = [];
+    if (stale.length > 0) {
+      // One cast per row, and `::text`, which we parse ourselves and whose
+      // length is the budget's measure (see readTeamSummaryRowsPostgres for
+      // `OFFSET 0`).
+      const result = await pgPool.query(
+        `SELECT key, row_version::text AS stamp, octet_length(value) AS size,
+                j->>'id' AS id,
+                j->>'name' AS name,
+                (j->'teamFeedbacks')::text AS team_feedbacks
+         FROM (SELECT key, xmin AS row_version, value, value::jsonb AS j
+               FROM kv_store WHERE key = ANY($1) OFFSET 0) AS team_rows`,
+        [stale]
+      );
+      projected = result.rows;
+    }
+    return { keys: stamps.rows.map((row) => row.key), known, projected };
+  };
+
+  // Synchronous from the fingerprint read to the cache update, like the
+  // summaries: no write of this process can land in between.
+  let sqliteFeedbackDataVersionSeen = null;
+  const readTeamFeedbackRowsSqlite = () => {
+    const dataVersion = sqliteDb.pragma('data_version', { simple: true });
+    const otherConnectionWrote = dataVersion !== sqliteFeedbackDataVersionSeen;
+    const stamps = sqliteDb.prepare(
+      `SELECT key, ${otherConnectionWrote ? 'updated_at' : 'NULL'} AS stamp, octet_length(value) AS size
        FROM kv_store WHERE key LIKE ?`
     ).all(TEAM_PREFIX + '%');
+    sqliteFeedbackDataVersionSeen = dataVersion;
+    const { known, stale } = partitionByFreshness(stamps, teamFeedbackCache);
+    const projected = stale.length === 0 ? [] : sqliteDb.prepare(
+      `SELECT key, updated_at AS stamp, octet_length(value) AS size,
+              json_extract(value, '$.id') AS id,
+              json_extract(value, '$.name') AS name,
+              json_extract(value, '$.teamFeedbacks') AS team_feedbacks
+       FROM kv_store WHERE key IN (SELECT value FROM json_each(?))`
+    ).all(JSON.stringify(stale));
+    return { keys: stamps.map((row) => row.key), known, projected };
+  };
 
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      teamFeedbacks: normalizeJsonArray(row.team_feedbacks)
-    }));
+  let warnedFeedbackBudget = false;
+  const loadAllTeamFeedbacks = async () => {
+    const { keys, known, projected } = usePostgres
+      ? await readTeamFeedbackRowsPostgres()
+      : readTeamFeedbackRowsSqlite();
+
+    const entries = new Map(known);
+    for (const row of projected) entries.set(row.key, projectFeedbackRow(row));
+
+    // The cache is rebuilt from this read alone, so a team that is gone falls
+    // out, and what is kept is decided again in storage order every time. A
+    // known entry re-admitted here after a write of this pod forgot it during
+    // the PostgreSQL await carries the old xmin, and is projected again next
+    // time.
+    teamFeedbackCache.clear();
+    let kept = 0;
+    const rows = [];
+    for (const key of keys) {
+      // A row deleted between the two reads has no projection: it is gone.
+      const entry = entries.get(key);
+      if (!entry) continue;
+      if (kept + entry.chars <= teamFeedbackCacheMaxChars) {
+        teamFeedbackCache.set(key, entry);
+        kept += entry.chars;
+      } else if (!warnedFeedbackBudget) {
+        warnedFeedbackBudget = true;
+        console.warn(`[Server] Feedback cache: team rows over its ${teamFeedbackCacheMaxChars}-character budget are read from the database on every request`);
+      }
+      rows.push({ ...entry.row });
+    }
+    return rows;
   };
 
   // ---------------------------------------------------------------------------

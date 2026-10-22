@@ -69,6 +69,7 @@ const login: Record<keyof typeof en, string> = {
 
   // Guest join (invite link)
   'login.join.title': 'Rejoindre {teamName}',
+  'login.join.retrying': 'Nouvel essai…',
   'login.join.subtitleSelect': 'Sélectionnez votre nom dans la liste ou ajoutez-en un nouveau',
   'login.join.subtitleNew': 'Saisissez votre nom pour rejoindre l’équipe',
   'login.join.pickerLabelNoEmail': 'Sélectionnez un membre sans adresse e-mail',
