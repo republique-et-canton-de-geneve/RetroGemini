@@ -1,6 +1,7 @@
 
 import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink, JiraParentLink } from '../types';
 import { randomId } from '../utils/randomId';
+import { PARTICIPANT_PALETTE } from '../utils/participantColors';
 import { isJiraIssueKey, isJiraIssueTypeId, isJiraLinked, isJiraParentScope, isJiraUncertain } from '../utils/jira.js';
 import {
   DEFAULT_TIMER_SECONDS,
@@ -84,7 +85,8 @@ const getHex = (twClass: string) => {
     return '#CBD5E1';
 };
 
-const USER_COLORS = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
+// One palette for every place a participant gets a colour (utils/participantColors.ts).
+const USER_COLORS: readonly string[] = PARTICIPANT_PALETTE;
 
 // Member and invite emails are identities: two spellings of one address must
 // find the same person. `cleanEmail` is the server's rule (utils/emailAddress.js)

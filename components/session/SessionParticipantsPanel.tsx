@@ -3,6 +3,7 @@ import { useTranslation } from '../../i18n/I18nContext';
 import { MessageKey } from '../../i18n/translate';
 import { ParticipantActivity, Role, SessionInvitee, User } from '../../types';
 import { pendingInvitees as selectPendingInvitees } from './sessionInvitees';
+import { avatarColorClasses, DEPARTED_AVATAR_CLASSES, participantColorClass } from '../../utils/participantColors';
 
 /**
  * The participants panel of every live session — a retrospective or a health
@@ -102,7 +103,7 @@ const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ cou
   const { t, tp } = useTranslation();
   if (count <= 0) {
     return (
-      <div className="flex items-center gap-1.5 mt-1.5 text-slate-300" title={t('phases.participants.noTicketsTitle')}>
+      <div className="flex items-center gap-1.5 mt-1.5 text-slate-600" title={t('phases.participants.noTicketsTitle')}>
         <span className="w-2 h-2 rounded-full border border-dashed border-slate-300 shrink-0" />
         <span className="text-[10px] font-medium tracking-wide">{t('phases.participants.noTickets')}</span>
       </div>
@@ -120,7 +121,7 @@ const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ cou
         <span key={index} className={`w-2 h-2 rounded-full shrink-0 ${colorClass}`} />
       ))}
       {overflowing && (
-        <span className="text-[10px] font-bold text-slate-500 leading-none ml-0.5 shrink-0">+{hidden}</span>
+        <span className="text-[10px] font-bold text-slate-600 leading-none ml-0.5 shrink-0">+{hidden}</span>
       )}
     </div>
   );
@@ -131,7 +132,7 @@ const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ cou
 const RowStatus: React.FC<{ status: ParticipantRowStatus }> = ({ status }) => {
   if (status.kind === 'progress') {
     return (
-      <span className="text-[11px] font-bold text-slate-500 ml-2 shrink-0 self-start leading-5" title={status.title}>
+      <span className="text-[11px] font-bold text-slate-600 ml-2 shrink-0 self-start leading-5" title={status.title}>
         {status.done}/{status.total}
       </span>
     );
@@ -169,7 +170,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
   const { t } = useTranslation();
 
   // Participants marked by the facilitator as having left mid-session stay
-  // visible (faded, at the bottom) but are excluded from every counter.
+  // visible (grey, at the bottom) but are excluded from every counter.
   const leftSet = new Set(leftUserIds ?? []);
   const activeParticipants = participants.filter((p) => !leftSet.has(p.id));
   const leftParticipants = participants.filter((p) => leftSet.has(p.id));
@@ -216,10 +217,12 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                   data-participant-left={hasLeft ? 'true' : undefined}
                   className={`flex items-center p-2 rounded-lg mb-1 group/row ${isCurrentUser ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
                 >
-                  {/* A departed participant is faded through the avatar only:
-                      fading the whole row took its text below 4.5:1. */}
+                  {/* A departed participant's avatar turns neutral grey; the
+                      "Left the session" chip says why. Nothing here is faded:
+                      fading the row, then the avatar, each put text below
+                      4.5:1 (utils/participantColors.ts). */}
                   <div className="relative mr-3 shrink-0">
-                    <div className={`w-8 h-8 rounded-full ${member.color} text-white flex items-center justify-center text-xs font-bold ${hasLeft ? 'grayscale opacity-50' : ''}`}>
+                    <div className={`w-8 h-8 rounded-full ${hasLeft ? DEPARTED_AVATAR_CLASSES : avatarColorClasses(member.color)} flex items-center justify-center text-xs font-bold`}>
                       {initials}
                     </div>
                     {isOnline && !hasLeft && (
@@ -252,7 +255,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                       </div>
                     )}
                     {contributionCounts && !hasLeft && (
-                      <ContributionDots count={contributionCounts[member.id] || 0} colorClass={member.color} />
+                      <ContributionDots count={contributionCounts[member.id] || 0} colorClass={participantColorClass(member.color)} />
                     )}
                   </div>
                   {isFacilitator && onToggleLeft && !isCurrentUser && (

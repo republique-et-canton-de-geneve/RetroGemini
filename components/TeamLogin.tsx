@@ -12,6 +12,7 @@ import { useTranslation } from '../i18n/I18nContext';
 import { translateErrorMessage } from '../i18n/errorMessages';
 import type { MessageKey, TranslationParams } from '../i18n/translate';
 import LanguageSwitcher from './common/LanguageSwitcher';
+import { avatarColorClasses } from '../utils/participantColors';
 
 /**
  * A banner message, kept as *what* to say rather than the sentence itself, so
@@ -891,14 +892,14 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                                         : 'bg-slate-50 border-2 border-transparent hover:bg-slate-100'
                                                 }`}
                                             >
-                                                <div className={`w-10 h-10 rounded-full ${member.color} text-white flex items-center justify-center font-bold text-sm mr-3 shrink-0`}>
+                                                <div className={`w-10 h-10 rounded-full ${avatarColorClasses(member.color)} flex items-center justify-center font-bold text-sm mr-3 shrink-0`}>
                                                     {member.name.substring(0, 2).toUpperCase()}
                                                 </div>
                                                 <div className="text-left grow">
                                                     <div className="font-bold text-slate-800">{member.name}</div>
                                                     <div className="text-xs text-slate-600 capitalize">{roleLabel(member.role)}</div>
                                                     {inviteData?.memberEmail && (
-                                                      <div className="text-[11px] text-slate-500">{t('login.join.noEmailOnFile')}</div>
+                                                      <div className="text-[11px] text-slate-600">{t('login.join.noEmailOnFile')}</div>
                                                     )}
                                                 </div>
                                                 {selectedMemberId === member.id && (
@@ -929,7 +930,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         {t('login.join.notInList')}
                                     </button>
                                 {inviteData?.memberEmail && (
-                                    <div className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded-sm p-2">
+                                    <div className="text-xs text-slate-600 bg-slate-100 border border-slate-200 rounded-sm p-2">
                                         {tRich('login.join.joiningAs', { email: <strong>{inviteData.memberEmail}</strong> })}
                                     </div>
                                 )}
@@ -977,7 +978,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                     </div>
                                 )}
                                 {inviteData?.memberEmail && (
-                                    <div className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded-sm p-2">
+                                    <div className="text-xs text-slate-600 bg-slate-100 border border-slate-200 rounded-sm p-2">
                                         {tRich('login.join.joiningAs', { email: <strong>{inviteData.memberEmail}</strong> })}
                                     </div>
                                 )}

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
 import { ActionItem, User } from '../../types';
 import ProposalNumber from './ProposalNumber';
+import { participantColorClass } from '../../utils/participantColors';
 
 const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: number): React.CSSProperties => {
   const total = upVotes + neutralVotes + downVotes;
@@ -121,7 +122,7 @@ const VoteStatusTooltip: React.FC<{
                 <ul className="ml-4 text-slate-600 space-y-1">
                   {notVotedParticipants.map((participant) => (
                     <li key={participant.id} className="flex items-center">
-                      <span className={`w-2.5 h-2.5 rounded-full ${participant.color} mr-2 shrink-0`}></span>
+                      <span className={`w-2.5 h-2.5 rounded-full ${participantColorClass(participant.color)} mr-2 shrink-0`}></span>
                       <span className="truncate">{participant.name}</span>
                     </li>
                   ))}
@@ -139,7 +140,7 @@ const VoteStatusTooltip: React.FC<{
                 <ul className="ml-4 text-slate-600 space-y-1">
                   {votedParticipants.map((participant) => (
                     <li key={participant.id} className="flex items-center">
-                      <span className={`w-2.5 h-2.5 rounded-full ${participant.color} mr-2 shrink-0`}></span>
+                      <span className={`w-2.5 h-2.5 rounded-full ${participantColorClass(participant.color)} mr-2 shrink-0`}></span>
                       <span className="truncate">{participant.name}</span>
                       {participant.role === 'facilitator' && (
                         <span className="ml-1 text-[10px] text-slate-500 italic shrink-0">{t('phases.proposal.facilitatorTag')}</span>

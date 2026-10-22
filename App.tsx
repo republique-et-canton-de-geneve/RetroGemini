@@ -10,6 +10,7 @@ import AnnouncementModal from './components/AnnouncementModal';
 import LanguageSwitcher from './components/common/LanguageSwitcher';
 import { useTranslation } from './i18n/I18nContext';
 import { isSessionInProgress } from './utils/sessionStatus';
+import { avatarColorClasses } from './utils/participantColors';
 
 const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
 // Shared with dataService, which patches the blob's teamPassword in place
@@ -581,7 +582,7 @@ const App: React.FC = () => {
                         <span className="text-[10px] font-bold text-slate-500 uppercase leading-none mb-1">{t('app.user')}</span>
                         <div className="text-sm font-bold text-slate-700">{currentUser.name}</div>
                     </div>
-                    <div className={`w-8 h-8 rounded-full ${currentUser.color} text-white flex items-center justify-center text-xs font-bold shadow-md ring-2 ring-white`}>
+                    <div className={`w-8 h-8 rounded-full ${avatarColorClasses(currentUser.color)} flex items-center justify-center text-xs font-bold shadow-md ring-2 ring-white`}>
                         {currentUser.name.substring(0, 2).toUpperCase()}
                     </div>
                 </div>
