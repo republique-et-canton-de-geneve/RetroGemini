@@ -372,6 +372,7 @@ const PARITY_CONTRACT: Record<string, Partial<Record<Surface, string>>> = {
   RESTORE_MAX_DECOMPRESSED_MB: { k8sSecrets: NOT_A_SECRET },
   ROSTER_BROADCAST_DEBOUNCE_MS: { k8sSecrets: NOT_A_SECRET },
   SESSION_CACHE_MAX: { k8sSecrets: NOT_A_SECRET },
+  SESSION_CACHE_MAX_MB: { k8sSecrets: NOT_A_SECRET },
   SOCKET_MAX_BUFFER_SIZE: { k8sSecrets: NOT_A_SECRET },
   SOCKET_UPDATE_BURST: { k8sSecrets: NOT_A_SECRET },
   SOCKET_UPDATE_RATE: { k8sSecrets: NOT_A_SECRET },

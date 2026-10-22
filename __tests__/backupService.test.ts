@@ -86,11 +86,38 @@ const createInMemoryBackupStore = () => {
   };
 };
 
+// The archive readers the builder streams from (backupArchive.js): the teams
+// one at a time, then retro-meta.
+const archiveTeams = async function* () {
+  for (const team of mockPersistedData.teams) yield structuredClone(team);
+};
+
 const createMockDataStore = (backupStore: ReturnType<typeof createInMemoryBackupStore>) => ({
-  loadPersistedData: vi.fn().mockResolvedValue(mockPersistedData),
+  iterateArchiveTeams: vi.fn(archiveTeams),
+  readArchiveMeta: vi.fn(async () => ({ resetTokens: [], orphanedFeedbacks: [] })),
   savePersistedData: vi.fn().mockResolvedValue(mockPersistedData),
   ...backupStore
 });
+
+// The next archive read yields its first team, then fails: a corrupt row
+// further down the key order.
+const failNextArchiveRead = (dataStore: ReturnType<typeof createMockDataStore>, error = new Error('DB error')) => {
+  dataStore.iterateArchiveTeams.mockImplementationOnce(async function* () {
+    yield structuredClone(mockPersistedData.teams[0]);
+    throw error;
+  });
+};
+
+// The next archive read waits until released.
+const holdNextArchiveRead = (dataStore: ReturnType<typeof createMockDataStore>) => {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  dataStore.iterateArchiveTeams.mockImplementationOnce(async function* () {
+    await released;
+    yield* archiveTeams();
+  });
+  return () => release();
+};
 
 const createMockLogService = () => ({
   addServerLog: vi.fn()
@@ -160,12 +187,26 @@ describe('Backup Service', () => {
       expect(labels).toContain('Second');
     });
 
-    it('should return null if dataStore.loadPersistedData fails', async () => {
-      dataStore.loadPersistedData.mockRejectedValueOnce(new Error('DB error'));
+    it('should return null, and store nothing, if a team record cannot be read', async () => {
+      failNextArchiveRead(dataStore);
       const service = createBackupService({ dataStore, logService });
       const entry = await service.createBackup('auto');
       expect(entry).toBeNull();
+      expect(dataStore.saveBackup).not.toHaveBeenCalled();
     });
+
+    // A failed automatic backup must not run retention: when the store could
+    // not be read whole, every scheduled run used to store an empty archive as
+    // a success and purge one good backup, until none was left.
+    it('runs no retention and stores nothing when a scheduled backup cannot read the store', async () => {
+      failNextArchiveRead(dataStore, new Error('Team record "team:t2" cannot be archived (unparsable)'));
+      const service = createBackupService({ dataStore, logService });
+      expect(await service.runScheduledBackup()).toBeNull();
+      expect(dataStore.saveBackup).not.toHaveBeenCalled();
+      expect(dataStore.purgeOldBackups).not.toHaveBeenCalled();
+      expect(dataStore.releaseAutoBackupClaim).toHaveBeenCalledOnce();
+    });
+
 
     it('should create a protected backup when the protected option is set', async () => {
       const service = createBackupService({ dataStore, logService });
@@ -197,6 +238,25 @@ describe('Backup Service', () => {
       const parsed = JSON.parse(json);
       expect(parsed.teams).toHaveLength(2);
       expect(json).toBe(JSON.stringify(parsed));
+    });
+  });
+
+  describe('createBackupOutcome', () => {
+    it('says a backup is already running, apart from a failure', async () => {
+      const release = holdNextArchiveRead(dataStore);
+      const service = createBackupService({ dataStore, logService });
+      const running = service.createBackupOutcome('manual');
+      await vi.waitFor(() => expect(dataStore.iterateArchiveTeams).toHaveBeenCalled());
+
+      expect(await service.createBackupOutcome('manual')).toEqual({ entry: null, reason: 'in_progress' });
+      release();
+      expect(await running).toMatchObject({ entry: { type: 'manual' }, reason: null });
+    });
+
+    it('says a backup failed when the store could not be read', async () => {
+      failNextArchiveRead(dataStore);
+      const service = createBackupService({ dataStore, logService });
+      expect(await service.createBackupOutcome('manual')).toEqual({ entry: null, reason: 'failed' });
     });
   });
 
@@ -568,7 +628,8 @@ describe('Backup Service', () => {
     it('reads no team and runs no retention: it writes one row and nothing else', async () => {
       const service = createBackupService({ dataStore, logService });
       await service.importBackup(gzipped());
-      expect(dataStore.loadPersistedData).not.toHaveBeenCalled();
+      expect(dataStore.iterateArchiveTeams).not.toHaveBeenCalled();
+      expect(dataStore.readArchiveMeta).not.toHaveBeenCalled();
       expect(dataStore.savePersistedData).not.toHaveBeenCalled();
       expect(backupStore.purgeOldBackups).not.toHaveBeenCalled();
     });
@@ -577,10 +638,7 @@ describe('Backup Service', () => {
       const service = createBackupService({ dataStore, logService });
 
       // A checkpoint stuck reading the store does not hold the import back.
-      let releaseRead!: () => void;
-      dataStore.loadPersistedData.mockImplementationOnce(
-        () => new Promise((resolve) => { releaseRead = () => resolve(mockPersistedData); })
-      );
+      const releaseRead = holdNextArchiveRead(dataStore);
       const checkpoint = service.createBackup('manual', 'slow');
       const imported = await service.importBackup(gzipped());
       expect(imported.entry.type).toBe('imported');
@@ -714,7 +772,7 @@ describe('Backup Service', () => {
 
       const entry = await service.runScheduledBackup();
       expect(entry).toBeNull();
-      expect(dataStore.loadPersistedData).not.toHaveBeenCalled();
+      expect(dataStore.iterateArchiveTeams).not.toHaveBeenCalled();
       expect(await service.listBackups()).toHaveLength(0);
     });
 
@@ -741,7 +799,7 @@ describe('Backup Service', () => {
     it('releases the interval claim when the backup fails so the next tick can retry', async () => {
       const service = createBackupService({ dataStore, logService });
       // Make the first createBackup fail (returns null) after the claim succeeds.
-      dataStore.loadPersistedData.mockRejectedValueOnce(new Error('DB blip'));
+      failNextArchiveRead(dataStore, new Error('DB blip'));
 
       const first = await service.runScheduledBackup();
       expect(first).toBeNull();

@@ -6,6 +6,7 @@ import { ActionItem, JiraLink, JiraStatus, RetroSession, Team, Ticket, User } fr
 import { dataService } from '../../services/dataService';
 import { noteRevokedResponse } from '../../services/sessionRevocation';
 import { getTicketOriginColumn } from '../../utils/retroGrouping';
+import { ticketQuote } from '../../utils/textCut';
 import { ROTI_FOLLOW_UP_LINK_ID } from './retroConstants';
 import TicketOriginBadge from './TicketOriginBadge';
 import JiraActionControl from '../jira/JiraActionControl';
@@ -112,9 +113,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
       if (action.linkedTicketId) {
         const ticket = retro.tickets.find((item) => item.id === action.linkedTicketId);
         if (ticket) {
-          contextText = contentT('phases.actions.contextTicket', {
-            text: `${ticket.text.substring(0, 50)}${ticket.text.length > 50 ? '...' : ''}`
-          });
+          contextText = contentT('phases.actions.contextTicket', { text: ticketQuote(ticket.text) });
           break;
         }
         const group = retro.groups.find((item) => item.id === action.linkedTicketId);

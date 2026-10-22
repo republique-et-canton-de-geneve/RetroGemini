@@ -168,6 +168,7 @@ All configuration is provided through environment variables. See [`.env.example`
 | `WIFI_PASSWORD` | Wi-Fi password for the optional QR code | Disabled |
 | `PG_POOL_MAX` | PostgreSQL connections **per pod**; keep `replicas × PG_POOL_MAX` under the database's `max_connections` | `10` |
 | `SESSION_CACHE_MAX` | Live sessions cached in memory per pod (bounds memory only — session state is always recoverable from the database) | `500` |
+| `SESSION_CACHE_MAX_MB` | Total size, in MB of session JSON, of the per-pod session cache, beside `SESSION_CACHE_MAX`'s count (bounds memory only; the session just written is never evicted) | `32` |
 | `SOCKET_MAX_BUFFER_SIZE` | Maximum Socket.IO message size in bytes (caps one session update) | `1000000` |
 | `SOCKET_UPDATE_RATE` | Sustained session updates per second allowed per socket. Off by default and off in the shipped manifest — enable it only if the deployment is reachable beyond your internal network, or if a runaway client is actually observed. Start at `20` (timer sync is ~1/s per client). A throttled write is healed with the authoritative state and re-sent, never dropped | `0` (disabled) |
 | `SOCKET_UPDATE_BURST` | Short update burst allowed above the sustained rate | `2 × rate` |

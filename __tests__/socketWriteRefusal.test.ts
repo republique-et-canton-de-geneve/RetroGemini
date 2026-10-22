@@ -9,6 +9,7 @@ import { join } from 'path';
 import { createDataStore } from '../server/services/dataStore.js';
 import { createBoundedCache } from '../server/services/boundedCache.js';
 import { registerSocketHandlers } from '../server/services/socketHandlers.js';
+import { createRepeatCoalescer } from '../server/services/logCoalescer.js';
 import { createTestTokenService } from './helpers/socketAuth';
 
 /**
@@ -90,6 +91,14 @@ describe('update-session: restore, refuse, report (integration)', () => {
   let dir: string;
   let failPersistence = false;
   let failTeamRead = false;
+  // The roster read falls back to the full record only after the summary read
+  // THREW (on PostgreSQL its `::jsonb` cast refuses text JSON.parse accepts).
+  // Off, the full record read throws as well; on or off, afterEach checks that
+  // no case read it without a failed summary read before it.
+  let fullRecordReadable = false;
+  let summaryAnswersNull = false;
+  let summaryFailures = 0;
+  let fullRecordReads: string[] = [];
   // The real loadSessionState never throws on a database error: it logs and
   // answers null, exactly like a session with no row.
   let failSessionRead = false;
@@ -97,6 +106,9 @@ describe('update-session: restore, refuse, report (integration)', () => {
   // handed back: what another request can do while a database read is in flight.
   let onSessionRead: (() => Promise<void>) | null = null;
   let sessionCache: ReturnType<typeof createBoundedCache>;
+  // The server's line coalescer, emptied after every case so a line one case
+  // wrote is not counted as a repeat in the next.
+  const refusalLog = createRepeatCoalescer();
   const savedEnv: Record<string, string | undefined> = {};
   const clients: Socket[] = [];
 
@@ -131,11 +143,23 @@ describe('update-session: restore, refuse, report (integration)', () => {
         if (failPersistence) return Promise.reject(new Error('simulated database outage'));
         return dataStore.saveSessionState(...args);
       },
-      // The team record is where the sender's role comes from; a read that
+      // The team summary is where the sender's role comes from; a read that
       // throws is the one case where the server cannot say who is writing.
-      loadTeam: (...args: Parameters<typeof dataStore.loadTeam>) => {
-        if (failTeamRead) return Promise.reject(new Error('simulated team read failure'));
-        return dataStore.loadTeam(...args);
+      loadTeamSummary: (...args: Parameters<typeof dataStore.loadTeamSummary>) => {
+        if (failTeamRead) {
+          summaryFailures += 1;
+          return Promise.reject(new Error('simulated team read failure'));
+        }
+        if (summaryAnswersNull) return Promise.resolve(null);
+        return dataStore.loadTeamSummary(...args);
+      },
+      // The socket path reads the roster from the summary, and the whole
+      // record only once a summary read has failed: every case in this suite
+      // doubles as that guard (see afterEach).
+      loadTeam: (teamId: string) => {
+        fullRecordReads.push(teamId);
+        if (fullRecordReadable) return dataStore.loadTeam(teamId);
+        return Promise.reject(new Error('the socket path must not load the full team record'));
       },
       loadSessionState: async (...args: Parameters<typeof dataStore.loadSessionState>) => {
         if (failSessionRead) return null;
@@ -150,7 +174,7 @@ describe('update-session: restore, refuse, report (integration)', () => {
     httpServer = createServer();
     io = new Server(httpServer, { path: '/socket.io' });
     sessionCache = createBoundedCache({ max: 100 });
-    registerSocketHandlers({ io, dataStore: flakyStore, sessionCache, tokenService });
+    registerSocketHandlers({ io, dataStore: flakyStore, sessionCache, tokenService, refusalLog });
     await new Promise<void>((res) => httpServer.listen(0, '127.0.0.1', () => res()));
     port = (httpServer.address() as { port: number }).port;
   });
@@ -171,11 +195,19 @@ describe('update-session: restore, refuse, report (integration)', () => {
   });
 
   afterEach(() => {
+    const unguardedReads = fullRecordReads.length - summaryFailures;
+    refusalLog.flushAll();
+    fullRecordReadable = false;
+    summaryAnswersNull = false;
+    summaryFailures = 0;
+    fullRecordReads = [];
     failPersistence = false;
     failTeamRead = false;
     failSessionRead = false;
     onSessionRead = null;
     vi.restoreAllMocks();
+    // Never a full-record read that a failed summary read did not come first.
+    expect(unguardedReads).toBeLessThanOrEqual(0);
   });
 
   const connect = async (): Promise<Socket> => {
@@ -248,6 +280,45 @@ describe('update-session: restore, refuse, report (integration)', () => {
     await settle(100);
 
     expect(paulEvents).toEqual([{ event: 'session-ack', payload: { sessionId: 'iss-clean', rev: rev + 1 } }]);
+  }, 20000);
+
+  // One accepted write wrote two info lines and one join four, all mirrored
+  // into the 1000-entry log ring: ten live retrospectives turned it over in
+  // about 25 seconds, and a rolling update's reconnect wave filled it alone.
+  // They are debug now (stdout only); the join line itself stays at info.
+  it('writes the per-write and redundant join lines at debug, and keeps the join line at info', async () => {
+    const log = vi.spyOn(console, 'log');
+    const info = vi.spyOn(console, 'info');
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const { paul, initial } = await setupSession('iss-debug-lines');
+
+    paul.emit('update-session', { ...structuredClone(initial), tickets: [ticket('t1')] });
+    await once(paul, 'session-ack');
+    // A leave writes the room count too (and so does every disconnect).
+    paul.emit('leave-session', { sessionId: 'iss-debug-lines' });
+    await settle(100);
+    // A join served from this pod's cache — the database read answered null,
+    // as it does during an outage — writes its own "Sending" line.
+    failSessionRead = true;
+    const pia = await connect();
+    pia.emit('join-session', { sessionId: 'iss-debug-lines', userId: 'par2', userName: 'Pia', sessionToken: teamToken });
+    await once(pia, 'session-update');
+    await settle(100);
+
+    const lines = (spy: typeof log) => spy.mock.calls.map((args) => args.map(String).join(' '));
+    const infoLines = [...lines(log), ...lines(info)];
+    for (const pattern of ['Session update from', 'Broadcasting to', 'now has', 'Sending persisted session state', 'Sending cached session state', 'Client connected']) {
+      expect(infoLines.filter((line) => line.includes(pattern))).toEqual([]);
+    }
+    expect(infoLines.some((line) => line.includes('joining session iss-debug-lines'))).toBe(true);
+    expect(infoLines.some((line) => line.includes('[Server] Paul leaving session iss-debug-lines'))).toBe(true);
+    const debugLines = lines(debug as unknown as typeof log);
+    expect(debugLines.some((line) => line.includes('Session update from Paul'))).toBe(true);
+    expect(debugLines.some((line) => line.includes('Broadcasting to') && line.includes('iss-debug-lines'))).toBe(true);
+    // Fiona's join, Paul's join, Paul's leave, Pia's join.
+    expect(debugLines.filter((line) => line.includes('Session iss-debug-lines now has')).length).toBeGreaterThanOrEqual(4);
+    expect(debugLines.some((line) => line.includes('Sending persisted session state to Paul'))).toBe(true);
+    expect(debugLines.some((line) => line.includes('Sending cached session state to Pia'))).toBe(true);
   }, 20000);
 
   it('heals without saving a write whose only change is facilitator-only, and says which fields', async () => {
@@ -429,8 +500,9 @@ describe('update-session: restore, refuse, report (integration)', () => {
     const sessionId = 'iss-role-unknown';
     const { fiona, paul, rev, initial } = await setupSession(sessionId);
 
-    // A reconnect (rolling update) during a database blip: the join cannot
-    // read the team record either, so no role is known for this socket.
+    // A reconnect (rolling update) during a database blip: the join can read
+    // neither the team summary nor, falling back, the full record, so no role
+    // is known for this socket.
     failTeamRead = true;
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     fiona.emit('join-session', { sessionId, userId: 'fac1', userName: 'Fiona', sessionToken: teamToken });
@@ -467,6 +539,89 @@ describe('update-session: restore, refuse, report (integration)', () => {
     const { rev: landed } = await once<{ rev: number }>(fiona, 'session-ack');
     expect(landed).toBe(rev + 1);
     expect(await dataStore.loadSessionState(sessionId)).toMatchObject({ phase: 'GROUP', settings: { timerRunning: true } });
+  }, 20000);
+
+  // On PostgreSQL the summary is a `value::jsonb` projection, and jsonb refuses
+  // text that Node's JSON.parse accepts: a lone UTF-16 surrogate escape (an
+  // action context cut through an emoji) or `\u0000`. Such a row used to lock
+  // the facilitator out of every facilitator-only change, in every session of
+  // the team, until the row was repaired by hand: the join could not read the
+  // role, so each write found it 'unknown' and was refused whole.
+  it('reads the role from the full record when the team summary cannot be read', async () => {
+    const sessionId = 'iss-summary-fallback';
+    const { fiona, paul, rev, initial } = await setupSession(sessionId);
+
+    failTeamRead = true;
+    fullRecordReadable = true;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // A reconnect wave: both re-join while the summary cannot be read.
+    fiona.emit('join-session', { sessionId, userId: 'fac1', userName: 'Fiona', sessionToken: teamToken });
+    paul.emit('join-session', { sessionId, userId: 'par1', userName: 'Paul', sessionToken: teamToken });
+    await Promise.all([once(fiona, 'session-update'), once(paul, 'session-update')]);
+    await settle(150);
+
+    const fionaEvents = record(fiona);
+    const paulSaw = once<SessionBlob>(paul, 'session-update');
+    paulSaw.catch(() => {}); // awaited below; never left unhandled if the ack fails first
+    const settings = (initial.settings ?? {}) as SessionBlob;
+    fiona.emit('update-session', {
+      ...structuredClone(initial),
+      phase: 'GROUP',
+      settings: { ...settings, timerRunning: true, timerSeconds: 600, timerStartedAt: 1760000000000 }
+    });
+    await settle(400);
+
+    // The phase change lands whole: no refusal, no heal.
+    expect(fionaEvents.map((e) => e.event)).toEqual(['session-ack']);
+    const landed = (fionaEvents[0].payload as { rev: number }).rev;
+    expect(landed).toBe(rev + 1);
+    expect(await paulSaw).toMatchObject({ phase: 'GROUP', _rev: rev + 1, settings: { timerRunning: true } });
+    expect(await dataStore.loadSessionState(sessionId)).toMatchObject({ phase: 'GROUP', settings: { timerRunning: true } });
+    // One full read per join, cached on the socket: the write read nothing.
+    expect(fullRecordReads).toEqual(['teamA', 'teamA']);
+    // Named once for the whole wave, with the team and the summary's error.
+    const fallbackLines = warn.mock.calls
+      .map((args) => args.map(String).join(' '))
+      .filter((line) => line.includes('team summary'));
+    expect(fallbackLines).toHaveLength(1);
+    expect(fallbackLines[0]).toContain('teamA');
+    expect(fallbackLines[0]).toContain('simulated team read failure');
+  }, 20000);
+
+  it('refreshes the last connection date from the full record when the team summary cannot be read', async () => {
+    const sessionId = 'iss-summary-fallback-refresh';
+    const { paul } = await setupSession(sessionId);
+    const stale = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    await dataStore.atomicTeamUpdate('teamA', (team: SessionBlob) => ({ ...team, lastConnectionDate: stale }));
+
+    failTeamRead = true;
+    fullRecordReadable = true;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    paul.emit('join-session', { sessionId, userId: 'par1', userName: 'Paul', sessionToken: teamToken });
+    await once(paul, 'session-update');
+
+    await vi.waitFor(async () => {
+      expect(((await dataStore.loadTeam('teamA')) as SessionBlob).lastConnectionDate).not.toBe(stale);
+    });
+  }, 20000);
+
+  it('never reads the full record when the summary says the team is gone', async () => {
+    // `null` is an answer, not a failure: the roster names nobody, so the
+    // sender is a participant (the restrictive default), as before.
+    const sessionId = 'iss-summary-null';
+    const { fiona, rev, initial } = await setupSession(sessionId);
+
+    summaryAnswersNull = true;
+    fiona.emit('join-session', { sessionId, userId: 'fac1', userName: 'Fiona', sessionToken: teamToken });
+    await once(fiona, 'session-update');
+    await settle(100);
+
+    fiona.emit('update-session', { ...structuredClone(initial), phase: 'GROUP', tickets: [ticket('t1', 'fac1')] });
+    const { rev: landed } = await once<{ rev: number }>(fiona, 'session-ack');
+
+    expect(landed).toBe(rev + 1);
+    expect(await dataStore.loadSessionState(sessionId)).toMatchObject({ phase: 'BRAINSTORM', tickets: [ticket('t1', 'fac1')] });
+    expect(fullRecordReads).toEqual([]);
   }, 20000);
 
   it('still restores rather than refuses when the team record confirms a participant', async () => {
@@ -619,6 +774,9 @@ describe('update-session: restore, refuse, report (integration)', () => {
     const { paul, initial } = await setupSession('iss-log-flood');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    // Accepted writes are logged at debug; a refused one must not be logged
+    // there either, or this test would pass on the info level alone.
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
 
     for (let i = 0; i < 50; i++) {
       paul.emit('update-session', { ...structuredClone(initial), name: 'Retro A' });
@@ -638,6 +796,7 @@ describe('update-session: restore, refuse, report (integration)', () => {
     expect(warnLines[1]).toMatch(/repeated 49 times in \d+s/);
     // A refused write is not "a session update" in the activity trail either.
     expect(lines(log).filter((line) => line.includes('Session update from'))).toEqual([]);
+    expect(lines(debug as unknown as typeof warn).filter((line) => line.includes('Session update from'))).toEqual([]);
   }, 30000);
 
   it('truncates a long value in the refusal line and escapes it', async () => {

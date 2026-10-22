@@ -1,6 +1,5 @@
 import express from 'express';
 import { randomBytes } from 'crypto';
-import { gzipSync } from 'zlib';
 import rateLimit from 'express-rate-limit';
 import {
   getRestoreMaxBodyBytes,
@@ -9,6 +8,8 @@ import {
 } from '../services/restoreArchive.js';
 import { hashPassword } from '../services/passwordHashing.js';
 import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
+// Stored text is cut without ever halving an emoji (utils/textCut.js).
+import { cutCodeUnits } from '../../utils/textCut.js';
 import { migrateLegacyPasswords } from '../services/passwordMigration.js';
 import { healStoredEmails } from '../services/emailMigration.js';
 import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
@@ -665,7 +666,7 @@ This notification was sent from RetroGemini.
         teamName: 'Super Admin',
         authorId: 'super-admin',
         authorName: 'Super Admin',
-        content: content.trim().slice(0, 1000),
+        content: cutCodeUnits(content.trim(), 1000),
         createdAt: new Date().toISOString(),
         isAdmin: true
       };
@@ -733,7 +734,7 @@ This notification was sent from RetroGemini.
         const typeLabel = feedbackType === 'bug' ? 'Bug Report' : 'Feature Request';
         const safeFeedbackTitle = escapeHtml(feedbackTitle);
         const safeTeamName = escapeHtml(teamName);
-        const safeContent = escapeHtml(content.trim().slice(0, 1000));
+        const safeContent = escapeHtml(newComment.content);
 
         try {
           await mailerService.mailer.sendMail({
@@ -744,7 +745,7 @@ This notification was sent from RetroGemini.
 
 The administrator has added a comment on your ${typeLabel} "${feedbackTitle}":
 
-"${content.trim().slice(0, 1000)}"
+"${newComment.content}"
 
 ---
 This notification was sent from RetroGemini.
@@ -1054,14 +1055,13 @@ This notification was sent from RetroGemini.
     }
 
     try {
-      const currentData = await dataStore.loadPersistedData();
+      // The builder every stored backup uses, so a download is the same bytes
+      // a backup row holds (compact JSON, team by team through gzip). Buffered
+      // before anything is sent: piping gzip into the response would save a
+      // truncated file as "downloaded" when a read fails after the headers.
+      const { data: compressed, teamCount } = await backupService.buildArchive();
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `retrogemini-backup-${timestamp}.json.gz`;
-
-      const jsonData = JSON.stringify(currentData, null, 2);
-      const compressed = gzipSync(Buffer.from(jsonData, 'utf8'));
-
-      const teamCount = currentData.teams?.length || 0;
       console.info(`[Server] Creating backup: ${teamCount} team(s)`);
 
       // Every team's data leaves the deployment in this response, so the
@@ -1114,9 +1114,15 @@ This notification was sent from RetroGemini.
 
     try {
       const { label } = req.body || {};
-      const entry = await backupService.createBackup('manual', label || undefined);
+      // Two different refusals: another backup is running (retry later), or
+      // the store could not be read whole (a corrupt row: the pod log and the
+      // Logs tab name it). Answering 409 for both read "a backup is already in
+      // progress" for as long as the row stayed corrupt.
+      const { entry, reason } = await backupService.createBackupOutcome('manual', label || undefined);
       if (!entry) {
-        return res.status(409).json({ error: 'backup_in_progress' });
+        return reason === 'in_progress'
+          ? res.status(409).json({ error: 'backup_in_progress' })
+          : res.status(500).json({ error: 'create_failed' });
       }
       await securityEvents.record(req, {
         action: SECURITY_ACTIONS.BACKUP_CREATE,
@@ -1169,16 +1175,17 @@ This notification was sent from RetroGemini.
   // route needs afterwards — a refusal, or the restored entry — never the
   // archive. It runs in a function of its own on purpose: an async function's
   // suspended frame keeps every local it declared, so an `archive` declared in
-  // the route itself stays reachable through the post-restore passes, and the
-  // password pass parses the whole store again (`loadAllTeams`), which right
-  // after a replace is the archive's data: two whole-store copies at once.
+  // the route itself stays reachable through the post-restore passes. Those
+  // read projections (the password pass two fields per team, the email heal
+  // the summaries), but the parsed archive is the largest object a restore
+  // builds, and nothing after the replace needs it.
   // `__tests__/restoreArchiveRetention.test.ts` observes that with `gc()`.
   const applyStoredArchive = async (backupId) => {
-    // Read and checked *after* the snapshot, never before: the snapshot dumps
-    // the whole store (`loadPersistedData` + stringify + gzip), and holding a
-    // parsed whole-store archive across it would double the route's memory
-    // peak. Rows imported since 41.0 were checked when written; this check is
-    // for rows written before, or by hand.
+    // Read and checked *after* the snapshot, never before: the snapshot reads
+    // the whole store (one team at a time, through gzip), and a parsed
+    // whole-store archive held across those reads would be held for nothing.
+    // Rows imported since 41.0 were checked when written; this check is for
+    // rows written before, or by hand.
     let archive;
     try {
       archive = await backupService.readBackupArchive(backupId);

@@ -1,4 +1,4 @@
-import { gzip, gzipSync } from 'zlib';
+import { gzip } from 'zlib';
 import { createHash, randomBytes } from 'crypto';
 import { promisify } from 'util';
 import {
@@ -8,6 +8,7 @@ import {
   parseRestoreArchiveBody
 } from './restoreArchive.js';
 import { ArchiveShapeError, archiveShapeProblem } from './archiveShape.js';
+import { buildBackupArchive } from './backupArchive.js';
 
 // Async: an import runs on a pod serving live sessions, and a synchronous gzip
 // of a large file would stall every socket on it meanwhile.
@@ -44,25 +45,32 @@ const createBackupService = ({ dataStore, logService }) => {
     return `backup_${Date.now()}_${randomBytes(4).toString('hex')}`;
   };
 
-  const createBackup = async (type, label, { protected: isProtected = false } = {}) => {
+  // The whole-store archive, team by team through gzip (backupArchive.js):
+  // what every stored backup and snapshot holds, and what the download sends.
+  const buildArchive = () => buildBackupArchive({ dataStore });
+
+  // `{ entry, reason }`: the stored backup, or `null` with why — 'in_progress'
+  // (another backup of this pod is running) or 'failed' (the store could not
+  // be read whole, or the write failed). A store that cannot be read whole is
+  // a failed backup, never an archive missing teams: the reads are strict
+  // (dataStore → iterateArchiveTeams / readArchiveMeta), and since retention
+  // runs only after a stored backup, a failed automatic backup keeps every
+  // good one.
+  const createBackupOutcome = async (type, label, { protected: isProtected = false } = {}) => {
     if (backupInProgress) {
-      return null;
+      return { entry: null, reason: 'in_progress' };
     }
 
     backupInProgress = true;
 
     try {
-      const currentData = await dataStore.loadPersistedData();
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `retrogemini-backup-${timestamp}.json.gz`;
-
       // Compact JSON (no pretty-print indentation): the archive is gzipped for
       // storage and JSON.parse'd on restore, so indentation is pure overhead
       // (~30% larger uncompressed payload and extra CPU) with no consumer.
-      const jsonData = JSON.stringify(currentData);
-      const compressed = gzipSync(Buffer.from(jsonData, 'utf8'));
+      const { data: compressed, teamCount, unrestorable } = await buildArchive();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `retrogemini-backup-${timestamp}.json.gz`;
 
-      const teamCount = currentData.teams?.length || 0;
       const entry = {
         id: generateId(),
         filename,
@@ -77,19 +85,37 @@ const createBackupService = ({ dataStore, logService }) => {
       await dataStore.saveBackup(entry, compressed);
 
       console.info(`[Backup] Created ${type} backup: ${filename} (${teamCount} team(s), ${(compressed.length / 1024).toFixed(1)} KB)`);
+      if (unrestorable.length > 0) {
+        // Archived anyway (backupArchive.js says why); a whole-store restore
+        // of this backup will refuse it until those records are repaired.
+        console.warn(
+          `[Backup] ${filename}: ${unrestorable.length} team record(s) cannot be restored by a whole-store restore `
+          + `(no id or name, or an id another record holds): ${unrestorable.join(', ')}; `
+          + 'single-team restores of the other teams still work'
+        );
+      }
 
       if (type === 'auto' || type === 'startup') {
         await enforceRetention();
       }
 
-      return entry;
+      return { entry, reason: null };
     } catch (err) {
-      console.error('[Backup] Failed to create backup', err);
-      return null;
+      // The message names the unreadable key (`Team record "team:…" cannot be
+      // archived (unparsable)`), never its content. It is written into the
+      // line itself because the console's Logs tab serialises an Error
+      // without its message, and this line is what the runbook says to look
+      // for (k8s/README.md → A backup that cannot read a team fails).
+      console.error(`[Backup] Failed to create backup: ${err?.message ?? String(err)}`, err);
+      return { entry: null, reason: 'failed' };
     } finally {
       backupInProgress = false;
     }
   };
+
+  // The entry or null, for the callers that only need to know whether a
+  // recovery point exists (the snapshots, the scheduler, the startup backup).
+  const createBackup = async (...args) => (await createBackupOutcome(...args)).entry;
 
   const enforceRetention = async () => {
     try {
@@ -321,7 +347,9 @@ const createBackupService = ({ dataStore, logService }) => {
   };
 
   return {
+    buildArchive,
     createBackup,
+    createBackupOutcome,
     listBackups,
     getBackupConfig,
     getBackupData,

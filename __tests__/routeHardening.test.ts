@@ -593,6 +593,8 @@ describe('route hardening', () => {
       dataStore: {
         loadTeamSummaries: vi.fn(async () => []),
         loadAllTeams: vi.fn(async () => []),
+        // The post-restore password pass reads this projection.
+        loadTeamPasswordHashes: vi.fn(async () => []),
         loadAllTeamFeedbacks: vi.fn(async () => []),
         loadMetaData: vi.fn(async () => ({ orphanedFeedbacks: [] })),
         loadGlobalSettings,

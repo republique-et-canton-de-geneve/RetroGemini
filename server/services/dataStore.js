@@ -3,6 +3,7 @@ import { dirname, join } from 'path';
 import Database from 'better-sqlite3';
 import pg from 'pg';
 import { createKeyedQueue } from './keyedQueue.js';
+import { isJsonbRefusal, readRowsOneByOne } from './jsonbRefusal.js';
 import { carryJiraLinks, carryJiraParents } from '../../utils/actionImpact.js';
 import { DEFAULT_SESSION_EPOCH, newSessionEpoch, parseTeamAuthRow } from './sessionEpoch.js';
 
@@ -1060,6 +1061,36 @@ const createDataStore = ({ rootDir }) => {
     return { known, stale };
   };
 
+  // The one projection of a team summary, for the rows `where` selects: the
+  // whole list's stale rows and the single-row read share it, so the column
+  // list cannot drift between them. On PostgreSQL every column comes from one
+  // cast per row: `OFFSET 0` keeps the planner from folding the subquery into
+  // the outer select, which would turn the single cast back into one per
+  // column. The stamp and size are those of the row version projected, never
+  // of an earlier fingerprint read.
+  const summaryProjectionSql = (where) => (usePostgres
+    ? `SELECT key, row_version::text AS stamp, octet_length(value) AS size,
+              j->>'id' AS id,
+              j->>'name' AS name,
+              j->>'facilitatorEmail' AS facilitator_email,
+              j->>'lastConnectionDate' AS last_connection_date,
+              j->'members' AS members,
+              j->'mergedFrom' AS merged_from,
+              j->'archivedMembers' AS archived_members,
+              j->'jiraTarget' AS jira_target
+       FROM (SELECT key, xmin AS row_version, value, value::jsonb AS j
+             FROM kv_store WHERE ${where} OFFSET 0) AS team_rows`
+    : `SELECT key, updated_at AS stamp, octet_length(value) AS size,
+              json_extract(value, '$.id') AS id,
+              json_extract(value, '$.name') AS name,
+              json_extract(value, '$.facilitatorEmail') AS facilitator_email,
+              json_extract(value, '$.lastConnectionDate') AS last_connection_date,
+              json_extract(value, '$.members') AS members,
+              json_extract(value, '$.mergedFrom') AS merged_from,
+              json_extract(value, '$.archivedMembers') AS archived_members,
+              json_extract(value, '$.jiraTarget') AS jira_target
+       FROM kv_store WHERE ${where}`);
+
   // LIKE (not a collation-sensitive range) for the same reason as
   // kvGetMultipleByPrefix above. `octet_length` reads the TOAST header, never
   // the value.
@@ -1072,22 +1103,7 @@ const createDataStore = ({ rootDir }) => {
     const { known, stale } = partitionByFreshness(stamps.rows);
     let projected = [];
     if (stale.length > 0) {
-      // `OFFSET 0` keeps the planner from folding the subquery into the outer
-      // select, which would turn the single cast back into one per column.
-      const result = await pgPool.query(
-        `SELECT key, row_version::text AS stamp, octet_length(value) AS size,
-                j->>'id' AS id,
-                j->>'name' AS name,
-                j->>'facilitatorEmail' AS facilitator_email,
-                j->>'lastConnectionDate' AS last_connection_date,
-                j->'members' AS members,
-                j->'mergedFrom' AS merged_from,
-                j->'archivedMembers' AS archived_members,
-                j->'jiraTarget' AS jira_target
-         FROM (SELECT key, xmin AS row_version, value, value::jsonb AS j
-               FROM kv_store WHERE key = ANY($1) OFFSET 0) AS team_rows`,
-        [stale]
-      );
+      const result = await pgPool.query(summaryProjectionSql('key = ANY($1)'), [stale]);
       projected = result.rows;
     }
     return { keys: stamps.rows.map((row) => row.key), known, projected };
@@ -1111,16 +1127,7 @@ const createDataStore = ({ rootDir }) => {
     sqliteDataVersionSeen = dataVersion;
     const { known, stale } = partitionByFreshness(stamps);
     const projected = stale.length === 0 ? [] : sqliteDb.prepare(
-      `SELECT key, updated_at AS stamp, octet_length(value) AS size,
-              json_extract(value, '$.id') AS id,
-              json_extract(value, '$.name') AS name,
-              json_extract(value, '$.facilitatorEmail') AS facilitator_email,
-              json_extract(value, '$.lastConnectionDate') AS last_connection_date,
-              json_extract(value, '$.members') AS members,
-              json_extract(value, '$.mergedFrom') AS merged_from,
-              json_extract(value, '$.archivedMembers') AS archived_members,
-              json_extract(value, '$.jiraTarget') AS jira_target
-       FROM kv_store WHERE key IN (SELECT value FROM json_each(?))`
+      summaryProjectionSql('key IN (SELECT value FROM json_each(?))')
     ).all(JSON.stringify(stale));
     return { keys: stamps.map((row) => row.key), known, projected };
   };
@@ -1177,15 +1184,152 @@ const createDataStore = ({ rootDir }) => {
     return summaries;
   };
 
-  // One team's summary, or null when the team is gone, through the same cache
-  // and the same freshness rule as the whole list: a warm read parses no
-  // record, whatever the team's history weighs, and a write by another pod is
-  // seen. It still reads every team's fingerprint, which is what keeps the
-  // cache's rules in one place.
+  // One team's summary, through the same cache and the same freshness rule as
+  // the whole list, reading that one row only. A socket join resolves the
+  // joiner's role from it, and `/jira/status` its target, so it runs on every
+  // reconnect: reading every team's fingerprint there would re-project every
+  // team written since the previous read, and during a live retrospective the
+  // active teams' records change several times a second. A warm read parses
+  // no record, whatever the team's history weighs, and a write by another pod
+  // is seen (`xmin`, or `updated_at` once another connection committed).
+  //
+  // An empty value is "no team", as it is for kvGet and teamExists; casting it
+  // would throw, and a join would then read the role as unknown.
+  //
+  // On PostgreSQL, readers of one team at one fingerprint share one
+  // projection: a reconnect wave after a rolling update is one join per
+  // participant, and each would otherwise run its own full cast of the same
+  // record while holding one of the pod's pooled connections. A projection
+  // issued after a fingerprint was read returns a row at least as new as it.
+  const summaryProjections = new Map(); // `${key}\0${stamp}\0${size}` -> Promise<entry | null>
+  const projectOneSummaryPostgres = (key, row) => {
+    const fingerprint = `${key}\u0000${row.stamp}\u0000${row.size}`;
+    const running = summaryProjections.get(fingerprint);
+    if (running) return running;
+    const started = (async () => {
+      const result = await pgPool.query(summaryProjectionSql('key = $1'), [key]);
+      const projected = result.rows[0];
+      // Deleted between the two queries.
+      if (!projected || !(Number(projected.size) > 0)) {
+        forgetTeamSummary(key);
+        return null;
+      }
+      const entry = projectSummaryRow(projected);
+      teamSummaryCache.set(key, entry);
+      return entry;
+    })();
+    summaryProjections.set(fingerprint, started);
+    // Both handlers attached here, so a rejection reaches every caller
+    // awaiting it and is never left unhandled.
+    const forget = () => {
+      if (summaryProjections.get(fingerprint) === started) summaryProjections.delete(fingerprint);
+    };
+    started.then(forget, forget);
+    return started;
+  };
+
+  const readOneTeamSummaryPostgres = async (key) => {
+    const result = await pgPool.query(
+      'SELECT xmin::text AS stamp, octet_length(value) AS size FROM kv_store WHERE key = $1',
+      [key]
+    );
+    const row = result.rows[0];
+    if (!row || !(Number(row.size) > 0)) {
+      forgetTeamSummary(key);
+      return null;
+    }
+    const cached = teamSummaryCache.get(key);
+    if (isFresh(cached, row)) return cached;
+    return projectOneSummaryPostgres(key, row);
+  };
+
+  // Synchronous from the fingerprint to the cache update, like the list path.
+  // It never moves `sqliteDataVersionSeen`: that marker says the WHOLE list
+  // was re-stamped, and moving it here would make the next list read skip the
+  // stamps of the other rows another connection rewrote at the same length.
+  const readOneTeamSummarySqlite = (key) => {
+    const dataVersion = sqliteDb.pragma('data_version', { simple: true });
+    const otherConnectionWrote = dataVersion !== sqliteDataVersionSeen;
+    const row = sqliteDb.prepare(
+      `SELECT key, ${otherConnectionWrote ? 'updated_at' : 'NULL'} AS stamp, octet_length(value) AS size
+       FROM kv_store WHERE key = ?`
+    ).get(key);
+    if (!row || !(Number(row.size) > 0)) {
+      forgetTeamSummary(key);
+      return null;
+    }
+    const cached = teamSummaryCache.get(key);
+    if (isFresh(cached, row)) return cached;
+    const projected = sqliteDb.prepare(summaryProjectionSql('key = ?')).get(key);
+    if (!projected) {
+      forgetTeamSummary(key);
+      return null;
+    }
+    const entry = projectSummaryRow(projected);
+    teamSummaryCache.set(key, entry);
+    return entry;
+  };
+
   const loadTeamSummary = async (teamId, { withMergeProvenance = false, withArchivedMembers = false, withJiraTarget = false } = {}) => {
-    const { entries } = await refreshTeamSummaries();
-    const entry = entries.get(`${TEAM_PREFIX}${teamId}`);
+    const key = `${TEAM_PREFIX}${teamId}`;
+    const entry = usePostgres ? await readOneTeamSummaryPostgres(key) : readOneTeamSummarySqlite(key);
     return entry ? copySummary(entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }) : null;
+  };
+
+  // Each team's id and stored password hash, nothing else: what the legacy
+  // password pass (`passwordMigration.js`) reads at boot and after both
+  // restore routes, which used to load and parse every full record in Node.
+  // The database still parses each record (one cast per row on PostgreSQL);
+  // Node parses none. A `passwordHash` that is not a string reads as null,
+  // like a team with none. A row the database cannot parse makes the query
+  // throw, which the pass reports as a failed scan.
+  //
+  // Deliberately NOT through the summary cache: the summaries feed the
+  // anonymous login picker (`copySummary` spreads every field), and a hash
+  // there would be one forgotten pick away from `/api/team/list`. Its only
+  // caller is the password pass; no route may call it.
+  //
+  // On PostgreSQL one row whose text jsonb refuses but Node parses (a lone
+  // surrogate escape, a `\u0000`: see jsonbRefusal.js) would fail the whole
+  // statement, and with it the pass — after a restore of an archive from
+  // before hashing, its teams would keep clear-text passwords no typed
+  // password matches. So that one refusal falls back to reading the rows one
+  // at a time in Node; a row Node cannot parse either still fails the read.
+  const readPasswordHashRowsPostgres = async () => {
+    try {
+      return (await pgPool.query(
+        `SELECT j->>'id' AS id,
+                CASE WHEN jsonb_typeof(j->'passwordHash') = 'string' THEN j->>'passwordHash' END AS password_hash
+         FROM (SELECT value::jsonb AS j FROM kv_store WHERE key LIKE $1 OFFSET 0) AS team_rows`,
+        [TEAM_PREFIX + '%']
+      )).rows;
+    } catch (err) {
+      if (!isJsonbRefusal(err)) throw err;
+      console.warn(`[Server] A team record holds text PostgreSQL's jsonb refuses (${err.code}); reading the password hashes one team at a time`);
+      return readRowsOneByOne({
+        query: (sql, params) => pgPool.query(sql, params),
+        prefix: TEAM_PREFIX,
+        pick: (team) => ({
+          id: team?.id,
+          password_hash: typeof team?.passwordHash === 'string' ? team.passwordHash : null
+        })
+      });
+    }
+  };
+
+  const loadTeamPasswordHashes = async () => {
+    const rows = usePostgres
+      ? await readPasswordHashRowsPostgres()
+      : sqliteDb.prepare(
+        `SELECT json_extract(value, '$.id') AS id,
+                CASE WHEN json_type(value, '$.passwordHash') = 'text' THEN json_extract(value, '$.passwordHash') END AS password_hash
+         FROM kv_store WHERE key LIKE ?`
+      ).all(TEAM_PREFIX + '%');
+    return rows.map((row) => ({
+      // Text on PostgreSQL, whatever JSON type it was; the same on SQLite.
+      id: row.id == null ? null : String(row.id),
+      passwordHash: typeof row.password_hash === 'string' ? row.password_hash : null
+    }));
   };
 
   // Feedback projection for the Feedback Hub and the super-admin feedback view.
@@ -1230,6 +1374,18 @@ const createDataStore = ({ rootDir }) => {
   // Session state (unchanged from before)
   // ---------------------------------------------------------------------------
 
+  // The JSON text length of each session object this store parsed or wrote,
+  // so the session cache (boundedCache.js) can size it without serializing it
+  // again — a join is the reconnect-stampede path, and it already pays one
+  // parse. Weak: an object nobody holds is forgotten with it. A copy
+  // (`{ ...state }`) is not in it; the cache then measures that copy itself.
+  const sessionTextLengths = new WeakMap();
+  const noteSessionText = (state, text) => {
+    if (state && typeof state === 'object') sessionTextLengths.set(state, text.length);
+    return state;
+  };
+  const sessionTextLength = (state) => (state && typeof state === 'object' ? sessionTextLengths.get(state) : undefined);
+
   // `strict` makes a read failure throw instead of reading as "no session".
   // Every live caller wants the lenient answer — a socket join must not fail
   // because one read did — but the super-admin merge compares what it reads
@@ -1242,12 +1398,12 @@ const createDataStore = ({ rootDir }) => {
       if (usePostgres) {
         const result = await pgPool.query('SELECT value FROM kv_store WHERE key = $1', [key]);
         if (result.rows.length > 0 && result.rows[0].value) {
-          return JSON.parse(result.rows[0].value);
+          return noteSessionText(JSON.parse(result.rows[0].value), result.rows[0].value);
         }
       } else {
         const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(key);
         if (row?.value) {
-          return JSON.parse(row.value);
+          return noteSessionText(JSON.parse(row.value), row.value);
         }
       }
     } catch (err) {
@@ -1293,26 +1449,26 @@ const createDataStore = ({ rootDir }) => {
             'SELECT value FROM kv_store WHERE key = $1 FOR UPDATE',
             [key]
           );
-          const current = lockResult.rows.length > 0 && lockResult.rows[0].value
-            ? JSON.parse(lockResult.rows[0].value)
-            : null;
+          const rowText = lockResult.rows.length > 0 ? lockResult.rows[0].value : null;
+          const current = rowText ? JSON.parse(rowText) : null;
 
           const decision = applyDecision(current);
           if (decision.rejected) {
             await client.query('ROLLBACK');
-            return { success: false, stale: true, data: decision.current };
+            return { success: false, stale: true, data: noteSessionText(decision.current, rowText) };
           }
 
+          const payload = JSON.stringify(decision.dataWithRev);
           await client.query(
             `INSERT INTO kv_store (key, value, updated_at)
              VALUES ($1, $2, NOW())
              ON CONFLICT (key) DO UPDATE SET
                value = EXCLUDED.value,
                updated_at = NOW()`,
-            [key, JSON.stringify(decision.dataWithRev)]
+            [key, payload]
           );
           await client.query('COMMIT');
-          return { success: true, stale: false, data: decision.dataWithRev };
+          return { success: true, stale: false, data: noteSessionText(decision.dataWithRev, payload) };
         } catch (txErr) {
           await client.query('ROLLBACK').catch(() => {});
           throw txErr;
@@ -1326,17 +1482,18 @@ const createDataStore = ({ rootDir }) => {
 
           const decision = applyDecision(current);
           if (decision.rejected) {
-            return { success: false, stale: true, data: decision.current };
+            return { success: false, stale: true, data: noteSessionText(decision.current, row.value) };
           }
 
+          const payload = JSON.stringify(decision.dataWithRev);
           sqliteDb.prepare(
             `INSERT INTO kv_store (key, value, updated_at)
              VALUES (?, ?, CURRENT_TIMESTAMP)
              ON CONFLICT(key) DO UPDATE SET
                value = excluded.value,
                updated_at = CURRENT_TIMESTAMP`
-          ).run(key, JSON.stringify(decision.dataWithRev));
-          return { success: true, stale: false, data: decision.dataWithRev };
+          ).run(key, payload);
+          return { success: true, stale: false, data: noteSessionText(decision.dataWithRev, payload) };
         })();
       }
     } catch (err) {
@@ -1475,8 +1632,9 @@ const createDataStore = ({ rootDir }) => {
   // `updateGlobalSettings` has closed that hazard for the settings left there,
   // but the connection keeps its own key: the console writes it whole, and a
   // row nobody else writes needs no reasoning about what sits beside it. This
-  // read is strict — an error propagates — and a missing row is `null`. Not
-  // part of `loadPersistedData`, so no backup archive carries it.
+  // read is strict — an error propagates — and a missing row is `null`. An
+  // archive holds `team:` rows and `retro-meta` only (iterateArchiveTeams,
+  // readArchiveMeta), so no backup archive carries it.
   // ---------------------------------------------------------------------------
 
   const loadJiraSettings = async () => kvGet(JIRA_SETTINGS_KEY);
@@ -1525,20 +1683,126 @@ const createDataStore = ({ rootDir }) => {
     return normalized;
   };
 
-  const loadPersistedData = async () => {
+  // ---------------------------------------------------------------------------
+  // Archive reads: what a backup, a snapshot and the download are built from
+  //
+  // Strict on purpose. They used to read through `loadPersistedData`, which
+  // answered `{ teams: [] }` on any read error: one unreadable team row and
+  // every backup stored an EMPTY archive that reported success — and since an
+  // automatic backup that succeeds runs retention, each failed run purged one
+  // good backup, until every recovery point was empty. A row the archive
+  // cannot carry now fails the archive, naming its key and never its content.
+  // ---------------------------------------------------------------------------
+
+  // "Team record" only for a team row: `retro-meta` fails the same way, and
+  // the line must not send an operator looking for a team.
+  const archiveReadError = (key, reason) =>
+    Object.assign(new Error(`${key.startsWith(TEAM_PREFIX) ? 'Team record' : 'Record'} ${JSON.stringify(key)} cannot be archived (${reason})`), {
+      code: 'BACKUP_READ_FAILED',
+      key,
+      reason
+    });
+
+  // null: the row is gone (SQLite only: deleted between the key scan and the
+  // read). The revision stamp is dropped, as loadTeam drops it.
+  const archiveTeamFromRow = (key, text) => {
+    if (text == null) return null;
+    if (text === '') throw archiveReadError(key, 'empty');
+    let value;
     try {
-      const teams = await loadAllTeams();
-      const meta = await loadMetaData();
-      return normalizePersistedData({
-        teams,
-        meta: { revision: 0, updatedAt: new Date().toISOString() },
-        resetTokens: meta.resetTokens,
-        orphanedFeedbacks: meta.orphanedFeedbacks
-      });
-    } catch (err) {
-      console.warn('[Server] Failed to load persisted data', err);
-      return normalizePersistedData({ teams: [] });
+      value = JSON.parse(text);
+    } catch {
+      throw archiveReadError(key, 'unparsable');
     }
+    if (!isPlainObject(value)) throw archiveReadError(key, 'not_an_object');
+    const { _rev, _updatedAt, ...team } = value;
+    return team;
+  };
+
+  // Every team record, one at a time and in key order, for an archive built
+  // team by team (backupArchive.js): the builder never holds the whole store.
+  //
+  // On PostgreSQL every team comes from ONE snapshot, as the single
+  // `SELECT key, value … LIKE` it replaced gave: a `REPEATABLE READ READ
+  // ONLY` transaction on one pooled client, held for the build (it blocks no
+  // writer). Without it, an operation that moves data between two teams while
+  // a backup runs — a console deletion moving a merge source's feedbacks into
+  // the merged team, then deleting the source — could land in neither half.
+  // SQLite has one connection, and a read transaction left open across the
+  // awaits would swallow every other request's writes into it, so its rows are
+  // read one at a time (accepted: SQLite deployments run one process and are
+  // not the production engine; HARDENING_STATUS H10).
+  //
+  // `ORDER BY key` on both engines, written down rather than inherited from a
+  // scan plan. Stopping early (a consumer that throws, `pipeline` destroying
+  // its source) runs `finally`, which ends the transaction and releases the
+  // client.
+  async function* iterateArchiveTeams() {
+    if (!usePostgres) {
+      const keys = sqliteDb.prepare('SELECT key FROM kv_store WHERE key LIKE ? ORDER BY key').all(TEAM_PREFIX + '%');
+      const readValue = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?');
+      for (const { key } of keys) {
+        const team = archiveTeamFromRow(key, readValue.get(key)?.value);
+        if (team) yield team;
+      }
+      return;
+    }
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const keys = await client.query('SELECT key FROM kv_store WHERE key LIKE $1 ORDER BY key', [TEAM_PREFIX + '%']);
+      for (const { key } of keys.rows) {
+        const { rows } = await client.query('SELECT value FROM kv_store WHERE key = $1', [key]);
+        const team = archiveTeamFromRow(key, rows[0]?.value);
+        if (team) yield team;
+      }
+    } finally {
+      // Read-only: ending it either way is the same.
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+    }
+  }
+
+  // `retro-meta` for an archive. loadMetaData turns a present-but-malformed
+  // row into empty lists (right for its writers, which rebuild it), which
+  // would have the archive silently drop every orphaned feedback. Missing or
+  // empty: the empty lists every meta reader sees. A list that is absent is
+  // empty; one that is present and not a list fails, as archiveShape refuses
+  // it on the way back in.
+  const readArchiveMeta = async () => {
+    const key = 'retro-meta';
+    const text = usePostgres
+      ? (await pgPool.query('SELECT value FROM kv_store WHERE key = $1', [key])).rows[0]?.value
+      : sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(key)?.value;
+    if (text == null || text === '') return { resetTokens: [], orphanedFeedbacks: [] };
+    let value;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      throw archiveReadError(key, 'unparsable');
+    }
+    if (!isPlainObject(value)) throw archiveReadError(key, 'not_an_object');
+    for (const field of ['resetTokens', 'orphanedFeedbacks']) {
+      if (value[field] !== undefined && !Array.isArray(value[field])) throw archiveReadError(key, 'list_malformed');
+    }
+    return { resetTokens: value.resetTokens ?? [], orphanedFeedbacks: value.orphanedFeedbacks ?? [] };
+  };
+
+  // The whole store as one archive object, read through the strict readers
+  // above — so it throws instead of answering an archive that misses teams.
+  // Production builds archives team by team (backupArchive.js) and no longer
+  // calls this; the tests use it as the reference representation of an
+  // archive, and built on the same readers it cannot drift from what ships.
+  const loadPersistedData = async () => {
+    const teams = [];
+    for await (const team of iterateArchiveTeams()) teams.push(team);
+    const meta = await readArchiveMeta();
+    return normalizePersistedData({
+      teams,
+      meta: { revision: 0, updatedAt: new Date().toISOString() },
+      resetTokens: meta.resetTokens,
+      orphanedFeedbacks: meta.orphanedFeedbacks
+    });
   };
 
   // `mode` controls how the archive is applied to the store:
@@ -2147,6 +2411,8 @@ const createDataStore = ({ rootDir }) => {
     loadAllTeamFeedbacks,
     loadTeamSummaries,
     loadTeamSummary,
+    // The legacy password pass's read: never cached, never sent anywhere
+    loadTeamPasswordHashes,
     atomicTeamSave,
     atomicTeamUpdate,
 
@@ -2160,6 +2426,10 @@ const createDataStore = ({ rootDir }) => {
     saveMetaData,
     atomicMetaUpdate,
 
+    // Archive reads (strict: a row the archive cannot carry throws)
+    iterateArchiveTeams,
+    readArchiveMeta,
+
     // Legacy compat (backup/restore, aggregated reads)
     loadPersistedData,
     savePersistedData,
@@ -2168,6 +2438,9 @@ const createDataStore = ({ rootDir }) => {
     // Session state
     loadSessionState,
     saveSessionState,
+    // The text length of a session object this store parsed or wrote, for
+    // the session cache's byte cap (undefined for any other object)
+    sessionTextLength,
 
     // Global settings: a lenient read for readers, a strict locked update for
     // writers (no whole-blob save: see updateGlobalSettings)

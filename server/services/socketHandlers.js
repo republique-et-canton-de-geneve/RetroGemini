@@ -58,6 +58,33 @@ const refreshLastConnectionDate = async (dataStore, teamId) => {
   return refreshed;
 };
 
+// One refresh per team in flight on this pod. A burst of joins — a whole
+// session reconnecting after a rolling update — all read the stale date before
+// any of them writes; each would otherwise queue its own update, and every
+// queued updater parses the whole team record under the lock before it can
+// decline. They share the one refresh instead, so a burst costs one parse and
+// one write on this pod (and, through the in-lock decision above, none on the
+// next pod). Only the call that started the refresh can answer true, and only
+// that call sees its rejection: the others answer false, so a failure is
+// logged once.
+const createLastConnectionRefresher = (dataStore, refresh = refreshLastConnectionDate) => {
+  const inFlight = new Map(); // teamId -> Promise<boolean>
+  const run = (teamId) => {
+    const running = inFlight.get(teamId);
+    if (running) return running.then(() => false, () => false);
+    const started = refresh(dataStore, teamId);
+    inFlight.set(teamId, started);
+    const forget = () => {
+      if (inFlight.get(teamId) === started) inFlight.delete(teamId);
+    };
+    // Both handlers attached: the caller awaits `started` itself, and this
+    // branch must not leave a rejection of its own unhandled.
+    started.then(forget, forget);
+    return started;
+  };
+  return { run, pending: () => inFlight.size };
+};
+
 // --- update-session flood protection (audit PR-12) -------------------------
 // A per-socket token bucket caps how many `update-session` writes one client
 // can drive through the expensive path (DB read + optimistic-concurrency CAS
@@ -304,6 +331,9 @@ const registerSocketHandlers = ({
   // Per-socket update-session throttle configuration, read once at startup.
   const updateThrottle = parseUpdateThrottleConfig();
 
+  // Shared by every join on this pod (see createLastConnectionRefresher).
+  const lastConnectionRefresher = createLastConnectionRefresher(dataStore);
+
   // Cross-pod session-cache invalidation (audit PR-6 / C-6). A super-admin
   // restore rewrites the shared store, so every pod must drop its in-memory
   // session snapshots — otherwise a replica still holding a stale snapshot
@@ -330,10 +360,44 @@ const registerSocketHandlers = ({
     sweepRevokedSockets(payload.teamId).catch((err) => console.warn('[Server] Session revocation sweep failed', err));
   });
 
+  // The team a role is read from: its summary, never the full record, whose
+  // history can weigh megabytes and which a reconnect wave would parse once
+  // per joiner. Except when the summary read THROWS: on PostgreSQL the summary
+  // is a `value::jsonb` projection, and jsonb refuses text Node's JSON.parse
+  // accepts — a lone UTF-16 surrogate escape (an excerpt cut through an emoji)
+  // or `\u0000`. Such a row would otherwise leave every socket of the team
+  // without a role, and every facilitator-only change refused, until someone
+  // repaired the row by hand; the full record still reads, as it did before
+  // the summary was used here. A summary that answers null is an answer (the
+  // team is gone), never a reason to read the record. The warning is
+  // coalesced per team, so a reconnect wave writes one line, not one per
+  // joiner; a full record that cannot be read either throws to the caller.
+  const loadRosterTeam = async (teamId) => {
+    try {
+      return await dataStore.loadTeamSummary(teamId);
+    } catch (summaryErr) {
+      refusalLog.report({
+        group: 'team-summary-fallback',
+        key: String(teamId),
+        message: () => {
+          const code = summaryErr?.code ? `${summaryErr.code} ` : '';
+          return `[Server] Could not read the team summary of ${teamId} (${code}${summaryErr?.message ?? summaryErr}); reading the roster from the full record instead`;
+        },
+        label: `[Server] Team summary of ${teamId} unreadable, roster read from the full record`
+      });
+      return dataStore.loadTeam(teamId);
+    }
+  };
+
+  // The roster's entry for a user. The summary's `members` is always an array;
+  // a full record's is whatever it stores.
+  const findRosterMember = (team, userId) =>
+    (Array.isArray(team?.members) ? team.members.find((m) => m?.id === userId) : undefined);
+
   // Resolve the sender's role from the team roster (the database record, not
-  // anything the client claims about itself). Cached on the socket once known;
-  // reset on every join-session. A user the roster does not name is a
-  // 'participant' — the restrictive default.
+  // anything the client claims about itself; see loadRosterTeam). Cached on the
+  // socket once known; reset on every join-session. A user the roster does not
+  // name is a 'participant' — the restrictive default.
   //
   // A failed lookup is 'unknown', not 'participant', and is not cached, so the
   // next write tries again. The two must stay apart because the guard treats
@@ -345,8 +409,8 @@ const registerSocketHandlers = ({
   const resolveSenderRole = async (socket, teamId) => {
     if (socket.data.sessionRole) return socket.data.sessionRole;
     try {
-      const team = await dataStore.loadTeam(teamId);
-      const member = team?.members?.find((m) => m.id === socket.userId);
+      const team = await loadRosterTeam(teamId);
+      const member = findRosterMember(team, socket.userId);
       const role = member?.role === 'facilitator' ? 'facilitator' : 'participant';
       socket.data.sessionRole = role;
       return role;
@@ -446,8 +510,10 @@ const registerSocketHandlers = ({
     console.log(`[Server] ${socket.userName || 'Unknown'} leaving session ${sessionId}`);
     socket.leave(sessionId);
 
+    // Debug (stdout only, never the log ring): the leave line above already
+    // says who left, and a reconnect wave writes one of each per participant.
     const room = io.sockets.adapter.rooms.get(sessionId);
-    console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
+    console.debug(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
 
     socket.to(sessionId).emit('member-left', {
       userId: socket.userId,
@@ -557,7 +623,9 @@ const registerSocketHandlers = ({
         )
       );
 
-    console.log('[Server] Client connected:', socket.id);
+    // Debug: the join line that follows names the user; the disconnect line
+    // stays at info.
+    console.debug('[Server] Client connected:', socket.id);
 
     // Audit H1: the socket channel used to have no authentication at all — a
     // join was taken at face value and answered with the full session state,
@@ -670,15 +738,18 @@ const registerSocketHandlers = ({
 
       rosterBroadcaster.schedule(sessionId);
 
+      // Debug, like the per-write lines: one join used to write four info
+      // lines, and a drained pod's 150 participants reconnecting filled the
+      // whole 1000-line ring. The join line above stays at info.
       const room = io.sockets.adapter.rooms.get(sessionId);
-      console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
+      console.debug(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
 
       if (sessionData) {
         if (fromDatabase) {
           sessionCache.set(sessionId, sessionData);
-          console.log(`[Server] Sending persisted session state to ${userName}`);
+          console.debug(`[Server] Sending persisted session state to ${userName}`);
         } else {
-          console.log(`[Server] Sending cached session state to ${userName}`);
+          console.debug(`[Server] Sending cached session state to ${userName}`);
         }
         // The in-memory-only store keeps its historical behaviour of seeding
         // the join from cache without an initial emit.
@@ -689,28 +760,34 @@ const registerSocketHandlers = ({
 
       socket.to(sessionId).emit('member-joined', { userId, userName });
 
-      // A failed team read leaves the role unset rather than guessing it:
-      // resolveSenderRole tries again on the first write that needs it, and
-      // answers 'unknown' — never 'participant' — if that read fails too.
+      // The roster comes from the team summary (the full record only when the
+      // summary read throws, see loadRosterTeam): a reconnect wave is one join
+      // per participant, and loading the record parsed the team's whole
+      // history once per joiner. A failed read leaves the role unset rather
+      // than guessing it: resolveSenderRole tries again on the first write that
+      // needs it, and answers 'unknown' — never 'participant' — if that read
+      // fails too.
       try {
         if (sessionData?.teamId) {
-          const team = await dataStore.loadTeam(sessionData.teamId);
+          const team = await loadRosterTeam(sessionData.teamId);
           if (team) {
-            const member = team.members.find((m) => m.id === userId);
+            const member = findRosterMember(team, userId);
             socket.data.sessionRole = member?.role === 'facilitator' ? 'facilitator' : 'participant';
             if (
               member &&
               member.role !== 'facilitator' &&
               shouldRefreshLastConnection(team.lastConnectionDate)
             ) {
-              if (await refreshLastConnectionDate(dataStore, sessionData.teamId)) {
+              // Awaited, so a write sent right behind the join waits for it
+              // (joinInFlight) — and for at most one coalesced team write.
+              if (await lastConnectionRefresher.run(sessionData.teamId)) {
                 console.log(`[Server] Updated lastConnectionDate for team ${team.name} (participant ${userName} joined)`);
               }
             }
           }
         }
       } catch (err) {
-        console.warn('[Server] Failed to update lastConnectionDate on session join', err);
+        console.warn('[Server] Could not read the team roster or refresh lastConnectionDate on session join', err);
       }
     };
 
@@ -787,8 +864,10 @@ const registerSocketHandlers = ({
     const acceptWrite = (sessionId, savedData, restoredFields) => {
       sessionCache.set(sessionId, savedData);
 
+      // Debug (stdout only): one line per accepted write would turn the log
+      // ring over in seconds during a live retrospective.
       const room = io.sockets.adapter.rooms.get(sessionId);
-      console.log(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
+      console.debug(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
 
       socket.to(sessionId).emit('session-update', savedData);
       if (restoredFields.length > 0) socket.emit('session-update', savedData);
@@ -1017,8 +1096,9 @@ const registerSocketHandlers = ({
 
         // Logged once the write is known to be going ahead: a refused write is
         // reported (and coalesced) above, and logging it here too put one line
-        // per refused write back into the log ring.
-        console.log(`[Server] Session update from ${socket.userName}, phase: ${outgoing.phase}`);
+        // per refused write back into the log ring. Debug: stdout only, the
+        // per-write trail, never the ring (logService.attachConsole).
+        console.debug(`[Server] Session update from ${socket.userName}, phase: ${outgoing.phase}`);
 
         const result = await dataStore.saveSessionState(sessionId, outgoing);
 
@@ -1118,6 +1198,7 @@ export {
   registerSocketHandlers,
   shouldRefreshLastConnection,
   refreshLastConnectionDate,
+  createLastConnectionRefresher,
   validateSessionUpdateShape,
   consumeUpdateToken,
   parseUpdateThrottleConfig,

@@ -387,7 +387,7 @@ const registerSuperAdminTeamRestoreRoutes = ({
       snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
       if (!snapshot) return refuse(503, 'pre_restore_snapshot_failed');
 
-      // Read *after* the snapshot, which dumps the whole store and can take
+      // Read *after* the snapshot, which reads the whole store and can take
       // seconds: a live session moves on meanwhile, and a revision read before it
       // could end up at or below the row's, which the record's rev guard accepts.
       let sessionRevs;

@@ -185,6 +185,10 @@ spec:
             # session state is always recoverable from the database).
             - name: SESSION_CACHE_MAX
               value: "500"
+            # Max total size, in MB of session JSON, of that cache (bounds
+            # memory only; the session just written is never evicted).
+            - name: SESSION_CACHE_MAX_MB
+              value: "32"
             # Max Socket.IO message size in bytes (1 MB) - caps one session update.
             - name: SOCKET_MAX_BUFFER_SIZE
               value: "1000000"

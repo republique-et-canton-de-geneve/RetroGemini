@@ -92,15 +92,24 @@ const buildApp = ({
 
   const table = createBackupTable();
   let releasePersistedRead: (() => void) | null = null;
+  // The readers every snapshot is built from (backupArchive.js).
+  const noTeams = async function* (): AsyncGenerator<Record<string, unknown>> {
+    yield* []; // an empty store
+  };
   const dataStore = {
     ...table,
-    loadPersistedData: vi.fn(async () => ({ teams: [] })),
+    iterateArchiveTeams: vi.fn(noTeams),
+    readArchiveMeta: vi.fn(async () => ({ resetTokens: [], orphanedFeedbacks: [] })),
     savePersistedData: vi.fn(async () => undefined),
     loadTeamSummaries: vi.fn(async () => []),
     holdPersistedRead: () => {
-      dataStore.loadPersistedData.mockImplementationOnce(() => new Promise((resolve) => {
-        releasePersistedRead = () => resolve({ teams: [] });
-      }));
+      const released = new Promise<void>((resolve) => {
+        releasePersistedRead = resolve;
+      });
+      dataStore.iterateArchiveTeams.mockImplementationOnce(async function* () {
+        await released;
+        yield* [];
+      });
     },
     releasePersistedRead: () => releasePersistedRead?.()
   };
@@ -432,7 +441,7 @@ describe('the per-pod import gate', () => {
     // A whole-store restore holds the restore gate while its snapshot reads the store.
     harness.dataStore.holdPersistedRead();
     const restore = postJson('/api/super-admin/backups/restore', { backupId: firstImport.backup.id });
-    await vi.waitFor(() => expect(harness.dataStore.loadPersistedData).toHaveBeenCalled());
+    await vi.waitFor(() => expect(harness.dataStore.iterateArchiveTeams).toHaveBeenCalled());
 
     const response = await importFile(archiveGzip());
     expect(response.status).toBe(200);

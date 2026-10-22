@@ -44,6 +44,8 @@ const buildApp = () => {
     dataStore: {
       savePersistedData,
       loadAllTeams: vi.fn(async () => []),
+      // The post-restore password pass reads this projection.
+      loadTeamPasswordHashes: vi.fn(async () => []),
       atomicTeamUpdate: vi.fn(),
       loadPersistedData: vi.fn(async () => ({ teams: [] })),
       loadGlobalSettings: vi.fn(async () => ({})),

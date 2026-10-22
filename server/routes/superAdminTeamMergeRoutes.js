@@ -502,9 +502,10 @@ const registerSuperAdminTeamMergeRoutes = ({
       }
 
       // A protected snapshot first, as both restore routes take one: this is
-      // the only copy of the team once the record is gone. `createBackup` also
-      // answers with an empty archive when it could not read the store, which
-      // is no recovery point at all.
+      // the only copy of the team once the record is gone. `createBackup`
+      // answers null when it could not read every team record; the team count
+      // is checked as well, because an empty archive is no recovery point for
+      // a team that exists.
       const snapshot = await backupService.createBackup('auto', 'Pre-delete snapshot', { protected: true });
       if (!snapshot || !(snapshot.teamCount > 0)) {
         return res.status(503).json({ error: 'pre_delete_snapshot_failed' });

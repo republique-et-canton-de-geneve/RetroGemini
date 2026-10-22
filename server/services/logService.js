@@ -80,7 +80,8 @@ const createLogService = ({
       error: console.error,
       warn: console.warn,
       info: console.info,
-      log: console.log
+      log: console.log,
+      debug: console.debug
     };
 
     // Mirror a console method into the in-memory server log buffer while still
@@ -99,7 +100,16 @@ const createLogService = ({
     // Everything after the console call is best-effort and wrapped: the real
     // write has already happened by then, so no failure in this file can cost
     // a log line.
-    const mirror = (level, originalFn) => (...args) => {
+    //
+    // `ring: false` writes to stdout only. That is the debug level: the
+    // per-write socket lines (one accepted `update-session` wrote two) and the
+    // redundant reconnect lines. With ten live retrospectives they turned the
+    // 1000-entry ring over in about 25 seconds, and a rolling update's
+    // reconnect wave filled it on its own, at exactly the moment the super
+    // admin opens the Logs tab to look for that rollout's errors. They stay on
+    // stdout, with their correlation and session ids, as the per-write trail
+    // an incident investigation reads.
+    const mirror = (level, originalFn, { ring = true } = {}) => (...args) => {
       let message = null;
 
       if (format === 'json') {
@@ -114,6 +124,7 @@ const createLogService = ({
         originalFn.apply(console, args);
       }
 
+      if (!ring) return;
       try {
         if (message === null) message = joinArgs(args);
         addServerLog(level, classifySource(message), message.substring(0, 500));
@@ -126,6 +137,7 @@ const createLogService = ({
     console.warn = mirror('warn', original.warn);
     console.info = mirror('info', original.info);
     console.log = mirror('info', original.log);
+    console.debug = mirror('debug', original.debug, { ring: false });
   };
 
   return {

@@ -6,15 +6,16 @@ import { describe, expect, it } from 'vitest';
  * The two whole-store restore routes must let go of the parsed archive before
  * the post-restore passes run.
  *
- * Right after a faithful replace, the password pass loads and parses every
- * team record again (`migrateLegacyPasswords` → `loadAllTeams`), and those
- * records are the archive's data. A route that keeps the parsed archive in
- * scope across that pass — a `let archive` in the same block as the
- * `await rehashRestoredPasswords()` is enough, since an async function's
- * suspended frame keeps every local — holds two whole-store copies at once.
- * On a 384 Mi pod restoring a large row, that is an OOM kill after the replace
- * succeeded: the console reports a failed restore, and the audit row is never
- * written.
+ * Right after a faithful replace, the post-restore passes read the store
+ * again: the password pass (`migrateLegacyPasswords` →
+ * `loadTeamPasswordHashes`) and the email heal. They read projections now, but
+ * a route that keeps the parsed archive in scope across them — a `let archive`
+ * in the same block as the `await rehashRestoredPasswords()` is enough, since
+ * an async function's suspended frame keeps every local — still holds the
+ * largest object a restore builds for no reason. When the password pass parsed
+ * every record, that was two whole-store copies at once: on a 384 Mi pod
+ * restoring a large row, an OOM kill after the replace succeeded, with the
+ * console reporting a failed restore and the audit row never written.
  *
  * Reachability can only be observed with `gc()`, which a vitest worker does
  * not have, so the routes are driven in a child `node --expose-gc`

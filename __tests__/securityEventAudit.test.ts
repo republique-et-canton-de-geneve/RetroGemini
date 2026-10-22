@@ -79,6 +79,10 @@ const createMockDataStore = () => {
       return team ? clone(team) : null;
     },
     loadAllTeams: async () => [...teams.values()].map(clone),
+    // What the post-restore password pass reads: two fields per team.
+    loadTeamPasswordHashes: async () => [...teams.values()].map((t) => ({
+      id: t.id, passwordHash: typeof t.passwordHash === 'string' ? t.passwordHash : null
+    })),
     loadAllTeamFeedbacks: async () => [],
     loadTeamSummaries: async () => [...teams.values()].map((t) => ({
       id: t.id, name: t.name, members: [], mergedFrom: (t.mergedFrom as unknown[]) || []
@@ -156,7 +160,10 @@ const createMockDataStore = () => {
 };
 
 const createBackupService = () => ({
+  // The download's archive (the real one is built from the store).
+  buildArchive: vi.fn(async () => ({ data: Buffer.from('gz'), teamCount: 2, unrestorable: [] })),
   createBackup: vi.fn(async () => ({ id: 'backup-1', type: 'manual', teamCount: 2 })),
+  createBackupOutcome: vi.fn(async () => ({ entry: { id: 'backup-1', type: 'manual', teamCount: 2 }, reason: null })),
   listBackups: vi.fn(async () => [{ id: 'backup-1' }]),
   getBackupConfig: vi.fn(() => ({ enabled: true, maxCount: 7 })),
   getBackupData: vi.fn(async () => ({ filename: 'backup-1.json.gz', data: Buffer.from('gz') })),

@@ -187,6 +187,17 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       : { key: 'login.superAdmin.tooManyAttemptsLater' };
   };
 
+  // Both whole-store restores take a protected snapshot first and answer
+  // `503 pre_restore_snapshot_failed`, with nothing written, when it cannot be
+  // made: a team record the backup cannot read (every backup fails until the
+  // row is repaired, k8s/README.md), or a backup already running. A gateway's
+  // own 503 page carries no such code and keeps the generic message.
+  const isSnapshotRefusal = async (response: Response): Promise<boolean> => {
+    if (response.status !== 503) return false;
+    const data = await response.json().catch(() => null);
+    return data?.error === 'pre_restore_snapshot_failed';
+  };
+
   // The address routes answer `400 invalid_email` for anything that is not one
   // valid address (utils/emailAddress.js). The console checks first, so this
   // is reached by a server judging more strictly than this bundle.
@@ -639,6 +650,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             ? { key: 'adminBackups.import.error.tooLargeUnpacked', params: { max: megabytesText(backupLimits.maxUnpackedBytes) } }
             : { key: 'adminBackups.notice.restoreInvalid' });
         }
+        if (await isSnapshotRefusal(response)) throw new NoticeError({ key: 'adminBackups.teamRestore.error.snapshotFailed' });
         throw new NoticeError({ key: 'adminBackups.notice.restoreFailed' });
       }
       setSuccessMessage({ key: 'adminBackups.notice.restored' });
@@ -1172,6 +1184,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           throw new NoticeError(rateLimitMessage);
         }
         if (response.status === 409) throw new NoticeError({ key: 'adminBackups.notice.restoreInProgress' });
+        if (await isSnapshotRefusal(response)) throw new NoticeError({ key: 'adminBackups.teamRestore.error.snapshotFailed' });
         throw new NoticeError({ key: 'admin.data.restoreFailed' });
       }
 

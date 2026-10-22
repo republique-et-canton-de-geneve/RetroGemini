@@ -1,5 +1,8 @@
 import { randomBytes } from 'crypto';
 import rateLimit from 'express-rate-limit';
+// Stored text is cut without ever halving an emoji: half of one in the team
+// record is text PostgreSQL's jsonb refuses (utils/textCut.js).
+import { cutCodeUnits } from '../../utils/textCut.js';
 
 const teamReadLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -53,8 +56,8 @@ const registerFeedbackRoutes = ({
         teamId,
         teamName: team.name,
         type: feedback.type,
-        title: feedback.title.trim().slice(0, 100),
-        description: feedback.description.trim().slice(0, 2000),
+        title: cutCodeUnits(feedback.title.trim(), 100),
+        description: cutCodeUnits(feedback.description.trim(), 2000),
         images: feedback.images || undefined,
         submittedBy: feedback.submittedBy,
         submittedByName: feedback.submittedByName,
@@ -162,7 +165,7 @@ const registerFeedbackRoutes = ({
         teamName: requestingTeamName,
         authorId,
         authorName,
-        content: content.trim().slice(0, 1000),
+        content: cutCodeUnits(content.trim(), 1000),
         createdAt: new Date().toISOString()
       };
 
@@ -235,7 +238,7 @@ const registerFeedbackRoutes = ({
           const safeFeedbackTitle = escapeHtml(feedbackTitle);
           const safeTeamName = escapeHtml(requestingTeamName);
           const safeAuthorName = escapeHtml(authorName);
-          const safeContent = escapeHtml(content.trim().slice(0, 1000));
+          const safeContent = escapeHtml(newComment.content);
 
           try {
             await mailerService.mailer.sendMail({
@@ -247,7 +250,7 @@ const registerFeedbackRoutes = ({
 ${typeLabel}: ${feedbackTitle}
 Comment by: ${authorName}
 
-"${content.trim().slice(0, 1000)}"
+"${newComment.content}"
 
 ---
 Log in to the Super Admin Dashboard to view and respond.

@@ -43,7 +43,12 @@ const createRestoreDataStore = () => {
         teamsById.set(team.id, structuredClone(team));
       }
     }),
-    loadAllTeams: vi.fn(async () => [...teamsById.values()].map((team) => structuredClone(team))),
+    // The password pass reads two fields per team, never the full records.
+    // There is deliberately no whole-record scan in this double: a pass that
+    // went back to one would fail every case below, instead of passing
+    // vacuously on a missing function.
+    loadTeamPasswordHashes: vi.fn(async () =>
+      [...teamsById.values()].map((team) => ({ id: team.id, passwordHash: team.passwordHash }))),
     // The email heal scans the projection, not the full records.
     loadTeamSummaries: vi.fn(async () => [...teamsById.values()].map((team) => structuredClone(team))),
     atomicTeamUpdate: vi.fn(async (teamId: string, updater: (team: StoredTeam) => StoredTeam | null) => {
@@ -169,7 +174,7 @@ describe('restore rehashes legacy password records (H23 prerequisite)', () => {
     await request(app, '/api/super-admin/restore', uploadArchive(legacyArchive()));
 
     expect(dataStore.savePersistedData.mock.invocationCallOrder[0])
-      .toBeLessThan(dataStore.loadAllTeams.mock.invocationCallOrder[0]);
+      .toBeLessThan(dataStore.loadTeamPasswordHashes.mock.invocationCallOrder[0]);
   });
 
   it('writes nothing when the restored archive already holds hashes', async () => {
@@ -206,7 +211,7 @@ describe('restore rehashes legacy password records (H23 prerequisite)', () => {
 
   it('still reports a successful stored-backup restore when the rehash pass fails', async () => {
     const dataStore = createRestoreDataStore();
-    dataStore.loadAllTeams = vi.fn(async () => {
+    dataStore.loadTeamPasswordHashes = vi.fn(async () => {
       throw new Error('store unavailable');
     });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -231,7 +236,7 @@ describe('restore rehashes legacy password records (H23 prerequisite)', () => {
     const response = await request(app, '/api/super-admin/restore', uploadArchive({ teams: 'not-an-array' }));
 
     expect(response.status).toBe(400);
-    expect(dataStore.loadAllTeams).not.toHaveBeenCalled();
+    expect(dataStore.loadTeamPasswordHashes).not.toHaveBeenCalled();
     expect(dataStore.loadTeamSummaries).not.toHaveBeenCalled();
     expect(dataStore.atomicTeamUpdate).not.toHaveBeenCalled();
   });
@@ -246,7 +251,7 @@ describe('restore rehashes legacy password records (H23 prerequisite)', () => {
     }));
 
     expect(response.status).toBe(503);
-    expect(dataStore.loadAllTeams).not.toHaveBeenCalled();
+    expect(dataStore.loadTeamPasswordHashes).not.toHaveBeenCalled();
     expect(dataStore.loadTeamSummaries).not.toHaveBeenCalled();
   });
 });
