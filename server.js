@@ -15,7 +15,7 @@ import { createBackupService } from './server/services/backupService.js';
 import { createAiService } from './server/services/aiService.js';
 import { startSocketAdapter } from './server/services/socketAdapter.js';
 import { registerSocketHandlers } from './server/services/socketHandlers.js';
-import { createBoundedCache } from './server/services/boundedCache.js';
+import { createBoundedCache, parseSessionCacheMaxBytes } from './server/services/boundedCache.js';
 import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneResetTokens } from './server/services/security.js';
 import { createShutdownHandler } from './server/services/shutdown.js';
 import { createSecurityHeaders } from './server/services/securityHeaders.js';
@@ -91,9 +91,14 @@ const securityEvents = createSecurityEventLog({ dataStore });
 const aiService = createAiService({ dataStore });
 // Bounded so a long-lived pod doesn't accumulate every session it has ever
 // served. Session state is always recoverable from the data store, so the
-// cache only needs the most recently active sessions.
+// cache only needs the most recently active sessions. Two caps: a count, and
+// the total JSON size of the cached sessions — whose sizes come from the
+// store, which remembers the text length of every session it parsed or wrote
+// (no second serialization on the join and write paths).
 const sessionCache = createBoundedCache({
-  max: Number(process.env.SESSION_CACHE_MAX) || 500
+  max: Number(process.env.SESSION_CACHE_MAX) || 500,
+  maxBytes: parseSessionCacheMaxBytes(),
+  sizeHint: dataStore.sessionTextLength
 });
 
 // Incident ISS: a Dashboard rename must reach the live session, not only the

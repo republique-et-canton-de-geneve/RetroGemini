@@ -331,6 +331,38 @@ describe('dataStore core primitives (SQLite)', () => {
 
       expect(await dataStore.loadSessionState('broken')).toBeNull();
     });
+
+    // The session cache sizes what it holds from these lengths, so the join
+    // and write paths never serialize a session a second time.
+    describe('remembers the text length of what it parsed or wrote', () => {
+      const rowText = (id: string): string =>
+        dataStore.getSqliteDb()!.prepare('SELECT value FROM kv_store WHERE key = ?').get(`session:${id}`).value;
+
+      it('for a saved state, an accepted write, a stale refusal and a read', async () => {
+        const first = await dataStore.saveSessionState('s1', { id: 's1', teamId: 't1', name: 'Rétro «1»', tickets: [] });
+        expect(Object.keys(first).sort()).toEqual(['data', 'stale', 'success']);
+        expect(first).toMatchObject({ success: true, stale: false });
+        expect(dataStore.sessionTextLength(first.data)).toBe(rowText('s1').length);
+
+        const second = await dataStore.saveSessionState('s1', { ...first.data, tickets: [{ id: 'k1', text: 'é' }] });
+        expect(dataStore.sessionTextLength(second.data)).toBe(rowText('s1').length);
+
+        const stale = await dataStore.saveSessionState('s1', { ...first.data, tickets: [] });
+        expect(stale).toMatchObject({ success: false, stale: true });
+        expect(Object.keys(stale).sort()).toEqual(['data', 'stale', 'success']);
+        expect(dataStore.sessionTextLength(stale.data)).toBe(rowText('s1').length);
+
+        const read = await dataStore.loadSessionState('s1');
+        expect(dataStore.sessionTextLength(read)).toBe(rowText('s1').length);
+      });
+
+      it('knows nothing of a copy, or of anything it did not produce', async () => {
+        const { data } = await dataStore.saveSessionState('s2', { id: 's2', teamId: 't1' });
+        expect(dataStore.sessionTextLength({ ...data })).toBeUndefined();
+        expect(dataStore.sessionTextLength(null)).toBeUndefined();
+        expect(dataStore.sessionTextLength('text')).toBeUndefined();
+      });
+    });
   });
 
   describe('global settings', () => {

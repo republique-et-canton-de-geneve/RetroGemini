@@ -933,6 +933,7 @@ These environment variables tune performance for larger deployments. They are se
 | `AUTH_RATE_LIMIT_MAX` | `5` | **Rejected** team-create / restore-session credentials per IP per 15 minutes, counted **per pod** (see below). Only `401` responses count, so no amount of ordinary use can consume the budget |
 | `PG_POOL_MAX` | `10` | Max PostgreSQL connections **per pod** |
 | `SESSION_CACHE_MAX` | `500` | Max live sessions cached in memory per pod (bounds memory only; session state is always recoverable from the database) |
+| `SESSION_CACHE_MAX_MB` | `32` | Max total size, in MB of session JSON, of the per-pod session cache, beside the count above (bounds memory only; the session just written is never evicted) |
 | `SOCKET_MAX_BUFFER_SIZE` | `1000000` | Max Socket.IO message size in bytes (caps a single session update) |
 | `SOCKET_UPDATE_RATE` | `0` (disabled) | Sustained `update-session` writes/second allowed per socket (token bucket). Enabling it is capacity-sensitive — load-test at your real cadence first. Throttled writes are healed, not dropped |
 | `SOCKET_UPDATE_BURST` | `2 × rate` | Momentary burst of `update-session` writes allowed above `SOCKET_UPDATE_RATE` |
@@ -1035,7 +1036,7 @@ Two consequences worth knowing:
 - Current default: 2 replicas × 10 = **20** connections — plenty of headroom.
 - If you scale up to handle more teams, size it together with the replica count, e.g. 6 replicas × 12 = 72 (still under 100). If you need to go higher, raise the database's `max_connections` too.
 
-`SESSION_CACHE_MAX` only bounds per-pod memory; at ~20-30 parallel retrospectives you will never approach 500, so the default is safe with the current pod memory limits.
+`SESSION_CACHE_MAX` and `SESSION_CACHE_MAX_MB` only bound per-pod memory. At ~20-30 parallel retrospectives you will never approach 500 sessions, and at 50-500 KB of JSON each they hold 1-15 MB, so the 32 MB cap only trims old sessions and pathological blobs: the cached objects take roughly three times their JSON size in the heap, well inside the 384 Mi limit. An evicted session is read from the database again on its next write; during a database outage that write has no baseline, the documented degraded-mode case.
 
 ---
 

@@ -1201,6 +1201,18 @@ const createDataStore = ({ rootDir }) => {
   // Session state (unchanged from before)
   // ---------------------------------------------------------------------------
 
+  // The JSON text length of each session object this store parsed or wrote,
+  // so the session cache (boundedCache.js) can size it without serializing it
+  // again — a join is the reconnect-stampede path, and it already pays one
+  // parse. Weak: an object nobody holds is forgotten with it. A copy
+  // (`{ ...state }`) is not in it; the cache then measures that copy itself.
+  const sessionTextLengths = new WeakMap();
+  const noteSessionText = (state, text) => {
+    if (state && typeof state === 'object') sessionTextLengths.set(state, text.length);
+    return state;
+  };
+  const sessionTextLength = (state) => (state && typeof state === 'object' ? sessionTextLengths.get(state) : undefined);
+
   // `strict` makes a read failure throw instead of reading as "no session".
   // Every live caller wants the lenient answer — a socket join must not fail
   // because one read did — but the super-admin merge compares what it reads
@@ -1213,12 +1225,12 @@ const createDataStore = ({ rootDir }) => {
       if (usePostgres) {
         const result = await pgPool.query('SELECT value FROM kv_store WHERE key = $1', [key]);
         if (result.rows.length > 0 && result.rows[0].value) {
-          return JSON.parse(result.rows[0].value);
+          return noteSessionText(JSON.parse(result.rows[0].value), result.rows[0].value);
         }
       } else {
         const row = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(key);
         if (row?.value) {
-          return JSON.parse(row.value);
+          return noteSessionText(JSON.parse(row.value), row.value);
         }
       }
     } catch (err) {
@@ -1264,26 +1276,26 @@ const createDataStore = ({ rootDir }) => {
             'SELECT value FROM kv_store WHERE key = $1 FOR UPDATE',
             [key]
           );
-          const current = lockResult.rows.length > 0 && lockResult.rows[0].value
-            ? JSON.parse(lockResult.rows[0].value)
-            : null;
+          const rowText = lockResult.rows.length > 0 ? lockResult.rows[0].value : null;
+          const current = rowText ? JSON.parse(rowText) : null;
 
           const decision = applyDecision(current);
           if (decision.rejected) {
             await client.query('ROLLBACK');
-            return { success: false, stale: true, data: decision.current };
+            return { success: false, stale: true, data: noteSessionText(decision.current, rowText) };
           }
 
+          const payload = JSON.stringify(decision.dataWithRev);
           await client.query(
             `INSERT INTO kv_store (key, value, updated_at)
              VALUES ($1, $2, NOW())
              ON CONFLICT (key) DO UPDATE SET
                value = EXCLUDED.value,
                updated_at = NOW()`,
-            [key, JSON.stringify(decision.dataWithRev)]
+            [key, payload]
           );
           await client.query('COMMIT');
-          return { success: true, stale: false, data: decision.dataWithRev };
+          return { success: true, stale: false, data: noteSessionText(decision.dataWithRev, payload) };
         } catch (txErr) {
           await client.query('ROLLBACK').catch(() => {});
           throw txErr;
@@ -1297,17 +1309,18 @@ const createDataStore = ({ rootDir }) => {
 
           const decision = applyDecision(current);
           if (decision.rejected) {
-            return { success: false, stale: true, data: decision.current };
+            return { success: false, stale: true, data: noteSessionText(decision.current, row.value) };
           }
 
+          const payload = JSON.stringify(decision.dataWithRev);
           sqliteDb.prepare(
             `INSERT INTO kv_store (key, value, updated_at)
              VALUES (?, ?, CURRENT_TIMESTAMP)
              ON CONFLICT(key) DO UPDATE SET
                value = excluded.value,
                updated_at = CURRENT_TIMESTAMP`
-          ).run(key, JSON.stringify(decision.dataWithRev));
-          return { success: true, stale: false, data: decision.dataWithRev };
+          ).run(key, payload);
+          return { success: true, stale: false, data: noteSessionText(decision.dataWithRev, payload) };
         })();
       }
     } catch (err) {
@@ -2201,6 +2214,9 @@ const createDataStore = ({ rootDir }) => {
     // Session state
     loadSessionState,
     saveSessionState,
+    // The text length of a session object this store parsed or wrote, for
+    // the session cache's byte cap (undefined for any other object)
+    sessionTextLength,
 
     // Global settings: a lenient read for readers, a strict locked update for
     // writers (no whole-blob save: see updateGlobalSettings)
