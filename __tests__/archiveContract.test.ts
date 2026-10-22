@@ -131,6 +131,22 @@ describe('the backup archive contract', () => {
     expect(serialised).not.toContain('jira.internal.example');
   });
 
+  it('does NOT carry any team\'s session epoch (decision D3b): a restore must never roll one back', async () => {
+    await store.saveTeam('t1', makeTeam('t1', 'Equipe Bilan'));
+    await store.saveTeamIndex(new Map([['equipe bilan', 't1']]));
+    const { sessionEpoch } = await store.rotateTeamSessionEpoch('t1');
+
+    // Really in the store, or the assertions below prove nothing.
+    expect((await store.loadTeamAuthState('t1')).sessionEpoch).toBe(sessionEpoch);
+
+    const archive = await store.loadPersistedData();
+
+    expect(archive.teams).toHaveLength(1);
+    const serialised = JSON.stringify(archive);
+    expect(serialised).not.toContain(sessionEpoch);
+    expect(serialised).not.toContain('team-auth');
+  });
+
   it('carries the Jira fields of a team record and restores them as stored: they are team data', async () => {
     const target = { mode: 'project', projectKey: 'BILAN', issueTypeId: '10001', labels: ['retrospective'] };
     const claims = { a1: { at: '2026-10-20T09:00:00.000Z', requestId: 'req-1' } };

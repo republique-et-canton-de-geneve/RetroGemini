@@ -1,4 +1,5 @@
 import { createHmac, hkdfSync, randomBytes, timingSafeEqual } from 'crypto';
+import { DEFAULT_SESSION_EPOCH } from './sessionEpoch.js';
 
 const SESSION_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 // Fixed on purpose: a key derived under another salt cannot open what this one
@@ -126,13 +127,30 @@ const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = u
     return payload;
   };
 
-  const createSessionToken = (teamId, visitorId) => {
+  // Decision D3b: a team session token carries the team's session epoch, and
+  // is valid only while that epoch is the team's current one (see
+  // `sessionEpoch.js`). The claim is *additive*: `rg1`, `v: 1` and every
+  // claim before it stay as they were, because a 41.0 pod validates with
+  // exactly those and ignores a claim it does not know — change any of them
+  // and every token this release mints is refused by an old pod, which is a
+  // mass logout on a rollback or whenever a request lands on one during the
+  // rollout (`__tests__/sessionTokenCompatibility.test.ts` holds that).
+  //
+  // The epoch defaults to `'0'`, the epoch of a team that never rotated, so a
+  // forgotten argument fails closed for any team that has: its token is
+  // refused. Every call under `server/` passes it explicitly
+  // (`__tests__/sessionTokenMint.test.ts`).
+  const createSessionToken = (teamId, visitorId, { sessionEpoch = DEFAULT_SESSION_EPOCH } = {}) => {
     return createSignedToken(TEAM_TOKEN_TYPE, {
       teamId,
-      visitorId: visitorId ?? null
+      visitorId: visitorId ?? null,
+      sessionEpoch
     });
   };
 
+  // `sessionEpoch` is the claim when it is a non-empty string, else null: a
+  // token minted before this release, or by an older pod during the rollout,
+  // which the epoch rule judges by its issue time (`createdAt`) instead.
   const validateSessionToken = (token) => {
     const payload = validateSignedToken(token, TEAM_TOKEN_TYPE);
     if (!payload || typeof payload.teamId !== 'string' || !payload.teamId) {
@@ -142,13 +160,17 @@ const createTokenService = ({ secureCompare, superAdminPassword, tokenSecret = u
     return {
       teamId: payload.teamId,
       visitorId: typeof payload.visitorId === 'string' ? payload.visitorId : null,
-      createdAt: payload.iat
+      createdAt: payload.iat,
+      sessionEpoch: typeof payload.sessionEpoch === 'string' && payload.sessionEpoch !== '' ? payload.sessionEpoch : null
     };
   };
 
   const invalidateSessionToken = () => {
-    // Signed stateless tokens cannot be revoked locally. Callers must still
-    // validate that the referenced team exists before restoring a session.
+    // Nothing to do per token: a token is revoked for its whole team, by the
+    // team's session epoch (decision D3b) — a password rotation gives the team
+    // a new one, and every token minted before stops validating on every route
+    // and on the socket (`sessionEpoch.js`, `dataStore.loadTeamAuthState`).
+    // Callers must still check that the referenced team exists.
     return undefined;
   };
 
