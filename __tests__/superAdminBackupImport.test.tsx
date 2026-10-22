@@ -191,7 +191,9 @@ describe('the stored-backup restore, as the console reports it', () => {
     });
     handlers['/api/super-admin/backups/restore'] = () => {
       answered = true;
-      return json(status, body);
+      // A Response is sent as it is: a gateway's page rather than the
+      // application's JSON.
+      return body instanceof Response ? body : json(status, body);
     };
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const page = <SuperAdmin sessionToken="admin-token" onExit={vi.fn()} />;
@@ -207,11 +209,24 @@ describe('the stored-backup restore, as the console reports it', () => {
   it.each([
     [404, { error: 'backup_not_found' }, 'This backup no longer exists.', 1],
     [422, { error: 'invalid_backup_data', reason: 'unreadable' }, 'This backup cannot be restored: its content is not a valid archive. Nothing was changed.', 0],
-    [413, { error: 'restore_archive_too_large' }, 'Once unpacked, this archive is larger than the server accepts: 512 MB at most.', 0]
+    [413, { error: 'restore_archive_too_large' }, 'Once unpacked, this archive is larger than the server accepts: 512 MB at most.', 0],
+    // The pre-restore snapshot could not be taken — a team record the backup
+    // cannot read, or a backup already running — so nothing was written.
+    [503, { error: 'pre_restore_snapshot_failed' }, 'The safety snapshot could not be created, so nothing was restored.', 0]
   ])('says what a %s means, and reads the list again only when the row is gone', async (status, body, message, reloads) => {
     await restoreFirstRow(status, body);
     expect(await screen.findByText(message)).toBeTruthy();
     await waitFor(() => expect(listCalls()).toBe(1 + reloads));
+  });
+
+  it('keeps the generic message for a 503 that is a gateway\'s page, not the snapshot refusal', async () => {
+    await restoreFirstRow(503, new Response('<html><body>503 Service Unavailable</body></html>', {
+      status: 503,
+      headers: { 'content-type': 'text/html' }
+    }));
+
+    expect(await screen.findByText('Failed to restore backup')).toBeTruthy();
+    expect(screen.queryByText('The safety snapshot could not be created, so nothing was restored.')).toBeNull();
   });
 
   it('takes away the row a 404 calls gone, and keeps the message', async () => {
@@ -236,7 +251,7 @@ describe('the stored-backup restore, as the console reports it', () => {
   });
 });
 
-describe('the whole-store upload (Upload & Restore), as the console reports a 413', () => {
+describe('the whole-store upload (Upload & Restore), as the console reports a refusal', () => {
   const uploadAndRestore = async (answer: () => Response, { french = false } = {}) => {
     handlers['/api/super-admin/restore'] = answer;
     const page = <SuperAdmin sessionToken="admin-token" onExit={vi.fn()} />;
@@ -265,6 +280,28 @@ describe('the whole-store upload (Upload & Restore), as the console reports a 41
 
     const banner = await screen.findByText('Ce fichier dépasse la taille acceptée par le serveur : 0,5 Mo au plus.');
     expect(banner.textContent).toContain('0,5 Mo');
+  });
+
+  // The upload's pre-restore snapshot could not be taken (a team record the
+  // backup cannot read, or a backup already running): nothing was written,
+  // and the console says so rather than "Failed to restore backup."
+  it('says the safety snapshot failed when the server answers that', async () => {
+    await uploadAndRestore(() => json(503, { error: 'pre_restore_snapshot_failed' }));
+    expect(await screen.findByText('The safety snapshot could not be created, so nothing was restored.')).toBeTruthy();
+    expect(screen.queryByText('Failed to restore backup.')).toBeNull();
+  });
+
+  it('says the safety snapshot failed in French too', async () => {
+    await uploadAndRestore(() => json(503, { error: 'pre_restore_snapshot_failed' }), { french: true });
+    expect(await screen.findByText('L’instantané de sécurité n’a pas pu être créé, rien n’a donc été restauré.')).toBeTruthy();
+  });
+
+  it('keeps the generic message for a 503 that is a gateway\'s page', async () => {
+    await uploadAndRestore(() => new Response('<html><body>503 Service Unavailable</body></html>', {
+      status: 503,
+      headers: { 'content-type': 'text/html' }
+    }));
+    expect(await screen.findByText('Failed to restore backup.')).toBeTruthy();
   });
 });
 
