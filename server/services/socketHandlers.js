@@ -319,9 +319,42 @@ const registerSocketHandlers = ({
     console.info('[Server] Cleared session cache after cross-pod restore invalidation');
   });
 
+  // The team a role is read from: its summary, never the full record, whose
+  // history can weigh megabytes and which a reconnect wave would parse once
+  // per joiner. Except when the summary read THROWS: on PostgreSQL the summary
+  // is a `value::jsonb` projection, and jsonb refuses text Node's JSON.parse
+  // accepts — a lone UTF-16 surrogate escape (an excerpt cut through an emoji)
+  // or `\u0000`. Such a row would otherwise leave every socket of the team
+  // without a role, and every facilitator-only change refused, until someone
+  // repaired the row by hand; the full record still reads, as it did before
+  // the summary was used here. A summary that answers null is an answer (the
+  // team is gone), never a reason to read the record. The warning is
+  // coalesced per team, so a reconnect wave writes one line, not one per
+  // joiner; a full record that cannot be read either throws to the caller.
+  const loadRosterTeam = async (teamId) => {
+    try {
+      return await dataStore.loadTeamSummary(teamId);
+    } catch (summaryErr) {
+      refusalLog.report({
+        group: 'team-summary-fallback',
+        key: String(teamId),
+        message: () => {
+          const code = summaryErr?.code ? `${summaryErr.code} ` : '';
+          return `[Server] Could not read the team summary of ${teamId} (${code}${summaryErr?.message ?? summaryErr}); reading the roster from the full record instead`;
+        },
+        label: `[Server] Team summary of ${teamId} unreadable, roster read from the full record`
+      });
+      return dataStore.loadTeam(teamId);
+    }
+  };
+
+  // The roster's entry for a user. The summary's `members` is always an array;
+  // a full record's is whatever it stores.
+  const findRosterMember = (team, userId) =>
+    (Array.isArray(team?.members) ? team.members.find((m) => m?.id === userId) : undefined);
+
   // Resolve the sender's role from the team roster (the database record, not
-  // anything the client claims about itself), read from the team summary —
-  // never the full record, whose history can weigh megabytes. Cached on the
+  // anything the client claims about itself; see loadRosterTeam). Cached on the
   // socket once known; reset on every join-session. A user the roster does not
   // name is a 'participant' — the restrictive default.
   //
@@ -335,8 +368,8 @@ const registerSocketHandlers = ({
   const resolveSenderRole = async (socket, teamId) => {
     if (socket.data.sessionRole) return socket.data.sessionRole;
     try {
-      const team = await dataStore.loadTeamSummary(teamId);
-      const member = team?.members?.find((m) => m.id === socket.userId);
+      const team = await loadRosterTeam(teamId);
+      const member = findRosterMember(team, socket.userId);
       const role = member?.role === 'facilitator' ? 'facilitator' : 'participant';
       socket.data.sessionRole = role;
       return role;
@@ -564,17 +597,18 @@ const registerSocketHandlers = ({
 
       socket.to(sessionId).emit('member-joined', { userId, userName });
 
-      // The roster comes from the team summary, never the full record: a
-      // reconnect wave is one join per participant, and loading the record
-      // parsed the team's whole history once per joiner. A failed read leaves
-      // the role unset rather than guessing it: resolveSenderRole tries again
-      // on the first write that needs it, and answers 'unknown' — never
-      // 'participant' — if that read fails too.
+      // The roster comes from the team summary (the full record only when the
+      // summary read throws, see loadRosterTeam): a reconnect wave is one join
+      // per participant, and loading the record parsed the team's whole
+      // history once per joiner. A failed read leaves the role unset rather
+      // than guessing it: resolveSenderRole tries again on the first write that
+      // needs it, and answers 'unknown' — never 'participant' — if that read
+      // fails too.
       try {
         if (sessionData?.teamId) {
-          const team = await dataStore.loadTeamSummary(sessionData.teamId);
+          const team = await loadRosterTeam(sessionData.teamId);
           if (team) {
-            const member = team.members.find((m) => m.id === userId);
+            const member = findRosterMember(team, userId);
             socket.data.sessionRole = member?.role === 'facilitator' ? 'facilitator' : 'participant';
             if (
               member &&

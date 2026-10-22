@@ -402,6 +402,22 @@ describe('aiService', () => {
       ]);
     });
 
+    // The title becomes a group's, stored in the session and the team record;
+    // half an emoji there is text PostgreSQL's jsonb refuses (utils/textCut.js).
+    it('cuts a long title at 80 characters without halving an emoji', async () => {
+      mockDataStore.loadGlobalSettings.mockResolvedValue({
+        ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }
+      });
+      const llmReply = JSON.stringify({ groups: [{ title: `${'d'.repeat(79)}😀 and more`, ticketIds: ['t1', 't2'] }] });
+      setupMockResponse(200, JSON.stringify({ choices: [{ message: { content: llmReply } }] }));
+
+      const result = await aiService.suggestTicketGroups([
+        { id: 't1', text: 'a' },
+        { id: 't2', text: 'b' }
+      ]);
+      expect(result?.groups).toEqual([{ title: 'd'.repeat(79), ticketIds: ['t1', 't2'] }]);
+    });
+
     it('returns an empty list when the LLM emits unparseable output', async () => {
       mockDataStore.loadGlobalSettings.mockResolvedValue({
         ai: { enabled: true, apiUrl: 'https://llm.example.com/v1' }

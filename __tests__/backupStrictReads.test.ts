@@ -280,8 +280,10 @@ describe('strict backup reads', () => {
       setRaw('retro-meta', value);
       expect(await backupService.createBackup('manual')).toBeNull();
       const line = errorLines().find((l) => l.includes('[Backup] Failed to create backup'));
-      expect(line).toContain('retro-meta');
-      expect(line).toContain(reason);
+      expect(line).toContain(`Record "retro-meta" cannot be archived (${reason})`);
+      // It is not a team record, and the line must not send an operator
+      // looking for one (k8s/README.md, A backup that cannot read a team fails).
+      expect(line).not.toContain('Team record');
     });
 
     it('backs up with empty lists when there is no retro-meta row at all', async () => {

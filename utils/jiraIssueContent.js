@@ -40,7 +40,10 @@
  * never its author). The strings are the `session.actionContext.*` entries of
  * `i18n/locales/{en,fr}/session.ts`, re-declared here because those files are
  * TypeScript; `__tests__/jiraIssueContent.test.ts` fails if the two drift.
+ * The card is quoted by `ticketQuote`, the rule the screens use as well.
  */
+
+import { cutCodeUnits, ticketQuote } from './textCut.js';
 
 /**
  * The id the client links a ROTI follow-up action to, in place of a card. It is
@@ -55,8 +58,6 @@ export const SUMMARY_MAX_LENGTH = 255;
 /** The longest display name a description names its requester by. */
 export const REQUESTED_BY_MAX_LENGTH = 80;
 
-// How much of a card the context quotes, as the screens do.
-const TICKET_QUOTE_MAX_LENGTH = 50;
 
 const CONTENT_LANGUAGES = new Set(['en', 'fr']);
 const isContentLanguage = (value) => CONTENT_LANGUAGES.has(value);
@@ -77,15 +78,6 @@ const WIKI_MARKUP = /[{}[\]|*_\-+^~!?#`]/g;
 
 const isObject = (value) => !!value && typeof value === 'object';
 const arrayOf = (value) => (Array.isArray(value) ? value : []);
-
-// The first `max` UTF-16 code units of `text`, one fewer when the cut would
-// fall inside a surrogate pair: an emoji is dropped whole, never halved.
-const cutCodeUnits = (text, max) => {
-  if (text.length <= max) return text;
-  const last = text.charCodeAt(max - 1);
-  const splitsPair = last >= 0xd800 && last <= 0xdbff;
-  return text.slice(0, splitsPair ? max - 1 : max);
-};
 
 // One line of text: every line-breaking character becomes a space, runs of
 // spaces become one, and the ends are trimmed.
@@ -191,8 +183,7 @@ const CONTEXT_STRINGS = {
  *    written;
  *  - a ROTI follow-up says so;
  *  - a card of any retro is quoted, cut at 50 characters and marked `...` when
- *    longer (the cut never halves an emoji, the one place this differs from
- *    the screen, which would show a broken character there);
+ *    longer, never halving an emoji (`ticketQuote`, the screens' rule too);
  *  - a group is named;
  *  - anything else — no link, a health-check dimension, a card deleted since —
  *    has no context, `''`.
@@ -217,9 +208,7 @@ export const actionContextText = ({ action, team, language } = {}) => {
     if (!isObject(retro)) continue;
     const ticket = arrayOf(retro.tickets).find((candidate) => isObject(candidate) && candidate.id === linkedId);
     if (ticket) {
-      const text = typeof ticket.text === 'string' ? ticket.text : '';
-      const cut = text.length > TICKET_QUOTE_MAX_LENGTH ? '...' : '';
-      return strings.ticket(`${cutCodeUnits(text, TICKET_QUOTE_MAX_LENGTH)}${cut}`);
+      return strings.ticket(ticketQuote(typeof ticket.text === 'string' ? ticket.text : ''));
     }
     const group = arrayOf(retro.groups).find((candidate) => isObject(candidate) && candidate.id === linkedId);
     if (group) return strings.group(typeof group.title === 'string' ? group.title : '');

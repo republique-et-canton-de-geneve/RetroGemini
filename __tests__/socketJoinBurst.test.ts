@@ -135,6 +135,8 @@ describe('a burst of joins on one team (integration)', () => {
     });
     await dataStore.saveSessionState(SESSION_ID, session());
 
+    // The full record is read only after a summary read has thrown (a row
+    // PostgreSQL's jsonb refuses); the summary never fails here.
     loadTeam = vi.fn(() => {
       throw new Error('a join must not load the full team');
     });

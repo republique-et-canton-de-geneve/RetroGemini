@@ -10,6 +10,7 @@
  */
 
 import { request as outboundRequest } from './outboundHttp.js';
+import { cutCodeUnits } from '../../utils/textCut.js';
 
 // Thirty seconds without a byte on the socket fails the call. It is an idle
 // timeout, not a deadline, and no size cap applies: the AI calls behave as
@@ -525,7 +526,8 @@ const createAiService = ({ dataStore }) => {
     const sanitizedGroups = [];
     for (const g of parsed.groups) {
       if (!g || typeof g !== 'object') continue;
-      const title = typeof g.title === 'string' ? g.title.trim().slice(0, 80) : '';
+      // Never half an emoji: the title is stored (utils/textCut.js).
+      const title = typeof g.title === 'string' ? cutCodeUnits(g.title.trim(), 80) : '';
       if (!Array.isArray(g.ticketIds)) continue;
       const ids = [];
       for (const rawId of g.ticketIds) {

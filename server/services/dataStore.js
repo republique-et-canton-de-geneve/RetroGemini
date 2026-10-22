@@ -3,6 +3,7 @@ import { dirname, join } from 'path';
 import Database from 'better-sqlite3';
 import pg from 'pg';
 import { createKeyedQueue } from './keyedQueue.js';
+import { isJsonbRefusal, readRowsOneByOne } from './jsonbRefusal.js';
 import { carryJiraLinks, carryJiraParents } from '../../utils/actionImpact.js';
 
 const TEAM_PREFIX = 'team:';
@@ -1139,14 +1140,38 @@ const createDataStore = ({ rootDir }) => {
   // anonymous login picker (`copySummary` spreads every field), and a hash
   // there would be one forgotten pick away from `/api/team/list`. Its only
   // caller is the password pass; no route may call it.
-  const loadTeamPasswordHashes = async () => {
-    const rows = usePostgres
-      ? (await pgPool.query(
+  //
+  // On PostgreSQL one row whose text jsonb refuses but Node parses (a lone
+  // surrogate escape, a `\u0000`: see jsonbRefusal.js) would fail the whole
+  // statement, and with it the pass — after a restore of an archive from
+  // before hashing, its teams would keep clear-text passwords no typed
+  // password matches. So that one refusal falls back to reading the rows one
+  // at a time in Node; a row Node cannot parse either still fails the read.
+  const readPasswordHashRowsPostgres = async () => {
+    try {
+      return (await pgPool.query(
         `SELECT j->>'id' AS id,
                 CASE WHEN jsonb_typeof(j->'passwordHash') = 'string' THEN j->>'passwordHash' END AS password_hash
          FROM (SELECT value::jsonb AS j FROM kv_store WHERE key LIKE $1 OFFSET 0) AS team_rows`,
         [TEAM_PREFIX + '%']
-      )).rows
+      )).rows;
+    } catch (err) {
+      if (!isJsonbRefusal(err)) throw err;
+      console.warn(`[Server] A team record holds text PostgreSQL's jsonb refuses (${err.code}); reading the password hashes one team at a time`);
+      return readRowsOneByOne({
+        query: (sql, params) => pgPool.query(sql, params),
+        prefix: TEAM_PREFIX,
+        pick: (team) => ({
+          id: team?.id,
+          password_hash: typeof team?.passwordHash === 'string' ? team.passwordHash : null
+        })
+      });
+    }
+  };
+
+  const loadTeamPasswordHashes = async () => {
+    const rows = usePostgres
+      ? await readPasswordHashRowsPostgres()
       : sqliteDb.prepare(
         `SELECT json_extract(value, '$.id') AS id,
                 CASE WHEN json_type(value, '$.passwordHash') = 'text' THEN json_extract(value, '$.passwordHash') END AS password_hash
@@ -1521,8 +1546,10 @@ const createDataStore = ({ rootDir }) => {
   // cannot carry now fails the archive, naming its key and never its content.
   // ---------------------------------------------------------------------------
 
+  // "Team record" only for a team row: `retro-meta` fails the same way, and
+  // the line must not send an operator looking for a team.
   const archiveReadError = (key, reason) =>
-    Object.assign(new Error(`Team record ${JSON.stringify(key)} cannot be archived (${reason})`), {
+    Object.assign(new Error(`${key.startsWith(TEAM_PREFIX) ? 'Team record' : 'Record'} ${JSON.stringify(key)} cannot be archived (${reason})`), {
       code: 'BACKUP_READ_FAILED',
       key,
       reason

@@ -1,4 +1,5 @@
 import type { Column, RetroSession, Ticket } from '../types';
+import { cutCodeUnits } from './textCut';
 import { randomId } from './randomId';
 
 const defaultIdGenerator = (): string => randomId();
@@ -206,7 +207,8 @@ export const applySuggestedClusters = (
     const newGroupId = generateId();
     session.groups.push({
       id: newGroupId,
-      title: (suggestion.title || '').trim().slice(0, 80),
+      // Never half an emoji: the title is stored (utils/textCut.js).
+      title: cutCodeUnits((suggestion.title || '').trim(), 80),
       colId,
       votes: [],
     });

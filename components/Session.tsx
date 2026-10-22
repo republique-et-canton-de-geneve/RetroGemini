@@ -6,6 +6,7 @@ import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
 import { bestTextColorOn, readableTextColor } from '../utils/colorUtils';
 import { randomId } from '../utils/randomId';
+import { ticketQuote } from '../utils/textCut';
 import {
   addTicketToGroup,
   applySuggestedClusters,
@@ -516,9 +517,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     for (const r of teamData.retrospectives) {
       const t = r.tickets.find(x => x.id === action.linkedTicketId);
       if (t) {
-        return contentT('session.actionContext.ticket', {
-          text: `${t.text.substring(0, 50)}${t.text.length > 50 ? '...' : ''}`
-        });
+        // Never half of an emoji: the quote is stored (see ticketQuote).
+        return contentT('session.actionContext.ticket', { text: ticketQuote(t.text) });
       }
       const g = r.groups.find(x => x.id === action.linkedTicketId);
       if (g) {

@@ -256,6 +256,14 @@ describe('retroGrouping helpers', () => {
       expect(session.tickets.find((t) => t.id === 't4')!.groupId).toBe('g2');
     });
 
+    // A group title is stored in the session and the team record; half an
+    // emoji there is text PostgreSQL's jsonb refuses (utils/textCut.js).
+    it('cuts a long title at 80 characters without halving an emoji', () => {
+      const session = makeSession({ tickets: [makeTicket({ id: 't1' }), makeTicket({ id: 't2' })] });
+      applySuggestedClusters(session, [{ title: `${'d'.repeat(79)}😀 and more`, ticketIds: ['t1', 't2'] }], () => 'g1');
+      expect(session.groups[0].title).toBe('d'.repeat(79));
+    });
+
     it('skips clusters that share ids with an already-applied cluster', () => {
       let counter = 0;
       const session = makeSession({

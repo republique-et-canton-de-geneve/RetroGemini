@@ -8,6 +8,8 @@ import {
 } from '../services/restoreArchive.js';
 import { hashPassword } from '../services/passwordHashing.js';
 import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
+// Stored text is cut without ever halving an emoji (utils/textCut.js).
+import { cutCodeUnits } from '../../utils/textCut.js';
 import { migrateLegacyPasswords } from '../services/passwordMigration.js';
 import { healStoredEmails } from '../services/emailMigration.js';
 import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
@@ -649,7 +651,7 @@ This notification was sent from RetroGemini.
         teamName: 'Super Admin',
         authorId: 'super-admin',
         authorName: 'Super Admin',
-        content: content.trim().slice(0, 1000),
+        content: cutCodeUnits(content.trim(), 1000),
         createdAt: new Date().toISOString(),
         isAdmin: true
       };
@@ -717,7 +719,7 @@ This notification was sent from RetroGemini.
         const typeLabel = feedbackType === 'bug' ? 'Bug Report' : 'Feature Request';
         const safeFeedbackTitle = escapeHtml(feedbackTitle);
         const safeTeamName = escapeHtml(teamName);
-        const safeContent = escapeHtml(content.trim().slice(0, 1000));
+        const safeContent = escapeHtml(newComment.content);
 
         try {
           await mailerService.mailer.sendMail({
@@ -728,7 +730,7 @@ This notification was sent from RetroGemini.
 
 The administrator has added a comment on your ${typeLabel} "${feedbackTitle}":
 
-"${content.trim().slice(0, 1000)}"
+"${newComment.content}"
 
 ---
 This notification was sent from RetroGemini.

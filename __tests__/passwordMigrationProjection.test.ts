@@ -127,6 +127,57 @@ for (const engine of engines) {
       expect(upgraded.retrospectives).toEqual(heavyHistory());
     });
 
+    // A team record holding text PostgreSQL's jsonb refuses (an action context
+    // cut through an emoji leaves a lone surrogate, which Node writes as
+    // `\ud83d`; a NUL is written `\u0000`): the one-statement projection
+    // throws on it, and used to fail the whole pass — so a restore of an
+    // archive from before password hashing left its teams unable to log in
+    // with a typed password, while the restore reported success. The pass
+    // reads the rows one at a time instead; Node parses both escapes.
+    it('still hashes the legacy records when another team record holds text jsonb refuses', async () => {
+      const legacy = tid('legacy-beside-escapes');
+      const surrogate = tid('lone-surrogate');
+      const nul = tid('nul');
+      await store.saveTeam(legacy, { id: legacy, name: 'Legacy', passwordHash: 'open-sesame-2' });
+      await store.saveTeam(surrogate, {
+        id: surrogate,
+        name: 'Surrogate',
+        passwordHash: await hashPassword('already-hashed'),
+        retrospectives: [{ id: 'r1', openActionsSnapshot: [{ id: 'a1', text: 'Fix it', contextText: `Re: abc\ud83d...` }] }]
+      });
+      await store.saveTeam(nul, { id: nul, name: 'Nul', passwordHash: await hashPassword('already-hashed'), notes: 'nul\u0000byte' });
+
+      if (engine.name === 'PostgreSQL') {
+        // The precondition, proved: the cast refuses both rows.
+        for (const id of [surrogate, nul]) {
+          await expect(
+            store.getPgPool().query('SELECT value::jsonb FROM kv_store WHERE key = $1', [`team:${id}`])
+          ).rejects.toMatchObject({ code: expect.stringMatching(/^22P0[25]$/) });
+        }
+      }
+
+      const teamRows = engine.name === 'PostgreSQL'
+        ? Number((await store.getPgPool().query("SELECT count(*) AS n FROM kv_store WHERE key LIKE 'team:%'")).rows[0].n)
+        : Number(store.getSqliteDb().prepare("SELECT count(*) AS n FROM kv_store WHERE key LIKE 'team:%'").get().n);
+      const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const result = await migrateLegacyPasswords({ dataStore: store });
+        expect(result.error).toBe(false);
+        expect(result.scanned).toBe(teamRows);
+        expect(result.failed).toBe(0);
+      } finally {
+        info.mockRestore();
+        warn.mockRestore();
+      }
+
+      const upgraded = (await store.loadTeamRaw(legacy)) as Json;
+      expect(isHashedPassword(upgraded.passwordHash)).toBe(true);
+      expect(await verifyPassword('open-sesame-2', upgraded.passwordHash as string)).toBe(true);
+      const rows = ours(await store.loadTeamPasswordHashes());
+      expect(rows.map((row) => row.id).sort()).toEqual(expect.arrayContaining([legacy, surrogate, nul].sort()));
+    });
+
     it('answers only the id and a string hash, null for anything else', async () => {
       const numeric = tid('numeric');
       const none = tid('none');
