@@ -298,6 +298,93 @@ for (const engine of engines) {
       expect(await store.loadTeamSummary(`${prefix}-missing`)).toBeNull();
     });
 
+    // A socket join reads one team's roster from this, on every reconnect.
+    // Reading every team's fingerprint there re-projected every team written
+    // since the previous read — during a live retrospective, the active teams'
+    // records change several times a second.
+    it('reads one team summary from that team\'s row alone', async () => {
+      const id = tid('n');
+      const neighbour = tid('n2');
+      await store.saveTeam(id, team(id, 'Xi'));
+      await store.saveTeam(neighbour, team(neighbour, 'Omicron'));
+
+      const cold = await sqlDuring(() => store.loadTeamSummary(id));
+      expect(cold.length).toBeGreaterThan(0);
+      expect(cold.filter((text) => /\bLIKE\b/i.test(text))).toEqual([]);
+
+      await store.loadTeamSummary(id);
+      const warm = await sqlDuring(() => store.loadTeamSummary(id));
+      expect(warm.filter((text) => /\bLIKE\b|json_extract|::jsonb/i.test(text))).toEqual([]);
+    });
+
+    it('sees a same-length rewrite another process made, through the single-team read', async () => {
+      const id = tid('o');
+      await store.saveTeam(id, team(id, 'Pi'));
+      expect((await store.loadTeamSummary(id) as Json).name).toBe('Pi');
+
+      await foreignRewrite(id, (stored) => stored.replace('"name":"Pi"', '"name":"Po"'));
+      expect((await store.loadTeamSummary(id) as Json).name).toBe('Po');
+    });
+
+    // The single-team read must not mark the whole list as re-stamped: the
+    // next list read would then judge a team another process rewrote at the
+    // same length by its length alone, and keep serving the old summary.
+    it('leaves the whole list able to see a foreign rewrite after reading another team', async () => {
+      const a = tid('p');
+      const b = tid('p2');
+      await store.saveTeam(a, team(a, 'Rho'));
+      await store.saveTeam(b, team(b, 'Sigma'));
+      expect((await ours())[a].name).toBe('Rho');
+
+      await foreignRewrite(a, (stored) => stored.replace('"name":"Rho"', '"name":"Rha"'));
+      expect((await store.loadTeamSummary(b) as Json).name).toBe('Sigma');
+      expect((await ours())[a].name).toBe('Rha');
+    });
+
+    it('answers null for a team deleted since it was cached, and the list forgets it', async () => {
+      const id = tid('q');
+      await store.saveTeam(id, team(id, 'Tau'));
+      expect(await store.loadTeamSummary(id)).not.toBeNull();
+      await other.deleteTeamRecord(id);
+      expect(await store.loadTeamSummary(id)).toBeNull();
+      expect((await ours())[id]).toBeUndefined();
+    });
+
+    // An empty value is "no team" for kvGet and teamExists; projecting it
+    // throws, and a join would then read the role as unknown.
+    it('answers null, as loadTeam does, for a row whose value is empty', async () => {
+      const id = tid('r');
+      await store.saveTeam(id, team(id, 'Upsilon'));
+      expect(await store.loadTeamSummary(id)).not.toBeNull();
+      if (isPg) await store.getPgPool().query("UPDATE kv_store SET value = '' WHERE key = $1", [`team:${id}`]);
+      else store.getSqliteDb().prepare("UPDATE kv_store SET value = '' WHERE key = ?").run(`team:${id}`);
+      expect(await store.loadTeam(id)).toBeNull();
+      expect(await store.loadTeamSummary(id)).toBeNull();
+      // The list projection cannot read such a row: leave none behind.
+      await store.deleteTeamRecord(id);
+    });
+
+    // A reconnect wave is one join per participant: readers of one stale team
+    // share one projection instead of casting the record once each.
+    it.skipIf(!isPg)('shares one projection between concurrent reads of one stale team', async () => {
+      const id = tid('s');
+      await store.saveTeam(id, team(id, 'Phi'));
+      await store.loadTeamSummary(id);
+      await foreignRewrite(id, (stored) => stored.replace('"name":"Phi"', '"name":"Pho"'));
+      // Eight live connections, so the eight fingerprint reads really overlap:
+      // with a cold pool they wait for connections one by one, and the first
+      // projection lands before the others look — sharing or not.
+      await Promise.all(Array.from({ length: 8 }, () => store.getPgPool().query('SELECT pg_sleep(0.05)')));
+
+      let answers: unknown[] = [];
+      const sql = await sqlDuring(async () => {
+        answers = await Promise.all(Array.from({ length: 8 }, () => store.loadTeamSummary(id)));
+      });
+      expect(sql.filter((text) => text.includes('::jsonb'))).toHaveLength(1);
+      expect(answers.map((answer) => (answer as Json).name)).toEqual(Array(8).fill('Pho'));
+      expect(new Set(answers).size).toBe(8);
+    });
+
     it('hands out a copy of the Jira target', async () => {
       const id = tid('m');
       await store.saveTeam(id, team(id, 'Nu', { jiraTarget: TARGET }));

@@ -1,9 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createDataStore } from '../server/services/dataStore.js';
-import { shouldRefreshLastConnection, refreshLastConnectionDate } from '../server/services/socketHandlers.js';
+import {
+  shouldRefreshLastConnection,
+  refreshLastConnectionDate,
+  createLastConnectionRefresher
+} from '../server/services/socketHandlers.js';
 
 const FIVE_MIN = 5 * 60 * 1000;
 
@@ -83,5 +87,77 @@ describe('refreshLastConnectionDate', () => {
 
     expect(await refreshLastConnectionDate(dataStore, 't1')).toBe(false);
     expect((await dataStore.loadTeamRaw('t1'))._rev).toBe(before);
+  });
+});
+
+// The in-lock decision above keeps a burst to one write, but on PostgreSQL —
+// where joins overlap — every join still queued its own update, and each queued
+// updater parsed the whole team record under the lock before declining. The
+// refresher shares one refresh per team on a pod.
+describe('createLastConnectionRefresher', () => {
+  const deferred = <T,>() => {
+    let resolve!: (value: T) => void;
+    let reject!: (err: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+
+  it('starts one refresh for ten concurrent joins, and only its caller answers true', async () => {
+    const pending = deferred<boolean>();
+    const refresh = vi.fn(() => pending.promise);
+    const refresher = createLastConnectionRefresher({}, refresh);
+
+    const calls = Array.from({ length: 10 }, () => refresher.run('t1'));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresher.pending()).toBe(1);
+    pending.resolve(true);
+
+    expect(await Promise.all(calls)).toEqual([true, false, false, false, false, false, false, false, false, false]);
+    expect(refresher.pending()).toBe(0);
+
+    // Settled: the next join starts a refresh of its own.
+    refresh.mockImplementation(() => Promise.resolve(false));
+    await refresher.run('t1');
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects only for the caller that started a failing refresh', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const pending = deferred<boolean>();
+      const refresher = createLastConnectionRefresher({}, () => pending.promise);
+      const first = refresher.run('t1');
+      const others = Array.from({ length: 3 }, () => refresher.run('t1'));
+      pending.reject(new Error('store down'));
+
+      await expect(first).rejects.toThrow('store down');
+      expect(await Promise.all(others)).toEqual([false, false, false]);
+      expect(refresher.pending()).toBe(0);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('runs two teams concurrently', async () => {
+    const a = deferred<boolean>();
+    const b = deferred<boolean>();
+    const refresh = vi.fn((_store: unknown, teamId: string) => (teamId === 'a' ? a.promise : b.promise));
+    const refresher = createLastConnectionRefresher({}, refresh);
+
+    const runA = refresher.run('a');
+    const runB = refresher.run('b');
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresher.pending()).toBe(2);
+    b.resolve(true);
+    a.resolve(true);
+    expect(await Promise.all([runA, runB])).toEqual([true, true]);
+    expect(refresher.pending()).toBe(0);
   });
 });

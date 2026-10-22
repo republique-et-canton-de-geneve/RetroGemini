@@ -131,12 +131,15 @@ describe('update-session: restore, refuse, report (integration)', () => {
         if (failPersistence) return Promise.reject(new Error('simulated database outage'));
         return dataStore.saveSessionState(...args);
       },
-      // The team record is where the sender's role comes from; a read that
+      // The team summary is where the sender's role comes from; a read that
       // throws is the one case where the server cannot say who is writing.
-      loadTeam: (...args: Parameters<typeof dataStore.loadTeam>) => {
+      loadTeamSummary: (...args: Parameters<typeof dataStore.loadTeamSummary>) => {
         if (failTeamRead) return Promise.reject(new Error('simulated team read failure'));
-        return dataStore.loadTeam(...args);
+        return dataStore.loadTeamSummary(...args);
       },
+      // The socket path reads the roster from the summary, never the whole
+      // record: every case in this suite doubles as that guard.
+      loadTeam: () => Promise.reject(new Error('the socket path must not load the full team record')),
       loadSessionState: async (...args: Parameters<typeof dataStore.loadSessionState>) => {
         if (failSessionRead) return null;
         const row = await dataStore.loadSessionState(...args);

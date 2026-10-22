@@ -912,6 +912,36 @@ const createDataStore = ({ rootDir }) => {
     return { known, stale };
   };
 
+  // The one projection of a team summary, for the rows `where` selects: the
+  // whole list's stale rows and the single-row read share it, so the column
+  // list cannot drift between them. On PostgreSQL every column comes from one
+  // cast per row: `OFFSET 0` keeps the planner from folding the subquery into
+  // the outer select, which would turn the single cast back into one per
+  // column. The stamp and size are those of the row version projected, never
+  // of an earlier fingerprint read.
+  const summaryProjectionSql = (where) => (usePostgres
+    ? `SELECT key, row_version::text AS stamp, octet_length(value) AS size,
+              j->>'id' AS id,
+              j->>'name' AS name,
+              j->>'facilitatorEmail' AS facilitator_email,
+              j->>'lastConnectionDate' AS last_connection_date,
+              j->'members' AS members,
+              j->'mergedFrom' AS merged_from,
+              j->'archivedMembers' AS archived_members,
+              j->'jiraTarget' AS jira_target
+       FROM (SELECT key, xmin AS row_version, value, value::jsonb AS j
+             FROM kv_store WHERE ${where} OFFSET 0) AS team_rows`
+    : `SELECT key, updated_at AS stamp, octet_length(value) AS size,
+              json_extract(value, '$.id') AS id,
+              json_extract(value, '$.name') AS name,
+              json_extract(value, '$.facilitatorEmail') AS facilitator_email,
+              json_extract(value, '$.lastConnectionDate') AS last_connection_date,
+              json_extract(value, '$.members') AS members,
+              json_extract(value, '$.mergedFrom') AS merged_from,
+              json_extract(value, '$.archivedMembers') AS archived_members,
+              json_extract(value, '$.jiraTarget') AS jira_target
+       FROM kv_store WHERE ${where}`);
+
   // LIKE (not a collation-sensitive range) for the same reason as
   // kvGetMultipleByPrefix above. `octet_length` reads the TOAST header, never
   // the value.
@@ -924,22 +954,7 @@ const createDataStore = ({ rootDir }) => {
     const { known, stale } = partitionByFreshness(stamps.rows);
     let projected = [];
     if (stale.length > 0) {
-      // `OFFSET 0` keeps the planner from folding the subquery into the outer
-      // select, which would turn the single cast back into one per column.
-      const result = await pgPool.query(
-        `SELECT key, row_version::text AS stamp, octet_length(value) AS size,
-                j->>'id' AS id,
-                j->>'name' AS name,
-                j->>'facilitatorEmail' AS facilitator_email,
-                j->>'lastConnectionDate' AS last_connection_date,
-                j->'members' AS members,
-                j->'mergedFrom' AS merged_from,
-                j->'archivedMembers' AS archived_members,
-                j->'jiraTarget' AS jira_target
-         FROM (SELECT key, xmin AS row_version, value, value::jsonb AS j
-               FROM kv_store WHERE key = ANY($1) OFFSET 0) AS team_rows`,
-        [stale]
-      );
+      const result = await pgPool.query(summaryProjectionSql('key = ANY($1)'), [stale]);
       projected = result.rows;
     }
     return { keys: stamps.rows.map((row) => row.key), known, projected };
@@ -963,16 +978,7 @@ const createDataStore = ({ rootDir }) => {
     sqliteDataVersionSeen = dataVersion;
     const { known, stale } = partitionByFreshness(stamps);
     const projected = stale.length === 0 ? [] : sqliteDb.prepare(
-      `SELECT key, updated_at AS stamp, octet_length(value) AS size,
-              json_extract(value, '$.id') AS id,
-              json_extract(value, '$.name') AS name,
-              json_extract(value, '$.facilitatorEmail') AS facilitator_email,
-              json_extract(value, '$.lastConnectionDate') AS last_connection_date,
-              json_extract(value, '$.members') AS members,
-              json_extract(value, '$.mergedFrom') AS merged_from,
-              json_extract(value, '$.archivedMembers') AS archived_members,
-              json_extract(value, '$.jiraTarget') AS jira_target
-       FROM kv_store WHERE key IN (SELECT value FROM json_each(?))`
+      summaryProjectionSql('key IN (SELECT value FROM json_each(?))')
     ).all(JSON.stringify(stale));
     return { keys: stamps.map((row) => row.key), known, projected };
   };
@@ -1029,14 +1035,95 @@ const createDataStore = ({ rootDir }) => {
     return summaries;
   };
 
-  // One team's summary, or null when the team is gone, through the same cache
-  // and the same freshness rule as the whole list: a warm read parses no
-  // record, whatever the team's history weighs, and a write by another pod is
-  // seen. It still reads every team's fingerprint, which is what keeps the
-  // cache's rules in one place.
+  // One team's summary, through the same cache and the same freshness rule as
+  // the whole list, reading that one row only. A socket join resolves the
+  // joiner's role from it, and `/jira/status` its target, so it runs on every
+  // reconnect: reading every team's fingerprint there would re-project every
+  // team written since the previous read, and during a live retrospective the
+  // active teams' records change several times a second. A warm read parses
+  // no record, whatever the team's history weighs, and a write by another pod
+  // is seen (`xmin`, or `updated_at` once another connection committed).
+  //
+  // An empty value is "no team", as it is for kvGet and teamExists; casting it
+  // would throw, and a join would then read the role as unknown.
+  //
+  // On PostgreSQL, readers of one team at one fingerprint share one
+  // projection: a reconnect wave after a rolling update is one join per
+  // participant, and each would otherwise run its own full cast of the same
+  // record while holding one of the pod's pooled connections. A projection
+  // issued after a fingerprint was read returns a row at least as new as it.
+  const summaryProjections = new Map(); // `${key}\0${stamp}\0${size}` -> Promise<entry | null>
+  const projectOneSummaryPostgres = (key, row) => {
+    const fingerprint = `${key}\u0000${row.stamp}\u0000${row.size}`;
+    const running = summaryProjections.get(fingerprint);
+    if (running) return running;
+    const started = (async () => {
+      const result = await pgPool.query(summaryProjectionSql('key = $1'), [key]);
+      const projected = result.rows[0];
+      // Deleted between the two queries.
+      if (!projected || !(Number(projected.size) > 0)) {
+        forgetTeamSummary(key);
+        return null;
+      }
+      const entry = projectSummaryRow(projected);
+      teamSummaryCache.set(key, entry);
+      return entry;
+    })();
+    summaryProjections.set(fingerprint, started);
+    // Both handlers attached here, so a rejection reaches every caller
+    // awaiting it and is never left unhandled.
+    const forget = () => {
+      if (summaryProjections.get(fingerprint) === started) summaryProjections.delete(fingerprint);
+    };
+    started.then(forget, forget);
+    return started;
+  };
+
+  const readOneTeamSummaryPostgres = async (key) => {
+    const result = await pgPool.query(
+      'SELECT xmin::text AS stamp, octet_length(value) AS size FROM kv_store WHERE key = $1',
+      [key]
+    );
+    const row = result.rows[0];
+    if (!row || !(Number(row.size) > 0)) {
+      forgetTeamSummary(key);
+      return null;
+    }
+    const cached = teamSummaryCache.get(key);
+    if (isFresh(cached, row)) return cached;
+    return projectOneSummaryPostgres(key, row);
+  };
+
+  // Synchronous from the fingerprint to the cache update, like the list path.
+  // It never moves `sqliteDataVersionSeen`: that marker says the WHOLE list
+  // was re-stamped, and moving it here would make the next list read skip the
+  // stamps of the other rows another connection rewrote at the same length.
+  const readOneTeamSummarySqlite = (key) => {
+    const dataVersion = sqliteDb.pragma('data_version', { simple: true });
+    const otherConnectionWrote = dataVersion !== sqliteDataVersionSeen;
+    const row = sqliteDb.prepare(
+      `SELECT key, ${otherConnectionWrote ? 'updated_at' : 'NULL'} AS stamp, octet_length(value) AS size
+       FROM kv_store WHERE key = ?`
+    ).get(key);
+    if (!row || !(Number(row.size) > 0)) {
+      forgetTeamSummary(key);
+      return null;
+    }
+    const cached = teamSummaryCache.get(key);
+    if (isFresh(cached, row)) return cached;
+    const projected = sqliteDb.prepare(summaryProjectionSql('key = ?')).get(key);
+    if (!projected) {
+      forgetTeamSummary(key);
+      return null;
+    }
+    const entry = projectSummaryRow(projected);
+    teamSummaryCache.set(key, entry);
+    return entry;
+  };
+
   const loadTeamSummary = async (teamId, { withMergeProvenance = false, withArchivedMembers = false, withJiraTarget = false } = {}) => {
-    const { entries } = await refreshTeamSummaries();
-    const entry = entries.get(`${TEAM_PREFIX}${teamId}`);
+    const key = `${TEAM_PREFIX}${teamId}`;
+    const entry = usePostgres ? await readOneTeamSummaryPostgres(key) : readOneTeamSummarySqlite(key);
     return entry ? copySummary(entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }) : null;
   };
 
