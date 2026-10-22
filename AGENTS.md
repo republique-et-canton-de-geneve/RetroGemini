@@ -2123,10 +2123,15 @@ Rules:
   record, and uses a stored `contextText` only when the card or group no
   longer exists — that value is whatever a screen stored, which may be cut at
   50 characters or written in the reader's language. Jira's limits are the
-  only cuts: the summary at 255, and the description at 32,767
-  (`DESCRIPTION_MAX_LENGTH`, line breaks counted twice), where whole cards are
-  dropped from the end and counted in a closing line, and a quote too long to
-  fit is replaced by a sentence saying so. `wikiText` escapes each item, and
+  only cuts to what the action and its cards say: the summary at 255, and the
+  description at 32,767 (`DESCRIPTION_MAX_LENGTH`, line breaks counted
+  twice), where whole cards are dropped from the end and counted in a closing
+  line (a first paragraph that nearly fills the limit leaves them
+  unmentioned), and a quote too long to fit is replaced by a sentence saying
+  so — only when that sentence fits: a session name close to the limit keeps
+  the real quote, overflows, and Jira refuses that one action. The requester's
+  display name is cut at 80 (`REQUESTED_BY_MAX_LENGTH`), RetroGemini's own
+  limit. `wikiText` escapes each item, and
   the list is the one construct the template writes (nothing interpolated can
   start a line). The guard is linear, because it runs under the team's row
   lock (the claim step) and in the dialog on every live update. The dialog

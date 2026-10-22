@@ -279,10 +279,11 @@ date, the card the action came from, quoted in full, or for an action on a
 group the group's title and the full text of each of its cards, one per line,
 in the board's order (in anonymous sessions too, never naming an author), and
 who asked, written in the session's template language; the labels come from
-the team's target. Only Jira's own limits shorten anything: the summary is the
-action's text up to 255 characters, and a description longer than 32,767
-characters lists as many whole cards as fit and says how many more are in
-RetroGemini. An action whose card no longer exists (its retrospective was
+the team's target. Cards are never shortened; only Jira's own limits shorten
+the issue: the summary is the action's text up to 255 characters, and a
+description longer than 32,767 characters lists as many whole cards as fit and
+says how many more are in RetroGemini. The name of the person who asked is cut
+at 80 characters. An action whose card no longer exists (its retrospective was
 deleted) quotes the context saved with it, which may be shortened. In the mode with a parent issue per session, each
 parent issue carries the session's name and date (the team's name for the
 Dashboard's parent) and who asked, in the same language. Required custom fields are not supported: Jira's own

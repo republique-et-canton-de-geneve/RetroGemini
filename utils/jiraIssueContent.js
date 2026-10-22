@@ -53,9 +53,12 @@
  * description also lists the full text of every card of that group, in board
  * order. The card is read from the team record; a context stored on the action
  * is only the fallback for a card that is gone, and may be what a screen cut.
- * Jira's own limits are the only cuts: the summary at 255 characters, the
- * description at 32,767 (`DESCRIPTION_MAX_LENGTH`), where whole cards are left
- * out and counted, never halved.
+ * A card or a group title is never cut: only Jira's limits shorten what the
+ * action and its cards say — the summary at 255 characters, the description
+ * at 32,767 (`DESCRIPTION_MAX_LENGTH`), where whole cards are left out and
+ * counted, never halved. The requester's display name is cut at 80 characters
+ * (`REQUESTED_BY_MAX_LENGTH`), a limit of RetroGemini's own. `issueFields`
+ * says what happens when the first paragraph alone nearly fills the limit.
  */
 
 /**
@@ -380,9 +383,10 @@ const DESCRIPTION_STRINGS = {
 
 // The first paragraph, then the group's cards: as many whole cards as fit
 // within Jira's limit, in board order, then a line saying how many more are in
-// RetroGemini. Never a card cut, never a silent drop. When not even the first
-// card fits, a line says where the cards are; when not even that line fits (a
-// first paragraph near the limit), the first paragraph alone (review R2a).
+// RetroGemini. Never a card cut. When not even the first card fits, a line says
+// where the cards are; when not even that line fits (a first paragraph near the
+// limit), the first paragraph alone (review R2a) — the cards then go
+// unmentioned.
 //
 // Linear in the number of cards (prefix sums): this runs inside the claim
 // step's `atomicTeamUpdate`, under the team's row lock, and in the dialog on
@@ -445,12 +449,22 @@ const describeOrigin = (strings, kind, session) => {
  *    is one line.
  *
  *    Jira's limit, `DESCRIPTION_MAX_LENGTH`, counted with each line break as
- *    two, is the only cut, and it never halves anything: a quote that cannot
- *    fit whole says it is too long and where to read it; cards that do not fit
- *    are left out whole from the end and counted in a closing line, or, when
- *    none fits, a line says the group's cards are in RetroGemini. Only an
- *    `origin` (a session name) longer than the limit can still overflow, and
- *    Jira then refuses that one action with its own words.
+ *    two, is the only cut of the card content, and it never halves anything:
+ *    a quote that cannot fit whole is replaced by a line saying it is too long
+ *    and where to read it, when that line fits; cards that do not fit are left
+ *    out whole from the end and counted in a closing line, or, when none fits,
+ *    a line says the group's cards are in RetroGemini. (The requester's name
+ *    is cut at 80 characters before any of this, `REQUESTED_BY_MAX_LENGTH`.)
+ *
+ *    Two cases near the limit escape that. A first paragraph that fits but
+ *    leaves no room even for the "cards are in RetroGemini" line (a group
+ *    title or a session name of some 32.6k characters) is sent alone, and the
+ *    group's cards go unmentioned. And the description can still overflow
+ *    when the `origin` (a session name) and the closing sentence leave no room
+ *    for the quote or its replacement line — a name within a couple of hundred
+ *    characters of the limit is enough. The real quote is then kept, and Jira
+ *    refuses that one action with its own words (`description` is not a
+ *    target field, so the batch goes on).
  *  - `language`: the content language, chosen by `issueContentLanguage` with
  *    `language` (the clicker's) as its fallback.
  *
@@ -476,9 +490,14 @@ export const issueFields = ({ action, session, kind, team, requestedBy, language
   const closing = person ? strings.requestedBy(person) : strings.createdFrom;
   const paragraph = (quoted) => `${origin}${quoted ? ` — ${quoted}` : ''}. ${closing}`;
   let head = paragraph(context);
-  // Jira's limit is the only cut there is, and it never halves anything: a
-  // quote that cannot fit whole says where it is instead.
-  if (context && jiraTextLength(head) > DESCRIPTION_MAX_LENGTH) head = paragraph(strings.contextTooLong);
+  // Jira's limit never halves the quote: a quote that cannot fit whole says
+  // where it is instead — but only when that line fits. A session name that
+  // leaves room for neither keeps the real quote, and Jira refuses the action
+  // in its own words rather than receive one that no longer names its card.
+  if (context && jiraTextLength(head) > DESCRIPTION_MAX_LENGTH) {
+    const replaced = paragraph(strings.contextTooLong);
+    if (jiraTextLength(replaced) <= DESCRIPTION_MAX_LENGTH) head = replaced;
+  }
   const description = withGroupCards(head, listedCards(linked), strings);
 
   return {

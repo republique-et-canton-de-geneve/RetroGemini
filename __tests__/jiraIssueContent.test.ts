@@ -864,10 +864,13 @@ describe('issueFields with a group’s cards', () => {
 });
 
 /**
- * Jira's own limit is the only cut (`DESCRIPTION_MAX_LENGTH`, 32,767 on Data
- * Center by default, line breaks counted twice in case Jira counts CR LF): as
- * many whole cards as fit, in board order, then a line saying how many more
- * are in RetroGemini — never a card cut, never a silent drop (review R2).
+ * Jira's own limit is the only cut of the card content (`DESCRIPTION_MAX_LENGTH`,
+ * 32,767 on Data Center by default, line breaks counted twice in case Jira
+ * counts CR LF): as many whole cards as fit, in board order, then a line saying
+ * how many more are in RetroGemini — never a card cut (review R2). Unless the
+ * first paragraph itself nearly fills the limit: it is then sent alone and the
+ * cards go unmentioned, and a session name that leaves no room for the quote
+ * overflows, for Jira to refuse that one action.
  */
 describe('the description length guard', () => {
   const retroWith = (cards: string[], title = 'Deploys', extra: Array<Record<string, unknown>> = []) => ({
@@ -991,6 +994,31 @@ describe('the description length guard', () => {
       'Action from the retrospective Sprint 12 (2026\\-10\\-06) — Re: too long to quote in a Jira description, see RetroGemini. Requested in RetroGemini as Ann.',
       '', 'Cards in the group:', '* A card'
     ]);
+  });
+
+  // The replacement line is only worth it when it fits: a session name close
+  // to the limit (under it) leaves room for neither, and swapping a short
+  // quote for "too long to quote" would drop the card the issue should name
+  // while Jira refuses the action anyway.
+  it('keeps a short quote when a long session name leaves no room for the replacement line either', () => {
+    const retro = {
+      id: 'r',
+      name: repeat('n', 32700),
+      date: '2026-10-06',
+      templateLanguage: 'en',
+      tickets: [{ id: 'c', text: SHORT_TICKET }],
+      groups: [],
+      actions: []
+    };
+    const team = { retrospectives: [retro] };
+    const { description } = issueFields({
+      action: { id: 'a', text: 'Act', linkedTicketId: 'c' }, session: retro, kind: 'retro', team, requestedBy: 'Ann', language: 'en'
+    });
+    expect(retro.name.length).toBeLessThan(DESCRIPTION_MAX_LENGTH);
+    expect(description).toContain(`Re: "${SHORT_TICKET}"`);
+    expect(description).not.toContain('too long to quote');
+    // Nothing can make it fit: Jira refuses this one action in its own words.
+    expect(counted(description)).toBeGreaterThan(DESCRIPTION_MAX_LENGTH);
   });
 
   it('fits whatever the group holds: whole cards, a prefix of the board, never an empty item', () => {

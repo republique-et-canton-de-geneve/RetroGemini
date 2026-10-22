@@ -194,7 +194,7 @@ Residuals, stated rather than discovered:
   the group (never their authors), quoted in anonymous sessions too
   (maintainer decision, 2026-10-20; full cards and group cards since
   2026-10-22) — the retrospective's or health check's name and date, and the
-  requester's name. A sub-task's readers in Jira may be wider than the team.
+  requester's name. An issue's readers in Jira may be wider than the team.
   A session's parent issue carries the session's name and date (or the team's
   name, for the dashboard's parent) and the requester's name.
   The batch dialog previews exactly what is sent. Record Jira as a recipient in
