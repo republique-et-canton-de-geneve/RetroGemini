@@ -253,7 +253,35 @@ below 0.183, and the ranges overlap). The brand primary is indigo-600, not
 > muted grey from 6.78:1 to 3.74:1 and their reveal link from 5.70:1 to 2.76:1.
 > Both close screens are now in the axe audit so the next one fails loudly, but
 > the rule comes first: **ask which surfaces a token lands on before replacing
-> it everywhere.**
+> it everywhere.** The super-admin console is the other worked example: it has
+> no dark surface carrying muted text, yet `text-slate-500` still stays on its
+> white cards (4.77:1) and went to slate-600 only where it lands on the grey
+> page or a tinted panel (4.35:1). The audit prints each `color-contrast`
+> finding as its colour pairs and ratios, which is what tells you the surface.
+
+**A participant's colour is data, and it reaches the screen through one
+module.** `User.color` is a Tailwind class written by the team record and by
+every participant's own client into the session blob, so it is never
+interpolated into `className`: `utils/participantColors.ts` →
+`avatarColorClasses` (an avatar's background *and* its initials' colour) and
+`participantColorClass` (background only, for the non-text dots). White
+initials failed on seven of the eight palette colours, so the initials' colour
+is chosen per colour by measured contrast — white where white clears 4.5:1
+(the facilitator's indigo), black elsewhere — and
+`__tests__/participantColors.test.ts` measures every pair from
+`node_modules/tailwindcss/theme.css` with **axe-core's own colour engine** (the
+copy the e2e gate injects), so a Tailwind bump that moves a colour fails the
+build. A value the palette does not know renders neutral (`bg-slate-600`,
+white initials), which also keeps a participant from writing classes such as
+`fixed inset-0 z-50` onto everyone's screen; a colour an older release stored
+renders neutral too, so grey avatars on an old team are expected, and nothing
+is migrated. A departed participant's avatar is neutral grey, never faded, and
+nothing adds opacity, `grayscale` or a second text colour beside the call —
+`__tests__/avatarColorSource.test.ts` walks the TSX AST and fails on a raw
+`.color` in any JSX attribute but `style` and `key` (the dots take theirs
+through a `colorClass` prop, which a `className`-only guard never saw). The
+health-check score tooltip's digits follow the same measurement
+(`utils/healthRatingColors.ts`).
 
 ## Moving cards on the board — two phases, two meanings
 
@@ -409,8 +437,10 @@ change to it lands in both.**
   session types, and `leftUsers` reaches every counter that waits on people —
   including the proposal vote badge (`ProposalActionRow`,
   `RotiFollowUpActions` take `leftUserIds`), which the health check first
-  forgot. Only the facilitator may *add* an id to `leftUsers`, and the server
-  enforces it (`sessionGuard.js`); taking one off stays open to every client,
+  forgot. A departed participant's avatar turns neutral grey
+  (`DEPARTED_AVATAR_CLASSES`) rather than fading, which put its initials below
+  4.5:1 on every colour. Only the facilitator may *add* an id to `leftUsers`,
+  and the server enforces it (`sessionGuard.js`); taking one off stays open to every client,
   because every client clears the mark of a participant who reconnects. In an
   anonymous session invitees are counted, never named: a name leaving the
   waiting list as "Participant 3" comes online would say who Participant 3 is.
@@ -942,11 +972,20 @@ the English file does not have. Both files ship in the image (`Dockerfile`,
    it cannot go stale), and
    `e2e/accessibility-audit.spec.ts` caps the serious/critical
    WCAG rules axe-core reports on ten screens (two of them **dark**) — **at 0
-   since 2026-08-25** — `e2e/jira.spec.ts` on the seven Jira screens, at 0
-   since they joined (2026-10-20), and `e2e/admin-team-restore.spec.ts` on the
-   console's backup import card (41.0), so
+   since 2026-08-25** — plus four states with a second participant (the
+   Members tab with one member per participant colour, the invite link's
+   member picker, the participant's own Group screen, and the Group phase with
+   the participant marked as departed; every retro screen from the icebreaker
+   on now shows two avatars of different colours), all at 0 since 2026-10-22;
+   `e2e/admin-console-accessibility.spec.ts` caps the whole super-admin console
+   once per tab (Teams, a team's inline editor, the settings cards opened up,
+   Feedback and its comment dialog, Live, Logs, Backups), behind an allowlist
+   that aborts any console call it did not mean to make; `e2e/jira.spec.ts` the
+   seven Jira screens, at 0 since they joined (2026-10-20); and
+   `e2e/admin-team-merge.spec.ts` / `e2e/admin-team-restore.spec.ts` the merge,
+   delete and one-team-restore dialogs and the backup import card, scoped, so
    any new serious or critical rule on those screens fails the pull request.
-   Both run `audit()` from `e2e/helpers/axe.ts`, which holds the one
+   All of them run `audit()` from `e2e/helpers/axe.ts`, which holds the one
    `BASELINE` table; a screen joins it at 0, and a card added to a screen the
    audit never walked is audited on its own (`{ scope }`), so it neither
    carries that screen's findings nor hides them — list them in
