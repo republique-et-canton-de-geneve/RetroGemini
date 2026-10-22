@@ -1147,9 +1147,10 @@ This notification was sent from RetroGemini.
   // route needs afterwards — a refusal, or the restored entry — never the
   // archive. It runs in a function of its own on purpose: an async function's
   // suspended frame keeps every local it declared, so an `archive` declared in
-  // the route itself stays reachable through the post-restore passes, and the
-  // password pass parses the whole store again (`loadAllTeams`), which right
-  // after a replace is the archive's data: two whole-store copies at once.
+  // the route itself stays reachable through the post-restore passes. Those
+  // read projections (the password pass two fields per team, the email heal
+  // the summaries), but the parsed archive is the largest object a restore
+  // builds, and nothing after the replace needs it.
   // `__tests__/restoreArchiveRetention.test.ts` observes that with `gc()`.
   const applyStoredArchive = async (backupId) => {
     // Read and checked *after* the snapshot, never before: the snapshot dumps

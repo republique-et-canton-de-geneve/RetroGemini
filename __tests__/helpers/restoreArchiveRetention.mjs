@@ -5,12 +5,14 @@
  * reports, for each, whether the parsed archive was still reachable while the
  * post-restore passes ran.
  *
- * Why it matters: right after a faithful replace, the password pass
- * (`migrateLegacyPasswords` → `dataStore.loadAllTeams()`) parses every team
- * record again, and those records are the archive's data. A route that keeps
- * the parsed archive in scope across that pass holds two whole-store copies
- * at once — the peak a 384 Mi pod restoring a large row is OOM-killed by,
- * after the replace succeeded and before the audit row was written.
+ * Why it matters: right after a faithful replace, the post-restore passes
+ * read the store again — the password pass (`migrateLegacyPasswords` →
+ * `dataStore.loadTeamPasswordHashes()`) and the email heal. They read
+ * projections now, not the whole store, but a route that keeps the parsed
+ * archive in scope across them still holds it for nothing: the archive is the
+ * largest object a restore ever builds, and holding it across further reads
+ * is the peak a 384 Mi pod restoring a large row was OOM-killed by, after the
+ * replace succeeded and before the audit row was written.
  *
  * Each case answers `{ status, passwords, emails }`: the HTTP status, then
  * whether the archive was reachable in the password pass and in the email
@@ -56,8 +58,8 @@ const keptOnPurpose = [];
 let keepTheArchive = false;
 
 const dataStore = {
-  // The password pass's whole-store read.
-  loadAllTeams: async () => {
+  // The password pass's read.
+  loadTeamPasswordHashes: async () => {
     current.passwords = await stillReachable(current.ref);
     return [];
   },

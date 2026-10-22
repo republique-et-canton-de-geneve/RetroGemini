@@ -1127,6 +1127,38 @@ const createDataStore = ({ rootDir }) => {
     return entry ? copySummary(entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }) : null;
   };
 
+  // Each team's id and stored password hash, nothing else: what the legacy
+  // password pass (`passwordMigration.js`) reads at boot and after both
+  // restore routes, which used to load and parse every full record in Node.
+  // The database still parses each record (one cast per row on PostgreSQL);
+  // Node parses none. A `passwordHash` that is not a string reads as null,
+  // like a team with none. A row the database cannot parse makes the query
+  // throw, which the pass reports as a failed scan.
+  //
+  // Deliberately NOT through the summary cache: the summaries feed the
+  // anonymous login picker (`copySummary` spreads every field), and a hash
+  // there would be one forgotten pick away from `/api/team/list`. Its only
+  // caller is the password pass; no route may call it.
+  const loadTeamPasswordHashes = async () => {
+    const rows = usePostgres
+      ? (await pgPool.query(
+        `SELECT j->>'id' AS id,
+                CASE WHEN jsonb_typeof(j->'passwordHash') = 'string' THEN j->>'passwordHash' END AS password_hash
+         FROM (SELECT value::jsonb AS j FROM kv_store WHERE key LIKE $1 OFFSET 0) AS team_rows`,
+        [TEAM_PREFIX + '%']
+      )).rows
+      : sqliteDb.prepare(
+        `SELECT json_extract(value, '$.id') AS id,
+                CASE WHEN json_type(value, '$.passwordHash') = 'text' THEN json_extract(value, '$.passwordHash') END AS password_hash
+         FROM kv_store WHERE key LIKE ?`
+      ).all(TEAM_PREFIX + '%');
+    return rows.map((row) => ({
+      // Text on PostgreSQL, whatever JSON type it was; the same on SQLite.
+      id: row.id == null ? null : String(row.id),
+      passwordHash: typeof row.password_hash === 'string' ? row.password_hash : null
+    }));
+  };
+
   // Feedback projection for the Feedback Hub and the super-admin feedback view.
   // Like loadTeamSummaries, it extracts only each team's id, name and
   // teamFeedbacks array directly in SQL, so those endpoints never deserialize
@@ -2037,6 +2069,8 @@ const createDataStore = ({ rootDir }) => {
     loadAllTeamFeedbacks,
     loadTeamSummaries,
     loadTeamSummary,
+    // The legacy password pass's read: never cached, never sent anywhere
+    loadTeamPasswordHashes,
     atomicTeamSave,
     atomicTeamUpdate,
 

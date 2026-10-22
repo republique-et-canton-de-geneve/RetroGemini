@@ -30,7 +30,7 @@ describe('legacy password migration (decision D1)', () => {
   it('hashes a legacy plaintext record in place', async () => {
     const stored = new Map([['team-1', legacyTeam('team-1', 'open-sesame')]]);
     const dataStore = {
-      loadAllTeams: vi.fn(async () => [...stored.values()]),
+      loadTeamPasswordHashes: vi.fn(async () => [...stored.values()]),
       atomicTeamUpdate: vi.fn(async (id: string, updater: (team: unknown) => unknown) => {
         const next = updater(stored.get(id));
         if (next) stored.set(id, next as ReturnType<typeof legacyTeam>);
@@ -50,7 +50,7 @@ describe('legacy password migration (decision D1)', () => {
 
   it('leaves an already-hashed record alone and writes nothing', async () => {
     const dataStore = {
-      loadAllTeams: vi.fn(async () => [{ id: 'team-1', name: 'Team', passwordHash: realHash }]),
+      loadTeamPasswordHashes: vi.fn(async () => [{ id: 'team-1', name: 'Team', passwordHash: realHash }]),
       atomicTeamUpdate: vi.fn(),
     };
 
@@ -77,7 +77,7 @@ describe('legacy password migration (decision D1)', () => {
   it('reports the clean result too, so silence is never the pass signal', async () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
     const dataStore = {
-      loadAllTeams: vi.fn(async () => [{ id: 'team-1', name: 'Team', passwordHash: realHash }]),
+      loadTeamPasswordHashes: vi.fn(async () => [{ id: 'team-1', name: 'Team', passwordHash: realHash }]),
       atomicTeamUpdate: vi.fn(),
     };
 
@@ -101,7 +101,7 @@ describe('legacy password migration (decision D1)', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dataStore = {
-      loadAllTeams: vi.fn(async () => {
+      loadTeamPasswordHashes: vi.fn(async () => {
         throw new Error('store unavailable');
       }),
       atomicTeamUpdate: vi.fn(),
@@ -118,7 +118,7 @@ describe('legacy password migration (decision D1)', () => {
 
   it('skips a record with no password at all', async () => {
     const dataStore = {
-      loadAllTeams: vi.fn(async () => [{ id: 'team-1', name: 'Team' }]),
+      loadTeamPasswordHashes: vi.fn(async () => [{ id: 'team-1', name: 'Team' }]),
       atomicTeamUpdate: vi.fn(),
     };
 
@@ -132,9 +132,10 @@ describe('legacy password migration (decision D1)', () => {
     // A lost write must not abort the pass: the remaining teams still need
     // upgrading, and the failed one is simply retried on the next boot.
     const dataStore = {
-      loadAllTeams: vi.fn(async () => [legacyTeam('bad', 'p1'), legacyTeam('good', 'p2')]),
-      atomicTeamUpdate: vi.fn(async (id: string) => {
+      loadTeamPasswordHashes: vi.fn(async () => [legacyTeam('bad', 'p1'), legacyTeam('good', 'p2')]),
+      atomicTeamUpdate: vi.fn(async (id: string, updater: (team: unknown) => unknown) => {
         if (id === 'bad') throw new Error('write lost');
+        updater(legacyTeam('good', 'p2'));
         return { success: true };
       }),
     };
@@ -146,7 +147,7 @@ describe('legacy password migration (decision D1)', () => {
 
   it('treats an updater that reports no success as a failure, not an upgrade', async () => {
     const dataStore = {
-      loadAllTeams: vi.fn(async () => [legacyTeam('team-1', 'p1')]),
+      loadTeamPasswordHashes: vi.fn(async () => [legacyTeam('team-1', 'p1')]),
       atomicTeamUpdate: vi.fn(async () => ({ success: false })),
     };
 
@@ -158,7 +159,7 @@ describe('legacy password migration (decision D1)', () => {
   it('never throws when the store itself is unavailable', async () => {
     // Boot must not depend on this pass succeeding.
     const dataStore = {
-      loadAllTeams: vi.fn(async () => {
+      loadTeamPasswordHashes: vi.fn(async () => {
         throw new Error('database down');
       }),
       atomicTeamUpdate: vi.fn(),
@@ -172,19 +173,25 @@ describe('legacy password migration (decision D1)', () => {
     });
   });
 
-  it('does not re-hash a record another pod upgraded first', async () => {
+  it('does not re-hash a record another pod upgraded first, nor count it as hashed', async () => {
     // Two pods boot together; the updater re-reads under the lock, so the loser
-    // must abort rather than overwrite a fresh hash with its own.
+    // must abort rather than overwrite a fresh hash with its own. A declined
+    // update still answers success, and the summary line is H23's evidence: it
+    // must not claim a record this pod never wrote.
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
     const alreadyUpgraded = { id: 'team-1', name: 'Team', passwordHash: realHash };
     const dataStore = {
-      loadAllTeams: vi.fn(async () => [legacyTeam('team-1', 'open-sesame')]),
+      loadTeamPasswordHashes: vi.fn(async () => [legacyTeam('team-1', 'open-sesame')]),
       atomicTeamUpdate: vi.fn(async (_id: string, updater: (team: unknown) => unknown) =>
         ({ success: true, applied: updater(alreadyUpgraded) !== null })),
     };
 
-    await migrateLegacyPasswords({ dataStore });
+    const result = await migrateLegacyPasswords({ dataStore });
 
     const updater = dataStore.atomicTeamUpdate.mock.calls[0][1] as (team: unknown) => unknown;
     expect(updater(alreadyUpgraded)).toBeNull();
+    expect(result).toMatchObject({ scanned: 1, upgraded: 0, failed: 0 });
+    expect(info.mock.calls.map((args) => args.join(' ')).join('\n')).toContain('0 record(s) hashed, 0 failed');
+    info.mockRestore();
   });
 });
