@@ -23,6 +23,13 @@ export interface FeedbackSubmission {
   teamId: string;
   password?: string | null;
   sessionToken?: string | null;
+  /**
+   * The token this client holds now (`dataService.getSessionToken`). Read
+   * only when the token sent was refused as revoked and the client has
+   * replaced it since (decision D3b): another tab's newer token was adopted,
+   * so the feedback is sent once more with it.
+   */
+  getSessionToken?: () => string | null | undefined;
   feedback: Omit<TeamFeedback, 'id' | 'submittedAt' | 'isRead' | 'status' | 'comments'>;
 }
 
@@ -49,16 +56,17 @@ export const submitTeamFeedback = async (
   fetchImpl: typeof fetch = fetch
 ): Promise<FeedbackSubmitResult> => {
   // Created through the API rather than the team record, to stay clear of the
-  // record's sync. The notification below carries the same credential: the
-  // route mails caller-supplied content through the deployment's SMTP
-  // identity, so it is authenticated (H29).
-  const credential = {
+  // record's sync. The notification below carries the credential the create
+  // succeeded with: the route mails caller-supplied content through the
+  // deployment's SMTP identity, so it is authenticated (H29).
+  const credentialWith = (sessionToken: string | null | undefined) => ({
     teamId: submission.teamId,
     password: submission.password ?? undefined,
-    sessionToken: submission.sessionToken ?? undefined
-  };
+    sessionToken: sessionToken ?? undefined
+  });
 
-  try {
+  const send = async (sessionToken: string | null | undefined, isRetry: boolean): Promise<FeedbackSubmitResult> => {
+    const credential = credentialWith(sessionToken);
     const response = await postJson(fetchImpl, '/api/feedbacks/create', { ...credential, feedback: submission.feedback });
 
     if (response.ok) {
@@ -73,12 +81,24 @@ export const submitTeamFeedback = async (
     // utils/feedbackImages.ts is meant to stay under.
     if (response.status === 413) return 'too_large';
     if (response.status === 401) {
-      // Decision D3b: a token a password change revoked is reported, and the
-      // Dashboard then signs out with the reason; the draft stays on the form.
-      await noteRevokedResponse(response, submission.sessionToken);
+      // Decision D3b: a token a password change revoked. When this client
+      // holds a newer one by now (another tab changed the password, and its
+      // token was adopted), the feedback goes once more with it — the same
+      // object, so the server recognises a first attempt that did land by its
+      // `submissionId`. Otherwise the session is revoked, the Dashboard says
+      // so above itself (App.tsx), and the draft stays on the form.
+      const outcome = await noteRevokedResponse(response, sessionToken);
+      if (outcome === 'retry' && !isRetry) {
+        const current = submission.getSessionToken?.() ?? null;
+        if (current && current !== sessionToken) return send(current, true);
+      }
       return 'session_expired';
     }
     return 'not_saved';
+  };
+
+  try {
+    return await send(submission.sessionToken, false);
   } catch (err) {
     // No answer, or a 2xx that is not the route's JSON (a proxy answering in
     // its place): either way nothing says the feedback was stored.

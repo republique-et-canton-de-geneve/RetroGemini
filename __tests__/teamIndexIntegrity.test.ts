@@ -51,6 +51,8 @@ type Faults = {
    */
   atomicTeamUpdate?: boolean;
   onAtomicTeamUpdate?: (() => Promise<void>) | null;
+  /** The session-epoch read (decision D3b) fails once, as a pool error would. */
+  loadTeamAuthState?: boolean;
 };
 
 const createMockDataStore = () => {
@@ -126,11 +128,19 @@ const createMockDataStore = () => {
   const loadGlobalSettings = async () => ({});
   const loadTeamSummaries = async () =>
     Array.from(teams.values()).map((t) => ({ id: t.id, name: t.name, members: [] }));
+  const authState = createTeamAuthStateDouble((teamId) => teams.has(teamId));
+  const loadTeamAuthState = async (teamId: string) => {
+    if (faults.loadTeamAuthState) {
+      faults.loadTeamAuthState = false;
+      throw new Error('store unavailable');
+    }
+    return authState.loadTeamAuthState(teamId);
+  };
 
   return {
     loadTeam,
     // Decision D3b: the session epoch every token check reads.
-    loadTeamAuthState: createTeamAuthStateDouble((teamId) => teams.has(teamId)).loadTeamAuthState,
+    loadTeamAuthState,
     loadTeamRaw,
     saveTeam,
     loadAllTeams,
@@ -237,6 +247,23 @@ describe('team-index integrity across create and delete', () => {
       expect(await (await exists('Alpha')).json()).toEqual({ exists: false });
 
       dataStore._faults.saveTeam = false;
+      const retried = await createTeam('Alpha');
+      expect(retried.status).toBe(201);
+      expect((await login('Alpha')).status).toBe(200);
+    });
+
+    // Decision D3b: creation reads the session epoch the creator's token is
+    // minted with. Read after the record was saved, a failed read answered 500
+    // for a team that existed, with its name claimed: the retry the screen
+    // invites was refused with 409 team_name_exists.
+    it('creates nothing, and frees the name, when the session epoch cannot be read', async () => {
+      dataStore._faults.loadTeamAuthState = true;
+
+      const failed = await createTeam('Alpha');
+      expect(failed.status).toBe(500);
+      expect(dataStore._teams.size).toBe(0);
+      expect(await (await exists('Alpha')).json()).toEqual({ exists: false });
+
       const retried = await createTeam('Alpha');
       expect(retried.status).toBe(201);
       expect((await login('Alpha')).status).toBe(200);

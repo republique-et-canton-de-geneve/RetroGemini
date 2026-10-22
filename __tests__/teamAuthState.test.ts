@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createDataStore } from '../server/services/dataStore.js';
-import { DEFAULT_SESSION_EPOCH, TeamAuthRowCorruptError } from '../server/services/sessionEpoch.js';
+import { DEFAULT_SESSION_EPOCH, TeamAuthRowCorruptError, sessionVerdict } from '../server/services/sessionEpoch.js';
 
 /**
  * Decision D3b — each team's session epoch lives in a row of its own,
@@ -93,6 +93,29 @@ for (const engine of engines) {
         return result.rows[0]?.value ?? null;
       }
       return store.getSqliteDb().prepare('SELECT value FROM kv_store WHERE key = ?').get(key)?.value ?? null;
+    };
+
+    // Makes the database refuse to delete one key, as an outage at that exact
+    // statement would (the trigger `teamSecretStore.test.ts` uses for the
+    // secret's place in the same deletion). Answers the release.
+    let triggers = 0;
+    const refuseDeleteOf = async (key: string) => {
+      triggers += 1;
+      const name = `${prefix.replace(/[^a-z0-9]/g, '')}_refuse_${triggers}`;
+      const pool = store.getPgPool() as { query: (sql: string) => Promise<unknown> } | null;
+      if (pool) {
+        await pool.query(`CREATE OR REPLACE FUNCTION ${name}() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'refused by test'; END; $$ LANGUAGE plpgsql`);
+        await pool.query(`CREATE TRIGGER ${name} BEFORE DELETE ON kv_store FOR EACH ROW WHEN (OLD.key = '${key}') EXECUTE FUNCTION ${name}()`);
+        return async () => {
+          await pool.query(`DROP TRIGGER IF EXISTS ${name} ON kv_store`);
+          await pool.query(`DROP FUNCTION IF EXISTS ${name}()`);
+        };
+      }
+      const db = store.getSqliteDb();
+      db.prepare(`CREATE TRIGGER ${name} BEFORE DELETE ON kv_store WHEN old.key = '${key}' BEGIN SELECT RAISE(ABORT, 'refused by test'); END`).run();
+      return async () => {
+        db.prepare(`DROP TRIGGER IF EXISTS ${name}`).run();
+      };
     };
 
     const saveTeam = (id: string, extra: Record<string, unknown> = {}) =>
@@ -228,6 +251,59 @@ for (const engine of engines) {
       expect(await store.sweepOrphanedTeamAuthRows()).toBeGreaterThanOrEqual(1);
       expect(await readRaw(`team-auth:${orphan}`)).toBeNull();
       expect((await store.loadTeamAuthState(kept)).sessionEpoch).toBe(keptEpoch);
+    });
+
+    describe('deleteTeamRecord order', () => {
+      // The epoch row goes after the record. In the other order, a deletion
+      // whose record delete fails leaves a live team with no row, which reads
+      // as epoch '0' with no rotation ever made: every token minted before the
+      // team's first password change, and every token without the claim,
+      // would be current again — the very tokens that change revoked.
+      it('keeps the epoch of a team whose record could not be deleted', async () => {
+        const id = tid('delete-record-fails');
+        await saveTeam(id);
+        const { sessionEpoch } = await store.rotateTeamSessionEpoch(id);
+
+        const release = await refuseDeleteOf(`team:${id}`);
+        try {
+          await expect(store.deleteTeamRecord(id)).rejects.toThrow();
+        } finally {
+          await release();
+        }
+
+        const state = await store.loadTeamAuthState(id);
+        expect(state.exists).toBe(true);
+        expect(state.sessionEpoch).toBe(sessionEpoch);
+        expect(state.sessionEpoch).not.toBe(DEFAULT_SESSION_EPOCH);
+        // A token from before the change, and one from before the claim.
+        expect(sessionVerdict({ sessionEpoch: DEFAULT_SESSION_EPOCH }, state)).toBe('revoked');
+        expect(sessionVerdict({ createdAt: (state.revokedAt as number) - 1 }, state)).toBe('revoked');
+
+        // The retry the failure invites finishes the job.
+        await store.deleteTeamRecord(id);
+        expect(await store.loadTeamRaw(id)).toBeNull();
+        expect(await readRaw(`team-auth:${id}`)).toBeNull();
+      });
+
+      // The best-effort half: the team is gone either way, and an epoch row
+      // nobody can reach is the boot sweep's to remove.
+      it('still deletes the team when its epoch row cannot be removed, and the boot sweep removes the row', async () => {
+        const id = tid('delete-row-fails');
+        await saveTeam(id);
+        await store.rotateTeamSessionEpoch(id);
+
+        const release = await refuseDeleteOf(`team-auth:${id}`);
+        try {
+          await expect(store.deleteTeamRecord(id)).resolves.toBeUndefined();
+          expect(await store.loadTeamRaw(id)).toBeNull();
+          expect(await readRaw(`team-auth:${id}`)).not.toBeNull();
+        } finally {
+          await release();
+        }
+
+        expect(await store.sweepOrphanedTeamAuthRows()).toBeGreaterThanOrEqual(1);
+        expect(await readRaw(`team-auth:${id}`)).toBeNull();
+      });
     });
 
     it('throws TeamAuthRowCorruptError on a corrupt row, and reads a later version with extra fields', async () => {

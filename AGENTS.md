@@ -451,7 +451,19 @@ change to it lands in both.**
   session live again by itself. Neither screen subscribes to the revocation
   directly (`__tests__/sessionRevokedShared.test.ts`). The signal itself lives in
   `services/sessionRevocation.ts`, a module with no imports, so the suites that
-  mock `dataService` keep working.
+  mock `dataService` keep working. **The Dashboard does the same**: App keeps it
+  mounted under `components/dashboard/DashboardRevokedBanner.tsx` (an alert with
+  "Log in again") instead of signing out at once, because a feedback being
+  written there — its screenshots, every comment draft — lives only on the
+  screen, and the login screen replacing it took the draft before the form could
+  say "copy your text" (`__tests__/appSessionRevokedDashboard.test.tsx`). Only a
+  view with nothing of the user's on it signs out at once. A request the server
+  refuses as revoked while this client holds a newer token by then (another
+  tab changed the password and its token was adopted) is sent once more with
+  it: `apiCall` does it, and so does what posts outside it — the feedback
+  create (`submitTeamFeedback`'s `getSessionToken`) and the feedback board's
+  reads and writes (`TeamFeedback` → `postToFeedbackRoute`), once, never in a
+  loop.
 - **One timer** — `utils/sessionTimer.ts` (the rules, pure and
   coverage-gated), `components/session/useSessionTimer.ts` (the countdown, the
   expiry write, the alarm, the editor) and `components/session/SessionTimer.tsx`

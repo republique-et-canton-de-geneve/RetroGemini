@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import TeamLogin from '../components/TeamLogin';
 import LanguageProvider from '../i18n/LanguageProvider';
+import { createTranslator } from '../i18n/translate';
 
 /**
  * Decision D3b — a person signed out because the team's password was changed
@@ -60,5 +61,36 @@ describe('the login screen after a password change signed the user out (decision
     await waitFor(() => expect(screen.getByRole('button', { name: /Alpha Team/ })).toBeTruthy());
 
     expect(screen.queryByText(/password was changed/)).toBeNull();
+  });
+});
+
+/**
+ * What the facilitator and the super administrator read once the password is
+ * changed. In this product a session is a retrospective or a health check,
+ * and "closed" is its CLOSED status: "the team's sessions have been closed"
+ * read as the live retrospectives having been ended, while what happened is
+ * that people were signed out. The facilitator's other tabs of the same
+ * browser stay signed in, so the Dashboard says "on another device", as the
+ * card's description does.
+ */
+describe('the notices after a password change say who was signed out', () => {
+  const en = createTranslator('en');
+  const fr = createTranslator('fr');
+
+  it('on the Dashboard', () => {
+    expect(en('dashboard.settings.passwordChanged')).toBe('Password changed. Everyone signed in to this team on another device has been signed out.');
+    expect(fr('dashboard.settings.passwordChanged')).toBe('Mot de passe changé. Les personnes connectées à cette équipe depuis un autre appareil ont été déconnectées.');
+  });
+
+  it('in the administration console', () => {
+    expect(en('adminTeams.notice.passwordSaved')).toBe('Password updated. Everyone signed in to this team has been signed out.');
+    expect(fr('adminTeams.notice.passwordSaved')).toBe('Mot de passe mis à jour. Toutes les personnes connectées à cette équipe ont été déconnectées.');
+  });
+
+  it('never as closed sessions', () => {
+    for (const key of ['dashboard.settings.passwordChanged', 'adminTeams.notice.passwordSaved'] as const) {
+      expect(en(key)).not.toMatch(/session/i);
+      expect(fr(key)).not.toMatch(/session|fermée/i);
+    }
   });
 });

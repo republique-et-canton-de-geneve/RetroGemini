@@ -163,8 +163,8 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
       });
 
       if (!response.ok) {
-        // Decision D3b: a token a password change revoked signs the Dashboard
-        // out (App.tsx), with the reason on the login screen.
+        // Decision D3b: a token a password change revoked is reported, and
+        // App then says why above the Dashboard, with "Log in again".
         await noteRevokedResponse(response, body.sessionToken as string | null);
         if (response.status === 404) {
           setError(t('dashboard.releaseAnalysis.errorNotEnabled'));

@@ -153,12 +153,18 @@ describe('App when the team password is changed (decision D3b)', () => {
     clearSessionRevoked();
   });
 
-  it('returns to the login screen at once from the Dashboard, saying why', async () => {
+  // The Dashboard stays, as a session does: a feedback or a reply being
+  // written there lives only on the screen (appSessionRevokedDashboard).
+  it('shows the banner on the Dashboard, and its way out lands on the login screen with the notice', async () => {
     saveSession('DASHBOARD', OLDER);
     render(<App />);
     await screen.findByText('Dashboard stub');
 
     act(() => markSessionRevoked());
+
+    expect(screen.getByRole('alert').textContent).toContain('The team password was changed');
+    expect(screen.getByText('Dashboard stub')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Log in again' }));
 
     expect(await screen.findByRole('heading', { name: 'RetroGemini' })).toBeTruthy();
     expect(screen.getByText(NOTICE).getAttribute('role')).toBe('status');
@@ -203,6 +209,7 @@ describe('App when the team password is changed (decision D3b)', () => {
     expect(storedToken()).toBe(NEWER);
 
     act(() => markSessionRevoked());
+    fireEvent.click(screen.getByRole('button', { name: 'Log in again' }));
     expect(await screen.findByRole('heading', { name: 'RetroGemini' })).toBeTruthy();
     expect(storedToken()).toBe(NEWER);
 

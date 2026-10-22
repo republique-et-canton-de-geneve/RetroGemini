@@ -179,7 +179,7 @@ const dashboard = {
   'dashboard.settings.confirmPassword': 'Confirm new password',
   'dashboard.settings.enterCurrentPassword': 'Enter the current password',
   'dashboard.settings.passwordMismatch': 'Passwords do not match',
-  'dashboard.settings.passwordChanged': "Password changed. The team's other sessions have been closed.",
+  'dashboard.settings.passwordChanged': 'Password changed. Everyone signed in to this team on another device has been signed out.',
   'dashboard.settings.hcTemplates': 'Health Check Templates',
   'dashboard.settings.createHcTemplate': 'Create Health Check Template',
   'dashboard.settings.noHcTemplates': 'No custom health check templates yet.',

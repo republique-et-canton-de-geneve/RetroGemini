@@ -152,6 +152,21 @@ describe('a session signed out by a password change', () => {
     expect(screen.getByTitle('Mot de passe changé — reconnectez-vous pour rejoindre la session')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Se reconnecter' })).toBeTruthy();
   });
+
+  // The chip's visible label is the same for every denial. It read "Session
+  // expirée" beside a banner saying the password was changed: two different
+  // explanations, and the visible one was wrong.
+  it('labels the French chip with a word that says nothing expired', () => {
+    render(
+      <LanguageProvider initialLanguage="fr">
+        <SessionSyncChip isLive={false} joinDeniedReason={JOIN_DENIED_REVOKED} />
+      </LanguageProvider>
+    );
+
+    const chip = screen.getByTitle('Mot de passe changé — reconnectez-vous pour rejoindre la session');
+    expect(chip.textContent).toContain('Déconnexion');
+    expect(document.body.textContent).not.toContain('Session expirée');
+  });
 });
 
 /**

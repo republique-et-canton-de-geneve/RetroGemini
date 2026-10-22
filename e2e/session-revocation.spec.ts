@@ -16,8 +16,12 @@ import { dismissAnnouncementsIfPresent } from './helpers/announcements';
  *  - F's first tab, still in the retrospective, is cut too for a moment, then
  *    adopts the new token the second tab stored and is live again — the
  *    revoked banner may flash first, so the test waits for "Live" rather than
- *    asserting the banner never shows;
- *  - F's second tab reloads and is still signed in (the new token was saved);
+ *    asserting the banner never shows — and what it writes next reaches the
+ *    server: a reload of that tab, which has no pending copy of its own,
+ *    still shows the card;
+ *  - F's second tab reloads and is still signed in (the new token was saved).
+ *    The first tab stored the newest saved session after adopting the token,
+ *    and it is in the retrospective, so the reload restores into it;
  *  - the invitation link from before the change no longer opens the team.
  *
  * The unit and socket suites hold each rule on its own
@@ -122,7 +126,7 @@ test.describe('Session revocation on a password change', () => {
     await settingsTab.getByPlaceholder(/^New password/).fill(NEW_PASSWORD);
     await settingsTab.getByPlaceholder('Confirm new password').fill(NEW_PASSWORD);
     await settingsTab.getByRole('button', { name: 'Change Password' }).click();
-    await expect(settingsTab.getByText("Password changed. The team's other sessions have been closed.")).toBeVisible({ timeout: 10_000 });
+    await expect(settingsTab.getByText('Password changed. Everyone signed in to this team on another device has been signed out.')).toBeVisible({ timeout: 10_000 });
 
     // ---- The participant is signed out, and told why ----
     const banner = participant.getByRole('alert').filter({ hasText: 'The team password was changed' });
@@ -137,10 +141,23 @@ test.describe('Session revocation on a password change', () => {
     await expect(facilitator.getByTitle('Real-time sync active')).toBeVisible({ timeout: 10_000 });
     await addCard(facilitator, 'Written after the change');
     await expect(facilitator.getByText('Written after the change')).toBeVisible({ timeout: 10_000 });
+    // A card shows on its author's screen before any answer, so that alone
+    // cannot fail on the save: a re-join that never happened, or a write held
+    // or refused, would leave it there all the same. The reloaded tab shows
+    // only what the server sends it.
+    await facilitator.reload();
+    await expect(facilitator.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 10_000 });
+    await expect(facilitator.getByText('Written after the change')).toBeVisible({ timeout: 10_000 });
 
     // ---- The new token was saved: a reload stays signed in ----
+    // The first tab, in the retrospective, stored the newest saved session
+    // after adopting the new token, so the reload restores into it. A restore
+    // that opens the retrospective proves the saved token works: leave it and
+    // reach the Dashboard, never the login screen.
     await settingsTab.reload();
+    await settingsTab.getByRole('button', { name: 'Leave the retrospective' }).click({ timeout: 10_000 });
     await expect(settingsTab.getByText(`${TEAM_NAME} Dashboard`)).toBeVisible({ timeout: 10_000 });
+    await expect(settingsTab.getByRole('button', { name: '+ New Team' })).toHaveCount(0);
 
     // ---- The invitation link from before the change is dead ----
     const late = await lateContext.newPage();

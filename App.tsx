@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
 import { Team, User, AppVersion, VersionAnnouncement } from './types';
 import { dataService, OPEN_SESSION_STORAGE_KEY } from './services/dataService';
 import TeamLogin, { InviteData } from './components/TeamLogin';
@@ -8,6 +8,7 @@ import HealthCheckSession from './components/HealthCheckSession';
 import SuperAdmin from './components/SuperAdmin';
 import AnnouncementModal from './components/AnnouncementModal';
 import LanguageSwitcher from './components/common/LanguageSwitcher';
+import DashboardRevokedBanner from './components/dashboard/DashboardRevokedBanner';
 import { useTranslation } from './i18n/I18nContext';
 import { isSessionInProgress } from './utils/sessionStatus';
 import { isSessionRevoked, newerToken, onSessionRevokedChange, onSessionTokenChanged } from './services/sessionRevocation';
@@ -17,6 +18,10 @@ const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
 // Shared with dataService, which patches the blob's teamPassword in place
 // when the team password is rotated.
 const STORAGE_KEY = OPEN_SESSION_STORAGE_KEY;
+
+// Module-level so useSyncExternalStore keeps one subscription for the life of
+// the app (the same shape as useSessionRevoked).
+const subscribeToRevocation = (onChange: () => void) => onSessionRevokedChange(() => onChange());
 
 // The session token stored for `teamId` by any tab of this browser, or null.
 const readStoredToken = (teamId: string | null | undefined): string | null => {
@@ -83,6 +88,9 @@ const App: React.FC = () => {
   // once by the restore below — the team is still in memory — and a revoked
   // session would sign out and back in for ever.
   const signedOutRef = useRef(false);
+  // Decision D3b: whether this client's team session was revoked, for the
+  // banner above the Dashboard.
+  const sessionRevoked = useSyncExternalStore(subscribeToRevocation, isSessionRevoked, isSessionRevoked);
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [view, setView] = useState<'LOGIN' | 'DASHBOARD' | 'SESSION' | 'HEALTH_CHECK' | 'SUPER_ADMIN'>('LOGIN');
@@ -406,13 +414,16 @@ const App: React.FC = () => {
   const handleSessionExpired = useCallback(() => signOut({ keepNewerSession: true }), [signOut]);
 
   // Decision D3b: the team's password was changed and this client's token is
-  // revoked. In a session the screen says so itself, with "Log in again"
-  // (useSessionRevoked), so a participant halfway through a card can still
-  // copy it; everywhere else the login screen comes at once, saying why.
+  // revoked. A session and the Dashboard say so themselves, with "Log in
+  // again" — useSessionRevoked in a session, DashboardRevokedBanner here — so
+  // a participant halfway through a card, or anyone halfway through a
+  // feedback or a reply to one, can still copy it: those drafts live only on
+  // the screen, and signing out at once took them away. Everywhere else the
+  // login screen comes at once, saying why.
   useEffect(() => {
     const react = () => {
       setSignedOutNotice({ key: 'login.notice.sessionRevoked' });
-      if (currentTeam && view !== 'SESSION' && view !== 'HEALTH_CHECK') {
+      if (currentTeam && view !== 'SESSION' && view !== 'HEALTH_CHECK' && view !== 'DASHBOARD') {
         signOut({ keepNewerSession: true });
       }
     };
@@ -689,6 +700,7 @@ const App: React.FC = () => {
         {view === 'DASHBOARD' && (
             <>
                 {renderHeader(false)}
+                {sessionRevoked && <DashboardRevokedBanner onLogInAgain={handleSessionExpired} />}
                 <Dashboard
                     team={currentTeam}
                     currentUser={currentUser!}

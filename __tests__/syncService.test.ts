@@ -986,6 +986,9 @@ describe('syncService', () => {
       expect(joinsSent()).toEqual([expect.objectContaining({ sessionId: 's1', sessionToken: 'rg1.rotated-token' })]);
     });
 
+    // Revoked through a denial, the socket has joined nothing, so this case
+    // pins the "not joined" hold as much as the revoked one. The next case is
+    // the one only the revoked guard can hold.
     it('holds a write while revoked, joins nothing, and sends both once another tab\'s token clears it', async () => {
       service.joinSession('s1', 'u1', 'Alice');
       trigger('join-denied', { sessionId: 's1', reason: 'unauthenticated', cause: 'session_revoked', joinId: lastJoinId() });
@@ -996,6 +999,27 @@ describe('syncService', () => {
       service.joinSession('s1', 'u1', 'Alice');
       service.updateSession({ id: 's1', phase: 'GROUP', _rev: 3 } as never);
       expect(emit).not.toHaveBeenCalled();
+
+      currentToken = 'rg1.adopted-token';
+      revocation.clearSessionRevoked();
+      revocation.notifySessionTokenChanged();
+
+      expect(emittedOrder()).toEqual([['join-session', 's1'], ['update-session', 's1']]);
+      expect((emit.mock.calls.at(-1)![1] as { phase: string }).phase).toBe('GROUP');
+    });
+
+    // An HTTP 401 session_revoked (a persist, an AI call, the Jira status
+    // read) revokes the session while the socket is still joined: its pod may
+    // have missed the rotation's broadcast, and would accept every write
+    // until its next sweep. The facilitator's mount send and a write already
+    // queued in a render reach here with no screen gate in between.
+    it('holds a write when revoked over HTTP while the socket is still joined, and sends it after the re-join', () => {
+      service.joinSession('s1', 'u1', 'Alice');
+      emit.mockClear();
+
+      revocation.markSessionRevoked();
+      service.updateSession({ id: 's1', phase: 'GROUP', _rev: 3 } as never);
+      expect(emit).not.toHaveBeenCalledWith('update-session', expect.anything());
 
       currentToken = 'rg1.adopted-token';
       revocation.clearSessionRevoked();

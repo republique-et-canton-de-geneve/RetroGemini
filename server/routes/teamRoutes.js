@@ -427,7 +427,18 @@ const registerTeamRoutes = ({
         return res.status(409).json({ error: 'team_name_exists' });
       }
 
+      // Decision D3b: the epoch the creator's token is minted with. It is '0'
+      // for a new team, except for an auth row left behind under a recycled
+      // random id: reading it is what keeps that token from being refused on
+      // its first use. Read before the record, inside the block that releases
+      // the claim, so that a failed read leaves no team behind — read after
+      // the save, it answered 500 for a team that existed, and the retry the
+      // screen invites was refused with 409 team_name_exists. Nothing writes
+      // the auth row of an id that has no record yet, so the order changes
+      // nothing about the value.
+      let authState;
       try {
+        authState = await dataStore.loadTeamAuthState(newTeam.id);
         await dataStore.saveTeam(newTeam.id, newTeam);
       } catch (saveErr) {
         // Compensating release, in the spirit of the rename rollback below.
@@ -482,10 +493,6 @@ const registerTeamRoutes = ({
         }
       }
 
-      // The epoch is '0' for a new team, except for an auth row left behind
-      // under a recycled random id: reading it is what keeps the creator's
-      // token from being refused on its first use.
-      const authState = await dataStore.loadTeamAuthState(newTeam.id);
       return res.status(201).json({
         team: sanitizeTeamForClient(newTeam),
         sessionToken: tokenService.createSessionToken(newTeam.id, null, { sessionEpoch: authState.sessionEpoch })

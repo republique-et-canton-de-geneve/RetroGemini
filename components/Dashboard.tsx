@@ -2305,6 +2305,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           teamName={team.name}
           teamPassword={dataService.getAuthenticatedPassword() || ''}
           sessionToken={dataService.getSessionToken()}
+          getSessionToken={dataService.getSessionToken}
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
           feedbacks={team.teamFeedbacks || []}
@@ -2315,6 +2316,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               teamId: team.id,
               password: dataService.getAuthenticatedPassword(),
               sessionToken: dataService.getSessionToken(),
+              // Decision D3b: read again when that token is refused as
+              // revoked and another tab's newer one was adopted meanwhile.
+              getSessionToken: dataService.getSessionToken,
               feedback
             });
             if (result === 'sent') onRefresh();

@@ -61,25 +61,53 @@ describe('a password rotation cuts the team\'s live sessions (decision D3b)', ()
   let teamSeq = 0;
   // Set by a case to make the next `loadTeamAuthState` of a pod's store throw.
   const failNextAuthRead = { value: false };
+  // Set by a case to hold the next `loadSessionState` of a gated pod: a join
+  // reads the session after the epoch, so a join held there has judged its
+  // token and not yet taken its place in the room.
+  let sessionReadGate: { reached: () => void; opened: Promise<void> } | null = null;
+  const armSessionReadGate = () => {
+    let reached!: () => void;
+    let open!: () => void;
+    const atGate = new Promise<void>((resolve) => { reached = resolve; });
+    sessionReadGate = { reached, opened: new Promise<void>((resolve) => { open = resolve; }) };
+    return { atGate, open };
+  };
 
   type Pod = { io: Server; port: number; revocation: ReturnType<typeof createSessionRevocation> };
 
-  const startPod = async ({ revocationSweepMs = 0, flakyStore = false } = {}): Promise<Pod> => {
+  const startPod = async ({ revocationSweepMs = 0, flakyStore = false, gatedSessionRead = false } = {}): Promise<Pod> => {
     const httpServer: HttpServer = createServer();
     const io = new Server(httpServer, { path: '/socket.io' });
     const revocation = createSessionRevocation({ io, serverRuntime: { multiPodAdapter: false } });
-    const store = flakyStore
+    const store = flakyStore || gatedSessionRead
       ? {
           ...dataStore,
           usePostgres: dataStore.usePostgres,
           getSqliteDb: dataStore.getSqliteDb,
-          loadTeamAuthState: async (teamId: string) => {
-            if (failNextAuthRead.value) {
-              failNextAuthRead.value = false;
-              throw new Error('database unavailable');
-            }
-            return dataStore.loadTeamAuthState(teamId);
-          }
+          ...(flakyStore
+            ? {
+                loadTeamAuthState: async (teamId: string) => {
+                  if (failNextAuthRead.value) {
+                    failNextAuthRead.value = false;
+                    throw new Error('database unavailable');
+                  }
+                  return dataStore.loadTeamAuthState(teamId);
+                }
+              }
+            : {}),
+          ...(gatedSessionRead
+            ? {
+                loadSessionState: async (sessionId: string) => {
+                  const gate = sessionReadGate;
+                  if (gate) {
+                    sessionReadGate = null;
+                    gate.reached();
+                    await gate.opened;
+                  }
+                  return dataStore.loadSessionState(sessionId);
+                }
+              }
+            : {})
         }
       : dataStore;
     registerSocketHandlers({
@@ -199,6 +227,64 @@ describe('a password rotation cuts the team\'s live sessions (decision D3b)', ()
     socket.emit('join-session', { sessionId: 's2', userId: 'par1', userName: 'Paul', sessionToken: oldToken, joinId: 'join-7' });
 
     expect(await denial).toEqual({ sessionId: 's2', reason: 'unauthenticated', cause: 'session_revoked', joinId: 'join-7' });
+  });
+
+  // A join that read the epoch just before a rotation holds no claims yet when
+  // the rotation's sweep looks at it, so a sweep that skipped it would leave
+  // it in the room, writing, until the next periodic sweep — a minute in
+  // production. The likeliest moment is the reconnect burst of a rolling
+  // update. No periodic sweep here, so only the rotation's own can cut it.
+  it('cuts a socket whose join read the epoch just before the rotation, once that join lands', async () => {
+    const pod = await startPod({ gatedSessionRead: true });
+    const teamId = await newTeam();
+    const oldToken = await tokenFor(teamId);
+    const participant = await connect(pod);
+
+    const gate = armSessionReadGate();
+    participant.emit('join-session', { sessionId: 's10', userId: 'par1', userName: 'Paul', sessionToken: oldToken, joinId: 'join-10' });
+    await gate.atGate;
+
+    await dataStore.rotateTeamSessionEpoch(teamId);
+    const observer = await connect(pod);
+    await joinSession(observer, { sessionId: 's10', userId: 'fac1', userName: 'Fiona', sessionToken: await tokenFor(teamId) });
+
+    const denial = once<Denial>(participant, 'join-denied');
+    const left = once<{ userId: string }>(observer, 'member-left');
+    const revoking = pod.revocation.revokeTeamSessions(teamId);
+    gate.open();
+    await revoking;
+
+    expect(await denial).toEqual({ sessionId: 's10', reason: 'unauthenticated', cause: 'session_revoked', joinId: 'join-10' });
+    expect((await left).userId).toBe('par1');
+  });
+
+  // A joined socket presenting its revoked token again (a remount re-joining
+  // the same session, a client from before this release) must leave the room
+  // it is in. Clearing its claims alone would leave it there, still writing,
+  // and with no claims no sweep would ever look at it again.
+  it('takes a socket out of its session when it re-joins it with a token revoked since', async () => {
+    const pod = await startPod();
+    const teamId = await newTeam();
+    const oldToken = await tokenFor(teamId);
+    const participant = await connect(pod);
+    await joinSession(participant, { sessionId: 's11', userId: 'par1', userName: 'Paul', sessionToken: oldToken });
+
+    await dataStore.rotateTeamSessionEpoch(teamId);
+    const observer = await connect(pod);
+    await joinSession(observer, { sessionId: 's11', userId: 'fac1', userName: 'Fiona', sessionToken: await tokenFor(teamId) });
+
+    const denial = once<Denial>(participant, 'join-denied');
+    const left = once<{ userId: string }>(observer, 'member-left');
+    participant.emit('join-session', { sessionId: 's11', userId: 'par1', userName: 'Paul', sessionToken: oldToken, joinId: 'join-11' });
+
+    expect(await denial).toEqual({ sessionId: 's11', reason: 'unauthenticated', cause: 'session_revoked', joinId: 'join-11' });
+    expect((await left).userId).toBe('par1');
+
+    const refused = once<{ reason: string }>(participant, 'session-update-refused');
+    participant.emit('update-session', { id: 's11', teamId, phase: 'BRAINSTORM', tickets: [{ id: 'k', text: 'after the re-join' }], _rev: 0 });
+    expect((await refused).reason).toBe('not-joined');
+    await settle();
+    expect(await dataStore.loadSessionState('s11')).toBeNull();
   });
 
   it('cuts a socket on another pod through the adapter event, and a forged event cuts nothing', async () => {

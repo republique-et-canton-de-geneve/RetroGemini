@@ -177,7 +177,7 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.settings.confirmPassword': 'Confirmer le nouveau mot de passe',
   'dashboard.settings.enterCurrentPassword': 'Saisissez le mot de passe actuel',
   'dashboard.settings.passwordMismatch': 'Les mots de passe ne correspondent pas',
-  'dashboard.settings.passwordChanged': "Mot de passe changé. Les autres sessions de l'équipe ont été fermées.",
+  'dashboard.settings.passwordChanged': 'Mot de passe changé. Les personnes connectées à cette équipe depuis un autre appareil ont été déconnectées.',
   'dashboard.settings.hcTemplates': 'Modèles de bilan de santé',
   'dashboard.settings.createHcTemplate': 'Créer un modèle de bilan de santé',
   'dashboard.settings.noHcTemplates': 'Aucun modèle de bilan de santé personnalisé pour le moment.',

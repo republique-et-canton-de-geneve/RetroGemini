@@ -3,7 +3,7 @@ import { gzipSync } from 'zlib';
 import { describe, expect, it, vi } from 'vitest';
 import { registerSuperAdminRoutes } from '../server/routes/superAdminRoutes.js';
 import { hashPassword, isHashedPassword, verifyPassword } from '../server/services/passwordHashing.js';
-import { postJson, request } from './helpers/routeTestServer';
+import { postJson, request, withServer } from './helpers/routeTestServer';
 
 /**
  * H23, prerequisite 2 — a restore can put plaintext password records back.
@@ -310,5 +310,65 @@ describe('restore cleans stored email addresses', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true, teamsRestored: 1 });
     warn.mockRestore();
+  });
+});
+
+/**
+ * Decision D3b — a restore can give a team a new session epoch (a password
+ * rolled back, a team brought back), and the sockets joined with a token that
+ * epoch revokes must leave their sessions at once. On a single pod, which
+ * broadcasts nothing, the restoring pod's own sweep is the only immediate cut:
+ * without it they stayed in their sessions, re-persisting pre-restore state,
+ * until the periodic sweep a minute later. A refused restore wrote nothing,
+ * so it sweeps nothing.
+ */
+describe('restore re-checks the live sockets', () => {
+  const revocation = () => ({
+    revokeTeamSessions: vi.fn(async () => undefined),
+    sweepAllLocal: vi.fn(async () => undefined),
+    attachLocalSweeper: vi.fn()
+  });
+
+  it('sweeps after an uploaded-archive restore, and not after a refused one', async () => {
+    const sessionRevocation = revocation();
+    const { app, backupService } = buildApp({ sessionRevocation });
+
+    expect((await request(app, '/api/super-admin/restore', uploadArchive({ teams: 'not-an-array' }))).status).toBe(400);
+    backupService.createBackup.mockResolvedValueOnce(null);
+    expect((await request(app, '/api/super-admin/restore', uploadArchive(legacyArchive()))).status).toBe(503);
+    expect(sessionRevocation.sweepAllLocal).not.toHaveBeenCalled();
+
+    expect((await request(app, '/api/super-admin/restore', uploadArchive(legacyArchive()))).status).toBe(200);
+    expect(sessionRevocation.sweepAllLocal).toHaveBeenCalledTimes(1);
+  });
+
+  it('sweeps after a stored-backup restore, and not after a refused one', async () => {
+    const sessionRevocation = revocation();
+    const { app, backupService } = buildApp({ sessionRevocation });
+    const restore = () => postJson({ password: VALID_PASSWORD, backupId: 'backup-1' });
+
+    backupService.createBackup.mockResolvedValueOnce(null);
+    expect((await request(app, '/api/super-admin/backups/restore', restore())).status).toBe(503);
+
+    // A second restore while one runs is refused.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const restoreFromBackup = backupService.restoreFromBackup.getMockImplementation()!;
+    backupService.restoreFromBackup.mockImplementationOnce(async (backupId: string) => {
+      await held;
+      return restoreFromBackup(backupId);
+    });
+    await withServer(app, async (call) => {
+      const first = call('/api/super-admin/backups/restore', restore());
+      await vi.waitFor(() => expect(backupService.restoreFromBackup).toHaveBeenCalled());
+      const second = await call('/api/super-admin/backups/restore', restore());
+      expect(second.status).toBe(409);
+      expect(await second.json()).toEqual({ error: 'restore_in_progress' });
+      expect(sessionRevocation.sweepAllLocal).not.toHaveBeenCalled();
+
+      release();
+      expect((await first).status).toBe(200);
+    });
+    expect(sessionRevocation.sweepAllLocal).toHaveBeenCalledTimes(1);
   });
 });
