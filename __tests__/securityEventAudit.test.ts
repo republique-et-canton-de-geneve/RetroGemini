@@ -154,6 +154,8 @@ const createMockDataStore = () => {
 };
 
 const createBackupService = () => ({
+  // The download's archive (the real one is built from the store).
+  buildArchive: vi.fn(async () => ({ data: Buffer.from('gz'), teamCount: 2, unrestorable: [] })),
   createBackup: vi.fn(async () => ({ id: 'backup-1', type: 'manual', teamCount: 2 })),
   createBackupOutcome: vi.fn(async () => ({ entry: { id: 'backup-1', type: 'manual', teamCount: 2 }, reason: null })),
   listBackups: vi.fn(async () => [{ id: 'backup-1' }]),

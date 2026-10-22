@@ -1,6 +1,5 @@
 import express from 'express';
 import { randomBytes } from 'crypto';
-import { gzipSync } from 'zlib';
 import rateLimit from 'express-rate-limit';
 import {
   getRestoreMaxBodyBytes,
@@ -1032,14 +1031,13 @@ This notification was sent from RetroGemini.
     }
 
     try {
-      const currentData = await dataStore.loadPersistedData();
+      // The builder every stored backup uses, so a download is the same bytes
+      // a backup row holds (compact JSON, team by team through gzip). Buffered
+      // before anything is sent: piping gzip into the response would save a
+      // truncated file as "downloaded" when a read fails after the headers.
+      const { data: compressed, teamCount } = await backupService.buildArchive();
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `retrogemini-backup-${timestamp}.json.gz`;
-
-      const jsonData = JSON.stringify(currentData, null, 2);
-      const compressed = gzipSync(Buffer.from(jsonData, 'utf8'));
-
-      const teamCount = currentData.teams?.length || 0;
       console.info(`[Server] Creating backup: ${teamCount} team(s)`);
 
       // Every team's data leaves the deployment in this response, so the
@@ -1159,11 +1157,11 @@ This notification was sent from RetroGemini.
   // builds, and nothing after the replace needs it.
   // `__tests__/restoreArchiveRetention.test.ts` observes that with `gc()`.
   const applyStoredArchive = async (backupId) => {
-    // Read and checked *after* the snapshot, never before: the snapshot dumps
-    // the whole store (`loadPersistedData` + stringify + gzip), and holding a
-    // parsed whole-store archive across it would double the route's memory
-    // peak. Rows imported since 41.0 were checked when written; this check is
-    // for rows written before, or by hand.
+    // Read and checked *after* the snapshot, never before: the snapshot reads
+    // the whole store (one team at a time, through gzip), and a parsed
+    // whole-store archive held across those reads would be held for nothing.
+    // Rows imported since 41.0 were checked when written; this check is for
+    // rows written before, or by hand.
     let archive;
     try {
       archive = await backupService.readBackupArchive(backupId);

@@ -243,6 +243,31 @@ describe('strict backup reads', () => {
     expect((await store.listBackups()).map((b: Json) => b.id)).toEqual([good!.id]);
   });
 
+  // A whole-store restore refuses an archive holding such a record
+  // (archiveShape.js), but failing the backup over it would also take away
+  // the single-team restore of every other team in it.
+  it('archives a readable team a whole-store restore would refuse, and warns once without naming content', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    setRaw('team:t4', JSON.stringify({ id: 't4', retrospectives: [{ id: 'r', name: SECRET_CONTENT }] }));
+    setRaw('team:t5', JSON.stringify({ name: SECRET_CONTENT }));
+
+    const entry = await backupService.createBackup('manual');
+    expect(entry?.teamCount).toBe(5);
+    const lines = warn.mock.calls.map((args) => args.map(String).join(' ')).filter((line) => line.includes('[Backup]'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(entry!.filename);
+    expect(lines[0]).toContain('2 team record(s)');
+    expect(lines[0]).toContain('id "t4"');
+    expect(lines[0]).toContain('record #5 in key order (no id)');
+    expect(lines[0]).not.toContain(SECRET_CONTENT);
+  });
+
+  it('warns about nothing when every team record is restorable', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await backupService.createBackup('manual')).toBeTruthy();
+    expect(warn.mock.calls.flat().map(String).filter((line) => line.includes('[Backup]'))).toEqual([]);
+  });
+
   describe('retro-meta', () => {
     it.each([
       ['not an object', '[]', 'not_an_object'],

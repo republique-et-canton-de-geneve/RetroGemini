@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { gunzipSync } from 'zlib';
 import { createDataStore } from '../server/services/dataStore.js';
+import { buildBackupArchive } from '../server/services/backupArchive.js';
 
 /**
  * What a backup archive carries — and what it deliberately does not (H43).
@@ -129,6 +131,29 @@ describe('the backup archive contract', () => {
     expect(serialised).not.toContain('sealed-jira-token-ciphertext');
     expect(serialised).not.toContain('Jira Robot');
     expect(serialised).not.toContain('jira.internal.example');
+  });
+
+  // The cases above read `loadPersistedData`, the reference representation.
+  // What ships is the streamed builder's bytes: the same contract, on those.
+  it('holds the same exclusions in the archive bytes every backup stores', async () => {
+    await store.saveTeam('t1', makeTeam('t1', 'Equipe Bilan'));
+    await store.saveTeamIndex(new Map([['equipe bilan', 't1']]));
+    await store.updateGlobalSettings(() => ({
+      adminEmail: 'admin@example.org',
+      infoMessage: 'Maintenance Friday',
+      ai: { enabled: true, apiUrl: 'https://llm.internal.example/v1', apiKey: 'secret-key-xyz' }
+    }));
+    await store.saveJiraSettings({ enabled: true, baseUrl: 'https://jira.internal.example/jira', allowSelfSignedCerts: true });
+    await store.saveTeamSecret('t1', { jira: { v: 1, iv: 'aXY', tag: 'dGFn', ct: 'sealed-jira-token-ciphertext', connectedAs: 'Jira Robot' } });
+
+    const serialised = gunzipSync((await buildBackupArchive({ dataStore: store })).data).toString('utf8');
+    const archive = JSON.parse(serialised);
+
+    expect(Object.keys(archive)).toEqual(['teams', 'meta', 'resetTokens', 'orphanedFeedbacks']);
+    expect(archive.teams.map((t: { name: string }) => t.name)).toEqual(['Equipe Bilan']);
+    for (const absent of ['secret-key-xyz', 'admin@example.org', 'Maintenance Friday', 'sealed-jira-token-ciphertext', 'Jira Robot', 'jira.internal.example']) {
+      expect(serialised).not.toContain(absent);
+    }
   });
 
   it('carries the Jira fields of a team record and restores them as stored: they are team data', async () => {

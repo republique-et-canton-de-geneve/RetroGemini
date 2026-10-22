@@ -1,5 +1,5 @@
 import express from 'express';
-import { gunzipSync } from 'zlib';
+import { gunzipSync, gzipSync } from 'zlib';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerSuperAdminRoutes } from '../server/routes/superAdminRoutes.js';
 import { verifyPassword } from '../server/services/passwordHashing.js';
@@ -109,7 +109,16 @@ const createDataStore = ({
   };
 };
 
+// The archive the download sends: what the real service builds from the store
+// (backupArchive.js), here from a fixed team list.
+const archiveOf = (teams: unknown[]) => ({
+  data: gzipSync(JSON.stringify({ teams, meta: { revision: 0, updatedAt: '2026-10-22T00:00:00.000Z' }, resetTokens: [], orphanedFeedbacks: [] })),
+  teamCount: teams.length,
+  unrestorable: [] as string[]
+});
+
 const createBackupService = () => ({
+  buildArchive: vi.fn(async () => archiveOf([{ id: 'team-1', name: 'Platform' }])),
   createBackup: vi.fn(async () => ({ id: 'backup-1', type: 'manual' })),
   createBackupOutcome: vi.fn(async (_type: string, _label?: string): Promise<{ entry: Record<string, unknown> | null; reason: string | null }> =>
     ({ entry: { id: 'backup-1', type: 'manual' }, reason: null })),
@@ -1025,9 +1034,10 @@ describe('super-admin feedback administration', () => {
 });
 
 describe('super-admin backups', () => {
-  it('streams a gzipped snapshot of the whole store', async () => {
-    const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Platform' }] });
-    const { app } = buildApp({ dataStore });
+  it('streams a gzipped snapshot of the whole store, built by the backup service', async () => {
+    const backupService = createBackupService();
+    backupService.buildArchive = vi.fn(async () => archiveOf([{ id: 'team-1', name: 'Platform' }, { id: 'team-2', name: 'Payments' }]));
+    const { app } = buildApp({ backupService });
 
     const response = await request(app, '/api/super-admin/backup', postJson(auth()));
 
@@ -1036,13 +1046,14 @@ describe('super-admin backups', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
 
     const payload = JSON.parse(gunzipSync(Buffer.from(await response.arrayBuffer())).toString('utf8'));
-    expect(payload.teams).toHaveLength(1);
+    expect(payload.teams.map((team: { id: string }) => team.id)).toEqual(['team-1', 'team-2']);
+    expect(backupService.buildArchive).toHaveBeenCalledOnce();
   });
 
   it('answers 500 when the snapshot cannot be built', async () => {
-    const dataStore = createDataStore();
-    dataStore.loadPersistedData = vi.fn(async () => { throw new Error('store down'); });
-    const { app } = buildApp({ dataStore });
+    const backupService = createBackupService();
+    backupService.buildArchive = vi.fn(async () => { throw new Error('Team record "team:t2" cannot be archived (unparsable)'); });
+    const { app } = buildApp({ backupService });
 
     const response = await request(app, '/api/super-admin/backup', postJson(auth()));
 

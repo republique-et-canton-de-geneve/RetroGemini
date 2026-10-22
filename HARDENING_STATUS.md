@@ -1253,6 +1253,13 @@ Keep visible so nobody "rediscovers" them as bugs:
   connection, and a read transaction held across the awaits would swallow
   every other request's writes. On both engines `retro-meta` is read after the
   teams, so at worst a feedback shows twice in an archive, never zero times.
+- **A snapshot that collides with a running backup answers `503`.** The
+  per-pod `backupInProgress` flag is held for the whole build, which is now
+  asynchronous and team by team: about as long as before, but no longer
+  blocking the event loop meanwhile. A pre-restore or pre-delete snapshot
+  taken while the scheduled backup runs on the same pod answers
+  `503 … snapshot_failed`, and retrying succeeds. Making snapshots wait for the
+  running backup is not built.
 
 - **CodeQL `js/request-forgery` on `/api/super-admin/test-jira` — expected, to
   be dismissed as "won't fix" with this rationale (40.0, the Jira

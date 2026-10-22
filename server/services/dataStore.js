@@ -1446,8 +1446,9 @@ const createDataStore = ({ rootDir }) => {
   // `updateGlobalSettings` has closed that hazard for the settings left there,
   // but the connection keeps its own key: the console writes it whole, and a
   // row nobody else writes needs no reasoning about what sits beside it. This
-  // read is strict — an error propagates — and a missing row is `null`. Not
-  // part of `loadPersistedData`, so no backup archive carries it.
+  // read is strict — an error propagates — and a missing row is `null`. An
+  // archive holds `team:` rows and `retro-meta` only (iterateArchiveTeams,
+  // readArchiveMeta), so no backup archive carries it.
   // ---------------------------------------------------------------------------
 
   const loadJiraSettings = async () => kvGet(JIRA_SETTINGS_KEY);
@@ -1531,7 +1532,7 @@ const createDataStore = ({ rootDir }) => {
   };
 
   // Every team record, one at a time and in key order, for an archive built
-  // team by team: no caller ever holds the whole store at once.
+  // team by team (backupArchive.js): the builder never holds the whole store.
   //
   // On PostgreSQL every team comes from ONE snapshot, as the single
   // `SELECT key, value … LIKE` it replaced gave: a `REPEATABLE READ READ
@@ -1601,7 +1602,9 @@ const createDataStore = ({ rootDir }) => {
 
   // The whole store as one archive object, read through the strict readers
   // above — so it throws instead of answering an archive that misses teams.
-  // Every backup, snapshot and the download read through it.
+  // Production builds archives team by team (backupArchive.js) and no longer
+  // calls this; the tests use it as the reference representation of an
+  // archive, and built on the same readers it cannot drift from what ships.
   const loadPersistedData = async () => {
     const teams = [];
     for await (const team of iterateArchiveTeams()) teams.push(team);
