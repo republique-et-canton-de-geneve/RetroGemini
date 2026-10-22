@@ -316,7 +316,7 @@ npm run test:e2e
 
 See [MAINTENANCE.md](MAINTENANCE.md), [HARDENING_STATUS.md](HARDENING_STATUS.md), [SECURITY.md](SECURITY.md), and [ACCESSIBILITY.md](ACCESSIBILITY.md) for details.
 
-Accessibility is gated on every pull request — an axe-core run over fifteen screens and `eslint-plugin-jsx-a11y` inside the lint budget. Both are ratchets: the number they allow may fall, never rise. [ACCESSIBILITY.md](ACCESSIBILITY.md) states what is tested, what was fixed, and what is still missing.
+Accessibility is gated on every pull request — an axe-core run over the main flows (with two participants of different colours), the super-admin console tab by tab and its dialogs, the Jira screens and the backup import card, every audited state capped at zero in `e2e/helpers/axe.ts` → `BASELINE`, and `eslint-plugin-jsx-a11y` inside the lint budget. Both are ratchets: the number they allow may fall, never rise. [ACCESSIBILITY.md](ACCESSIBILITY.md) states what is tested, what was fixed, and what is still missing.
 
 ## Development
 

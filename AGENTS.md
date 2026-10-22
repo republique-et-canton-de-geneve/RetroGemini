@@ -259,10 +259,10 @@ below 0.183, and the ranges overlap). The brand primary is indigo-600, not
 > page or a tinted panel (4.35:1). The audit prints each `color-contrast`
 > finding as its colour pairs and ratios, which is what tells you the surface.
 
-**A participant's colour is data, and it reaches the screen through one
-module.** `User.color` is a Tailwind class written by the team record and by
-every participant's own client into the session blob, so it is never
-interpolated into `className`: `utils/participantColors.ts` →
+**A participant's colour is data, and as a class it reaches the screen
+through one module.** `User.color` is a Tailwind class written by the team
+record and by every participant's own client into the session blob, so it is
+never interpolated into `className`: `utils/participantColors.ts` →
 `avatarColorClasses` (an avatar's background *and* its initials' colour) and
 `participantColorClass` (background only, for the non-text dots). White
 initials failed on seven of the eight palette colours, so the initials' colour
@@ -277,11 +277,24 @@ white initials), which also keeps a participant from writing classes such as
 renders neutral too, so grey avatars on an old team are expected, and nothing
 is migrated. A departed participant's avatar is neutral grey, never faded, and
 nothing adds opacity, `grayscale` or a second text colour beside the call —
-`__tests__/avatarColorSource.test.ts` walks the TSX AST and fails on a raw
-`.color` in any JSX attribute but `style` and `key` (the dots take theirs
-through a `colorClass` prop, which a `className`-only guard never saw). The
-health-check score tooltip's digits follow the same measurement
-(`utils/healthRatingColors.ts`).
+`__tests__/avatarColorSource.test.ts` walks the AST of `App.tsx` and every
+`.ts`/`.tsx` file under `components/` and fails on a raw `.color` in any JSX
+attribute but `style` and `key` (the dots take theirs through a `colorClass`
+prop, which a `className`-only guard never saw) — and on one anywhere else that
+is not inside those two functions, a roster copy (`color: member.color`, with
+an optional `||`/`??` fallback) or a key into a colour map, because a class
+built in a local variable and interpolated later reads `.color` outside every
+attribute. The one map is `Session.tsx`'s `TAILWIND_COLOR_MAP`, kept on purpose
+for the colour-by-author card: it paints a hex `style`, an unknown key gives the
+default card, and `bestTextColorOn` picks the text on it. A `color` destructured
+out of a user escapes the guard; do not write one. The health-check score
+tooltip's digits follow the same measurement (`utils/healthRatingColors.ts`),
+and because a measured table proves nothing about the line that reads it,
+`__tests__/healthRatingTooltipContrast.test.tsx` renders the tooltip and
+measures what it paints — as `__tests__/teamLoginInviteContrast.test.tsx` does
+for the two hints only a member-email invite link shows. Text that only a hover
+or one kind of link reveals is what the e2e audit never walks: measure it in
+jsdom with `__tests__/helpers/tailwindTheme.ts` → `effectivePair`.
 
 ## Moving cards on the board — two phases, two meanings
 

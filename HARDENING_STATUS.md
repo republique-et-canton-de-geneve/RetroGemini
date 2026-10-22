@@ -139,7 +139,12 @@ reading `git log`. If the file has grown a history section, prune it.
   into `className`; a departed avatar grey, never faded), pinned by a theme test
   that measures `theme.css` with axe-core's own colour engine and by an AST guard
   (`avatarColorSource.test.ts`) that sees every JSX attribute — the dots took
-  their colour through a `colorClass` prop that a `className`-only guard missed.
+  their colour through a `colorClass` prop that a `className`-only guard missed —
+  and, since review, every other `.color` read in `App.tsx` and `components/`, so
+  a class built in a local variable no longer slips past it. Two fixes no e2e
+  state reaches got render tests of their own: the score tooltip's digits
+  (`healthRatingTooltipContrast.test.tsx`, hover only) and a member-email invite
+  link's two hints (`teamLoginInviteContrast.test.tsx`).
   The console (182 nodes on 2026-10-20) was fixed by surface: `text-slate-500`
   stays on its white cards and went darker only on the grey page and tinted
   panels. The audit now walks the console once per tab behind an allowlist that

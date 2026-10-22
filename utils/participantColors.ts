@@ -1,8 +1,8 @@
 /**
  * A participant's colour is **data**: a Tailwind class stored on `User.color`,
  * written by the team record and by each participant's own client into the
- * session blob. It reaches the screen only through this module — guarded by
- * `__tests__/avatarColorSource.test.ts` — for two reasons.
+ * session blob. As a class it reaches the screen only through this module —
+ * guarded by `__tests__/avatarColorSource.test.ts` — for two reasons.
  *
  * - **Contrast.** White initials fail WCAG 1.4.3 on seven of the eight palette
  *   colours (lime at 1.96:1). The initials' colour is chosen per colour by
@@ -13,6 +13,12 @@
  *   Any participant can write any participant's `color` into the session blob,
  *   and a value such as `fixed inset-0 z-50` used to land on every screen. A
  *   value this release does not know renders neutral.
+ *
+ * One other reader, on purpose (design A6): `Session.tsx`'s
+ * `TAILWIND_COLOR_MAP` also reads it, as a lookup key for the colour-by-author
+ * card background, painted as a hex `style`. An unknown key gives the default
+ * card, and the text colour on that background is measured by
+ * `bestTextColorOn`.
  *
  * A colour an earlier release stored and this palette does not hold (or a
  * later release's new colour, seen by this one during a rolling update) also

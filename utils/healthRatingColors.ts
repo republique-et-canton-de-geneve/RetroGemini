@@ -6,7 +6,10 @@
  * of black and white on its background (`bestTextColorOn`'s rule), which is
  * black on all five. `__tests__/participantColors.test.ts` measures each pair
  * from Tailwind's `theme.css` with axe-core's engine, the way the e2e audit
- * measures it. Ratios as of Tailwind 4.3.3.
+ * measures it. Ratios as of Tailwind 4.3.3. That proves the table, not the line
+ * that reads it, so `__tests__/healthRatingTooltipContrast.test.tsx` renders the
+ * Dashboard and measures each digit as painted: the e2e audit never shows the
+ * tooltip, which appears on hover only.
  *
  * A rating is not a person's colour, so it lives apart from
  * `participantColors.ts`.
