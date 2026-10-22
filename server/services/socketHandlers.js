@@ -436,8 +436,10 @@ const registerSocketHandlers = ({
     console.log(`[Server] ${socket.userName || 'Unknown'} leaving session ${sessionId}`);
     socket.leave(sessionId);
 
+    // Debug (stdout only, never the log ring): the leave line above already
+    // says who left, and a reconnect wave writes one of each per participant.
     const room = io.sockets.adapter.rooms.get(sessionId);
-    console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
+    console.debug(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
 
     socket.to(sessionId).emit('member-left', {
       userId: socket.userId,
@@ -466,7 +468,9 @@ const registerSocketHandlers = ({
         )
       );
 
-    console.log('[Server] Client connected:', socket.id);
+    // Debug: the join line that follows names the user; the disconnect line
+    // stays at info.
+    console.debug('[Server] Client connected:', socket.id);
 
     // Audit H1: the socket channel used to have no authentication at all — a
     // join was taken at face value and answered with the full session state,
@@ -538,15 +542,18 @@ const registerSocketHandlers = ({
 
       rosterBroadcaster.schedule(sessionId);
 
+      // Debug, like the per-write lines: one join used to write four info
+      // lines, and a drained pod's 150 participants reconnecting filled the
+      // whole 1000-line ring. The join line above stays at info.
       const room = io.sockets.adapter.rooms.get(sessionId);
-      console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
+      console.debug(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
 
       if (sessionData) {
         if (fromDatabase) {
           sessionCache.set(sessionId, sessionData);
-          console.log(`[Server] Sending persisted session state to ${userName}`);
+          console.debug(`[Server] Sending persisted session state to ${userName}`);
         } else {
-          console.log(`[Server] Sending cached session state to ${userName}`);
+          console.debug(`[Server] Sending cached session state to ${userName}`);
         }
         // The in-memory-only store keeps its historical behaviour of seeding
         // the join from cache without an initial emit.
@@ -660,8 +667,10 @@ const registerSocketHandlers = ({
     const acceptWrite = (sessionId, savedData, restoredFields) => {
       sessionCache.set(sessionId, savedData);
 
+      // Debug (stdout only): one line per accepted write would turn the log
+      // ring over in seconds during a live retrospective.
       const room = io.sockets.adapter.rooms.get(sessionId);
-      console.log(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
+      console.debug(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
 
       socket.to(sessionId).emit('session-update', savedData);
       if (restoredFields.length > 0) socket.emit('session-update', savedData);
@@ -890,8 +899,9 @@ const registerSocketHandlers = ({
 
         // Logged once the write is known to be going ahead: a refused write is
         // reported (and coalesced) above, and logging it here too put one line
-        // per refused write back into the log ring.
-        console.log(`[Server] Session update from ${socket.userName}, phase: ${outgoing.phase}`);
+        // per refused write back into the log ring. Debug: stdout only, the
+        // per-write trail, never the ring (logService.attachConsole).
+        console.debug(`[Server] Session update from ${socket.userName}, phase: ${outgoing.phase}`);
 
         const result = await dataStore.saveSessionState(sessionId, outgoing);
 

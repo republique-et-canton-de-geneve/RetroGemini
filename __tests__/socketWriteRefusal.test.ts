@@ -253,6 +253,33 @@ describe('update-session: restore, refuse, report (integration)', () => {
     expect(paulEvents).toEqual([{ event: 'session-ack', payload: { sessionId: 'iss-clean', rev: rev + 1 } }]);
   }, 20000);
 
+  // One accepted write wrote two info lines and one join four, all mirrored
+  // into the 1000-entry log ring: ten live retrospectives turned it over in
+  // about 25 seconds, and a rolling update's reconnect wave filled it alone.
+  // They are debug now (stdout only); the join line itself stays at info.
+  it('writes the per-write and redundant join lines at debug, and keeps the join line at info', async () => {
+    const log = vi.spyOn(console, 'log');
+    const info = vi.spyOn(console, 'info');
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const { paul, initial } = await setupSession('iss-debug-lines');
+
+    paul.emit('update-session', { ...structuredClone(initial), tickets: [ticket('t1')] });
+    await once(paul, 'session-ack');
+    await settle(100);
+
+    const lines = (spy: typeof log) => spy.mock.calls.map((args) => args.map(String).join(' '));
+    const infoLines = [...lines(log), ...lines(info)];
+    for (const pattern of ['Session update from', 'Broadcasting to', 'now has', 'Sending persisted session state', 'Client connected']) {
+      expect(infoLines.filter((line) => line.includes(pattern))).toEqual([]);
+    }
+    expect(infoLines.some((line) => line.includes('joining session iss-debug-lines'))).toBe(true);
+    const debugLines = lines(debug as unknown as typeof log);
+    expect(debugLines.some((line) => line.includes('Session update from Paul'))).toBe(true);
+    expect(debugLines.some((line) => line.includes('Broadcasting to') && line.includes('iss-debug-lines'))).toBe(true);
+    expect(debugLines.some((line) => line.includes('Session iss-debug-lines now has'))).toBe(true);
+    expect(debugLines.some((line) => line.includes('Sending persisted session state to Paul'))).toBe(true);
+  }, 20000);
+
   it('heals without saving a write whose only change is facilitator-only, and says which fields', async () => {
     const { fiona, paul, rev, initial } = await setupSession('iss-protected-only');
     const paulEvents = record(paul);
@@ -622,6 +649,9 @@ describe('update-session: restore, refuse, report (integration)', () => {
     const { paul, initial } = await setupSession('iss-log-flood');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    // Accepted writes are logged at debug; a refused one must not be logged
+    // there either, or this test would pass on the info level alone.
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
 
     for (let i = 0; i < 50; i++) {
       paul.emit('update-session', { ...structuredClone(initial), name: 'Retro A' });
@@ -641,6 +671,7 @@ describe('update-session: restore, refuse, report (integration)', () => {
     expect(warnLines[1]).toMatch(/repeated 49 times in \d+s/);
     // A refused write is not "a session update" in the activity trail either.
     expect(lines(log).filter((line) => line.includes('Session update from'))).toEqual([]);
+    expect(lines(debug as unknown as typeof warn).filter((line) => line.includes('Session update from'))).toEqual([]);
   }, 30000);
 
   it('truncates a long value in the refusal line and escapes it', async () => {

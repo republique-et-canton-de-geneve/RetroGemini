@@ -1253,6 +1253,12 @@ Keep visible so nobody "rediscovers" them as bugs:
   connection, and a read transaction held across the awaits would swallow
   every other request's writes. On both engines `retro-meta` is read after the
   teams, so at worst a feedback shows twice in an archive, never zero times.
+- **The per-write socket lines reach stdout only.** Accepted `update-session`
+  lines and the redundant reconnect lines are `console.debug`: never in the
+  super-admin log ring (they turned it over in seconds), still on stdout with
+  their correlation and session ids, as the trail an investigation reads.
+  There is no `LOG_LEVEL` knob; an aggregator that drops `level: debug` drops
+  that trail.
 - **A snapshot that collides with a running backup answers `503`.** The
   per-pod `backupInProgress` flag is held for the whole build, which is now
   asynchronous and team by team: about as long as before, but no longer
