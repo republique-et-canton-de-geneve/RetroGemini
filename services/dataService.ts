@@ -1934,18 +1934,36 @@ export const dataService = {
   importTeam: async (inviteData: { id: string; name: string; password?: string; inviteCredential?: string; sessionId?: string; session?: RetroSession; members?: User[]; globalActions?: ActionItem[]; retrospectives?: RetroSession[]; memberId?: string; memberEmail?: string; memberName?: string; inviteToken?: string }): Promise<Team> => {
     // New links (stage 7e) carry a signed invite credential; older links
     // embed the plaintext password and keep joining until stage 7d.
-    const res = await fetch('/api/team/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(
-        inviteData.inviteCredential
-          ? { teamName: inviteData.name, inviteCredential: inviteData.inviteCredential }
-          : { teamName: inviteData.name, password: inviteData.password }
-      )
-    });
+    let res: Response;
+    try {
+      res = await fetch('/api/team/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          inviteData.inviteCredential
+            ? { teamName: inviteData.name, inviteCredential: inviteData.inviteCredential }
+            : { teamName: inviteData.name, password: inviteData.password }
+        )
+      });
+    } catch {
+      // No answer at all: the network, never the link. The browser's own
+      // message ("Failed to fetch") would reach the screen untranslated.
+      throw new Error('The server could not be reached. Check your connection, then try again.');
+    }
 
+    // The join screen offers "Try again", so the message says whether a retry
+    // can help. The route refuses a link with 400 (no credential) or 401 (a
+    // team, password or credential it does not accept); 429 is `loginLimiter`;
+    // anything else — a 5xx, a gateway's answer during a rolling update — is
+    // worth retrying now.
     if (!res.ok) {
-      throw new Error('Failed to join team - invalid invite link');
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        throw new Error('Failed to join team - invalid invite link');
+      }
+      if (res.status === 429) {
+        throw new Error('Too many attempts to join this team from this network. Please wait a few minutes, then try again.');
+      }
+      throw new Error('The team could not be joined right now. Please try again in a moment.');
     }
 
     const { team, sessionToken } = await res.json();

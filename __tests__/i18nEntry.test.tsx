@@ -151,6 +151,27 @@ describe('TeamLogin in French', () => {
     expect(screen.queryByText(/I'm not in the list/)).toBeNull();
   });
 
+  it('says in French why an invite link could not be used, with a retry and a way back', async () => {
+    // The import failed with no answer from the server: a retry can help, and
+    // a reload cannot (App has already removed `?join=` from the address).
+    const { dataService } = await import('../services/dataService');
+    vi.mocked(dataService.importTeam).mockRejectedValueOnce(
+      new Error('The server could not be reached. Check your connection, then try again.')
+    );
+    render(
+      <LanguageProvider initialLanguage="fr">
+        <TeamLogin onLogin={vi.fn()} onJoin={vi.fn()} inviteData={{ id: 'team-1', name: 'Alpha Team' }} />
+      </LanguageProvider>
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Le serveur est injoignable. Vérifiez votre connexion, puis réessayez.'
+    );
+    expect(screen.getByRole('button', { name: 'Réessayer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Retour/ })).toBeInTheDocument();
+    expect(screen.queryByText(/could not be reached/)).toBeNull();
+  });
+
   it('offers the switcher on the reset screen and states the password rule in French', async () => {
     window.history.replaceState({}, '', `/?reset=${'a'.repeat(64)}`);
     render(

@@ -161,49 +161,70 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   // passes new callbacks each time, and `/api/version` answering during the
   // import is one such render), so every invitee downloaded the team at least
   // twice. React keeps the ref across StrictMode's double mount, so
-  // development imports once too. A failed import is not retried here: the
-  // error stays on screen, and a reload retries.
+  // development imports once too.
+  //
+  // A failed import is never retried by a render, and a reload cannot retry
+  // it: App removes `?join=` from the address as soon as it reads the link, so
+  // a reload shows the team list. The error screen therefore offers "Try
+  // again" (one import per click, which keeps the limiter's count to what the
+  // user asked for) and a way back to the team list.
   const importedInvite = useRef<InviteData | null>(null);
+  // A retry keeps its button on screen while it runs, like the team list's,
+  // and puts focus on the join screen's heading when that is where it lands.
+  const [inviteRetrying, setInviteRetrying] = useState(false);
+  const focusJoinAfterRetry = useRef(false);
+  const joinHeadingRef = useRef<HTMLHeadingElement>(null);
 
-  // Handle invitation link - try auto-join or show member selection
+  // Import the invitation's team, then try auto-join or show member selection.
+  // Stable (refs and setters only), so the effect below runs once per link.
+  const importInvite = useCallback(async (invite: InviteData) => {
+    try {
+      const team = await dataService.importTeam(invite);
+      setSelectedTeam(team);
+      // A failed attempt's error stays on screen while a retry runs; this
+      // attempt has succeeded.
+      setError(null);
+
+      try {
+        const { team: updatedTeam, user } = dataService.autoJoinFromInvite(team.id, invite);
+        // Auto-join succeeded (server validated the authentication)
+        const join = onJoinRef.current;
+        if (join) {
+          join(updatedTeam, user);
+        } else {
+          onLoginRef.current(updatedTeam);
+        }
+      } catch (err: unknown) {
+        // Auto-join failed (invalid or missing authentication)
+        // Show member selection screen as fallback
+        if (!(err instanceof InviteAutoJoinError && err.code === 'INVITE_NOT_VERIFIED')) {
+          const message = err instanceof Error ? err.message : String(err);
+          setError(rawFeedback(message));
+        }
+        setView('JOIN');
+      }
+    } catch (err: unknown) {
+      focusJoinAfterRetry.current = false;
+      const message = err instanceof Error ? err.message : String(err);
+      setError(rawFeedback(message));
+      setView('JOIN');
+    } finally {
+      setInviteRetrying(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!inviteData || importedInvite.current === inviteData) return;
     importedInvite.current = inviteData;
+    importInvite(inviteData);
+  }, [inviteData, importInvite]);
 
-    const handleInvite = async () => {
-      try {
-        const team = await dataService.importTeam(inviteData);
-        setSelectedTeam(team);
-
-        try {
-          const { team: updatedTeam, user } = dataService.autoJoinFromInvite(team.id, inviteData);
-          // Auto-join succeeded (server validated the authentication)
-          const join = onJoinRef.current;
-          if (join) {
-            join(updatedTeam, user);
-          } else {
-            onLoginRef.current(updatedTeam);
-          }
-        } catch (err: unknown) {
-          // Auto-join failed (invalid or missing authentication)
-          // Show member selection screen as fallback
-          if (err instanceof InviteAutoJoinError && err.code === 'INVITE_NOT_VERIFIED') {
-            setError(null);
-          } else {
-            const message = err instanceof Error ? err.message : String(err);
-            setError(rawFeedback(message));
-          }
-          setView('JOIN');
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        setError(rawFeedback(message));
-        setView('JOIN');
-      }
-    };
-
-    handleInvite();
-  }, [inviteData]);
+  const retryInviteImport = () => {
+    if (inviteRetrying || !inviteData) return;
+    focusJoinAfterRetry.current = true;
+    setInviteRetrying(true);
+    importInvite(inviteData);
+  };
 
   const isFullTeam = (team: Team | TeamSummary | null): team is Team => {
     return !!team && 'members' in team;
@@ -231,6 +252,14 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     focusListAfterRetry.current = false;
     listHeadingRef.current?.focus();
   }, [teamsLoadFailed, teamsLoaded, teams]);
+
+  // The same for an invite retry that lands on the join screen: its button is
+  // gone in that commit, and focus would otherwise fall back to the page.
+  useLayoutEffect(() => {
+    if (!focusJoinAfterRetry.current || view !== 'JOIN' || !selectedTeam) return;
+    focusJoinAfterRetry.current = false;
+    joinHeadingRef.current?.focus();
+  }, [view, selectedTeam]);
 
   useEffect(() => {
     loadTeams();
@@ -862,11 +891,37 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
 
             {/* A refused invite import leaves no team to join, and the join
                 screen below needs one: say why here, or the pane stays blank.
-                The import is not retried behind the user's back (each try is
-                one more refusal counted by the login limiter); a reload does. */}
+                The import is never retried behind the user's back (each try is
+                one more refusal counted by the login limiter), and a reload
+                cannot retry it (App has removed `?join=` from the address), so
+                this screen offers "Try again" and a way back to the team list.
+                The error stays while a retry runs, or the pane would go blank. */}
             {view === 'JOIN' && !selectedTeam && error && (
                 <div className="flex flex-col h-full justify-center max-w-md mx-auto">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (inviteRetrying) return;
+                            focusJoinAfterRetry.current = false;
+                            setView('LIST');
+                            setError(null);
+                        }}
+                        aria-disabled={inviteRetrying}
+                        className="absolute top-8 left-8 text-slate-500 hover:text-slate-600 flex items-center text-sm font-bold aria-disabled:opacity-60 aria-disabled:cursor-wait"
+                    >
+                        <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">arrow_back</span> {t('common.back')}
+                    </button>
                     <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>
+                    {inviteData && (
+                        <button
+                            type="button"
+                            onClick={retryInviteImport}
+                            aria-disabled={inviteRetrying}
+                            className="self-center bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50 aria-disabled:opacity-60 aria-disabled:cursor-wait"
+                        >
+                            {inviteRetrying ? t('login.join.retrying') : t('login.list.retry')}
+                        </button>
+                    )}
                 </div>
             )}
 
@@ -876,7 +931,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         <div className="w-16 h-16 rounded-full bg-linear-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-2xl mx-auto mb-4">
                             {selectedTeam.name.substring(0,2).toUpperCase()}
                         </div>
-                        <h2 className="text-2xl font-bold text-slate-800">{t('login.join.title', { teamName: selectedTeam.name })}</h2>
+                        <h2 ref={joinHeadingRef} tabIndex={-1} className="text-2xl font-bold text-slate-800 outline-hidden">{t('login.join.title', { teamName: selectedTeam.name })}</h2>
                         <p className="text-slate-500 text-sm mt-2">
                             {selectionMode === 'SELECT_MEMBER'
                                 ? t('login.join.subtitleSelect')

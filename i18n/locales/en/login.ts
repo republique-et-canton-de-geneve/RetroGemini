@@ -68,6 +68,9 @@ const login = {
 
   // Guest join (invite link)
   'login.join.title': 'Join {teamName}',
+  // The invite import failed, and its "Try again" button (login.list.retry)
+  // is running a new attempt.
+  'login.join.retrying': 'Trying again...',
   'login.join.subtitleSelect': 'Select your name from the list or add a new one',
   'login.join.subtitleNew': 'Enter your name to join',
   'login.join.pickerLabelNoEmail': 'Select a member without an email',
