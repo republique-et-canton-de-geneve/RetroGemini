@@ -140,6 +140,61 @@ describe('JiraBatchButton', () => {
     });
   });
 
+  // Maintainer, on the Dashboard: "améliorer l'affichage de ce texte qui
+  // décale tout et c'est moche". The column used to be as wide as the
+  // sentence, with the button at its left edge, so the button landed wherever
+  // the sentence started. jsdom cannot measure, so the structure and classes
+  // are pinned here and e2e/jira.spec.ts measures the boxes.
+  describe('the layout of the button and its note', () => {
+    const blocked = statusWith({ token: { configured: false, usable: false } });
+
+    it('docks the button to the right edge from sm up, the note hanging under it', () => {
+      installJiraFetch({});
+      render(<JiraBatchButton {...props({ status: blocked })} />);
+      const button = screen.getByRole('button', { name: 'Create in Jira (2)' });
+      const root = button.parentElement!;
+      expect(root.firstElementChild).toBe(button);
+      const note = button.nextElementSibling!;
+      expect(note.tagName).toBe('P');
+      expect(note).toHaveTextContent('Jira is not connected for this team: add an access token in Settings → Jira.');
+      expect(button).toHaveAttribute('aria-describedby', note.id);
+      // A column whose right edge is the container's: the button's place never
+      // depends on how long the note is.
+      expect(root).toHaveClass('flex', 'flex-col', 'items-start', 'max-w-full', 'sm:ml-auto', 'sm:max-w-sm', 'sm:items-end');
+    });
+
+    // index.css declares `.material-symbols-outlined { font-size: 24px }`
+    // outside any cascade layer, so a plain `text-sm` on an icon does nothing:
+    // the note's icon stayed a 24px glyph beside 12px text (review R1).
+    it('sizes both icons with the important modifier, which beats the unlayered icon rule', () => {
+      installJiraFetch({});
+      render(<JiraBatchButton {...props({ status: blocked })} />);
+      const button = screen.getByRole('button', { name: 'Create in Jira (2)' });
+      expect(button.querySelector('.material-symbols-outlined')).toHaveClass('text-lg!', 'leading-none');
+      expect(button.nextElementSibling!.querySelector('.material-symbols-outlined')).toHaveClass('text-base!', 'leading-none');
+    });
+
+    it('shows the button alone when the team can create', () => {
+      installJiraFetch({});
+      render(<JiraBatchButton {...props()} />);
+      const button = screen.getByRole('button', { name: 'Create in Jira (2)' });
+      expect(button.parentElement!.children).toHaveLength(1);
+      expect(button).not.toHaveAttribute('aria-describedby');
+    });
+
+    // Per-action controls render nothing while creation is blocked, so with
+    // nothing to send the note is the only thing saying why there is no Jira
+    // control (finding U-1, review R5): it stands alone in the button's place.
+    it('stands the note alone in the button’s place when there is nothing to send', () => {
+      installJiraFetch({});
+      render(<JiraBatchButton {...props({ status: blocked, actions: OTHERS })} />);
+      expect(screen.queryByRole('button', { name: /Create in Jira/ })).toBeNull();
+      const note = screen.getByText(/Jira is not connected for this team/).closest('p')!;
+      expect(note.parentElement!.children).toHaveLength(1);
+      expect(note.parentElement).toHaveClass('sm:ml-auto', 'sm:items-end');
+    });
+  });
+
   describe('the dialog', () => {
     it('shows the target and exactly what each issue will say', () => {
       installJiraFetch({});

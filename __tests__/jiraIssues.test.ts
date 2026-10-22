@@ -544,7 +544,18 @@ describe('POST /jira/issues (SQLite)', () => {
   // it from its record and the request. Both go through `issueSource`, so for
   // the same state the facilitator previews exactly what Jira receives.
   describe('the preview and the server agree', () => {
-    type Case = { label: string; actionId: string; sessionId?: string; kind: 'retro' | 'healthcheck' | 'backlog'; edit?: (team: Json) => void };
+    type Case = {
+      label: string;
+      actionId: string;
+      sessionId?: string;
+      kind: 'retro' | 'healthcheck' | 'backlog';
+      edit?: (team: Json) => void;
+      /** What Jira must have stored, beyond agreeing with the preview. */
+      check?: (description: string) => void;
+    };
+    // Longer than every limit the builder has (the summary's 255, the 50 the
+    // screens cut a quote at), with an end marker a cut would lose (review R3).
+    const HUGE_CARD = `The release checklist ${'keeps growing and nobody owns it '.repeat(32)}END OF THE CARD`;
     const cases: Case[] = [
       {
         label: 'an action in two homes, the backlog copy edited, the retro copy written against a card',
@@ -576,10 +587,81 @@ describe('POST /jira/issues (SQLite)', () => {
         actionId: 'h1',
         sessionId: RETRO_ID,
         kind: 'retro'
+      },
+      {
+        label: 'an action on a group of three cards, one on several lines and one with markup',
+        actionId: 'a1',
+        sessionId: RETRO_ID,
+        kind: 'retro',
+        edit: (team) => {
+          const retro = team.retrospectives[0];
+          retro.groups = [{ id: 'grp', title: 'Deploys', colId: 'c1', votes: [] }];
+          retro.tickets.push(
+            { id: 'g1', colId: 'c1', text: 'Deploys wait for a manual approval', groupId: 'grp', votes: [] },
+            { id: 'g2', colId: 'c1', text: 'Too many steps\n- build\n- sign', groupId: 'grp', votes: [] },
+            { id: 'g3', colId: 'c1', text: 'Ask [~admin] for {code}', groupId: 'grp', votes: [] }
+          );
+          retro.actions.find((entry: Json) => entry.id === 'a1').linkedTicketId = 'grp';
+        },
+        check: (description) => {
+          expect(description.split('\n').slice(1)).toEqual([
+            '',
+            'Cards in the group:',
+            '* Deploys wait for a manual approval',
+            '* Too many steps \\- build \\- sign',
+            '* Ask \\[\\~admin\\] for \\{code\\}'
+          ]);
+        }
+      },
+      {
+        // The retro copy on the record carries the "Re: …" line a screen cut
+        // at 50 characters; the card is still on the record, so it is quoted.
+        label: 'an action on a huge card whose record copy carries a context a screen cut',
+        actionId: 'a2',
+        sessionId: RETRO_ID,
+        kind: 'retro',
+        edit: (team) => {
+          const retro = team.retrospectives[0];
+          retro.tickets.push({ id: 'huge', colId: 'c1', text: HUGE_CARD, votes: [] });
+          Object.assign(retro.actions.find((entry: Json) => entry.id === 'a2'), {
+            linkedTicketId: 'huge',
+            contextText: `Re: "${HUGE_CARD.substring(0, 50)}..."`
+          });
+        },
+        check: (description) => {
+          expect(description).toContain(`Re: "${HUGE_CARD}"`);
+          expect(description).not.toContain('...');
+        }
+      },
+      {
+        label: 'an action on a group whose cards exceed Jira’s limit',
+        actionId: 'a3',
+        sessionId: RETRO_ID,
+        kind: 'retro',
+        edit: (team) => {
+          const retro = team.retrospectives[0];
+          retro.groups = [{ id: 'big', title: 'Too much', colId: 'c1', votes: [] }];
+          retro.tickets.push(
+            { id: 'b1', colId: 'c1', text: 'Kept card', groupId: 'big', votes: [] },
+            { id: 'b2', colId: 'c1', text: 'y'.repeat(33000), groupId: 'big', votes: [] },
+            { id: 'b3', colId: 'c1', text: 'After the big one', groupId: 'big', votes: [] }
+          );
+          retro.actions.find((entry: Json) => entry.id === 'a3').linkedTicketId = 'big';
+        },
+        check: (description) => {
+          expect(description.length).toBeLessThanOrEqual(32767);
+          expect(description.split('\n').slice(1)).toEqual([
+            '',
+            'Cards in the group:',
+            '* Kept card',
+            '',
+            'And 2 more cards in RetroGemini: Jira limits the length of a description.'
+          ]);
+        }
       }
     ];
 
-    it.each(cases)('$label', async ({ actionId, sessionId, kind, edit }) => {
+    it.each(cases)('$label', async ({ actionId, sessionId, kind, edit, check }) => {
       if (edit) await editRecord(edit);
       const team = await record();
       const live = sessionId
@@ -601,6 +683,7 @@ describe('POST /jira/issues (SQLite)', () => {
 
       const [issue] = jira.issues();
       expect({ summary: issue.summary, description: issue.description }).toEqual({ summary: preview.summary, description: preview.description });
+      check?.(issue.description ?? '');
     });
   });
 

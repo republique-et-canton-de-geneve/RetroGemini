@@ -203,6 +203,11 @@ describe('HealthCheckSession Review with Jira', () => {
     const button = await screen.findByRole('button', { name: 'Create in Jira (2)' });
     expect(button).toHaveAttribute('aria-disabled', 'true');
     expect(button).toHaveAccessibleDescription(/Jira refused the team’s token on .*: replace it in Settings → Jira\./);
+    // The same layout as the retrospective's step and the Dashboard: the note
+    // right under the button, docked with it to the right edge.
+    const note = screen.getByText(/Jira refused the team’s token on/).closest('p')!;
+    expect(button.nextElementSibling).toBe(note);
+    expect(button.parentElement).toHaveClass('sm:ml-auto', 'sm:items-end');
     // This facilitator dismissed the note already, in this browser.
     expect(screen.queryByRole('note', { name: 'New: create your actions in Jira' })).toBeNull();
   });

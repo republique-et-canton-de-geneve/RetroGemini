@@ -231,9 +231,30 @@ describe('ReviewPhase with Jira', () => {
     const button = await screen.findByRole('button', { name: 'Create in Jira (1)' });
     expect(button).toHaveAttribute('aria-disabled', 'true');
     expect(button).toHaveAccessibleDescription(/Jira is not connected for this team: add an access token in Settings → Jira\./);
+    // The note hangs right under the button, docked with it to the header's
+    // right edge, so it never moves the button (the layout the Dashboard shares).
+    const note = screen.getByText(/Jira is not connected for this team/).closest('p')!;
+    expect(button.nextElementSibling).toBe(note);
+    expect(button.parentElement).toHaveClass('sm:ml-auto', 'sm:items-end');
     expect(screen.queryByRole('button', { name: 'Create in Jira, Fix the build' })).toBeNull();
     // This facilitator dismissed the note already, in this browser.
     expect(screen.queryByRole('note', { name: 'New: create your actions in Jira' })).toBeNull();
+  });
+
+  // Before any new action, or once they are all sent, there is no batch to
+  // offer, and the previous actions' own controls render nothing while
+  // creation is blocked: the note, alone in the button's place, is the only
+  // thing saying why there is no Jira control on the step (review R5).
+  it('keeps the reason alone in the button’s place on a step with only previous actions', async () => {
+    installJiraFetch(routes({ 'jira/status': () => ok(statusWith({ token: { configured: false, usable: false, connectedAs: null, setAt: null } })) }));
+    const session = retro({ actions: [] });
+    mocks.team = teamWith(session, [action('old-1', 'Write the runbook')]);
+    window.localStorage.setItem(JIRA_NOTE_STORAGE_KEY, JSON.stringify([facilitator.id]));
+    render(<Harness session={session} team={mocks.team} currentUser={facilitator} historyActionIds={['old-1']} />);
+
+    const note = (await screen.findByText(/Jira is not connected for this team: add an access token in Settings → Jira\./)).closest('p')!;
+    expect(note.parentElement!.children).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /Create in Jira/ })).toBeNull();
   });
 
   it('shows the link of a previous action that only the session’s history snapshot knows', async () => {

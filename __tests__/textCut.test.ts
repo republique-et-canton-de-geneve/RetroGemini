@@ -44,10 +44,14 @@ describe('ticketQuote', () => {
     expect(cutCodeUnits('ab😀', 4)).toBe('ab😀');
   });
 
-  it('is the quote the Jira description writes, so the screen and the issue agree', () => {
+  // The screens' "Re: …" line is cut; the Jira description quotes the card
+  // whole, never through this cut (maintainer decision 2026-10-22, "never
+  // abbreviate"), so no emoji can be halved there either.
+  it('is not the quote the Jira description writes: the issue quotes the card whole', () => {
     const text = `${'a'.repeat(49)}😀 and more`;
     const team = { retrospectives: [{ id: 'r1', tickets: [{ id: 'k1', text }], groups: [] }] };
-    expect(actionContextText({ action: { linkedTicketId: 'k1' }, team, language: 'en' })).toBe(`Re: "${ticketQuote(text)}"`);
+    expect(ticketQuote(text)).not.toBe(text);
+    expect(actionContextText({ action: { linkedTicketId: 'k1' }, team, language: 'en' })).toBe(`Re: "${text}"`);
   });
 
   // The three screens that write a card's quote onto an action. A quote

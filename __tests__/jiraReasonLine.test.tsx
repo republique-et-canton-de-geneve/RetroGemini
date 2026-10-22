@@ -39,6 +39,18 @@ describe('JiraReasonLine', () => {
     expect(screen.getByText('Choose where the issues are created in Settings → Jira.')).toBeInTheDocument();
   });
 
+  // A tidy note with two clean edges, the codebase's amber notice: slate-700
+  // on amber-50 is 9.98:1, the amber-700 icon 4.87:1 (and hidden from
+  // assistive technology); the text carries the reason, never the colour.
+  it('is a small bordered note, its icon sized against the unlayered icon rule', () => {
+    render(<JiraReasonLine status={statusWith({ target: null })} isFacilitator />);
+    const note = screen.getByText('Choose where the issues are created in Settings → Jira.').closest('p')!;
+    expect(note).toHaveClass('rounded-md', 'border', 'border-amber-200', 'bg-amber-50', 'text-xs', 'text-slate-700');
+    const icon = note.querySelector('.material-symbols-outlined')!;
+    expect(icon).toHaveAttribute('aria-hidden', 'true');
+    expect(icon).toHaveClass('text-base!', 'leading-none', 'shrink-0', 'text-amber-700');
+  });
+
   it('carries the id a disabled control points its aria-describedby at', () => {
     render(<JiraReasonLine status={statusWith({ target: null })} isFacilitator id="why" />);
     expect(screen.getByText(/Choose where/).closest('[id="why"]')).not.toBeNull();

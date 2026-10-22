@@ -35,6 +35,12 @@ const SUPER_ADMIN_PASSWORD = 'e2e-super-admin-password';
 const LABEL = `e2e-${STAMP}`;
 
 const TICKET = 'Releases keep slipping';
+// The first test's own card: longer than every limit the builder has (the
+// summary's 255, the 50 the screens cut a quote at), plain words with no
+// character Jira reads as markup (so it reaches Jira exactly as typed), and an
+// end marker a cut at any length would lose. The issue quotes it whole
+// (maintainer, 2026-10-22: "Il ne faut pas abréger sinon on sait plus").
+const LONG_TICKET = `Releases keep slipping because ${'the checklist grows and nobody owns the last step '.repeat(5)}END OF THE CARD`;
 const NEW_ACTIONS = ['Write the release checklist', 'Book a weekly release review'];
 const PREVIOUS_ACTION = 'Automate the changelog';
 const REMAINING_ACTION = 'Archive the old wiki pages';
@@ -59,6 +65,12 @@ const keyOf = (mock: JiraMock, summary: string): string => {
 };
 
 const issueCount = (mock: JiraMock) => mock.issues({ label: LABEL }).length;
+
+const boxOf = async (locator: Locator) => {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('Expected a visible element with a box');
+  return { left: box.x, top: box.y, right: box.x + box.width, bottom: box.y + box.height, height: box.height };
+};
 
 const openConsole = async (page: Page) => {
   await page.goto('/');
@@ -234,6 +246,44 @@ test.describe('Creating actions in Jira', () => {
     await addBacklogAction(facilitator, PREVIOUS_ACTION);
     await addBacklogAction(facilitator, REMAINING_ACTION);
 
+    // ---- No token yet: the button on the filters' row, the reason under it -
+    // The maintainer's screenshot: the reason's column pushed the button into
+    // the middle of the page. jsdom cannot measure, so the boxes are read here.
+    const dashboardBatch = facilitator.getByRole('button', { name: 'Create in Jira (2)' });
+    await expect(dashboardBatch).toHaveAttribute('aria-disabled', 'true', { timeout: 15_000 });
+    await expect(dashboardBatch).toHaveAccessibleDescription(/^Jira is not connected for this team: add an access token in Settings → Jira\.$/);
+    const reasonId = await dashboardBatch.getAttribute('aria-describedby');
+    const reason = facilitator.locator(`[id="${reasonId}"]`);
+    const openPill = facilitator.getByRole('button', { name: 'Open', exact: true });
+    const actionList = dashboardRow(facilitator, PREVIOUS_ACTION).locator('xpath=..');
+    const toolbar = openPill.locator('xpath=../..');
+    {
+      const [button, pill, note, list, icon] = await Promise.all(
+        [dashboardBatch, openPill, reason, actionList, reason.locator('.material-symbols-outlined')].map(boxOf)
+      );
+      // On the pills' row, the same height (the icon no longer stretches it).
+      expect(Math.abs(button.top - pill.top)).toBeLessThanOrEqual(1);
+      expect(Math.abs(button.bottom - pill.bottom)).toBeLessThanOrEqual(1);
+      // Docked to the list's right edge, the note under it, right edges lined up.
+      expect(Math.abs(button.right - list.right)).toBeLessThanOrEqual(1);
+      expect(Math.abs(note.right - button.right)).toBeLessThanOrEqual(1);
+      expect(note.top).toBeGreaterThanOrEqual(button.bottom);
+      // About text height, not the 24px glyph the unlayered icon rule gave it.
+      expect(icon.height).toBeLessThanOrEqual(17);
+    }
+    // A phone: a left-aligned stack, the note within the screen. Re-rendered,
+    // not reloaded, so the per-IP read budget is not spent.
+    await facilitator.setViewportSize({ width: 320, height: 900 });
+    {
+      const [button, note, list] = await Promise.all([dashboardBatch, reason, actionList].map(boxOf));
+      expect(Math.abs(button.left - list.left)).toBeLessThanOrEqual(1);
+      expect(note.left).toBeGreaterThanOrEqual(0);
+      expect(note.right).toBeLessThanOrEqual(320);
+      expect(button.right).toBeLessThanOrEqual(320);
+      expect(await toolbar.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+    }
+    await facilitator.setViewportSize({ width: 1280, height: 900 });
+
     await dashboardTab(facilitator, 'Settings').click();
     const settingsCard = facilitator.getByRole('region', { name: 'Jira', exact: true });
     await expect(settingsCard.getByText('No token saved yet.')).toBeVisible({ timeout: 15_000 });
@@ -267,9 +317,9 @@ test.describe('Creating actions in Jira', () => {
     await facilitator.getByRole('button', { name: 'BRAINSTORM', exact: true }).click();
     const idea = facilitator.getByRole('textbox', { name: 'Add an idea...' }).first();
     await expect(idea).toBeVisible({ timeout: 15_000 });
-    await idea.fill(TICKET);
+    await idea.fill(LONG_TICKET);
     await idea.press('Enter');
-    await expect(facilitator.getByText(TICKET)).toBeVisible();
+    await expect(facilitator.getByText(LONG_TICKET)).toBeVisible();
     await wait(1_000);
 
     await facilitator.getByRole('button', { name: 'DISCUSS', exact: true }).click();
@@ -339,6 +389,9 @@ test.describe('Creating actions in Jira', () => {
     expect(sentBody.actionIds).toHaveLength(2);
     expect(issueCount(mock)).toBe(2);
     const newKeys = NEW_ACTIONS.map(text => keyOf(mock, text));
+    // The only place the session, the record and the route meet end to end:
+    // the issue quotes the card whole, not the 50 characters the screens show.
+    expect(mock.issues({ label: LABEL }).find(issue => issue.summary === NEW_ACTIONS[0])?.description).toContain(LONG_TICKET);
     for (const key of newKeys) await expect(dialog.getByRole('link', { name: linkName(key) })).toBeVisible();
     await dialog.getByRole('button', { name: 'Close' }).click();
     await expect(dialog).toHaveCount(0);

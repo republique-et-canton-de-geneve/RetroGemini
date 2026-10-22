@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActionItem } from '../types';
-import { jiraIssuePreview, jiraParentPreviews, withLiveSession } from '../components/jira/jiraIssuePreview';
+import { descriptionAsJiraShowsIt, jiraIssuePreview, jiraParentPreviews, withLiveSession } from '../components/jira/jiraIssuePreview';
 
 /**
  * The batch dialog's preview of each issue (`components/jira/jiraIssuePreview.ts`).
@@ -102,10 +102,58 @@ describe('jiraIssuePreview', () => {
       .toEqual({ summary, description, language: 'en' });
   });
 
+  // The cached team a screen was handed can lag its live session: a card put
+  // in the group since, on the facilitator's own screen. The server reads the
+  // record once the screen's writes landed.
+  it('lists a group’s cards from the live session, not from the cached team', () => {
+    const live = {
+      ...cachedRetro,
+      actions: [action('a1', { linkedTicketId: 'grp' })],
+      groups: [{ id: 'grp', title: 'Deploys' }],
+      tickets: [
+        { id: 't1', text: 'Deploys wait for approval', groupId: 'grp' },
+        { id: 't2', text: 'Grouped since the cache was read', groupId: 'grp' }
+      ]
+    };
+    const cached = { ...team, retrospectives: [{ ...live, tickets: [live.tickets[0]] }, team.retrospectives[1]] };
+    const preview = jiraIssuePreview({ action: live.actions[0], team: cached, session: live, kind: 'retro', sessionId: 'r1', requestedBy: 'Ann', language: 'en' });
+    expect(preview.description).toBe(
+      'Action from the retrospective Sprint 12 (2026\\-10\\-06) — Re: Group "Deploys". Requested in RetroGemini as Ann.\n'
+      + '\nCards in the group:\n* Deploys wait for approval\n* Grouped since the cache was read'
+    );
+  });
+
   it('describes an action the team holds no copy of from the copy on screen, as a backlog action', () => {
     const shown = action('nowhere', { text: 'Only on screen' });
     expect(jiraIssuePreview({ action: shown, team, kind: 'retro', sessionId: 'r1', requestedBy: '', language: 'en' }))
       .toEqual({ summary: 'Only on screen', description: 'Action from the team backlog. Created from RetroGemini.', language: 'en' });
+  });
+});
+
+/**
+ * The description as Jira shows it, for the dialog: the escapes the builder
+ * adds removed (Jira renders `\-` as `-`), the template's list items as
+ * bullets, and the line breaks kept, so the dialog shows the list Jira will.
+ */
+describe('descriptionAsJiraShowsIt', () => {
+  it('shows each escaped character as itself', () => {
+    expect(descriptionAsJiraShowsIt('Sprint 12 (2026\\-10\\-06) — Re: "\\[\\~admin\\] \\{code\\}"'))
+      .toBe('Sprint 12 (2026-10-06) — Re: "[~admin] {code}"');
+  });
+
+  it('shows the template’s items as bullets and keeps every line break', () => {
+    expect(descriptionAsJiraShowsIt('Head.\n\nCards in the group:\n* One\n* Two \\- three'))
+      .toBe('Head.\n\nCards in the group:\n• One\n• Two - three');
+  });
+
+  it('never turns a card’s escaped star into a bullet', () => {
+    expect(descriptionAsJiraShowsIt('Head.\n\nCards in the group:\n* \\* x\n* a \\* b'))
+      .toBe('Head.\n\nCards in the group:\n• * x\n• a * b');
+  });
+
+  it('leaves a one-line description on one line', () => {
+    expect(descriptionAsJiraShowsIt('Action from the team backlog. Created from RetroGemini.'))
+      .toBe('Action from the team backlog. Created from RetroGemini.');
   });
 });
 

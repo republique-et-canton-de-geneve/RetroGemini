@@ -656,6 +656,15 @@ that test in hand.
    depends on; check what that costs before proposing it
 3. **QR codes** are generated client-side using the `qrcode` npm package — no external API needed
 4. **Test with network disabled** — verify that the feature works with no internet access
+5. **Size an icon with the important modifier.** `.material-symbols-outlined`
+   in `index.css` is declared outside any cascade layer, so it beats every
+   Tailwind utility (which live in `@layer utilities`): a plain `text-sm` on an
+   icon has no effect and the glyph stays 24px. Write `text-base! leading-none`
+   — `leading-none` because the important size otherwise brings its own
+   line-height. That is what left the Jira reason note's icon a 24px glyph
+   beside 12px text. Most icons in `components/` still carry an inert size
+   class; moving the rule into `@layer base` would make all of them take effect
+   at once, an app-wide visual change that needs its own review
 
 ## Internationalisation (EN/FR)
 
@@ -2279,9 +2288,10 @@ Rules:
   under it** [R1]. A `parent`-mode one-time target with `adoptParent` sends
   every action under the parent named, and makes it the stored parent of each
   scope with no key (or only a mark, or only an expired claim; with
-  `replaceParents`, one with a key too) **in the write that stores the key of a
-  sub-task created under it** (`adoptParent` in `jiraIssues.js`) — never in the
-  claim write. A refused sub-task, a lost answer or a key that cannot be saved
+  `replaceParents`, one with a key too) **in the write that lands the key of a
+  sub-task Jira created under it** (`adoptParent` in `jiraIssues.js`) — even
+  when that action's copy no longer takes the key (deleted, or a rival key
+  kept), and never in the claim write. A refused sub-task, a lost answer or a key that cannot be saved
   changes no scope; a live foreign parent claim is left alone. The adopted key
   is the one Jira's lookup answered, and a parent that cannot hold sub-tasks — a
   sub-task, or on Cloud a type above level 0 (an epic) — is refused once,
@@ -2300,10 +2310,12 @@ Rules:
   Route then answers 504 while the server finishes the call in flight and then
   stops (`client_gone`), and the client reads it as `outcome_unknown`. A
   session's parent counts as one creation: the budget, the caller and the
-  drain are read again before the sub-task that follows a fresh parent, and
-  once more after the parent's write [R6], so a `SIGTERM` during that write
-  releases the action's claim and starts no call; a parent created past the
-  budget is stored and its action waits in `remaining`. A Dashboard request of
+  drain are read again before the parent's write, to decide whether the
+  sub-task that follows a fresh parent may start, and only the caller and the
+  drain (not the budget) are read once more after that write [R6], so a
+  `SIGTERM` during that write releases the action's claim and starts no call;
+  a parent created past the budget is stored and its action waits in
+  `remaining`. A Dashboard request of
   ten actions from ten sessions can need twenty calls: the budget cuts it. A
   draining pod is forced out `DEFAULT_SHUTDOWN_TIMEOUT_MS` (20 s) after
   `SIGTERM`: one Jira call (`JIRA_CALL_DEADLINE_MS`) and the write of its key,
@@ -2331,7 +2343,28 @@ Rules:
   with none reads English), else the team's latest retro's, else the clicker's,
   else English. The server creates with them and the batch dialog previews with
   them, so what the facilitator confirms is what is sent. The context is quoted
-  in anonymous sessions too (maintainer decision D2). The dialog sends the
+  in anonymous sessions too (maintainer decision D2). The description quotes
+  the linked card in full, or for an action on a group names the group and
+  lists the full text of each of its cards, one `* ` item each, in board order
+  (`retro.tickets` order), never an author (maintainer decision 2026-10-22,
+  "never abbreviate"; `actionGroupCards`). It derives the card from the
+  record, and uses a stored `contextText` only when the card or group no
+  longer exists — that value is whatever a screen stored, which may be cut at
+  50 characters or written in the reader's language. Jira's limits are the
+  only cuts to what the action and its cards say: the summary at 255, and the
+  description at 32,767 (`DESCRIPTION_MAX_LENGTH`, line breaks counted
+  twice), where whole cards are dropped from the end and counted in a closing
+  line (a first paragraph that nearly fills the limit leaves them
+  unmentioned), and a quote too long to fit is replaced by a sentence saying
+  so — only when that sentence fits: a session name close to the limit keeps
+  the real quote, overflows, and Jira refuses that one action. The requester's
+  display name is cut at 80 (`REQUESTED_BY_MAX_LENGTH`), RetroGemini's own
+  limit. `wikiText` escapes each item, and
+  the list is the one construct the template writes (nothing interpolated can
+  start a line). The guard is linear, because it runs under the team's row
+  lock (the claim step) and in the dialog on every live update. The dialog
+  renders the description with its line breaks and the list's bullets
+  (`descriptionAsJiraShowsIt`, `whitespace-pre-wrap`). The dialog sends the
   target it shows — the stored one as last read, or the one-time change — with
   every request of the batch, never "whatever is stored now": any team session
   may save another target meanwhile (D1), and a batch longer than one request
@@ -2402,9 +2435,16 @@ Rules:
   read on Review entry, on each reconnect and after a settings save — never
   from `dataService` while rendering (`useJiraStatus`).
 - **Who may press is the screens' rule.** The controls show to facilitators,
-  on open actions only (the server answers `closed` anyway); a reason line tied
+  on open actions only (the server answers `closed` anyway); a reason note tied
   to an `aria-disabled` control says why a facilitator cannot create (no token,
-  enter it again, refused by Jira, no target). The health-check Review closes
+  enter it again, refused by Jira, no target). At all three sites (the
+  Dashboard's Actions tab, where the batch button shares the filters' row, and
+  both Review steps) the button is docked to the right edge from `sm` up and
+  the note hangs under it as a small bordered amber note, right-aligned with it
+  and at most 24rem wide, so it never moves the button (`JiraBatchButton`,
+  `JiraReasonLine`; a left-aligned stack on a phone). With nothing to send the
+  note stands alone in the button's place: per-action controls render nothing
+  while creation is blocked. The health-check Review closes
   and assigns actions through `toggleGlobalAction` / `updateGlobalAction`, as
   the retro's does: it used to write only the session row, so the Dashboard —
   and the batch — saw closed actions as open. In `sessionParent` mode both
@@ -2522,16 +2562,24 @@ one-click's target, the dialog of the sub-task modes, the `parent_*`
 outcomes), `jiraTargetFields.test.tsx` (the third mode, and a project form
 that never offers a sub-task type from the route's full list),
 `jiraService.test.ts` / `dataServiceJira.test.ts` (parents read, cached and
-counted as progress), `jiraIssuePreview.test.ts` and `jiraIssues.test.ts` →
-*the parent preview and the server agree*, `reviewPhaseJira.test.tsx`,
-`healthCheckReviewJira.test.tsx` and `dashboardJira.test.tsx` (the parent line
+counted as progress), `jiraIssueContent.test.ts` (the full quote, a group's
+cards, each escaped, and the 32,767 guard: whole cards only, linear),
+`jiraMock.test.ts` (the mock refuses a description over 32,767 as Jira does),
+`jiraIssuePreview.test.ts` and `jiraIssues.test.ts` → *the preview and the
+server agree* (a group's cards, a huge card over a cut stored context, an
+overflowing group) and *the parent preview and the server agree*, `reviewPhaseJira.test.tsx`,
+`healthCheckReviewJira.test.tsx` and `dashboardJira.test.tsx` (the reason note
+docked under the button, with `jiraBatchButton.test.tsx`,
+`dashboardActionsTab.test.tsx` and `jiraReasonLine.test.tsx`; the parent line
 and the rows' dialog), `i18nJira.test.tsx`,
 `jiraBatchSessionConvergence.test.ts`, `jiraErrorCodes.test.ts` (every code
 the routes answer reads as a sentence in both languages), `shutdown.test.ts`
 (the forced exit outlasts one Jira call and ends inside the grace period),
 and `e2e/jira.spec.ts` — the whole flow with two browsers, one parent issue
 per retrospective reused for its later actions, the dashboard's own parent and
-a parent named for one send, and the axe audit of the seven Jira screens. A local PostgreSQL run of several of the suites that
+a parent named for one send, a ~300-character card reaching Jira whole, the
+Dashboard's reason note measured under its button at 1280 and 320px, and the
+axe audit of the seven Jira screens. A local PostgreSQL run of several of the suites that
 read `TEST_DATABASE_URL` shares global rows between files: run it with
 `--no-file-parallelism`.
 

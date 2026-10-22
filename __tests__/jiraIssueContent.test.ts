@@ -5,10 +5,12 @@ import enSession from '../i18n/locales/en/session';
 import frSession from '../i18n/locales/fr/session';
 import { ROTI_FOLLOW_UP_LINK_ID as CLIENT_ROTI_FOLLOW_UP_LINK_ID } from '../components/session/retroConstants';
 import {
+  DESCRIPTION_MAX_LENGTH,
   ROTI_FOLLOW_UP_LINK_ID,
   SUMMARY_MAX_LENGTH,
   REQUESTED_BY_MAX_LENGTH,
   actionContextText,
+  actionGroupCards,
   issueContentLanguage,
   issueFields,
   issueSource,
@@ -17,6 +19,7 @@ import {
   parentIssueFields,
   wikiText
 } from '../utils/jiraIssueContent.js';
+import { jiraIssuePreview } from '../components/jira/jiraIssuePreview';
 
 /**
  * What an issue created from an action says (`utils/jiraIssueContent.js`).
@@ -51,7 +54,13 @@ const OTHER_LINE_BREAKING: Array<[string, string]> = [
 ];
 
 const SHORT_TICKET = 'Deploys are slow';
-const LONG_TICKET = `${repeat('x', 50)} and then some more words`;
+// Longer than every limit the module has (the summary's 255, the requester's
+// 80, the 50 the screens cut a quote at), plain words only so escaping leaves
+// it as it is, with an end marker a cut at any length would lose (review R3).
+const HUGE_CARD = `The release checklist ${'keeps growing and nobody owns it '.repeat(32)}END OF THE CARD`;
+
+// What Jira may count: each line break as CR LF.
+const counted = (text: string) => text.length + (text.split('\n').length - 1);
 
 const makeTeam = () => ({
   id: 'team-1',
@@ -73,8 +82,7 @@ const makeTeam = () => ({
       templateLanguage: 'en',
       tickets: [
         { id: 'ticket-short', text: SHORT_TICKET },
-        { id: 'ticket-long', text: LONG_TICKET },
-        { id: 'ticket-50', text: repeat('y', 50) },
+        { id: 'ticket-huge', text: HUGE_CARD },
         { id: 'ticket-emoji', text: `${repeat('a', 49)}\u{1F600}tail` },
         { id: 'ticket-dollar', text: 'Costs $& and $1' }
       ],
@@ -295,10 +303,55 @@ describe('actionContextText', () => {
   const team = makeTeam();
   const action = (fields: Record<string, unknown>) => ({ id: 'a1', text: 'Act', ...fields });
 
-  it('keeps a stored context, whatever the language', () => {
-    expect(actionContextText({
-      action: action({ contextText: 'Re: stored', linkedTicketId: 'ticket-short' }), team, language: 'fr'
-    })).toBe('Re: stored');
+  // Maintainer decision 2026-10-22, "Il ne faut pas abréger sinon on sait
+  // plus": Jira has nothing else to show, so the card is quoted whole.
+  it('quotes a card in full, never cut nor marked', () => {
+    for (const [language, dictionary] of [['en', enSession], ['fr', frSession]] as const) {
+      const text = actionContextText({ action: action({ linkedTicketId: 'ticket-huge' }), team, language });
+      expect(text).toBe(fill(dictionary['session.actionContext.ticket'], 'text', HUGE_CARD));
+      expect(text).toContain('END OF THE CARD');
+      expect(text).not.toContain('...');
+    }
+  });
+
+  it('quotes a card with an emoji whole', () => {
+    const text = actionContextText({ action: action({ linkedTicketId: 'ticket-emoji' }), team, language: 'en' });
+    expect(text).toBe(fill(enSession['session.actionContext.ticket'], 'text', `${repeat('a', 49)}\u{1F600}tail`));
+    expect(LONE_SURROGATE.test(text)).toBe(false);
+  });
+
+  // A stored context is what a screen wrote: the session's "Re: …" line cut
+  // at 50 characters, or a Dashboard display string. While the card is still
+  // on the record, the card is what is quoted.
+  it('quotes the card from the record over a stored context a screen cut', () => {
+    const cut = `Re: "${HUGE_CARD.substring(0, 50)}..."`;
+    expect(actionContextText({ action: action({ contextText: cut, linkedTicketId: 'ticket-huge' }), team, language: 'en' }))
+      .toBe(fill(enSession['session.actionContext.ticket'], 'text', HUGE_CARD));
+  });
+
+  it('quotes the card over a Dashboard display context, in the content language', () => {
+    expect(actionContextText({ action: action({ contextText: SHORT_TICKET, linkedTicketId: 'ticket-short' }), team, language: 'fr' }))
+      .toBe(fill(frSession['session.actionContext.ticket'], 'text', SHORT_TICKET));
+  });
+
+  it('derives a group from the record over a stored context', () => {
+    expect(actionContextText({ action: action({ contextText: 'Group: Tooling', linkedTicketId: 'group-en' }), team, language: 'en' }))
+      .toBe(fill(enSession['session.actionContext.group'], 'title', 'Tooling'));
+  });
+
+  // The residual the docs state (review R4): a card that is gone (its
+  // retrospective was deleted) leaves only what a screen stored, cut or not.
+  it.each([
+    ['the card is gone', 'gone-ticket'],
+    ['the action has no link', undefined]
+  ])('keeps the stored context, as stored, only when %s', (_label, linkedTicketId) => {
+    const stored = 'Re: "The release checklist keeps growing and nob..."';
+    expect(actionContextText({ action: action({ contextText: stored, linkedTicketId }), team, language: 'fr' })).toBe(stored);
+  });
+
+  it('names a ROTI follow-up in the content language, even over a stored context', () => {
+    expect(actionContextText({ action: action({ contextText: 'Re: ROTI follow-up', linkedTicketId: ROTI_FOLLOW_UP_LINK_ID }), team, language: 'fr' }))
+      .toBe(frSession['session.actionContext.rotiFollowUp']);
   });
 
   it('quotes a short ticket in full, exactly as the screens do', () => {
@@ -306,25 +359,6 @@ describe('actionContextText', () => {
       .toBe(fill(enSession['session.actionContext.ticket'], 'text', SHORT_TICKET));
     expect(actionContextText({ action: action({ linkedTicketId: 'ticket-short' }), team, language: 'fr' }))
       .toBe(fill(frSession['session.actionContext.ticket'], 'text', SHORT_TICKET));
-  });
-
-  it('cuts a long ticket at 50 characters and marks the cut', () => {
-    const quoted = `${LONG_TICKET.substring(0, 50)}...`;
-    expect(actionContextText({ action: action({ linkedTicketId: 'ticket-long' }), team, language: 'en' }))
-      .toBe(fill(enSession['session.actionContext.ticket'], 'text', quoted));
-    expect(actionContextText({ action: action({ linkedTicketId: 'ticket-long' }), team, language: 'fr' }))
-      .toBe(fill(frSession['session.actionContext.ticket'], 'text', quoted));
-  });
-
-  it('does not mark a ticket of exactly 50 characters as cut', () => {
-    expect(actionContextText({ action: action({ linkedTicketId: 'ticket-50' }), team, language: 'en' }))
-      .toBe(fill(enSession['session.actionContext.ticket'], 'text', repeat('y', 50)));
-  });
-
-  it('does not split an emoji at the 50-character cut', () => {
-    const text = actionContextText({ action: action({ linkedTicketId: 'ticket-emoji' }), team, language: 'en' });
-    expect(text).toBe(fill(enSession['session.actionContext.ticket'], 'text', `${repeat('a', 49)}...`));
-    expect(LONE_SURROGATE.test(text)).toBe(false);
   });
 
   it('keeps a `$&` in the ticket literally', () => {
@@ -596,6 +630,486 @@ describe('issueFields', () => {
     const session = { ...englishRetro, name };
     expect(issueFields({ action: plainAction, session, kind: 'retro', team, requestedBy: 'Ann', language: 'en' }).description)
       .toBe('Action from the retrospective (2026\\-10\\-06). Requested in RetroGemini as Ann.');
+  });
+});
+
+/**
+ * A group's cards in the description (maintainer, 2026-10-22: "ajouter dans
+ * la description le texte des tickets dans les groupes aussi. Ne rien
+ * abréger"). The cards of a group are its retro's tickets with that
+ * `groupId`, in board order (`retro.tickets` order), each one whole and
+ * escaped, never with its author.
+ */
+describe('actionGroupCards', () => {
+  const groupRetro = (tickets: Array<Record<string, unknown>>, extra: Record<string, unknown> = {}) => ({
+    id: 'retro-g',
+    name: 'Sprint 12',
+    date: '2026-10-06',
+    templateLanguage: 'en',
+    tickets,
+    groups: [{ id: 'grp', title: 'Deploys' }, { id: 'grp-other', title: 'Other' }],
+    actions: [],
+    ...extra
+  });
+  const linked = (linkedTicketId: unknown) => ({ id: 'a1', text: 'Act', linkedTicketId });
+
+  it('lists the group’s cards in board order, from the retro that holds the group only', () => {
+    const team = {
+      retrospectives: [
+        // A newer retro holding a card that names the same group id: not this group's card.
+        { id: 'retro-new', tickets: [{ id: 'elsewhere', text: 'Another retro', groupId: 'grp' }], groups: [] },
+        groupRetro([
+          { id: 't3', text: 'Third on the board? No: first', groupId: 'grp', authorId: 'mem-1' },
+          { id: 't-other', text: 'In another group', groupId: 'grp-other' },
+          { id: 't-loose', text: 'In no group', groupId: null },
+          { id: 't1', text: 'Second on the board', groupId: 'grp', authorId: 'mem-2' }
+        ])
+      ]
+    };
+    expect(actionGroupCards({ action: linked('grp'), team })).toEqual([
+      wikiText('Third on the board? No: first'),
+      'Second on the board'
+    ]);
+  });
+
+  it('gives the escaped text of each card, whole', () => {
+    const team = { retrospectives: [groupRetro([
+      { id: 't1', text: HUGE_CARD, groupId: 'grp' },
+      { id: 't2', text: '[~admin] {html}', groupId: 'grp' }
+    ])] };
+    expect(actionGroupCards({ action: linked('grp'), team })).toEqual([HUGE_CARD, '\\[\\~admin\\] \\{html\\}']);
+  });
+
+  it.each([
+    ['spaces only', '   '],
+    ['control characters only', '\n\t\u0007'],
+    ['backslashes only', '\\\\\\'],
+    ['a zero-width space only', '\u200b'],
+    ['an empty text', ''],
+    ['no text at all', undefined]
+  ])('leaves out a card of %s, so no item is ever empty', (_label, text) => {
+    const team = { retrospectives: [groupRetro([
+      { id: 't1', text: 'Kept', groupId: 'grp' },
+      { id: 't2', text, groupId: 'grp' }
+    ])] };
+    const cards = actionGroupCards({ action: linked('grp'), team });
+    expect(cards).toEqual(['Kept']);
+    expect(cards).not.toContain('');
+  });
+
+  // Decision R9: the action was written against that card; the group it was
+  // put in later is the Review step's display, not what the action is about.
+  it('lists nothing for an action linked to a card, even a card in a group', () => {
+    const team = { retrospectives: [groupRetro([{ id: 't1', text: 'Grouped card', groupId: 'grp' }])] };
+    expect(actionGroupCards({ action: linked('t1'), team })).toEqual([]);
+  });
+
+  it.each([
+    ['a ROTI follow-up', linked(ROTI_FOLLOW_UP_LINK_ID)],
+    ['no link', linked(undefined)],
+    ['a link to nothing the team holds', linked('gone')],
+    ['no action', undefined]
+  ])('lists nothing for %s', (_label, action) => {
+    const team = { retrospectives: [groupRetro([{ id: 't1', text: 'Grouped card', groupId: 'grp' }])] };
+    expect(actionGroupCards({ action, team })).toEqual([]);
+  });
+
+  it('survives a malformed team record', () => {
+    expect(actionGroupCards({ action: linked('grp'), team: null })).toEqual([]);
+    expect(actionGroupCards({ action: linked('grp'), team: { retrospectives: 'x' } })).toEqual([]);
+    expect(actionGroupCards({
+      action: linked('grp'),
+      team: { retrospectives: [null, { tickets: 'x', groups: [{ id: 'grp' }] }] }
+    })).toEqual([]);
+    expect(actionGroupCards({
+      action: linked('grp'),
+      team: { retrospectives: [{ tickets: [null, 7, { id: 't', text: 'Kept', groupId: 'grp' }], groups: [null, { id: 'grp' }] }] }
+    })).toEqual(['Kept']);
+  });
+});
+
+describe('issueFields with a group’s cards', () => {
+  const englishRetro = {
+    id: 'retro-12',
+    name: 'Sprint 12',
+    date: '2026-10-06',
+    templateLanguage: 'en',
+    tickets: [
+      { id: 'c1', text: 'Have an environment where we can change the F5 and WAM configs ourselves, to be autonomous', groupId: 'grp-en' },
+      { id: 'loose', text: 'Not in the group', groupId: null },
+      { id: 'c2', text: 'Clarify the dev/integration scope so our tools and our assignments stay consistent', groupId: 'grp-en' },
+      { id: 'c3', text: 'Who decides what goes into the sprint?', groupId: 'grp-en' }
+    ],
+    groups: [{ id: 'grp-en', title: 'Autonomy and consistency of assignments' }, { id: 'grp-empty', title: 'Nothing inside' }],
+    actions: []
+  };
+  // The maintainer's own retro, as the screenshots show it.
+  const frenchRetro = {
+    id: 'retro-186',
+    name: 'AFC R&S 19/10 2611-Sprint 186',
+    date: '13.10.2026',
+    templateLanguage: 'fr',
+    tickets: [
+      { id: 'f1', text: 'Avoir un environnement où on peut toucher les confs F5 et WAM pour pouvoir être autonome', groupId: 'grp-fr' },
+      { id: 'f2', text: 'Essayer de clarifier le périmètre dev/intégration afin d’avoir une cohérence entre nos outils et nos missions', groupId: 'grp-fr' },
+      { id: 'f3', text: 'Qui décide de ce qui entre dans le sprint ?', groupId: 'grp-fr' },
+      { id: 'f-laurent', text: 'Acter la proposition de Laurent : pas de colonne Sprint pour atelier', groupId: null }
+    ],
+    groups: [{ id: 'grp-fr', title: 'Autonomie et cohérence des missions' }],
+    actions: []
+  };
+  const team = { retrospectives: [frenchRetro, englishRetro], healthChecks: [], globalActions: [] };
+  const describeAction = (linkedTicketId: string, session: Record<string, unknown>, requestedBy = 'Facilitator') =>
+    issueFields({ action: { id: 'a', text: 'Act', linkedTicketId }, session, kind: 'retro', team, requestedBy, language: 'en' }).description;
+
+  it('lists the cards of an English group after the first paragraph', () => {
+    expect(describeAction('grp-en', englishRetro)).toBe(
+      'Action from the retrospective Sprint 12 (2026\\-10\\-06) — Re: Group "Autonomy and consistency of assignments". Requested in RetroGemini as Facilitator.\n'
+      + '\n'
+      + 'Cards in the group:\n'
+      + '* Have an environment where we can change the F5 and WAM configs ourselves, to be autonomous\n'
+      + '* Clarify the dev/integration scope so our tools and our assignments stay consistent\n'
+      + '* Who decides what goes into the sprint\\?'
+    );
+  });
+
+  it('lists the cards of a French group, with the French typography', () => {
+    expect(describeAction('grp-fr', frenchRetro)).toBe(
+      'Action de la rétrospective AFC R&S 19/10 2611\\-Sprint 186 (13.10.2026) — Concerne\u00a0: groupe «\u00a0Autonomie et cohérence des missions\u00a0». Demandée dans RetroGemini par Facilitator.\n'
+      + '\n'
+      + 'Cartes du groupe\u00a0:\n'
+      + '* Avoir un environnement où on peut toucher les confs F5 et WAM pour pouvoir être autonome\n'
+      + '* Essayer de clarifier le périmètre dev/intégration afin d’avoir une cohérence entre nos outils et nos missions\n'
+      + '* Qui décide de ce qui entre dans le sprint \\?'
+    );
+  });
+
+  // The maintainer's card-linked sub-task, quoted whole (screenshot 3).
+  it('quotes the maintainer’s card whole, on one line', () => {
+    const description = describeAction('f-laurent', frenchRetro);
+    expect(description).toBe(
+      'Action de la rétrospective AFC R&S 19/10 2611\\-Sprint 186 (13.10.2026) — Concerne\u00a0: «\u00a0Acter la proposition de Laurent : pas de colonne Sprint pour atelier\u00a0». Demandée dans RetroGemini par Facilitator.'
+    );
+    expect(description).not.toContain('\n');
+  });
+
+  it('quotes a huge card whole, in the description too', () => {
+    const hugeTeam = { retrospectives: [{ ...englishRetro, tickets: [{ id: 'huge', text: HUGE_CARD }] }] };
+    const { description } = issueFields({
+      action: { id: 'a', text: 'Act', linkedTicketId: 'huge' }, session: hugeTeam.retrospectives[0], kind: 'retro', team: hugeTeam, requestedBy: 'Ann', language: 'en'
+    });
+    expect(description).toContain(`Re: "${HUGE_CARD}"`);
+    expect(description).not.toContain('\n');
+  });
+
+  it('adds nothing for a group with no card, or only blank ones', () => {
+    expect(describeAction('grp-empty', englishRetro))
+      .toBe('Action from the retrospective Sprint 12 (2026\\-10\\-06) — Re: Group "Nothing inside". Requested in RetroGemini as Facilitator.');
+    const blankTeam = { retrospectives: [{ ...englishRetro, tickets: [{ id: 'b1', text: ' \\\\ ', groupId: 'grp-en' }, { id: 'b2', text: '\u200b', groupId: 'grp-en' }] }] };
+    const { description } = issueFields({
+      action: { id: 'a', text: 'Act', linkedTicketId: 'grp-en' }, session: blankTeam.retrospectives[0], kind: 'retro', team: blankTeam, requestedBy: 'Ann', language: 'en'
+    });
+    expect(description).not.toContain('\n');
+  });
+
+  it('keeps every other description on one line', () => {
+    expect(describeAction('c1', englishRetro)).not.toContain('\n');
+    expect(describeAction(ROTI_FOLLOW_UP_LINK_ID, englishRetro)).not.toContain('\n');
+  });
+
+  it('makes a multi-line card one whole item', () => {
+    const multiTeam = { retrospectives: [{ ...englishRetro, tickets: [{ id: 'm', text: 'Too many meetings\n- standup runs long\r\n- retro too', groupId: 'grp-en' }] }] };
+    const { description } = issueFields({
+      action: { id: 'a', text: 'Act', linkedTicketId: 'grp-en' }, session: multiTeam.retrospectives[0], kind: 'retro', team: multiTeam, requestedBy: 'Ann', language: 'en'
+    });
+    expect(description.split('\n').slice(2)).toEqual(['Cards in the group:', '* Too many meetings \\- standup runs long \\- retro too']);
+  });
+
+  // The template writes one construct on purpose, the list; nothing a
+  // participant typed can start a line, end its item or open another one.
+  it('escapes each card, and no card can start a line or a construct of its own', () => {
+    const hostile = ['[~admin]', '{html}<b>x</b>{html}', '!https://e/i.png!', '*bold*', '# x', 'a\nh1. b', 'x \\\\ y', '- a', '|| a ||', 'bq. quote', '----', '&#123;'];
+    const hostileTeam = { retrospectives: [{ ...englishRetro, tickets: hostile.map((text, i) => ({ id: `h${i}`, text, groupId: 'grp-en' })) }] };
+    const { description } = issueFields({
+      action: { id: 'a', text: 'Act', linkedTicketId: 'grp-en' }, session: hostileTeam.retrospectives[0], kind: 'retro', team: hostileTeam, requestedBy: 'Ann', language: 'en'
+    });
+    const lines = description.split('\n');
+    expect(lines.slice(3)).toEqual(hostile.map((text) => `* ${wikiText(text)}`));
+    expect(lines[1]).toBe('');
+    expect(lines[2]).toBe('Cards in the group:');
+    for (const line of lines) {
+      // Only the template starts a line: the first paragraph, the blank line,
+      // the heading, or an item.
+      expect(line).not.toMatch(/^(h\d\.|bq\.|#|\{|\|\||-|\\\\)/);
+    }
+    for (const line of lines.slice(3)) {
+      expect(line.startsWith('* ')).toBe(true);
+      expect(line).not.toBe('* ');
+      // `h1.` or `bq.` after the bullet is mid-line, and harmless; a markup
+      // character right after it is escaped, so it cannot nest a list.
+      expect(line.slice(2)).not.toMatch(/^[*#\-{|![]/);
+    }
+    expect(description).not.toContain('\\\\');
+  });
+
+  it('never names an author, in anonymous sessions too', () => {
+    const anonymous = { ...englishRetro, settings: { isAnonymous: true }, tickets: englishRetro.tickets.map((ticket) => ({ ...ticket, authorId: 'mem-secret' })) };
+    const anonymousTeam = { ...team, retrospectives: [anonymous], members: [{ id: 'mem-secret', name: 'Secret Sam' }] };
+    const { description } = issueFields({
+      action: { id: 'a', text: 'Act', linkedTicketId: 'grp-en' }, session: anonymous, kind: 'retro', team: anonymousTeam, requestedBy: '', language: 'en'
+    });
+    expect(description).toContain('* Who decides what goes into the sprint\\?');
+    expect(description).not.toMatch(/mem-secret|Secret Sam/);
+  });
+});
+
+/**
+ * Jira's own limit is the only cut of the card content (`DESCRIPTION_MAX_LENGTH`,
+ * 32,767 on Data Center by default, line breaks counted twice in case Jira
+ * counts CR LF): as many whole cards as fit, in board order, then a line saying
+ * how many more are in RetroGemini — never a card cut (review R2). Unless the
+ * first paragraph itself nearly fills the limit: it is then sent alone and the
+ * cards go unmentioned, and a session name that leaves no room for the quote
+ * overflows, for Jira to refuse that one action.
+ */
+describe('the description length guard', () => {
+  const retroWith = (cards: string[], title = 'Deploys', extra: Array<Record<string, unknown>> = []) => ({
+    id: 'r',
+    name: 'Sprint 12',
+    date: '2026-10-06',
+    templateLanguage: 'en',
+    tickets: [...cards.map((text, i) => ({ id: `c${i}`, text, groupId: 'g' })), ...extra],
+    groups: [{ id: 'g', title }],
+    actions: []
+  });
+  const describeGroup = (cards: string[], { title = 'Deploys', language = 'en', linkedTicketId = 'g', extra = [] as Array<Record<string, unknown>> } = {}) => {
+    const retro = { ...retroWith(cards, title, extra), templateLanguage: language };
+    const team = { retrospectives: [retro] };
+    return issueFields({ action: { id: 'a', text: 'Act', linkedTicketId }, session: retro, kind: 'retro', team, requestedBy: 'Ann', language }).description;
+  };
+  // The first paragraph and the list heading, as the guard counts them.
+  const listHead = (language = 'en') => {
+    const head = describeGroup([], { language });
+    return `${head}\n\n${language === 'fr' ? 'Cartes du groupe\u00a0:' : 'Cards in the group:'}`;
+  };
+  // A card that makes a list of `before` plus it land on exactly `total` counted.
+  const filler = (before: string[], total: number, language = 'en') => {
+    const used = counted(listHead(language)) + before.reduce((sum, card) => sum + 4 + card.length, 0);
+    return repeat('x', total - used - 4);
+  };
+
+  it('pins Jira’s limit', () => {
+    expect(DESCRIPTION_MAX_LENGTH).toBe(32767);
+  });
+
+  it('lists every card when the description lands exactly on the limit', () => {
+    const cards = ['First card', 'Second card'];
+    const last = filler(cards, DESCRIPTION_MAX_LENGTH);
+    const description = describeGroup([...cards, last]);
+    expect(counted(description)).toBe(DESCRIPTION_MAX_LENGTH);
+    expect(description.endsWith(`* ${last}`)).toBe(true);
+    expect(description).not.toContain('RetroGemini: Jira limits');
+  });
+
+  it('drops the last card whole, and says so, one character over', () => {
+    const cards = ['First card', 'Second card'];
+    const last = `${filler(cards, DESCRIPTION_MAX_LENGTH)}x`;
+    const description = describeGroup([...cards, last]);
+    expect(counted(description)).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+    expect(description.endsWith(
+      '* First card\n* Second card\n\nAnd 1 more card in RetroGemini: Jira limits the length of a description.'
+    )).toBe(true);
+    expect(description).not.toContain('xxx');
+  });
+
+  it('counts the cards left out, in board order, and lists none after the first that does not fit', () => {
+    const big = repeat('x', DESCRIPTION_MAX_LENGTH);
+    const description = describeGroup(['First card', 'Second card', big, 'Small after', 'Another small']);
+    const lines = description.split('\n');
+    expect(lines.filter((line) => line.startsWith('* '))).toEqual(['* First card', '* Second card']);
+    expect(lines[lines.length - 1]).toBe('And 3 more cards in RetroGemini: Jira limits the length of a description.');
+    expect(lines[lines.length - 2]).toBe('');
+    expect(counted(description)).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+  });
+
+  it('says it in French too, with the French typography', () => {
+    const one = describeGroup(['Première carte', `${filler(['Première carte'], DESCRIPTION_MAX_LENGTH, 'fr')}x`], { language: 'fr' });
+    const oneLine = one.split('\n').pop();
+    expect(oneLine).toBe('Et 1 autre carte dans RetroGemini\u00a0: Jira limite la longueur d’une description.');
+    const three = describeGroup(['Première carte', repeat('x', DESCRIPTION_MAX_LENGTH), 'b', 'c'], { language: 'fr' });
+    const threeLine = three.split('\n').pop();
+    expect(threeLine).toBe('Et 3 autres cartes dans RetroGemini\u00a0: Jira limite la longueur d’une description.');
+    for (const line of [oneLine, threeLine]) {
+      expect(line).toContain('\u00a0:');
+      expect(line).not.toContain(' :');
+    }
+  });
+
+  it('counts the escaped length, which is what Jira receives', () => {
+    // Raw, these dashes fit with room to spare; escaped, each one is two
+    // characters and the card does not fit.
+    const room = DESCRIPTION_MAX_LENGTH - counted(listHead()) - 4;
+    const dashes = repeat('-', Math.floor(room / 2) + 1);
+    const description = describeGroup([dashes]);
+    expect(description).not.toContain('\\-\\-\\-');
+    expect(counted(description)).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+    // One dash fewer fits exactly when the room is even, or with one to spare.
+    expect(describeGroup([repeat('-', Math.floor(room / 2))])).toContain(`* ${repeat('\\-', Math.floor(room / 2))}`);
+  });
+
+  it('says where the cards are when not even the first one fits, in English and in French', () => {
+    const tooBig = repeat('x', DESCRIPTION_MAX_LENGTH);
+    expect(describeGroup([tooBig]).split('\n').slice(1)).toEqual([
+      '', 'The group’s card is in RetroGemini: Jira limits the length of a description.'
+    ]);
+    expect(describeGroup([tooBig, 'a', 'b']).split('\n').slice(1)).toEqual([
+      '', 'The group’s 3 cards are in RetroGemini: Jira limits the length of a description.'
+    ]);
+    const frenchOne = describeGroup([tooBig], { language: 'fr' }).split('\n').pop();
+    const frenchThree = describeGroup([tooBig, 'a', 'b'], { language: 'fr' }).split('\n').pop();
+    expect(frenchOne).toBe('La carte du groupe est dans RetroGemini\u00a0: Jira limite la longueur d’une description.');
+    expect(frenchThree).toBe('Les 3 cartes du groupe sont dans RetroGemini\u00a0: Jira limite la longueur d’une description.');
+    for (const line of [frenchOne, frenchThree]) expect(line).not.toContain(' :');
+  });
+
+  it('keeps the first paragraph alone when a group title leaves room for nothing after it', () => {
+    const shortTitle = describeGroup([], { title: 't' });
+    const title = repeat('t', DESCRIPTION_MAX_LENGTH - counted(shortTitle) - 10);
+    const description = describeGroup(['A card'], { title });
+    expect(description).toBe(describeGroup([], { title }));
+    expect(description).not.toContain('\n');
+    expect(counted(description)).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+  });
+
+  it('says a quote too long for Jira is in RetroGemini instead of cutting it, in English and in French', () => {
+    const giant = repeat('x', 40000);
+    const english = describeGroup([], { linkedTicketId: 'giant', extra: [{ id: 'giant', text: giant }] });
+    expect(english).toBe('Action from the retrospective Sprint 12 (2026\\-10\\-06) — Re: too long to quote in a Jira description, see RetroGemini. Requested in RetroGemini as Ann.');
+    const french = describeGroup([], { language: 'fr', linkedTicketId: 'giant', extra: [{ id: 'giant', text: giant }] });
+    expect(french).toBe('Action de la rétrospective Sprint 12 (2026\\-10\\-06) — Concerne\u00a0: trop long pour être cité dans une description Jira, voir RetroGemini. Demandée dans RetroGemini par Ann.');
+    expect(french).not.toContain(' :');
+    // A group title too long to quote still lists its cards.
+    const longTitle = describeGroup(['A card'], { title: giant });
+    expect(longTitle.split('\n')).toEqual([
+      'Action from the retrospective Sprint 12 (2026\\-10\\-06) — Re: too long to quote in a Jira description, see RetroGemini. Requested in RetroGemini as Ann.',
+      '', 'Cards in the group:', '* A card'
+    ]);
+  });
+
+  // The replacement line is only worth it when it fits: a session name close
+  // to the limit (under it) leaves room for neither, and swapping a short
+  // quote for "too long to quote" would drop the card the issue should name
+  // while Jira refuses the action anyway.
+  it('keeps a short quote when a long session name leaves no room for the replacement line either', () => {
+    const retro = {
+      id: 'r',
+      name: repeat('n', 32700),
+      date: '2026-10-06',
+      templateLanguage: 'en',
+      tickets: [{ id: 'c', text: SHORT_TICKET }],
+      groups: [],
+      actions: []
+    };
+    const team = { retrospectives: [retro] };
+    const { description } = issueFields({
+      action: { id: 'a', text: 'Act', linkedTicketId: 'c' }, session: retro, kind: 'retro', team, requestedBy: 'Ann', language: 'en'
+    });
+    expect(retro.name.length).toBeLessThan(DESCRIPTION_MAX_LENGTH);
+    expect(description).toContain(`Re: "${SHORT_TICKET}"`);
+    expect(description).not.toContain('too long to quote');
+    // Nothing can make it fit: Jira refuses this one action in its own words.
+    expect(counted(description)).toBeGreaterThan(DESCRIPTION_MAX_LENGTH);
+  });
+
+  it('fits whatever the group holds: whole cards, a prefix of the board, never an empty item', () => {
+    // A small seeded generator, so a failure is reproducible.
+    let seed = 0x5eed;
+    const random = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    // Spaces, escapes that double, backslashes that vanish, line breaks, an
+    // emoji, a no-break space: one long random string, sliced for speed.
+    const alphabet = ['a', 'b', ' ', '-', '*', '{', '\\', '\n', 'é', '\u{1F600}', '?', '\u00a0'];
+    const pool = Array.from({ length: 40000 }, () => alphabet[Math.floor(random() * alphabet.length)]).join('');
+    const text = (max: number) => {
+      const from = Math.floor(random() * (pool.length - max));
+      return pool.slice(from, from + Math.floor(random() * max));
+    };
+    let cut = 0;
+    for (let run = 0; run < 200; run += 1) {
+      const cards = Array.from({ length: Math.floor(random() * 60) }, () => text(2000));
+      const title = random() < 0.1 ? text(33000) : text(40);
+      const description = describeGroup(cards, { title });
+      if (description.includes('RetroGemini: Jira limits')) cut += 1;
+      expect(counted(description)).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+      const items = description.split('\n').filter((line) => line.startsWith('* '));
+      const visible = actionGroupCards({ action: { linkedTicketId: 'g' }, team: { retrospectives: [retroWith(cards, title)] } });
+      expect(items).toEqual(visible.slice(0, items.length).map((card) => `* ${card}`));
+      for (const item of items) expect(item.trim()).not.toBe('*');
+    }
+    // Not vacuous: the limit was reached in a good share of the runs.
+    expect(cut).toBeGreaterThan(20);
+  });
+
+  it('stays linear: five thousand cards build in well under a second', () => {
+    // About the 1 MB a session update may carry, all of it in one group.
+    const cards = Array.from({ length: 5000 }, (_, i) => `${i} ${repeat('w', 195)}`);
+    const started = performance.now();
+    const description = describeGroup(cards);
+    const elapsed = performance.now() - started;
+    expect(counted(description)).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+    expect(description.endsWith('more cards in RetroGemini: Jira limits the length of a description.')).toBe(true);
+    expect(elapsed).toBeLessThan(1000);
+  });
+});
+
+/**
+ * The server builds each issue with `issueSource` then `issueFields`; the
+ * dialog previews it with `jiraIssuePreview`. For a group, a huge card and an
+ * overflowing group, the two say the same thing.
+ */
+describe('the server and the preview agree on the new content', () => {
+  const retro = {
+    id: 'r',
+    name: 'Sprint 12',
+    date: '2026-10-06',
+    templateLanguage: 'en',
+    tickets: [
+      { id: 'huge', text: HUGE_CARD },
+      { id: 'g1', text: 'First of the group', groupId: 'g' },
+      { id: 'g2', text: 'Second\nof the group?', groupId: 'g' },
+      { id: 'o1', text: 'Small', groupId: 'over' },
+      { id: 'o2', text: repeat('y', DESCRIPTION_MAX_LENGTH), groupId: 'over' },
+      { id: 'o3', text: 'Small again', groupId: 'over' }
+    ],
+    groups: [{ id: 'g', title: 'Deploys' }, { id: 'over', title: 'Overflow' }],
+    actions: [
+      { id: 'on-group', text: 'Group action', linkedTicketId: 'g' },
+      { id: 'on-huge', text: 'Huge action', linkedTicketId: 'huge', contextText: `Re: "${HUGE_CARD.substring(0, 50)}..."` },
+      { id: 'on-over', text: 'Overflow action', linkedTicketId: 'over' }
+    ]
+  };
+  const team = { retrospectives: [retro], healthChecks: [], globalActions: [] };
+
+  it.each(['on-group', 'on-huge', 'on-over'])('for %s', (actionId) => {
+    const source = issueSource({ team, actionId, preferredSessionId: 'r' });
+    const server = issueFields({ action: source.action, session: source.session, kind: source.kind, team, requestedBy: 'Ann', language: 'fr' });
+    const preview = jiraIssuePreview({
+      action: retro.actions.find((entry) => entry.id === actionId) as never, team: team as never, session: retro as never, kind: 'retro', sessionId: 'r', requestedBy: 'Ann', language: 'fr'
+    });
+    expect(preview).toEqual(server);
+    expect(counted(server.description)).toBeLessThanOrEqual(DESCRIPTION_MAX_LENGTH);
+  });
+
+  it('quotes the huge card whole over the cut context stored on the action', () => {
+    const preview = jiraIssuePreview({
+      action: retro.actions[1] as never, team: team as never, session: retro as never, kind: 'retro', sessionId: 'r', requestedBy: 'Ann', language: 'en'
+    });
+    expect(preview.description).toContain(HUGE_CARD);
+    expect(preview.description).not.toContain('...');
   });
 });
 

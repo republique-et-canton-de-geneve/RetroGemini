@@ -45,6 +45,21 @@ export const withLiveSession = <T extends PreviewTeam>(
 };
 
 /**
+ * A description as Jira shows it, for the dialog. The builder escapes Jira's
+ * wiki markup with a backslash before each special character (`2026\-10\-06`),
+ * which Jira renders as the character alone; a participant's own backslashes
+ * became spaces in the builder, so every backslash left is one of those
+ * escapes. The template's list items (a group's cards) start a line with
+ * `* `, which Jira renders as a bullet: only the template can start a line,
+ * since `wikiText` turns every line break of what it escapes into a space.
+ * Bullets are replaced before the escapes are removed, so a card's own `\*`
+ * becomes `*` mid-line and never a bullet. Line breaks are kept: the dialog
+ * renders them (`whitespace-pre-wrap`), so it shows the list Jira will.
+ */
+export const descriptionAsJiraShowsIt = (description: string): string =>
+  description.replace(/^\* /gmu, '• ').replace(/\\(.)/gsu, '$1');
+
+/**
  * What the issue of one action will say, for the confirmation dialog: built as
  * the server builds it (`issueSource`, then `issueFields`), from the same
  * session the request names, so the preview is exactly what Jira receives.

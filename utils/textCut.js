@@ -30,10 +30,10 @@ export const cutCodeUnits = (text, max) => {
 };
 
 /**
- * A card's text as an action's context quotes it ("Re: …"): cut at
- * `TICKET_QUOTE_MAX_LENGTH`, marked `...` when it was longer. One rule for the
- * session screens that write the context onto the action and for the Jira
- * description (`utils/jiraIssueContent.js`), so the two never disagree.
+ * A card's text as the session screens quote it in an action's context
+ * ("Re: …"): cut at `TICKET_QUOTE_MAX_LENGTH`, marked `...` when it was
+ * longer. The Jira description does not use it: an issue quotes the card whole
+ * (`utils/jiraIssueContent.js`, maintainer decision 2026-10-22).
  *
  * @param {string} text
  * @returns {string}

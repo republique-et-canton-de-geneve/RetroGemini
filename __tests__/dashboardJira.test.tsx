@@ -128,8 +128,10 @@ const Harness: React.FC<{ currentUser: User; initialTab?: 'ACTIONS' | 'SETTINGS'
   );
 };
 
-// A ticket longer than the 50 characters an action's context quotes.
-const LONG_TICKET = 'The build takes forty minutes on every single push to main and nobody knows why.';
+// Longer than every limit the builder has (the summary's 255, the 50 the
+// screens cut a quote at), plain words only, with an end marker a cut at any
+// length would lose (review R3).
+const HUGE_CARD = `The build takes forty minutes ${'on every single push to main and nobody knows why '.repeat(24)}END OF THE CARD`;
 
 // A team whose only open actions come from a retro's card and a retro's group,
 // so the batch's preview has a context to quote for each.
@@ -139,7 +141,11 @@ const teamWithContexts = (): Team => ({
     action('r-card', 'Cache the dependencies', { linkedTicketId: 'tkt-long' }),
     action('r-group', 'Split the pipeline', { linkedTicketId: 'grp-1' })
   ], {
-    tickets: [{ id: 'tkt-long', colId: 'col-1', text: LONG_TICKET, authorId: 'mem-1', groupId: null, votes: [] }],
+    tickets: [
+      { id: 'tkt-long', colId: 'col-1', text: HUGE_CARD, authorId: 'mem-1', groupId: null, votes: [] },
+      { id: 'tkt-g2', colId: 'col-1', text: 'Rollbacks need a ticket?', authorId: 'mem-1', groupId: 'grp-1', votes: [] },
+      { id: 'tkt-g1', colId: 'col-1', text: 'Deploys wait for a manual approval', authorId: 'fac-1', groupId: 'grp-1', votes: [] }
+    ],
     groups: [{ id: 'grp-1', title: 'Deploys', colId: 'col-1', votes: [] }]
   })],
   globalActions: []
@@ -334,7 +340,8 @@ describe('Dashboard with Jira', () => {
   // in the reader's language), made for the screen. The preview must be built
   // from the team record's copy, which is what the server builds the issue
   // from (finding U-8: the preview is exactly what Jira receives).
-  it('previews a card-linked action as the server describes it: the card quoted, cut at 50 characters', async () => {
+  // Maintainer, 2026-10-22: "Il ne faut pas abréger sinon on sait plus".
+  it('previews a card-linked action as the server describes it: the card quoted in full', async () => {
     mocks.cache = teamWithContexts();
     installJiraFetch(routes());
     render(<Harness currentUser={facilitator} />);
@@ -342,22 +349,32 @@ describe('Dashboard with Jira', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Create in Jira (2)' }));
     const dialog = await screen.findByRole('dialog', { name: 'Create the actions in Jira' });
     expect(within(dialog).getByText(
-      'Action from the retrospective Sprint 12 (2026-10-06) — Re: "The build takes forty minutes on every single push...". Requested in RetroGemini as Facilitator.'
+      `Action from the retrospective Sprint 12 (2026-10-06) — Re: "${HUGE_CARD}". Requested in RetroGemini as Facilitator.`
     )).toBeInTheDocument();
-    // The row shows the whole card; the issue never does.
-    expect(within(dialog).queryByText(/nobody knows why/)).toBeNull();
+    expect(within(dialog).queryByText(/push\.\.\./)).toBeNull();
   });
 
-  it('previews a group-linked action in the retrospective’s language, not the reader’s', async () => {
+  // The group's cards follow on their own lines, in board order, as Jira
+  // will show them: the description element keeps its line breaks.
+  it('previews a group-linked action in the retrospective’s language, its cards on their own lines', async () => {
     mocks.cache = teamWithContexts();
     installJiraFetch(routes());
     render(<LanguageProvider initialLanguage="fr"><Harness currentUser={facilitator} /></LanguageProvider>);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Créer dans Jira (2)' }));
     const dialog = await screen.findByRole('dialog', { name: 'Créer les actions dans Jira' });
-    expect(within(dialog).getByText(
-      'Action from the retrospective Sprint 12 (2026-10-06) — Re: Group "Deploys". Requested in RetroGemini as Facilitator.'
-    )).toBeInTheDocument();
+    const items = within(within(dialog).getByRole('list', { name: 'Ce qui sera envoyé dans Jira' })).getAllByRole('listitem');
+    const description = items[1].querySelector('dd[lang]');
+    // `textContent`, not `getByText`: the latter folds the line breaks away.
+    expect(description?.textContent).toBe(
+      'Action from the retrospective Sprint 12 (2026-10-06) — Re: Group "Deploys". Requested in RetroGemini as Facilitator.\n'
+      + '\n'
+      + 'Cards in the group:\n'
+      + '• Rollbacks need a ticket?\n'
+      + '• Deploys wait for a manual approval'
+    );
+    expect(description).toHaveAttribute('lang', 'en');
+    expect(description).toHaveClass('whitespace-pre-wrap');
     expect(within(dialog).queryByText(/Groupe\s*: Deploys/)).toBeNull();
   });
 
