@@ -501,6 +501,59 @@ describe('super-admin dashboard reads', () => {
     expect(dataStore.loadSessionState).toHaveBeenCalledWith('session-db');
   });
 
+  // The Live tab polls every 5 s. Naming each room's team used to load that
+  // team's whole record, once per room; one read of the summaries (cached per
+  // pod) now names them all.
+  it('names every room from one summary read and never loads a full team', async () => {
+    const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Platform' }, { id: 'team-2', name: 'Mobile' }] });
+    const states: Record<string, Record<string, unknown>> = {
+      'room-a': { teamId: 'team-1', name: 'A' },
+      'room-b': { teamId: 'team-1', name: 'B' },
+      'room-c': { teamId: 'team-2', name: 'C' },
+      'room-gone': { teamId: 'team-deleted', name: 'Orphan' }
+    };
+    dataStore.loadSessionState = vi.fn(async (sessionId: string) => states[sessionId] ?? null);
+    const io = {
+      fetchSockets: vi.fn(async () => Object.keys(states).map((room, i) => (
+        { id: `sock-${i}`, data: { userId: `u${i}`, userName: `User ${i}` }, rooms: new Set([`sock-${i}`, room]) }
+      ))),
+      serverSideEmit: vi.fn()
+    };
+    const { app } = buildApp({ dataStore, io });
+
+    const { sessions } = await (await request(app, '/api/super-admin/active-sessions', postJson(auth()))).json();
+
+    const names = Object.fromEntries(sessions.map((s: { sessionId: string; teamName: string }) => [s.sessionId, s.teamName]));
+    expect(names).toEqual({ 'room-a': 'Platform', 'room-b': 'Platform', 'room-c': 'Mobile', 'room-gone': 'Unknown' });
+    expect(dataStore.loadTeam).not.toHaveBeenCalled();
+    expect(dataStore.loadTeamSummaries).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads no summary when no room is open', async () => {
+    const { app, dataStore } = buildApp();
+
+    const { sessions } = await (await request(app, '/api/super-admin/active-sessions', postJson(auth()))).json();
+
+    expect(sessions).toEqual([]);
+    expect(dataStore.loadTeamSummaries).not.toHaveBeenCalled();
+  });
+
+  it('answers 500 when the summaries cannot be read, as a failed team read did', async () => {
+    const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Platform' }] });
+    dataStore.loadSessionState = vi.fn(async () => ({ teamId: 'team-1', name: 'A' }));
+    dataStore.loadTeamSummaries = vi.fn(async () => { throw new Error('database down'); });
+    const io = {
+      fetchSockets: vi.fn(async () => [{ id: 'sock-1', data: { userId: 'u1', userName: 'Ada' }, rooms: new Set(['sock-1', 'room-a']) }]),
+      serverSideEmit: vi.fn()
+    };
+    const { app } = buildApp({ dataStore, io });
+
+    const response = await request(app, '/api/super-admin/active-sessions', postJson(auth()));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'failed_to_load' });
+  });
+
   it('falls back to placeholders for a session with no persisted state', async () => {
     const io = {
       fetchSockets: vi.fn(async () => [

@@ -1487,6 +1487,19 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
         }
       }
 
+      // Names only: one read of the summaries (cached per pod, see
+      // dataStore.loadTeamSummaries) for the whole poll, made when the first
+      // room needs it. Each room used to load its team's whole record, once
+      // per room, every 5 s the Live tab stays open. A summary read that
+      // fails is a 500, as a failed team read was.
+      let teamNames = null;
+      const teamNameOf = async (teamId) => {
+        if (!teamNames) {
+          teamNames = new Map((await dataStore.loadTeamSummaries()).map((team) => [team.id, team.name]));
+        }
+        return teamNames.get(teamId);
+      };
+
       for (const [roomId, participants] of sessionRooms.entries()) {
         let sessionData = sessionCache.get(roomId);
         if (!sessionData) {
@@ -1497,10 +1510,7 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
         let teamName = 'Unknown';
 
         if (sessionData?.teamId) {
-          const team = await dataStore.loadTeam(sessionData.teamId);
-          if (team) {
-            teamName = team.name;
-          }
+          teamName = (await teamNameOf(sessionData.teamId)) ?? 'Unknown';
         }
 
         const sessionInfo = {
