@@ -153,6 +153,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   // Live sessions monitoring
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
+  // The last poll got no list. Shown instead of the empty state, which says
+  // it is safe to deploy: an unanswered poll does not know that.
+  const [liveLoadFailed, setLiveLoadFailed] = useState(false);
   const liveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveLoadingRef = useRef(false);
   const sessionTokenRef = useRef(sessionToken);
@@ -495,9 +498,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       if (response.ok) {
         const data = await response.json();
         setActiveSessions(data.sessions || []);
+        setLiveLoadFailed(false);
+      } else {
+        setActiveSessions([]);
+        setLiveLoadFailed(true);
       }
     } catch (err) {
       console.error('Failed to load active sessions', err);
+      setActiveSessions([]);
+      setLiveLoadFailed(true);
     } finally {
       liveLoadingRef.current = false;
     }
@@ -2240,7 +2249,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </button>
             </div>
 
-            {activeSessions.length === 0 ? (
+            {liveLoadFailed ? (
+              <div role="alert" className="bg-white rounded-xl shadow-sm p-12 text-center">
+                <span className="material-symbols-outlined text-6xl mb-4 text-amber-600" aria-hidden="true">warning</span>
+                <p className="text-slate-700 text-lg">{t('adminLive.loadFailed')}</p>
+                <p className="text-slate-600 text-sm mt-2">{t('adminLive.loadFailedHint')}</p>
+              </div>
+            ) : activeSessions.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                 <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">cloud_off</span>
                 <p className="text-slate-500 text-lg">{t('adminLive.empty')}</p>

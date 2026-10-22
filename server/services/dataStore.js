@@ -19,6 +19,10 @@ const TEAM_SECRET_PREFIX = 'team-secret:';
 // restore — ever reads it as a team, so no archive carries it and no restore
 // rolls it back.
 const TEAM_AUTH_PREFIX = 'team-auth:';
+// The boot sweep never removes an epoch row younger than this, so it cannot
+// take away an epoch a restore on another pod has just written (see
+// sweepOrphanedTeamAuthRows). A number written into the SQL, never input.
+const TEAM_AUTH_ORPHAN_MIN_AGE_MINUTES = 10;
 const JIRA_SETTINGS_KEY = 'jira-settings';
 const GLOBAL_SETTINGS_KEY = 'global-settings';
 
@@ -860,12 +864,41 @@ const createDataStore = ({ rootDir, teamFeedbackCacheMaxChars = TEAM_FEEDBACK_CA
   // Removes every auth row whose team record is gone, and answers how many: a
   // deletion whose last step failed, or a pod from before this release that
   // deleted a team without it. Run at startup, beside the secrets' sweep.
+  //
+  // One conditional statement per row, and never a row younger than
+  // TEAM_AUTH_ORPHAN_MIN_AGE_MINUTES. The sweep runs while other pods serve,
+  // and a restore that brings a deleted team back writes its epoch before and
+  // after the record (rotateRecreatedTeamEpoch, savePersistedData). Checking
+  // the record and then deleting, as two statements, let a restore land in
+  // between: the sweep saw no record, the restore wrote the record and its new
+  // epoch, and the delete took that epoch away — epoch '0' for a team that
+  // exists, and every token from before its deletion current again. The age is
+  // what closes it on PostgreSQL too: a delete whose snapshot predates the
+  // record's commit keeps its NOT EXISTS answer when it re-checks a row the
+  // rotation rewrote, but that row's `updated_at` is now. An orphan younger
+  // than that waits for the next start, which costs nothing: no team holds it.
   const sweepOrphanedTeamAuthRows = async () => {
     let removed = 0;
     for (const key of await kvKeysByPrefix(TEAM_AUTH_PREFIX)) {
-      if (await teamExists(key.slice(TEAM_AUTH_PREFIX.length))) continue;
-      await kvDelete(key);
-      removed += 1;
+      const teamKey = `team:${key.slice(TEAM_AUTH_PREFIX.length)}`;
+      if (usePostgres) {
+        const result = await pgPool.query(
+          `DELETE FROM kv_store
+            WHERE key = $1
+              AND updated_at < NOW() - INTERVAL '${TEAM_AUTH_ORPHAN_MIN_AGE_MINUTES} minutes'
+              AND NOT EXISTS (SELECT 1 FROM kv_store team WHERE team.key = $2 AND octet_length(team.value) > 0)`,
+          [key, teamKey]
+        );
+        removed += result.rowCount ?? 0;
+      } else {
+        const result = sqliteDb.prepare(
+          `DELETE FROM kv_store
+            WHERE key = ?
+              AND datetime(updated_at) < datetime('now', '-${TEAM_AUTH_ORPHAN_MIN_AGE_MINUTES} minutes')
+              AND NOT EXISTS (SELECT 1 FROM kv_store team WHERE team.key = ? AND octet_length(team.value) > 0)`
+        ).run(key, teamKey);
+        removed += result.changes;
+      }
     }
     return removed;
   };

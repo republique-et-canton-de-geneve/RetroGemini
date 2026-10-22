@@ -178,6 +178,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   // A retry keeps its button on screen while it runs, like the team list's,
   // and puts focus on the join screen's heading when that is where it lands.
   const [inviteRetrying, setInviteRetrying] = useState(false);
+  // Counts failed imports: the error screen keys its alert on it, so a retry
+  // that fails with the same message still puts a new alert in, and a screen
+  // reader announces it. With the same text in the same node, React changes
+  // nothing and the live region stays silent.
+  const [inviteFailures, setInviteFailures] = useState(0);
   const focusJoinAfterRetry = useRef(false);
   const joinHeadingRef = useRef<HTMLHeadingElement>(null);
 
@@ -213,6 +218,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
       focusJoinAfterRetry.current = false;
       const message = err instanceof Error ? err.message : String(err);
       setError(rawFeedback(message));
+      setInviteFailures((count) => count + 1);
       setView('JOIN');
     } finally {
       setInviteRetrying(false);
@@ -919,7 +925,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     >
                         <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">arrow_back</span> {t('common.back')}
                     </button>
-                    <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>
+                    <div key={inviteFailures} role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>
                     {inviteData && (
                         <button
                             type="button"

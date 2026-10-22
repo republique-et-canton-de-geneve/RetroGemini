@@ -6,9 +6,9 @@
  * epoch on every request (`dataStore.loadTeamAuthState`), so a revoked token
  * is refused the moment the rotation commits. A socket is different: it
  * authenticated once, at `join-session`, and stays in its room until it
- * disconnects. So the pod that rotated sweeps its own sockets, and tells the
- * others through the Socket.IO adapter to sweep theirs. The broadcast carries
- * a team id and nothing else, and it is only a hint: every pod decides by
+ * disconnects. So the pod that rotated tells the others through the
+ * Socket.IO adapter to sweep their sockets, and sweeps its own. The broadcast
+ * carries a team id and nothing else, and it is only a hint: every pod decides by
  * reading the team's epoch again, so a forged, late or duplicated event can
  * never cut a socket whose token is still current. A pod that misses the
  * broadcast (a degraded adapter) still cuts within a minute, through the
@@ -47,9 +47,13 @@ export const createSessionRevocation = ({ io, serverRuntime }) => {
   };
 
   return {
-    /** Cuts the team's stale sockets on this pod, then asks every other pod to. */
+    /**
+     * Asks every other pod to cut the team's stale sockets, then cuts this
+     * pod's. The broadcast goes first: the rotation has committed before this
+     * is called and each pod reads the epoch again, so the others need not
+     * wait for this pod's sweep, which may itself be waiting on a join.
+     */
     revokeTeamSessions: async (teamId) => {
-      await sweepLocal(teamId);
       // The guard `invalidateSessionCaches` uses: the in-memory adapter of a
       // single-pod deployment does not support serverSideEmit, and warns.
       if (serverRuntime?.multiPodAdapter && typeof io?.serverSideEmit === 'function') {
@@ -59,6 +63,7 @@ export const createSessionRevocation = ({ io, serverRuntime }) => {
           console.warn('[Server] Failed to broadcast a team session revocation to the other pods; their periodic sweep covers it', err);
         }
       }
+      await sweepLocal(teamId);
     },
     /** Re-checks every socket on this pod (after a whole-store restore). */
     sweepAllLocal: () => sweepLocal(null),

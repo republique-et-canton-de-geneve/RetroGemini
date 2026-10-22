@@ -9,6 +9,10 @@ const adminLive = {
   'adminLive.empty': 'No active sessions',
   'adminLive.emptyHint': 'Sessions will appear here when users join a retrospective or health check.',
   'adminLive.safeToDeploy': 'Safe to deploy - no active sessions',
+  // The poll got no list: nothing is known, so nothing may read as safe.
+  'adminLive.loadFailed': 'The live sessions could not be loaded',
+  'adminLive.loadFailedHint':
+    'Whether anyone is in a session right now is unknown, so this is not a safe moment to deploy. The list is loaded again every 5 seconds.',
   'adminLive.warningTitle': 'Active sessions detected',
   'adminLive.warning':
     '{sessions} session(s) with {users} connected user(s). Consider waiting before deploying to avoid interrupting these sessions.',

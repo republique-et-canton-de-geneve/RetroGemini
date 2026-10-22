@@ -25,6 +25,7 @@ import { createArchiveBodyErrorHandler } from './archiveBodyErrors.js';
 import { archiveShapeProblem } from '../services/archiveShape.js';
 import { registerJiraAdminRoutes } from './jiraRoutes.js';
 import { createRestoreGate, RESTORE_IN_PROGRESS_ERROR } from '../services/restoreGate.js';
+import { createRepeatCoalescer } from '../services/logCoalescer.js';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -1496,6 +1497,11 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
     }
   });
 
+  // The Live tab polls every 5 s: a row the team summaries cannot read is
+  // reported once, then summarised every ten minutes (logCoalescer.js), so a
+  // tab left open does not fill the log ring the admin reads.
+  const liveTabLog = createRepeatCoalescer({ windowMs: 10 * 60 * 1000 });
+
   app.post('/api/super-admin/active-sessions', superAdminPollingLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
@@ -1519,14 +1525,54 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
       // Names only: one read of the summaries (cached per pod, see
       // dataStore.loadTeamSummaries) for the whole poll, made when the first
       // room needs it. Each room used to load its team's whole record, once
-      // per room, every 5 s the Live tab stays open. A summary read that
-      // fails is a 500, as a failed team read was.
+      // per room, every 5 s the Live tab stays open.
+      //
+      // That read is one statement over every team row, and one row it cannot
+      // read fails it whole: a record PostgreSQL's jsonb refuses (a lone
+      // surrogate or NUL escape), a truncated one on either engine. The poll
+      // then names each room's team on its own, once per team — its summary,
+      // else its record parsed in Node, as 41.0 did — so one broken row of any
+      // team cannot take the tab down: the repair runbook relies on it to see
+      // whether a session is open. A team whose record Node cannot parse
+      // either reads as 'Unknown'; any other failure (the database is down)
+      // is still a 500.
       let teamNames = null;
-      const teamNameOf = async (teamId) => {
-        if (!teamNames) {
-          teamNames = new Map((await dataStore.loadTeamSummaries()).map((team) => [team.id, team.name]));
+      let listUnreadable = false;
+      const namesOneByOne = new Map();
+      const readTeamNameAlone = async (teamId) => {
+        try {
+          return (await dataStore.loadTeamSummary(teamId))?.name;
+        } catch {
+          try {
+            return (await dataStore.loadTeam(teamId))?.name;
+          } catch (err) {
+            if (!(err instanceof SyntaxError)) throw err;
+            liveTabLog.report({
+              group: 'active-sessions',
+              key: `unparsable:${teamId}`,
+              message: `[Server] Live sessions: the record of team ${JSON.stringify(String(teamId))} cannot be parsed; its rooms read as Unknown`
+            });
+            return undefined;
+          }
         }
-        return teamNames.get(teamId);
+      };
+      const teamNameOf = async (teamId) => {
+        if (!teamNames && !listUnreadable) {
+          try {
+            teamNames = new Map((await dataStore.loadTeamSummaries()).map((team) => [team.id, team.name]));
+          } catch (err) {
+            listUnreadable = true;
+            liveTabLog.report({
+              group: 'active-sessions',
+              key: 'summaries',
+              message: () => `[Server] Live sessions: the team summaries could not be read (${err?.code ? `${err.code} ` : ''}${err?.message ?? err}); naming each room's team on its own`,
+              label: '[Server] Live sessions: team summaries unreadable, rooms named one team at a time'
+            });
+          }
+        }
+        if (teamNames) return teamNames.get(teamId);
+        if (!namesOneByOne.has(teamId)) namesOneByOne.set(teamId, readTeamNameAlone(teamId));
+        return namesOneByOne.get(teamId);
       };
 
       for (const [roomId, participants] of sessionRooms.entries()) {

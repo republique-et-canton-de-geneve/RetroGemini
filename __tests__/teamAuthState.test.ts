@@ -86,6 +86,60 @@ for (const engine of engines) {
       ).run(key, text);
     };
 
+    // Backdates a row, as a boot sweep finds an orphan a deletion left behind
+    // long ago.
+    const ageRow = async (key: string, minutes: number) => {
+      const pool = store.getPgPool();
+      if (pool) {
+        await pool.query(`UPDATE kv_store SET updated_at = NOW() - make_interval(mins => $2) WHERE key = $1`, [key, minutes]);
+        return;
+      }
+      store.getSqliteDb().prepare(`UPDATE kv_store SET updated_at = datetime('now', ?) WHERE key = ?`).run(`-${minutes} minutes`, key);
+    };
+
+    // Runs `hook` once, right after the first statement `store` sends with
+    // `teamKey` among its parameters has answered — the moment another pod's
+    // write lands between that statement and whatever the caller does next.
+    // On SQLite the hook's writes are synchronous (they run on `other`'s
+    // connection while it is called); on PostgreSQL the statement's answer
+    // waits for them. Answers the release and the hook's promise.
+    const afterStatementNaming = (teamKey: string, hook: () => Promise<unknown>) => {
+      let fired: Promise<unknown> | null = null;
+      const fire = () => {
+        if (fired) return null;
+        fired = hook();
+        return fired;
+      };
+      const names = (params: unknown) => Array.isArray(params) && params.includes(teamKey);
+      const pool = store.getPgPool() as { query: (...args: unknown[]) => Promise<unknown> } | null;
+      if (pool) {
+        const original = pool.query;
+        pool.query = async (...args: unknown[]) => {
+          const result = await original.apply(pool, args);
+          if (names(args[1])) await fire();
+          return result;
+        };
+        return { release: () => { pool.query = original; }, fired: () => fired };
+      }
+      const db = store.getSqliteDb();
+      const originalPrepare = db.prepare;
+      db.prepare = (sql: string) => {
+        const statement = originalPrepare.call(db, sql);
+        return new Proxy(statement, {
+          get(target, prop) {
+            const value = Reflect.get(target, prop, target);
+            if (typeof value !== 'function' || !['get', 'run', 'all'].includes(String(prop))) return value;
+            return (...params: unknown[]) => {
+              const result = value.apply(target, params);
+              if (names(params)) fire();
+              return result;
+            };
+          }
+        });
+      };
+      return { release: () => { db.prepare = originalPrepare; }, fired: () => fired };
+    };
+
     const readRaw = async (key: string): Promise<string | null> => {
       const pool = store.getPgPool();
       if (pool) {
@@ -248,9 +302,59 @@ for (const engine of engines) {
 
       const orphan = tid('orphan');
       await writeRaw(`team-auth:${orphan}`, JSON.stringify({ v: 1, sessionEpoch: 'x', revokedAt: 1 }));
+      await ageRow(`team-auth:${orphan}`, 60);
+      await ageRow(`team-auth:${kept}`, 60);
       expect(await store.sweepOrphanedTeamAuthRows()).toBeGreaterThanOrEqual(1);
       expect(await readRaw(`team-auth:${orphan}`)).toBeNull();
       expect((await store.loadTeamAuthState(kept)).sessionEpoch).toBe(keptEpoch);
+    });
+
+    // The sweep runs at boot while other pods serve, and a restore that brings
+    // a deleted team back rotates its epoch before and after writing the
+    // record. A sweep that removed either row would leave the team with none:
+    // epoch '0', and every token from before the deletion current again.
+    describe('boot sweep against a restore on another pod', () => {
+      it('never removes a row younger than ten minutes, even while the team has no record yet', async () => {
+        const id = tid('sweep-fresh');
+        // The restore's "before" rotation: the row exists, the record not yet.
+        const { sessionEpoch } = await other.rotateTeamSessionEpoch(id);
+        await ageRow(`team-auth:${id}`, 9);
+
+        await store.sweepOrphanedTeamAuthRows();
+
+        expect(await readRaw(`team-auth:${id}`)).not.toBeNull();
+        await other.saveTeam(id, { id, name: `Team ${id}`, passwordHash: 'scrypt$1$1$1$salt$old' });
+        expect((await store.loadTeamAuthState(id)).sessionEpoch).toBe(sessionEpoch);
+      });
+
+      it('keeps the epoch a restore writes after the sweep found no record', async () => {
+        const id = tid('sweep-race');
+        // An orphan a failed deletion left behind long ago.
+        await writeRaw(`team-auth:${id}`, JSON.stringify({ v: 1, sessionEpoch: 'old', revokedAt: 1 }));
+        await ageRow(`team-auth:${id}`, 60);
+
+        // Right after the sweep's first statement about the team's record,
+        // another pod recreates the team and rotates its epoch.
+        let restored: { sessionEpoch: string } | null = null;
+        const interleave = afterStatementNaming(`team:${id}`, async () => {
+          const saving = other.saveTeam(id, { id, name: `Team ${id}`, passwordHash: 'scrypt$1$1$1$salt$old' });
+          const rotating = other.rotateTeamSessionEpoch(id);
+          await saving;
+          restored = await rotating;
+        });
+        try {
+          await store.sweepOrphanedTeamAuthRows();
+        } finally {
+          interleave.release();
+        }
+        await interleave.fired();
+
+        expect(restored).not.toBeNull();
+        const state = await store.loadTeamAuthState(id);
+        expect(state.exists).toBe(true);
+        expect(state.sessionEpoch).toBe(restored!.sessionEpoch);
+        expect(sessionVerdict({ sessionEpoch: DEFAULT_SESSION_EPOCH }, state)).toBe('revoked');
+      });
     });
 
     describe('deleteTeamRecord order', () => {
@@ -301,6 +405,7 @@ for (const engine of engines) {
           await release();
         }
 
+        await ageRow(`team-auth:${id}`, 60);
         expect(await store.sweepOrphanedTeamAuthRows()).toBeGreaterThanOrEqual(1);
         expect(await readRaw(`team-auth:${id}`)).toBeNull();
       });

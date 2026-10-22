@@ -11,6 +11,26 @@ import { NO_OP_SESSION_REVOCATION, TEAM_SESSIONS_REVOKED_EVENT } from './session
 // tiny read per team with live sockets per minute is no capacity question.
 const REVOCATION_SWEEP_MS = 60_000;
 
+// How long a revocation sweep waits for the joins in flight on its pod to
+// decide (see sweepRevokedSockets). A join normally decides in milliseconds;
+// one stuck on a query that will not answer must not hold every revocation of
+// the pod hostage, so past this the sweep judges the sockets it can and leaves
+// the undecided ones to the next sweep.
+const JOIN_AUTH_WAIT_MS = 5_000;
+
+// Resolves when `promise` settles or `delayMs` has passed, whichever is first;
+// answers whether it settled. Never rejects, and its timer never holds the
+// process open.
+const settledWithin = (promise, delayMs) => new Promise((resolve) => {
+  const timer = setTimeout(() => resolve(false), delayMs);
+  if (typeof timer.unref === 'function') timer.unref();
+  const done = () => {
+    clearTimeout(timer);
+    resolve(true);
+  };
+  promise.then(done, done);
+});
+
 // A timer that never holds the process open (the adapter's retries do the
 // same, socketAdapter.js).
 const scheduleUnref = (run, delayMs) => {
@@ -326,7 +346,11 @@ const registerSocketHandlers = ({
   // The periodic sweep's interval, 0 to turn it off, and its timer: injectable
   // so a harness can run it fast, or not at all.
   revocationSweepMs = REVOCATION_SWEEP_MS,
-  schedule = scheduleUnref
+  schedule = scheduleUnref,
+  // How long a sweep waits for undecided joins, and the periodic sweep's
+  // clock: injectable for the same reason.
+  joinAuthWaitMs = JOIN_AUTH_WAIT_MS,
+  clock = Date.now
 }) => {
   // Per-socket update-session throttle configuration, read once at startup.
   const updateThrottle = parseUpdateThrottleConfig();
@@ -557,10 +581,20 @@ const registerSocketHandlers = ({
   const sweepRevokedSockets = async (teamId = null) => {
     const byTeam = new Map();
     // A snapshot: the loop awaits, and the live Map changes meanwhile.
-    for (const socket of [...(io.sockets?.sockets?.values?.() ?? [])]) {
-      // A join that read the old epoch finishes first, so its socket is
-      // judged on the claims it ends up holding.
-      if (socket.data.joinInFlight) await socket.data.joinInFlight;
+    const sockets = [...(io.sockets?.sockets?.values?.() ?? [])];
+    // A join that read the old epoch decides first, so its socket is judged
+    // on the claims it ends up holding. Only the decision is awaited
+    // (joinAuthInFlight), never the rest of the join: its roster read and its
+    // team write can wait on a row lock for as long as the client that holds
+    // it takes to die. And the wait is bounded, all joins together: a join
+    // stuck before it decides — of any team, since its team is not known yet —
+    // is left to the next sweep (or to its own epoch read, which is all it
+    // has), rather than holding every revocation of this pod.
+    const deciding = sockets.map((socket) => socket.data.joinAuthInFlight).filter(Boolean);
+    if (deciding.length > 0 && !(await settledWithin(Promise.all(deciding), joinAuthWaitMs))) {
+      console.warn(`[Server] Session revocation sweep: a join still had not decided after ${joinAuthWaitMs} ms; its socket is checked by the next sweep`);
+    }
+    for (const socket of sockets) {
       const claims = socket.data.authClaims;
       if (!claims || !socket.sessionId || (teamId && claims.teamId !== teamId)) continue;
       if (!byTeam.has(claims.teamId)) byTeam.set(claims.teamId, []);
@@ -596,14 +630,26 @@ const registerSocketHandlers = ({
   sessionRevocation.attachLocalSweeper(sweepRevokedSockets);
 
   if (revocationSweepMs > 0) {
-    const sweepPeriodically = () => {
-      schedule(() => {
-        sweepRevokedSockets(null)
-          .catch((err) => console.warn('[Server] Periodic session revocation sweep failed', err))
-          .finally(sweepPeriodically);
-      }, revocationSweepMs);
+    // Each tick schedules the next one before it runs anything: chained on
+    // the previous run's end instead, one run that never ended (a query on a
+    // connection that died) stopped the periodic sweep of its pod for good —
+    // the only cover for a degraded adapter and for joins accepted during an
+    // outage. A tick that finds a run younger than one period still going
+    // skips its turn rather than stacking a second run on it.
+    let running = null;
+    const tick = () => {
+      const startedAt = clock();
+      schedule(tick, revocationSweepMs);
+      if (running && startedAt - running.startedAt < revocationSweepMs) return;
+      const run = { startedAt };
+      running = run;
+      sweepRevokedSockets(null)
+        .catch((err) => console.warn('[Server] Periodic session revocation sweep failed', err))
+        .finally(() => {
+          if (running === run) running = null;
+        });
     };
-    sweepPeriodically();
+    schedule(tick, revocationSweepMs);
   }
 
   io.on('connection', (socket) => {
@@ -634,7 +680,10 @@ const registerSocketHandlers = ({
     // already holds after login, and that token must belong to the team that
     // owns the session. Nothing (not the room membership, not one field of
     // state) happens before both checks pass.
-    const handleJoinSession = async ({ sessionId, userId, userName, sessionToken, joinId: rawJoinId }) => {
+    // `authDecided` is called once the join has decided who this socket is
+    // (its claims are set); a join that is refused, or throws, has decided
+    // when it ends (the caller below). What the revocation sweep waits for.
+    const handleJoinSession = async ({ sessionId, userId, userName, sessionToken, joinId: rawJoinId }, authDecided = () => {}) => {
       console.log(`[Server] User ${userName} (${userId}) joining session ${sessionId}`);
       // Decision D3b: echoed in a denial, so the client can tell the denial of
       // an earlier join (made with a token it has since replaced) from that of
@@ -735,6 +784,7 @@ const registerSocketHandlers = ({
       socket.data.authUnverified = authUnverified;
       // Role is per session and per claimed user; re-resolve after every join.
       socket.data.sessionRole = undefined;
+      authDecided();
 
       rosterBroadcaster.schedule(sessionId);
 
@@ -801,13 +851,25 @@ const registerSocketHandlers = ({
     // from. Publishing the in-flight join lets those writes wait for it instead
     // of being lost; a write behind a *denied* join still finds no sessionId
     // and is still refused, so H1 is unchanged.
+    //
+    // Two promises are published. `joinInFlight` is the whole join, which a
+    // write waits for (the role and the last-connection refresh included).
+    // `joinAuthInFlight` settles as soon as the join has decided who the
+    // socket is, which is all the revocation sweep needs: waiting for the
+    // whole join let a team write stuck on a row lock stop every revocation
+    // on the pod.
     on('join-session', (payload) => {
-      const pending = handleJoinSession(payload).catch((err) => {
+      let authDecided;
+      const authInFlight = new Promise((resolve) => { authDecided = resolve; });
+      const pending = handleJoinSession(payload, authDecided).catch((err) => {
         console.error('[Server] Failed to handle join-session', err);
       });
       socket.data.joinInFlight = pending;
+      socket.data.joinAuthInFlight = authInFlight;
       pending.finally(() => {
+        authDecided();
         if (socket.data.joinInFlight === pending) socket.data.joinInFlight = null;
+        if (socket.data.joinAuthInFlight === authInFlight) socket.data.joinAuthInFlight = null;
       });
     });
 
@@ -878,6 +940,13 @@ const registerSocketHandlers = ({
       await awaitPendingJoin();
 
       const sessionId = socket.sessionId;
+      // The team the socket joined as, read with the session id: a join sets
+      // both, and a revocation or a refused re-join clears both in the same
+      // synchronous step (a leave clears the session id, and the write is then
+      // refused just below). Read live after the awaits below instead, a
+      // revocation landing meanwhile emptied it and the creation check further
+      // down passed for any team (audit H1).
+      const authTeamId = socket.data.authTeamId;
       if (!sessionId) {
         // No session on this socket: a write behind a denied join, or one that
         // outran a join the client believes it made. There is no room and no
@@ -1085,10 +1154,10 @@ const registerSocketHandlers = ({
           // nothing to compare against, so bind the new session to the team the
           // socket authenticated as (audit H1): otherwise one team's credential
           // could seed a session claiming another team's id and inherit that
-          // team's roster for role resolution.
+          // team's roster for role resolution. Fails closed: a socket with no
+          // authenticated team seeds no team's session.
           sessionData.teamId &&
-          socket.data.authTeamId &&
-          sessionData.teamId !== socket.data.authTeamId
+          (!authTeamId || sessionData.teamId !== authTeamId)
         ) {
           console.warn(`[Server] Rejected session creation from ${socket.userName} for ${sessionId}: teamId does not match the authenticated team`);
           return;

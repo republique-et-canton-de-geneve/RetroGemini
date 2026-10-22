@@ -8,6 +8,9 @@ const adminLive: Record<keyof typeof en, string> = {
   'adminLive.emptyHint':
     'Les sessions apparaissent ici lorsque des utilisateurs rejoignent une rétrospective ou un bilan de santé.',
   'adminLive.safeToDeploy': 'Déploiement sans risque\u00a0: aucune session active',
+  'adminLive.loadFailed': 'Les sessions en direct n’ont pas pu être chargées',
+  'adminLive.loadFailedHint':
+    'Impossible de savoir si quelqu’un est en session en ce moment\u00a0: ce n’est donc pas le moment de déployer. La liste est rechargée toutes les 5\u00a0secondes.',
   'adminLive.warningTitle': 'Sessions actives détectées',
   'adminLive.warning':
     '{sessions} session(s) avec {users} utilisateur(s) connecté(s). Attendez de préférence avant de déployer, pour ne pas interrompre ces sessions.',

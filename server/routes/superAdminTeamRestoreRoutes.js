@@ -90,9 +90,11 @@ const registerSuperAdminTeamRestoreRoutes = ({
   // Before and after the record is written, for the reason the whole-store
   // replace gives (dataStore.savePersistedData): after alone leaves the old
   // tokens alive when the write lands and the rotation does not, and before
-  // alone lets a login in between mint under the new epoch. The second also
-  // rewrites a row a booting pod's orphan sweep removed while the team had no
-  // record yet. Best-effort: a restore that happened must not answer 500.
+  // alone lets a login in between mint under the new epoch. A booting pod's
+  // orphan sweep removes neither: it never touches a row younger than ten
+  // minutes (dataStore.sweepOrphanedTeamAuthRows), and it checks the record
+  // and deletes in one statement. Best-effort: a restore that happened must
+  // not answer 500.
   const rotateRecreatedTeamEpoch = async (teamId, when) => {
     try {
       await dataStore.rotateTeamSessionEpoch(teamId);

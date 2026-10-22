@@ -508,6 +508,24 @@ describe('the super-admin console in French', () => {
     expect(en['adminLive.unknownPhase']).toBe('Unknown');
   });
 
+  // The Live tab is how an admin checks that nobody is in a session before
+  // deploying or repairing a team record. A poll the server refused used to
+  // leave the list as it was — empty on a fresh console — which read as "no
+  // active sessions, safe to deploy" while people were in a session.
+  it('says the live sessions could not be loaded instead of calling it safe to deploy', async () => {
+    overrides = {
+      '/api/super-admin/active-sessions': { status: 500, body: { error: 'failed_to_load' } }
+    };
+    await renderConsole();
+    openTab(/Sessions en direct$/);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Les sessions en direct n’ont pas pu être chargées');
+    expect(alert.textContent).toContain('ce n’est donc pas le moment de déployer');
+    expect(screen.queryByText('Aucune session active')).toBeNull();
+    expect(screen.queryByText(/Déploiement sans risque/)).toBeNull();
+  });
+
   it('translates the Logs tab and marks the server’s own message as English', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     await renderConsole();

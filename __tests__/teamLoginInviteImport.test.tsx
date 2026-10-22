@@ -190,6 +190,28 @@ describe('TeamLogin — a failed invite import is retried by the user', () => {
     expect(dataService.importTeam).toHaveBeenCalledTimes(2);
   });
 
+  // The alert stays mounted while a retry runs. A retry that fails with the
+  // same message changed no text, so the live region said nothing: a screen
+  // reader user who pressed "Try again" heard no answer at all. Each failure
+  // puts a new alert in, which is announced even with the same text.
+  it('announces a retry that fails with the same message again', async () => {
+    const pending = holdEachImport();
+    render(<TeamLogin onLogin={vi.fn()} onJoin={vi.fn()} inviteData={makeInvite()} />);
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await act(async () => { pending[0].reject(refusal()); });
+    const first = screen.getByRole('alert');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(pending).toHaveLength(2));
+    // Still the first alert while the attempt runs: nothing is announced yet.
+    expect(screen.getByRole('alert')).toBe(first);
+    await act(async () => { pending[1].reject(refusal()); });
+
+    const second = screen.getByRole('alert');
+    expect(second).toHaveTextContent('The team could not be joined right now.');
+    expect(second).not.toBe(first);
+  });
+
   it('moves focus to the join screen when a retry lands on it', async () => {
     const pending = holdEachImport();
     vi.mocked(dataService.autoJoinFromInvite).mockImplementation(() => {

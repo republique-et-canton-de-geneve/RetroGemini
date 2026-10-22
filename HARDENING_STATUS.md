@@ -131,7 +131,7 @@ reading `git log`. If the file has grown a history section, prune it.
 
 - **D3b — a password change signs out the team's open sessions, on every
   route and on the socket, without cutting off the facilitator who made it**
-  (Jira plan decision D3b; this branch, 2026-10-22). Team session tokens carry
+  (Jira plan decision D3b). Team session tokens carry
   the team's *session epoch* (an additive claim on the unchanged `rg1`/`v: 1`
   format), kept in a row of its own (`team-auth:{teamId}`, random, never on the
   record, never archived) and rotated in the password's own transaction by the
@@ -155,6 +155,22 @@ reading `git log`. If the file has grown a history section, prune it.
   `e2e/session-revocation`.
   Residuals are in `SECURITY.md` → *Session Tokens* (the rollout, tokens with
   no epoch, a request in flight, a lost answer, the login limiter) and in H10.
+  — PR #534, 41.2 (the sign-out follow-ups in 41.3, the review fixes below in
+  41.4; internal `Y` bumps) — 2026-10-22
+- **Final pre-landing review of PR #534 — eight findings, all applied.** The
+  boot sweep of orphaned epoch rows deletes in one conditional statement and
+  never a row younger than ten minutes, so a restore on another pod keeps the
+  epoch it just wrote (`teamAuthState`, both engines). A revocation sweep waits
+  only for the joins in flight to decide, at most 5 s for all of them, the
+  rotating pod broadcasts before it sweeps, and the periodic sweep schedules
+  its next tick before each run, so one stuck join or run no longer stops
+  revocation on its pod; a session creation in flight stays bound to the team
+  its socket joined as when a revoked join lands meanwhile
+  (`socketSessionRevocation`). The console's Live tab names rooms one team at a
+  time when the summary list cannot be read, and says so when a poll gets no
+  list (see H10). A repeated identical invite-import failure is announced
+  again (`teamLoginInviteImport`). The lint header's composition and these
+  entries' references were made true. — PR #534, 41.4 — 2026-10-22
 - **Performance, server side (perf series items 5, 6, 7 and the server half of
   10).** Four changes, each with its own guard. **Join burst:** a socket join
   read the full team record for the roster, and on PostgreSQL every join that
@@ -184,7 +200,7 @@ reading `git log`. If the file has grown a history section, prune it.
   back to the full record and the pass to one row at a time, and every writer
   that cut stored text by UTF-16 unit (three session screens, the feedback
   routes, AI group titles) now cuts through `utils/textCut.js`, never halving
-  a pair. The residuals are under H10. — version set at integration —
+  a pair. The residuals are under H10. — PR #534, 41.2 (internal `Y` bumps) —
   2026-10-22
 - **H42 follow-ups — avatar initials, the super-admin console's contrast, and
   the console in the axe audit.** Two known gaps of `ACCESSIBILITY.md` (6, and
@@ -208,7 +224,7 @@ reading `git log`. If the file has grown a history section, prune it.
   aborts any console write it did not mean to make, and every retro screen with
   two participants of different colours; `BASELINE` holds 33 states, all at 0.
   A hidden card (reveal off) is recorded as gap 7, not fixed: its text stays in
-  the page under a blur. — PR #534 (internal, a `Y` bump) — 2026-10-22
+  the page under a blur. — PR #534, 41.2 (internal, a `Y` bump) — 2026-10-22
 
 - **H45 — privileged actions now leave a durable, append-only trace.** Every
   super-admin login (**including the failures**), team deletion and rename,
@@ -1431,7 +1447,13 @@ Keep visible so nobody "rediscovers" them as bugs:
   throws (`socketWriteRefusal.test.ts`, and on a real row
   `socketJoinUnreadableSummary.test.ts`), and the legacy password pass reads
   the rows one at a time on `22P02`/`22P05` (`jsonbRefusal.test.ts`, and on a
-  real row `passwordMigrationProjection.test.ts`). The rows stored before, and
+  real row `passwordMigrationProjection.test.ts`). The console's Live tab,
+  which the performance series moved onto the summary list, names each
+  room's team one team at a time when that list fails — its summary, else its
+  record parsed in Node, *Unknown* for a record Node cannot parse either — and
+  says so when a poll gets no list instead of calling it safe to deploy (41.4,
+  `activeSessionsUnreadableTeam.test.ts` on a real row, `superAdminRoutes.test.ts`,
+  `i18nSuperAdmin.test.tsx`). The rows stored before, and
   any a 41.0 client writes during the rollout, still fail the summary list
   (login picker, console Teams tab, boot email heal, merge and deletion
   checks) and the feedback projection, as they have since 38.0: those cast

@@ -55,6 +55,10 @@ const createDataStore = ({
     teamsById,
     indexMap,
     loadTeamSummaries: vi.fn(async () => [...teamsById.values()]),
+    loadTeamSummary: vi.fn(async (teamId: string) => {
+      const team = teamsById.get(teamId);
+      return team ? structuredClone(team) : null;
+    }),
     loadAllTeamFeedbacks: vi.fn(async () => [...teamsById.values()].map((t) => ({
       id: t.id,
       name: t.name,
@@ -549,10 +553,13 @@ describe('super-admin dashboard reads', () => {
     expect(dataStore.loadTeamSummaries).not.toHaveBeenCalled();
   });
 
-  it('answers 500 when the summaries cannot be read, as a failed team read did', async () => {
+  it('answers 500 when the database is down, as a failed team read did', async () => {
     const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Platform' }] });
     dataStore.loadSessionState = vi.fn(async () => ({ teamId: 'team-1', name: 'A' }));
-    dataStore.loadTeamSummaries = vi.fn(async () => { throw new Error('database down'); });
+    const down = async () => { throw new Error('database down'); };
+    dataStore.loadTeamSummaries = vi.fn(down);
+    dataStore.loadTeamSummary = vi.fn(down);
+    dataStore.loadTeam = vi.fn(down);
     const io = {
       fetchSockets: vi.fn(async () => [{ id: 'sock-1', data: { userId: 'u1', userName: 'Ada' }, rooms: new Set(['sock-1', 'room-a']) }]),
       serverSideEmit: vi.fn()
@@ -563,6 +570,70 @@ describe('super-admin dashboard reads', () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: 'failed_to_load' });
+  });
+
+  // The summary list is one statement over every team, and one row it cannot
+  // read fails it whole: on PostgreSQL a record jsonb refuses (`\ud83d`, a NUL
+  // escape), on both engines a truncated one. The Live tab is what the repair
+  // runbook relies on to see whether a session is open, so it names each room
+  // one team at a time instead, as 41.0 did.
+  describe('when the summary list cannot be read', () => {
+    const rooms = {
+      'room-a': { teamId: 'team-1', name: 'A' },
+      'room-b': { teamId: 'team-2', name: 'B' },
+      'room-c': { teamId: 'team-2', name: 'C' }
+    };
+    const liveApp = (dataStore: ReturnType<typeof createDataStore>) => {
+      dataStore.loadSessionState = vi.fn(async (sessionId: string) => rooms[sessionId as keyof typeof rooms] ?? null);
+      const io = {
+        fetchSockets: vi.fn(async () => Object.keys(rooms).map((room, i) => (
+          { id: `sock-${i}`, data: { userId: `u${i}`, userName: `User ${i}` }, rooms: new Set([`sock-${i}`, room]) }
+        ))),
+        serverSideEmit: vi.fn()
+      };
+      return buildApp({ dataStore, io }).app;
+    };
+    const namesOf = async (app: express.Express) => {
+      const response = await request(app, '/api/super-admin/active-sessions', postJson(auth()));
+      expect(response.status).toBe(200);
+      const { sessions } = await response.json();
+      return Object.fromEntries(sessions.map((s: { sessionId: string; teamName: string }) => [s.sessionId, s.teamName]));
+    };
+
+    it('names each room from its own team, reading the record in Node when its summary is refused too', async () => {
+      const dataStore = createDataStore({ teams: [{ id: 'team-1', name: 'Platform' }, { id: 'team-2', name: 'Mobile' }] });
+      const refused = () => Object.assign(new Error('Unicode low surrogate must follow a high surrogate.'), { code: '22P02' });
+      dataStore.loadTeamSummaries = vi.fn(async () => { throw refused(); });
+      const summary = dataStore.loadTeamSummary;
+      dataStore.loadTeamSummary = vi.fn(async (teamId: string) => {
+        if (teamId === 'team-1') throw refused();
+        return summary(teamId);
+      });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      expect(await namesOf(liveApp(dataStore))).toEqual({ 'room-a': 'Platform', 'room-b': 'Mobile', 'room-c': 'Mobile' });
+      // One read per team, not per room, and the full record only for the
+      // team whose own summary was refused.
+      expect(dataStore.loadTeamSummary).toHaveBeenCalledTimes(2);
+      expect(dataStore.loadTeam).toHaveBeenCalledTimes(1);
+      expect(dataStore.loadTeam).toHaveBeenCalledWith('team-1');
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+    });
+
+    it('reads a team whose record Node cannot parse either as Unknown, and still names the others', async () => {
+      const dataStore = createDataStore({ teams: [{ id: 'team-2', name: 'Mobile' }] });
+      dataStore.loadTeamSummaries = vi.fn(async () => { throw new Error('malformed JSON'); });
+      dataStore.loadTeamSummary = vi.fn(async (teamId: string) => {
+        if (teamId === 'team-1') throw new Error('malformed JSON');
+        return { id: 'team-2', name: 'Mobile' };
+      });
+      dataStore.loadTeam = vi.fn(async () => JSON.parse('{"id":"team-1","name":'));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      expect(await namesOf(liveApp(dataStore))).toEqual({ 'room-a': 'Unknown', 'room-b': 'Mobile', 'room-c': 'Mobile' });
+      warn.mockRestore();
+    });
   });
 
   it('falls back to placeholders for a session with no persisted state', async () => {

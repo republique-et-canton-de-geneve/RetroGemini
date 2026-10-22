@@ -897,8 +897,8 @@ RetroGemini includes an automatic server-side backup system that creates compres
     The team's Jira token row (`team-secret:<id>`), if any, is removed by the next pod start's sweep.
   - **`retro-meta`**: **never delete it** — it holds the feedbacks of every deleted team and the pending password-reset links. Repair it in place: a malformed `resetTokens` can be set to an empty list (`UPDATE kv_store SET value = jsonb_set(value::jsonb, '{resetTokens}', '[]')::text WHERE key = 'retro-meta';`, the links then have to be requested again); take a malformed or unparsable `orphanedFeedbacks` back from the `pg_dump` taken first rather than emptying it.
 
-  Backups and restores work again once the row reads. What else the row breaks, which tells you where to look: an **unparsable or empty team row** makes the summary projection throw, so the login screen's team list and the console's **Teams** tab are down too. A **team row that parses but is not an object** gives a summary with no name: the login screen's team list fails (its sort, or its render), while the **Teams** tab loads with a nameless row that fails only when sorted by name or merged. A **malformed `retro-meta`** shows nothing else at all — its readers see empty lists — so that log line and the absence of new automatic backups in the **Backups** tab are the only signs
-- **A team record PostgreSQL's jsonb refuses**: the row is valid JSON to Node but holds a lone half of an emoji, written as the escape `\ud83d` (a ticket excerpt cut through an emoji by a client from 41.0 or earlier, or a feedback or AI group title cut the same way by a server from then), or a NUL written `\u0000`. Node reads it, so backups, invitation links, live sessions and the legacy password pass keep working; every projection that casts the record to `jsonb` fails, for **every** team at once: the login screen's team list, the console's **Teams** tab and feedback views, the feedback board, the boot-time email heal and the console's merge and deletion checks — with `invalid input syntax for type json` (`22P02`, "Unicode low surrogate must follow a high surrogate") or `unsupported Unicode escape sequence` (`22P05`) in the pod log. Find the rows, take a `pg_dump`, and remove those escapes in place — the expression leaves an escaped backslash (a user who typed `\ud83d` literally) alone:
+  Backups and restores work again once the row reads. What else the row breaks, which tells you where to look: an **unparsable or empty team row** makes the summary projection throw, so the login screen's team list and the console's **Teams** tab are down too (the **Live** tab keeps working: it names each room's team one team at a time, and that team's rooms read as *Unknown*). A **team row that parses but is not an object** gives a summary with no name: the login screen's team list fails (its sort, or its render), while the **Teams** tab loads with a nameless row that fails only when sorted by name or merged. A **malformed `retro-meta`** shows nothing else at all — its readers see empty lists — so that log line and the absence of new automatic backups in the **Backups** tab are the only signs
+- **A team record PostgreSQL's jsonb refuses**: the row is valid JSON to Node but holds a lone half of an emoji, written as the escape `\ud83d` (a ticket excerpt cut through an emoji by a client from 41.0 or earlier, or a feedback or AI group title cut the same way by a server from then), or a NUL written `\u0000`. Node reads it, so backups, invitation links, live sessions, the legacy password pass and the console's **Live** tab (which then names each room's team one team at a time) keep working; every projection that casts the record to `jsonb` fails, for **every** team at once: the login screen's team list, the console's **Teams** tab and feedback views, the feedback board, the boot-time email heal and the console's merge and deletion checks — with `invalid input syntax for type json` (`22P02`, "Unicode low surrogate must follow a high surrogate") or `unsupported Unicode escape sequence` (`22P05`) in the pod log. Find the rows, take a `pg_dump`, and remove those escapes in place — the expression leaves an escaped backslash (a user who typed `\ud83d` literally) alone:
   ```sql
   SELECT key FROM kv_store
    WHERE (key LIKE 'team:%' OR key LIKE 'session:%')
@@ -909,7 +909,7 @@ RetroGemini includes an automatic server-side backup system that creates compres
    WHERE (key LIKE 'team:%' OR key LIKE 'session:%')
      AND value ~ '(?<!\\)(?:\\\\)*\\u(?:[dD][89a-fA-F][0-9a-fA-F]{2}|0000)';
   ```
-  The statement repairs the `session:*` rows too, and is best run while none of the team's sessions is open: an unrepaired session row, or a browser still in the session, puts the text back into the team record with its next save. Node writes a well-formed emoji as itself, never as an escape, so every match is one of these broken halves or a NUL
+  The statement repairs the `session:*` rows too, and is best run while none of the team's sessions is open — the console's **Live** tab shows the open ones, and says so when it could not load them rather than reporting none: an unrepaired session row, or a browser still in the session, puts the text back into the team record with its next save. Node writes a well-formed emoji as itself, never as an escape, so every match is one of these broken halves or a NUL
 
 ### Configuration
 
@@ -965,9 +965,9 @@ collaboration into a total outage — and readiness cannot express "some pods ar
 still healthy".
 
 The adapter also carries **a team's password change to the other pods' live
-sessions** (decision D3b): the pod that served the change cuts its own sockets
-of that team and broadcasts `team-sessions-revoked`, and each pod cuts its
-stale ones. With the adapter down, the other pods still cut them within a
+sessions** (decision D3b): the pod that served the change broadcasts
+`team-sessions-revoked` and cuts its own sockets of that team, and each pod
+cuts its stale ones. With the adapter down, the other pods still cut them within a
 minute through their periodic sweep, and every HTTP request is refused at once
 everywhere, since each one reads the team's session epoch from the database.
 

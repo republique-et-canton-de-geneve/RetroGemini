@@ -73,13 +73,57 @@ describe('a password rotation cuts the team\'s live sessions (decision D3b)', ()
     return { atGate, open };
   };
 
+  // Set by a case to hold the next `loadTeamAuthState` of a flaky pod until
+  // the case releases it: a query sent on a connection that died answers no
+  // sooner than the kernel gives up on it, many minutes later.
+  let hangNextAuthRead: { reached: () => void; released: Promise<void> } | null = null;
+  const armAuthReadHang = () => {
+    let reached!: () => void;
+    let release!: () => void;
+    const atHang = new Promise<void>((resolve) => { reached = resolve; });
+    hangNextAuthRead = { reached, released: new Promise<void>((resolve) => { release = resolve; }) };
+    return { atHang, release };
+  };
+  // Holds every `atomicTeamUpdate` of a pod built with `hangingTeamWrite`
+  // until the case releases them: a team write waiting on a row lock a dead
+  // client still holds.
+  const teamWriteHang = (() => {
+    let reached!: () => void;
+    let release!: () => void;
+    const state = {
+      atHang: new Promise<void>((resolve) => { reached = resolve; }),
+      released: new Promise<void>((resolve) => { release = resolve; }),
+      reached: () => reached(),
+      release: () => release()
+    };
+    return state;
+  })();
+
   type Pod = { io: Server; port: number; revocation: ReturnType<typeof createSessionRevocation> };
 
-  const startPod = async ({ revocationSweepMs = 0, flakyStore = false, gatedSessionRead = false } = {}): Promise<Pod> => {
+  type PodOptions = {
+    revocationSweepMs?: number;
+    flakyStore?: boolean;
+    gatedSessionRead?: boolean;
+    hangingTeamWrite?: boolean;
+    joinAuthWaitMs?: number;
+    schedule?: (run: () => void, delayMs: number) => void;
+    clock?: () => number;
+  };
+
+  const startPod = async ({
+    revocationSweepMs = 0,
+    flakyStore = false,
+    gatedSessionRead = false,
+    hangingTeamWrite = false,
+    joinAuthWaitMs,
+    schedule,
+    clock
+  }: PodOptions = {}): Promise<Pod> => {
     const httpServer: HttpServer = createServer();
     const io = new Server(httpServer, { path: '/socket.io' });
     const revocation = createSessionRevocation({ io, serverRuntime: { multiPodAdapter: false } });
-    const store = flakyStore || gatedSessionRead
+    const store = flakyStore || gatedSessionRead || hangingTeamWrite
       ? {
           ...dataStore,
           usePostgres: dataStore.usePostgres,
@@ -91,7 +135,22 @@ describe('a password rotation cuts the team\'s live sessions (decision D3b)', ()
                     failNextAuthRead.value = false;
                     throw new Error('database unavailable');
                   }
+                  const hang = hangNextAuthRead;
+                  if (hang) {
+                    hangNextAuthRead = null;
+                    hang.reached();
+                    await hang.released;
+                  }
                   return dataStore.loadTeamAuthState(teamId);
+                }
+              }
+            : {}),
+          ...(hangingTeamWrite
+            ? {
+                atomicTeamUpdate: async (...args: Parameters<typeof dataStore.atomicTeamUpdate>) => {
+                  teamWriteHang.reached();
+                  await teamWriteHang.released;
+                  return dataStore.atomicTeamUpdate(...args);
                 }
               }
             : {}),
@@ -116,7 +175,10 @@ describe('a password rotation cuts the team\'s live sessions (decision D3b)', ()
       sessionCache: createBoundedCache({ max: 100 }),
       tokenService,
       sessionRevocation: revocation,
-      revocationSweepMs
+      revocationSweepMs,
+      ...(joinAuthWaitMs !== undefined ? { joinAuthWaitMs } : {}),
+      ...(schedule ? { schedule } : {}),
+      ...(clock ? { clock } : {})
     });
     await new Promise<void>((res) => httpServer.listen(0, '127.0.0.1', () => res()));
     const port = (httpServer.address() as { port: number }).port;
@@ -177,6 +239,8 @@ describe('a password rotation cuts the team\'s live sessions (decision D3b)', ()
   });
 
   afterAll(async () => {
+    teamWriteHang.release();
+    hangNextAuthRead?.reached();
     clients.forEach((c) => c.close());
     for (const pod of pods) await pod.close();
     await dataStore.closeDatabase();
@@ -405,5 +469,152 @@ describe('a password rotation cuts the team\'s live sessions (decision D3b)', ()
     const cut = once<Denial>(joined, 'join-denied');
     await pod.revocation.revokeTeamSessions(teamId);
     expect((await cut).sessionId).toBe('s9');
+  });
+
+  // Audit H1 binds a session's creation to the team the socket joined as. The
+  // write read that team live, after awaiting the session read, and D3b made
+  // a revocation clear it: a revoked join sent behind the write, on the same
+  // socket, emptied it and let the write seed a session claiming another
+  // team's id.
+  it('binds a session creation in flight to the team it joined as, even when a revoked join lands meanwhile', async () => {
+    const pod = await startPod({ gatedSessionRead: true });
+    const teamId = await newTeam();
+    const otherTeam = await newTeam();
+    const token = await tokenFor(teamId);
+    const socket = await connect(pod);
+    await joinSession(socket, { sessionId: 's23', userId: 'fac1', userName: 'Fiona', sessionToken: token });
+    // The token the socket holds is revoked; no sweep runs on this pod.
+    await dataStore.rotateTeamSessionEpoch(teamId);
+
+    const gate = armSessionReadGate();
+    socket.emit('update-session', { id: 's23', teamId: otherTeam, phase: 'BRAINSTORM', tickets: [], _rev: 0 });
+    await gate.atGate;
+    const denial = once<Denial>(socket, 'join-denied');
+    socket.emit('join-session', { sessionId: 's23', userId: 'fac1', userName: 'Fiona', sessionToken: token, joinId: 'join-23' });
+    expect((await denial).cause).toBe('session_revoked');
+    gate.open();
+    await settle();
+
+    expect(await dataStore.loadSessionState('s23')).toBeNull();
+  });
+
+  // A sweep waits for the joins in flight on its pod, so that a join that read
+  // the old epoch is judged on the claims it ends up holding. It used to wait
+  // for the whole join, of every team, with no limit: a join stuck on a team
+  // write (a row lock held by a client that died) stopped every revocation on
+  // its pod — the rotation's own sweep, the broadcast behind it, and the
+  // periodic sweep, which only rescheduled itself once the previous run ended.
+  describe('a stuck join never stops revocation on its pod', () => {
+    const memberTeam = async () => {
+      const teamId = await newTeam();
+      await dataStore.atomicTeamUpdate(teamId, (team: Record<string, unknown>) => ({
+        ...team,
+        members: [
+          { id: 'fac1', name: 'Fiona', color: 'bg-indigo-500', role: 'facilitator' },
+          { id: 'parA', name: 'Ada', color: 'bg-rose-500', role: 'participant' }
+        ]
+      }));
+      return teamId;
+    };
+
+    it('cuts another team\'s revoked socket while a join waits on its team\'s write', async () => {
+      const pod = await startPod({ hangingTeamWrite: true });
+      const stuckTeam = await memberTeam();
+      await dataStore.saveSessionState('s20a', { id: 's20a', teamId: stuckTeam, phase: 'BRAINSTORM', _rev: 0 });
+      const revokedTeam = await newTeam();
+      const revoked = await connect(pod);
+      await joinSession(revoked, { sessionId: 's20b', userId: 'par1', userName: 'Paul', sessionToken: await tokenFor(revokedTeam) });
+
+      // A participant of the other team joins; the join has its claims and is
+      // now refreshing the team's last connection, which never answers.
+      const stuck = await connect(pod);
+      stuck.emit('join-session', { sessionId: 's20a', userId: 'parA', userName: 'Ada', sessionToken: await tokenFor(stuckTeam) });
+      await teamWriteHang.atHang;
+
+      await dataStore.rotateTeamSessionEpoch(revokedTeam);
+      const denial = once<Denial>(revoked, 'join-denied', 1500);
+      void pod.revocation.revokeTeamSessions(revokedTeam);
+
+      expect((await denial).cause).toBe('session_revoked');
+    });
+
+    it('waits a bounded time for a join that has not decided yet, then judges the sockets it can', async () => {
+      const pod = await startPod({ gatedSessionRead: true, joinAuthWaitMs: 100 });
+      const revokedTeam = await newTeam();
+      const revoked = await connect(pod);
+      await joinSession(revoked, { sessionId: 's21b', userId: 'par1', userName: 'Paul', sessionToken: await tokenFor(revokedTeam) });
+
+      // Another team's join held before its claims: its session read hangs.
+      const otherTeam = await newTeam();
+      const pending = await connect(pod);
+      const gate = armSessionReadGate();
+      pending.emit('join-session', { sessionId: 's21a', userId: 'par2', userName: 'Pia', sessionToken: await tokenFor(otherTeam) });
+      await gate.atGate;
+
+      await dataStore.rotateTeamSessionEpoch(revokedTeam);
+      const denial = once<Denial>(revoked, 'join-denied', 1500);
+      void pod.revocation.revokeTeamSessions(revokedTeam);
+      try {
+        expect((await denial).cause).toBe('session_revoked');
+      } finally {
+        gate.open();
+      }
+    });
+
+    it('keeps the periodic sweep running while an earlier run is stuck', async () => {
+      const ticks: (() => void)[] = [];
+      let now = 1_000_000;
+      const pod = await startPod({
+        revocationSweepMs: 1000,
+        flakyStore: true,
+        schedule: (run) => { ticks.push(run); },
+        clock: () => now
+      });
+      const teamId = await newTeam();
+      const socket = await connect(pod);
+      await joinSession(socket, { sessionId: 's22', userId: 'par1', userName: 'Paul', sessionToken: await tokenFor(teamId) });
+      await dataStore.rotateTeamSessionEpoch(teamId);
+      const denials: Denial[] = [];
+      socket.on('join-denied', (payload: Denial) => denials.push(payload));
+
+      // The first run hangs on its epoch read.
+      expect(ticks).toHaveLength(1);
+      const hang = armAuthReadHang();
+      ticks.shift()!();
+      await hang.atHang;
+
+      // The next tick is already scheduled; within one period it skips its
+      // turn rather than stacking a second run on the first.
+      expect(ticks).toHaveLength(1);
+      now += 500;
+      ticks.shift()!();
+      await settle(50);
+      expect(denials).toHaveLength(0);
+
+      // A period later, a new run judges the socket the stuck one never did.
+      expect(ticks).toHaveLength(1);
+      now += 600;
+      const denial = once<Denial>(socket, 'join-denied', 1500);
+      ticks.shift()!();
+      expect((await denial).cause).toBe('session_revoked');
+      hang.release();
+    });
+  });
+
+  // The other pods re-read the epoch themselves, and the rotation has
+  // committed before this is called, so they need not wait for this pod's
+  // sweep — which may itself be waiting.
+  it('asks the other pods to sweep before sweeping its own sockets', async () => {
+    const emitted: unknown[][] = [];
+    const revocation = createSessionRevocation({
+      io: { serverSideEmit: (...args: unknown[]) => { emitted.push(args); return true; } } as unknown as Server,
+      serverRuntime: { multiPodAdapter: true }
+    });
+    revocation.attachLocalSweeper(() => new Promise(() => undefined));
+
+    void revocation.revokeTeamSessions('team-x');
+    await settle(10);
+
+    expect(emitted).toEqual([[TEAM_SESSIONS_REVOKED_EVENT, { teamId: 'team-x' }]]);
   });
 });
