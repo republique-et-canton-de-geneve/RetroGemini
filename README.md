@@ -297,6 +297,7 @@ comes back from Jira: closing the issue does not close the action.
 - **Storage:** SQLite with WAL mode or PostgreSQL
 - **Scale-out:** Redis or PostgreSQL Socket.IO adapter
 - **Container:** Node 26 Alpine, non-root user
+- **Delivery:** JSON answers over 1 KiB are gzipped, the hashed bundle is precompressed at build time and cached for a year, and `index.html` is revalidated on every load, with no proxy configuration needed
 
 The application is designed to survive rolling updates: session state is persisted, WebSocket clients reconnect automatically, and participants rejoin their active session.
 

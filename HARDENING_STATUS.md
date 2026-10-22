@@ -1304,6 +1304,14 @@ Keep visible so nobody "rediscovers" them as bugs:
   low-risk half and carries most of the gain; decomposing the components is a
   separate, later decision. The `npm run build` warning about the 500 kB
   threshold is expected output, not a regression to chase.
+  **Note (2026-10-22, performance series item 9):** the bundle now crosses the
+  wire compressed — precompressed at build time, 1.24 MB of JS and CSS to
+  312 KB — and its hashed files are cached immutably for a year, so a returning
+  phone downloads it once per release (AGENTS.md → *Compression and caching*).
+  A cross-pod asset miss during a rollout is now a `no-store` text 404 instead
+  of the SPA page served as JavaScript; it is still a blank page until a reload.
+  Code splitting stays an accepted residual, with its reopening condition
+  unchanged.
 - **H19 — the rate limiters are per pod, so the real ceiling is `N ×` the
   documented value.** At `replicas: 2` a load-balanced client gets
   `2 × AUTH_RATE_LIMIT_MAX`. **Accepted (maintainer, 2026-08-04): leave it,

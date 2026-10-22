@@ -997,6 +997,25 @@ value depends on your cluster's edge:
   Invitations keep working without it: that endpoint requires a team credential
   and the link it mails carries one the caller already holds, so it falls back to
   the origin the request arrived on. Setting `PUBLIC_BASE_URL` pins it too.
+- **Compression is the application's, so leave the router's off.** JSON
+  answers of 1 KiB and more are gzipped by `server.js`, and the bundle is
+  precompressed at build time. An OpenShift IngressController with
+  `httpCompression`, or ingress-nginx's `use-gzip`, leaves an answer that
+  already carries `Content-Encoding` alone, so turning it on buys nothing, and
+  the application's compression is the one that is tested.
+- **A corporate caching proxy is safe.** Every answer large enough to be
+  compressed carries `Vary: Accept-Encoding`, and `immutable` (a year) is set
+  only on the hashed bundle files, whose name changes with their content;
+  `index.html`, the fonts and the files of `public/` are revalidated on every
+  load (`no-cache`).
+- **Keep real file timestamps when you build the image.** `index.html` is
+  revalidated by size and modification time, and its size rarely changes
+  between releases. A build that normalises timestamps (kaniko
+  `--reproducible`, BuildKit `rewrite-timestamp`, a `SOURCE_DATE_EPOCH`
+  applied to files) would give every release the same validator, and returning
+  browsers would keep the previous release's page — a blank page after each
+  upgrade. The repository's Dockerfile keeps them; see AGENTS.md →
+  *Compression and caching* before changing that.
 
 ### What `AUTH_RATE_LIMIT_MAX` actually counts
 
