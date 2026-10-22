@@ -5,9 +5,11 @@ import type { AddressInfo } from 'net';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { gzipSync } from 'zlib';
+import { gzipSync, gunzipSync } from 'zlib';
 import { createDataStore } from '../server/services/dataStore.js';
 import { createBackupService } from '../server/services/backupService.js';
+import { buildBackupArchive } from '../server/services/backupArchive.js';
+import { deleteTeamAndPreserveFeedbacks } from '../server/services/teamDeletion.js';
 import { createTokenService } from '../server/services/sessionTokens.js';
 import { registerSuperAdminRoutes } from '../server/routes/superAdminRoutes.js';
 
@@ -303,6 +305,67 @@ describe('strict backup reads', () => {
     const rest: Json[] = [];
     for await (const next of { [Symbol.asyncIterator]: () => teams }) rest.push(next);
     expect(rest.map((t) => t.id)).toEqual(['t3']);
+  });
+
+  // The archive reads `retro-meta` AFTER the teams (AGENTS.md, Backup/restore),
+  // and that order is what keeps a team deleted mid-backup in the archive at
+  // least once: its deletion orphans its feedbacks into `retro-meta` first,
+  // then removes its row. Read before the teams, the meta would predate the
+  // move while the iterator, reaching the row after the deletion, skipped it —
+  // the feedbacks in neither part of the archive. "Never zero times."
+  it('reads retro-meta after the teams, so the feedbacks of a team deleted mid-backup stay in the archive', async () => {
+    const feedback = {
+      id: 'fb-1',
+      teamId: 't2',
+      teamName: 'Beta',
+      type: 'bug',
+      title: 'The timer stops',
+      description: 'It stops at 0:10.',
+      status: 'pending',
+      createdAt: '2026-10-20T08:00:00.000Z',
+      comments: []
+    };
+    await store.saveTeam('t2', { ...team('t2', 'Beta'), teamFeedbacks: [feedback] });
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reachedHold: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      reachedHold = resolve;
+    });
+    // The real reads, with the build held after its first team.
+    const heldStore = {
+      iterateArchiveTeams: async function* () {
+        let first = true;
+        for await (const next of store.iterateArchiveTeams()) {
+          yield next;
+          if (first) {
+            first = false;
+            reachedHold();
+            await gate;
+          }
+        }
+      },
+      readArchiveMeta: () => store.readArchiveMeta()
+    };
+
+    const building = buildBackupArchive({ dataStore: heldStore });
+    await held;
+    // The real deletion, as a team deleting itself runs it, so this follows
+    // production's order if it changes.
+    await deleteTeamAndPreserveFeedbacks({ dataStore: store, team: (await store.loadTeam('t2')) as Json, mergeTarget: null });
+    release();
+    const archive = JSON.parse(gunzipSync((await building).data).toString('utf8'));
+
+    const inTeams = archive.teams.flatMap((t: Json) => t.teamFeedbacks ?? []).filter((f: Json) => f.id === 'fb-1');
+    const inOrphans = archive.orphanedFeedbacks.filter((f: Json) => f.id === 'fb-1');
+    expect(inTeams.length + inOrphans.length).toBeGreaterThanOrEqual(1);
+    // Not vacuous: the team really was gone when the iterator reached it, and
+    // the feedback is in the archive as the orphan the deletion made.
+    expect(archive.teams.map((t: Json) => t.id)).toEqual(['t1', 't3']);
+    expect(inOrphans).toHaveLength(1);
   });
 
   it('answers the teams in key order, whatever order they were written in', async () => {

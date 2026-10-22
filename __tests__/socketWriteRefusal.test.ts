@@ -294,19 +294,31 @@ describe('update-session: restore, refuse, report (integration)', () => {
 
     paul.emit('update-session', { ...structuredClone(initial), tickets: [ticket('t1')] });
     await once(paul, 'session-ack');
+    // A leave writes the room count too (and so does every disconnect).
+    paul.emit('leave-session', { sessionId: 'iss-debug-lines' });
+    await settle(100);
+    // A join served from this pod's cache — the database read answered null,
+    // as it does during an outage — writes its own "Sending" line.
+    failSessionRead = true;
+    const pia = await connect();
+    pia.emit('join-session', { sessionId: 'iss-debug-lines', userId: 'par2', userName: 'Pia', sessionToken: teamToken });
+    await once(pia, 'session-update');
     await settle(100);
 
     const lines = (spy: typeof log) => spy.mock.calls.map((args) => args.map(String).join(' '));
     const infoLines = [...lines(log), ...lines(info)];
-    for (const pattern of ['Session update from', 'Broadcasting to', 'now has', 'Sending persisted session state', 'Client connected']) {
+    for (const pattern of ['Session update from', 'Broadcasting to', 'now has', 'Sending persisted session state', 'Sending cached session state', 'Client connected']) {
       expect(infoLines.filter((line) => line.includes(pattern))).toEqual([]);
     }
     expect(infoLines.some((line) => line.includes('joining session iss-debug-lines'))).toBe(true);
+    expect(infoLines.some((line) => line.includes('[Server] Paul leaving session iss-debug-lines'))).toBe(true);
     const debugLines = lines(debug as unknown as typeof log);
     expect(debugLines.some((line) => line.includes('Session update from Paul'))).toBe(true);
     expect(debugLines.some((line) => line.includes('Broadcasting to') && line.includes('iss-debug-lines'))).toBe(true);
-    expect(debugLines.some((line) => line.includes('Session iss-debug-lines now has'))).toBe(true);
+    // Fiona's join, Paul's join, Paul's leave, Pia's join.
+    expect(debugLines.filter((line) => line.includes('Session iss-debug-lines now has')).length).toBeGreaterThanOrEqual(4);
     expect(debugLines.some((line) => line.includes('Sending persisted session state to Paul'))).toBe(true);
+    expect(debugLines.some((line) => line.includes('Sending cached session state to Pia'))).toBe(true);
   }, 20000);
 
   it('heals without saving a write whose only change is facilitator-only, and says which fields', async () => {
