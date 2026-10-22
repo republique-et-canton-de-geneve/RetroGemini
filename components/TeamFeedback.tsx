@@ -74,7 +74,6 @@ interface TeamFeedbackProps {
   sessionToken?: string | null;
   currentUserId: string;
   currentUserName: string;
-  feedbacks: TeamFeedbackType[];
   onSubmitFeedback: (feedback: Omit<TeamFeedbackType, 'id' | 'submittedAt' | 'isRead' | 'status' | 'comments'>) => Promise<FeedbackSubmitResult>;
   onRefresh: () => void;
 }
@@ -97,7 +96,6 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   sessionToken,
   currentUserId,
   currentUserName,
-  feedbacks: localFeedbacks,
   onSubmitFeedback,
   onRefresh
 }) => {

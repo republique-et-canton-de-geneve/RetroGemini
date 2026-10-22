@@ -27,12 +27,18 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
     // mode. `jiraTarget` stays: it is a team setting the screens show; so does
     // `jiraParents`, the keys of each session's parent issue, which the batch
     // dialog and the Review step read.
+    // teamFeedbacks stays on the record and leaves every team answer: the
+    // Feedback Hub reads `/api/feedbacks/*`, no client version ever read the
+    // field from a team, and the images it carries were the largest part of
+    // the answer (300 KB of the 1 MB the largest team sent on every login,
+    // restore and Dashboard refresh).
     const {
       passwordHash,
       inviteEpoch,
       mergedFrom: _mergedFrom,
       jiraClaims: _jiraClaims,
       jiraParentClaims: _jiraParentClaims,
+      teamFeedbacks: _teamFeedbacks,
       ...safeTeam
     } = team;
     return safeTeam;

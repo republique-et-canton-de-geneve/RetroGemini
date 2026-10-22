@@ -262,9 +262,11 @@ describe('teamRoutes granular persist: failure paths and rev guards', () => {
       });
 
       expect(res.status).toBe(500);
-      // The success shape of this route is `{ team }`, so a caller that only
-      // checks `response.ok` would render a roster that was never persisted.
-      expect((await res.json()).team).toBeUndefined();
+      // The success shape of this route is `{ success: true }`: a failed write
+      // must carry neither it nor a team, so no caller can read it as stored.
+      const body = await res.json();
+      expect(body.success).toBeUndefined();
+      expect(body.team).toBeUndefined();
       // Creation seeds the facilitator, so the roster is not empty to begin
       // with — what must be absent is the member this failed write carried.
       const names = (stored(teamId).members as unknown as { name: string }[]).map((m) => m.name);

@@ -198,6 +198,8 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
         members: [{ id: 'm1', name: 'Alice', color: 'bg-rose-500', role: 'member' }]
       });
       expect(res.status).toBe(200);
+      // No team in the answer: the joiner's client never read it.
+      expect(await res.json()).toEqual({ success: true });
     });
 
     it('rejects a token-only request on /api/team/:teamId/password (stage 7c: rotating the credential requires the current credential)', async () => {

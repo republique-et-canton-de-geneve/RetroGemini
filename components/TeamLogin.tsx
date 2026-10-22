@@ -149,9 +149,26 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     verifyToken();
   }, []);
 
+  // The latest callbacks App handed down. App re-creates them on every render,
+  // and the invite import below must call the current one without re-running.
+  const onJoinRef = useRef(onJoin);
+  onJoinRef.current = onJoin;
+  const onLoginRef = useRef(onLogin);
+  onLoginRef.current = onLogin;
+  // The invite link this screen has imported (or tried to). One import per
+  // link: each one downloads the team's whole history, and a refused one counts
+  // against the login limiter. It used to re-run on every App render (App
+  // passes new callbacks each time, and `/api/version` answering during the
+  // import is one such render), so every invitee downloaded the team at least
+  // twice. React keeps the ref across StrictMode's double mount, so
+  // development imports once too. A failed import is not retried here: the
+  // error stays on screen, and a reload retries.
+  const importedInvite = useRef<InviteData | null>(null);
+
   // Handle invitation link - try auto-join or show member selection
   useEffect(() => {
-    if (!inviteData) return;
+    if (!inviteData || importedInvite.current === inviteData) return;
+    importedInvite.current = inviteData;
 
     const handleInvite = async () => {
       try {
@@ -161,10 +178,11 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
         try {
           const { team: updatedTeam, user } = dataService.autoJoinFromInvite(team.id, inviteData);
           // Auto-join succeeded (server validated the authentication)
-          if (onJoin) {
-            onJoin(updatedTeam, user);
+          const join = onJoinRef.current;
+          if (join) {
+            join(updatedTeam, user);
           } else {
-            onLogin(updatedTeam);
+            onLoginRef.current(updatedTeam);
           }
         } catch (err: unknown) {
           // Auto-join failed (invalid or missing authentication)
@@ -185,7 +203,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     };
 
     handleInvite();
-  }, [inviteData, onJoin, onLogin]);
+  }, [inviteData]);
 
   const isFullTeam = (team: Team | TeamSummary | null): team is Team => {
     return !!team && 'members' in team;
@@ -304,10 +322,10 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   // - A layout effect, not a passive one, so it lands in the commit that first
   //   shows the screen. A passive effect ran one task later, and a click on
   //   "I'm not in the list" in that window was queued before it and undone.
-  // - Keyed on the team's id, not the object. The invite effect re-imports the
-  //   team whenever it re-runs (StrictMode's double mount, or any App re-render:
-  //   App passes fresh onJoin/onLogin each time), every import is a new object,
-  //   and keyed on the object each one re-ran this reset over the user's choice.
+  // - Keyed on the team's id, not the object. Every import is a new object, and
+  //   keyed on the object each one re-ran this reset over the user's choice.
+  //   The invite effect used to re-import on every App re-render; it now
+  //   imports once per link, so this guards a genuine re-import (a new link).
   const loadedTeamId = isFullTeam(selectedTeam) ? selectedTeam.id : null;
   useLayoutEffect(() => {
     if (view !== 'JOIN' || !loadedTeamId) return;
@@ -839,6 +857,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             </button>
                         </div>
                     </form>
+                </div>
+            )}
+
+            {/* A refused invite import leaves no team to join, and the join
+                screen below needs one: say why here, or the pane stays blank.
+                The import is not retried behind the user's back (each try is
+                one more refusal counted by the login limiter); a reload does. */}
+            {view === 'JOIN' && !selectedTeam && error && (
+                <div className="flex flex-col h-full justify-center max-w-md mx-auto">
+                    <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-sm mb-4 text-sm">{feedbackText(error)}</div>
                 </div>
             )}
 

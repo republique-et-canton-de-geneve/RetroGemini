@@ -54,6 +54,21 @@ export const TEAM_DELETE_FAILED = 'The team could not be deleted. Please try aga
 // Thrown by `updateFacilitatorEmail` when the server did not store the address.
 export const RECOVERY_EMAIL_NOT_SAVED = 'The recovery email could not be saved. Please try again.';
 
+// When the cache last received the whole team from a login, a creation, a
+// restore or an invite join, or `null`. The Dashboard reuses that load once,
+// instead of fetching the same team again a moment later
+// (`refreshFromServer({ maxAgeMs })`). A refresh never stamps it.
+let teamLoadedAt: number | null = null;
+const markTeamLoaded = () => { teamLoadedAt = Date.now(); };
+
+// How long a refresh waits for the writes queued before it. The session exit
+// queues the session's last save and enters the Dashboard in the same tick; a
+// refresh answered before that save landed would replace the cache with a
+// copy that lacks it. Bounded, because the queue has no timeout of its own.
+// Not exported: App suites mock this module with a factory, and vitest throws
+// on an export the factory does not define.
+const REFRESH_PERSIST_WAIT_MS = 3000;
+
 const INVITE_CREDENTIAL_TTL_MS = 60_000;
 // The login picker gives up on the team list after this long and offers a
 // retry, rather than spinning on a request that will never answer.
@@ -305,6 +320,7 @@ const clearAuthCredentials = () => {
   authenticatedTeam = null;
   authenticatedSessionToken = null;
   inviteCredentialCache = null;
+  teamLoadedAt = null;
 };
 
 /**
@@ -904,12 +920,38 @@ const hydrateFromServer = async (): Promise<void> => {
 };
 
 /**
- * Refresh team data from server
+ * Refresh team data from server.
+ *
+ * `maxAgeMs`: serve this call from the whole-team load a login, a creation, a
+ * restore or an invite join has just made, when it is younger than that. One
+ * reuse per load: the entry that follows it is served, any later one (a return
+ * from a session included) fetches.
+ *
+ * The fetch waits first, at most REFRESH_PERSIST_WAIT_MS, for the writes
+ * queued before this call, so its answer holds them.
  */
-const refreshFromServer = async (): Promise<void> => {
+const refreshFromServer = async ({ maxAgeMs = 0 }: { maxAgeMs?: number } = {}): Promise<void> => {
   if (!authenticatedTeamId || !hasTeamCredentials()) return;
 
-  const { data, error } = await apiCall<{ team: Team }>(`/api/team/${authenticatedTeamId}`, {});
+  if (maxAgeMs > 0 && teamLoadedAt !== null && Date.now() - teamLoadedAt < maxAgeMs) {
+    teamLoadedAt = null;
+    return;
+  }
+
+  // The tail never rejects (see whenPersisted), and the timer is always
+  // cleared, so nothing outlives the call.
+  const teamId = authenticatedTeamId;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    whenPersisted(),
+    new Promise<void>((resolve) => { timer = setTimeout(resolve, REFRESH_PERSIST_WAIT_MS); })
+  ]);
+  clearTimeout(timer);
+  // A logout, or a login to another team, during the wait: this answer would
+  // belong to nobody.
+  if (authenticatedTeamId !== teamId || !hasTeamCredentials()) return;
+
+  const { data, error } = await apiCall<{ team: Team }>(`/api/team/${teamId}`, {});
 
   if (!error && data?.team) {
     authenticatedTeam = data.team;
@@ -1006,6 +1048,7 @@ export const dataService = {
     const { team, sessionToken } = await res.json();
     // Automatically log in to the new team
     setAuthCredentials(team.id, password, team, sessionToken);
+    markTeamLoaded();
     return team;
   },
 
@@ -1042,6 +1085,7 @@ export const dataService = {
     const { team, sessionToken } = await res.json();
     if (!team.archivedMembers) team.archivedMembers = [];
     setAuthCredentials(team.id, password, team, sessionToken);
+    markTeamLoaded();
     return team;
   },
 
@@ -1069,6 +1113,7 @@ export const dataService = {
       const { team } = await res.json();
       if (!team.archivedMembers) team.archivedMembers = [];
       setAuthCredentials(team.id, '', team, sessionToken);
+      markTeamLoaded();
       return team;
     } catch {
       return null;
@@ -1908,6 +1953,7 @@ export const dataService = {
     // Credential joins hold no password; the issued session token covers all
     // team calls, including deriving invite credentials of their own.
     setAuthCredentials(team.id, inviteData.password || '', team, sessionToken);
+    markTeamLoaded();
 
     return team;
   },
