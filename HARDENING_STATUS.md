@@ -129,6 +129,30 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **Performance, server side (perf series items 5, 6, 7 and the server half of
+  10).** Four changes, each with its own guard. **Join burst:** a socket join
+  read the full team record for the roster, and on PostgreSQL every join that
+  saw a stale `lastConnectionDate` queued its own team update; joins now read
+  the roster from a single-row team summary (concurrent reads of one stale team
+  share one projection) and share one refresh per team per pod, so a burst
+  costs one team write across the cluster (`socketJoinBurst.test.ts`, gated so
+  SQLite's synchronous reads cannot serialize it into a vacuous pass).
+  **Password pass and strict backups:** the legacy password pass reads two
+  fields per team instead of every record, and counts only the records it
+  wrote; a backup that cannot read every team record (or a malformed
+  `retro-meta`) **fails** instead of storing an empty archive that reported
+  success — which also ran retention, purging a good backup per failed run —
+  so every snapshot fails with it and restores answer `503` until the row is
+  repaired (`backupStrictReads.test.ts`; the two tests that pinned the lenient
+  read are inverted). **Streamed archive:** every backup, snapshot and the
+  download build the archive team by team through async gzip, the same bytes as
+  before, read on PostgreSQL in one `REPEATABLE READ` snapshot
+  (`backupArchiveStream.test.ts`, both engines). **Log ring and cache:** the
+  per-write and redundant reconnect socket lines are `console.debug`, stdout
+  only; the session cache gains a byte cap, `SESSION_CACHE_MAX_MB` (32), sized
+  from the store's own text lengths. The residuals are under H10. — version set
+  at integration — 2026-10-22
+
 - **H45 — privileged actions now leave a durable, append-only trace.** Every
   super-admin login (**including the failures**), team deletion and rename,
   password change on all three paths, backup create/download/restore/delete,
