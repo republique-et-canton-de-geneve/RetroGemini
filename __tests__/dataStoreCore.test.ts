@@ -379,13 +379,16 @@ describe('dataStore core primitives (SQLite)', () => {
       expect(data.meta).toMatchObject({ revision: 0 });
     });
 
-    it('degrades to an empty archive rather than throwing when the store is unreadable', async () => {
+    // It used to answer an empty archive here, which every backup then stored
+    // as a success: a recovery point holding nothing. An archive that cannot
+    // be read whole is not an archive.
+    it('throws rather than answering an empty archive when the store is unreadable', async () => {
       await dataStore.closeDatabase();
-
-      const data = await dataStore.loadPersistedData();
-
-      expect(data).toMatchObject({ teams: [], resetTokens: [], orphanedFeedbacks: [] });
-      await dataStore.initDatabase();
+      try {
+        await expect(dataStore.loadPersistedData()).rejects.toThrow();
+      } finally {
+        await dataStore.initDatabase();
+      }
     });
 
     it('re-reads the store on refresh', async () => {

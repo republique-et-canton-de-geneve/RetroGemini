@@ -530,7 +530,9 @@ below, run the cheap probe that would settle it.
    a save. Timer runtime fields and `participantsPanelCollapsed` must stay
    writable by everyone; `teamId` is immutable for everyone (a hard refusal).
 4. **Restore is a faithful replace**, not a merge, and takes a *protected*
-   pre-restore snapshot first — aborting with `503` if that snapshot fails.
+   pre-restore snapshot first — aborting with `503` if that snapshot fails. A
+   snapshot that could not read every team record is a failed snapshot (`503`),
+   never an archive missing teams.
 5. **Closed actions never silently re-open.** Both `reconcileRetroActionState`
    and the `/retrospective/:retroId` server handler enforce the guard; a
    legitimate re-open goes through the granular `/action` endpoint.
@@ -1229,6 +1231,28 @@ grave, rien faire"*, which is why it is P2 now rather than P1.
 ### H10 — [P2] Accepted residuals (documented, not scheduled)
 
 Keep visible so nobody "rediscovers" them as bugs:
+
+- **A corrupt team row blocks every backup, and so every restore, until it is
+  repaired by hand.** A backup that cannot read every team record (or a
+  malformed `retro-meta`) fails rather than storing an archive missing teams;
+  every snapshot fails with it, so both whole-store restores, the single-team
+  restore and console deletion answer `503` — including the restore someone
+  might want in order to repair that very row. It is not a new dead end: the
+  summary projection cannot read such a row either, so the login picker and
+  the console's Teams tab are already down, and only SQL repairs it
+  (`k8s/README.md` → *A backup that cannot read a team fails*). The other
+  choice, archiving the readable teams and recording the skipped keys, needs a
+  backups-table column, a console string and a decision. A failed automatic
+  backup runs no retention, so the last good backups are kept. During the
+  rollout, a pod from before this change still stores an empty archive on
+  such a row, and its retention can purge a good backup.
+- **On SQLite, an archive is read one team row at a time**, interleaved with
+  writes, so a multi-team operation landing mid-backup (a console deletion
+  moving a merge source's feedbacks into the merged team) can be half in it.
+  PostgreSQL reads every team in one `REPEATABLE READ` snapshot; SQLite has one
+  connection, and a read transaction held across the awaits would swallow
+  every other request's writes. On both engines `retro-meta` is read after the
+  teams, so at worst a feedback shows twice in an archive, never zero times.
 
 - **CodeQL `js/request-forgery` on `/api/super-admin/test-jira` — expected, to
   be dismissed as "won't fix" with this rationale (40.0, the Jira

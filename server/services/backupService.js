@@ -44,9 +44,16 @@ const createBackupService = ({ dataStore, logService }) => {
     return `backup_${Date.now()}_${randomBytes(4).toString('hex')}`;
   };
 
-  const createBackup = async (type, label, { protected: isProtected = false } = {}) => {
+  // `{ entry, reason }`: the stored backup, or `null` with why — 'in_progress'
+  // (another backup of this pod is running) or 'failed' (the store could not
+  // be read whole, or the write failed). A store that cannot be read whole is
+  // a failed backup, never an archive missing teams: the reads are strict
+  // (dataStore → iterateArchiveTeams / readArchiveMeta), and since retention
+  // runs only after a stored backup, a failed automatic backup keeps every
+  // good one.
+  const createBackupOutcome = async (type, label, { protected: isProtected = false } = {}) => {
     if (backupInProgress) {
-      return null;
+      return { entry: null, reason: 'in_progress' };
     }
 
     backupInProgress = true;
@@ -82,14 +89,23 @@ const createBackupService = ({ dataStore, logService }) => {
         await enforceRetention();
       }
 
-      return entry;
+      return { entry, reason: null };
     } catch (err) {
-      console.error('[Backup] Failed to create backup', err);
-      return null;
+      // The message names the unreadable key (`Team record "team:…" cannot be
+      // archived (unparsable)`), never its content. It is written into the
+      // line itself because the console's Logs tab serialises an Error
+      // without its message, and this line is what the runbook says to look
+      // for (k8s/README.md → A backup that cannot read a team fails).
+      console.error(`[Backup] Failed to create backup: ${err?.message ?? String(err)}`, err);
+      return { entry: null, reason: 'failed' };
     } finally {
       backupInProgress = false;
     }
   };
+
+  // The entry or null, for the callers that only need to know whether a
+  // recovery point exists (the snapshots, the scheduler, the startup backup).
+  const createBackup = async (...args) => (await createBackupOutcome(...args)).entry;
 
   const enforceRetention = async () => {
     try {
@@ -322,6 +338,7 @@ const createBackupService = ({ dataStore, logService }) => {
 
   return {
     createBackup,
+    createBackupOutcome,
     listBackups,
     getBackupConfig,
     getBackupData,

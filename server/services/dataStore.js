@@ -1496,20 +1496,122 @@ const createDataStore = ({ rootDir }) => {
     return normalized;
   };
 
-  const loadPersistedData = async () => {
+  // ---------------------------------------------------------------------------
+  // Archive reads: what a backup, a snapshot and the download are built from
+  //
+  // Strict on purpose. They used to read through `loadPersistedData`, which
+  // answered `{ teams: [] }` on any read error: one unreadable team row and
+  // every backup stored an EMPTY archive that reported success — and since an
+  // automatic backup that succeeds runs retention, each failed run purged one
+  // good backup, until every recovery point was empty. A row the archive
+  // cannot carry now fails the archive, naming its key and never its content.
+  // ---------------------------------------------------------------------------
+
+  const archiveReadError = (key, reason) =>
+    Object.assign(new Error(`Team record ${JSON.stringify(key)} cannot be archived (${reason})`), {
+      code: 'BACKUP_READ_FAILED',
+      key,
+      reason
+    });
+
+  // null: the row is gone (SQLite only: deleted between the key scan and the
+  // read). The revision stamp is dropped, as loadTeam drops it.
+  const archiveTeamFromRow = (key, text) => {
+    if (text == null) return null;
+    if (text === '') throw archiveReadError(key, 'empty');
+    let value;
     try {
-      const teams = await loadAllTeams();
-      const meta = await loadMetaData();
-      return normalizePersistedData({
-        teams,
-        meta: { revision: 0, updatedAt: new Date().toISOString() },
-        resetTokens: meta.resetTokens,
-        orphanedFeedbacks: meta.orphanedFeedbacks
-      });
-    } catch (err) {
-      console.warn('[Server] Failed to load persisted data', err);
-      return normalizePersistedData({ teams: [] });
+      value = JSON.parse(text);
+    } catch {
+      throw archiveReadError(key, 'unparsable');
     }
+    if (!isPlainObject(value)) throw archiveReadError(key, 'not_an_object');
+    const { _rev, _updatedAt, ...team } = value;
+    return team;
+  };
+
+  // Every team record, one at a time and in key order, for an archive built
+  // team by team: no caller ever holds the whole store at once.
+  //
+  // On PostgreSQL every team comes from ONE snapshot, as the single
+  // `SELECT key, value … LIKE` it replaced gave: a `REPEATABLE READ READ
+  // ONLY` transaction on one pooled client, held for the build (it blocks no
+  // writer). Without it, an operation that moves data between two teams while
+  // a backup runs — a console deletion moving a merge source's feedbacks into
+  // the merged team, then deleting the source — could land in neither half.
+  // SQLite has one connection, and a read transaction left open across the
+  // awaits would swallow every other request's writes into it, so its rows are
+  // read one at a time (accepted: SQLite deployments run one process and are
+  // not the production engine; HARDENING_STATUS H10).
+  //
+  // `ORDER BY key` on both engines, written down rather than inherited from a
+  // scan plan. Stopping early (a consumer that throws, `pipeline` destroying
+  // its source) runs `finally`, which ends the transaction and releases the
+  // client.
+  async function* iterateArchiveTeams() {
+    if (!usePostgres) {
+      const keys = sqliteDb.prepare('SELECT key FROM kv_store WHERE key LIKE ? ORDER BY key').all(TEAM_PREFIX + '%');
+      const readValue = sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?');
+      for (const { key } of keys) {
+        const team = archiveTeamFromRow(key, readValue.get(key)?.value);
+        if (team) yield team;
+      }
+      return;
+    }
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const keys = await client.query('SELECT key FROM kv_store WHERE key LIKE $1 ORDER BY key', [TEAM_PREFIX + '%']);
+      for (const { key } of keys.rows) {
+        const { rows } = await client.query('SELECT value FROM kv_store WHERE key = $1', [key]);
+        const team = archiveTeamFromRow(key, rows[0]?.value);
+        if (team) yield team;
+      }
+    } finally {
+      // Read-only: ending it either way is the same.
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+    }
+  }
+
+  // `retro-meta` for an archive. loadMetaData turns a present-but-malformed
+  // row into empty lists (right for its writers, which rebuild it), which
+  // would have the archive silently drop every orphaned feedback. Missing or
+  // empty: the empty lists every meta reader sees. A list that is absent is
+  // empty; one that is present and not a list fails, as archiveShape refuses
+  // it on the way back in.
+  const readArchiveMeta = async () => {
+    const key = 'retro-meta';
+    const text = usePostgres
+      ? (await pgPool.query('SELECT value FROM kv_store WHERE key = $1', [key])).rows[0]?.value
+      : sqliteDb.prepare('SELECT value FROM kv_store WHERE key = ?').get(key)?.value;
+    if (text == null || text === '') return { resetTokens: [], orphanedFeedbacks: [] };
+    let value;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      throw archiveReadError(key, 'unparsable');
+    }
+    if (!isPlainObject(value)) throw archiveReadError(key, 'not_an_object');
+    for (const field of ['resetTokens', 'orphanedFeedbacks']) {
+      if (value[field] !== undefined && !Array.isArray(value[field])) throw archiveReadError(key, 'list_malformed');
+    }
+    return { resetTokens: value.resetTokens ?? [], orphanedFeedbacks: value.orphanedFeedbacks ?? [] };
+  };
+
+  // The whole store as one archive object, read through the strict readers
+  // above — so it throws instead of answering an archive that misses teams.
+  // Every backup, snapshot and the download read through it.
+  const loadPersistedData = async () => {
+    const teams = [];
+    for await (const team of iterateArchiveTeams()) teams.push(team);
+    const meta = await readArchiveMeta();
+    return normalizePersistedData({
+      teams,
+      meta: { revision: 0, updatedAt: new Date().toISOString() },
+      resetTokens: meta.resetTokens,
+      orphanedFeedbacks: meta.orphanedFeedbacks
+    });
   };
 
   // `mode` controls how the archive is applied to the store:
@@ -2083,6 +2185,10 @@ const createDataStore = ({ rootDir }) => {
     loadMetaData,
     saveMetaData,
     atomicMetaUpdate,
+
+    // Archive reads (strict: a row the archive cannot carry throws)
+    iterateArchiveTeams,
+    readArchiveMeta,
 
     // Legacy compat (backup/restore, aggregated reads)
     loadPersistedData,

@@ -595,14 +595,12 @@ describe('Orphaned feedback storage (SQLite)', () => {
     expect(meta.orphanedFeedbacks).toEqual([orphan]);
   });
 
-  it('still returns a well-formed archive when the store cannot be read', async () => {
-    // Degraded read (database unavailable): callers such as the backup service
-    // must never receive an archive whose orphanedFeedbacks key is missing.
+  it('refuses to answer an archive when the store cannot be read', async () => {
+    // Degraded read (database unavailable): an archive with no teams and no
+    // orphaned feedbacks is exactly what used to be stored as a successful
+    // backup. The reader throws instead, and the backup fails.
     dataStore.closeDatabase();
 
-    const archive = await dataStore.loadPersistedData();
-    expect(archive.teams).toEqual([]);
-    expect(archive.orphanedFeedbacks).toEqual([]);
-    expect(archive.resetTokens).toEqual([]);
+    await expect(dataStore.loadPersistedData()).rejects.toThrow();
   });
 });

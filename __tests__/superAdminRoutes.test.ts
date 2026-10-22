@@ -111,6 +111,8 @@ const createDataStore = ({
 
 const createBackupService = () => ({
   createBackup: vi.fn(async () => ({ id: 'backup-1', type: 'manual' })),
+  createBackupOutcome: vi.fn(async (_type: string, _label?: string): Promise<{ entry: Record<string, unknown> | null; reason: string | null }> =>
+    ({ entry: { id: 'backup-1', type: 'manual' }, reason: null })),
   listBackups: vi.fn(async () => [{ id: 'backup-1' }]),
   getBackupConfig: vi.fn(() => ({ enabled: true, maxCount: 7 })),
   getBackupData: vi.fn(async () => ({ filename: 'backup-1.json.gz', data: Buffer.from('gz') })),
@@ -1074,18 +1076,32 @@ describe('super-admin backups', () => {
     const response = await request(app, '/api/super-admin/backups/create', postJson(auth({ label: 'before migration' })));
 
     expect(await response.json()).toEqual({ success: true, backup: { id: 'backup-1', type: 'manual' } });
-    expect(backupService.createBackup).toHaveBeenCalledWith('manual', 'before migration');
+    expect(backupService.createBackupOutcome).toHaveBeenCalledWith('manual', 'before migration');
   });
 
   it('reports a conflict when another backup is already running', async () => {
     const backupService = createBackupService();
-    backupService.createBackup = vi.fn(async () => null);
+    backupService.createBackupOutcome = vi.fn(async () => ({ entry: null, reason: 'in_progress' }));
     const { app } = buildApp({ backupService });
 
     const response = await request(app, '/api/super-admin/backups/create', postJson(auth()));
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: 'backup_in_progress' });
+  });
+
+  // A backup that could not read the store used to answer 409 as well, so a
+  // corrupt team row read "a backup is already in progress" for as long as it
+  // stayed corrupt.
+  it('reports a failed checkpoint as a failure, not as a conflict', async () => {
+    const backupService = createBackupService();
+    backupService.createBackupOutcome = vi.fn(async () => ({ entry: null, reason: 'failed' }));
+    const { app } = buildApp({ backupService });
+
+    const response = await request(app, '/api/super-admin/backups/create', postJson(auth()));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'create_failed' });
   });
 
   it('downloads a stored backup', async () => {
@@ -1284,7 +1300,7 @@ describe('super-admin backups', () => {
 
   it.each([
     ['/api/super-admin/backups/list', 'listBackups', {}, 'list_failed'],
-    ['/api/super-admin/backups/create', 'createBackup', {}, 'create_failed'],
+    ['/api/super-admin/backups/create', 'createBackupOutcome', {}, 'create_failed'],
     ['/api/super-admin/backups/download', 'getBackupData', { backupId: 'backup-1' }, 'download_failed'],
     ['/api/super-admin/backups/restore', 'restoreFromBackup', { backupId: 'backup-1' }, 'restore_failed'],
     ['/api/super-admin/backups/delete', 'deleteBackup', { backupId: 'backup-1' }, 'delete_failed'],

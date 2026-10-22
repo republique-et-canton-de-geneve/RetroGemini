@@ -165,7 +165,21 @@ describe('Backup Service', () => {
       const service = createBackupService({ dataStore, logService });
       const entry = await service.createBackup('auto');
       expect(entry).toBeNull();
+      expect(dataStore.saveBackup).not.toHaveBeenCalled();
     });
+
+    // A failed automatic backup must not run retention: when the store could
+    // not be read whole, every scheduled run used to store an empty archive as
+    // a success and purge one good backup, until none was left.
+    it('runs no retention and stores nothing when a scheduled backup cannot read the store', async () => {
+      dataStore.loadPersistedData.mockRejectedValueOnce(new Error('Team record "team:t2" cannot be archived (unparsable)'));
+      const service = createBackupService({ dataStore, logService });
+      expect(await service.runScheduledBackup()).toBeNull();
+      expect(dataStore.saveBackup).not.toHaveBeenCalled();
+      expect(dataStore.purgeOldBackups).not.toHaveBeenCalled();
+      expect(dataStore.releaseAutoBackupClaim).toHaveBeenCalledOnce();
+    });
+
 
     it('should create a protected backup when the protected option is set', async () => {
       const service = createBackupService({ dataStore, logService });
@@ -197,6 +211,28 @@ describe('Backup Service', () => {
       const parsed = JSON.parse(json);
       expect(parsed.teams).toHaveLength(2);
       expect(json).toBe(JSON.stringify(parsed));
+    });
+  });
+
+  describe('createBackupOutcome', () => {
+    it('says a backup is already running, apart from a failure', async () => {
+      let release!: () => void;
+      dataStore.loadPersistedData.mockImplementationOnce(() => new Promise((resolve) => {
+        release = () => resolve(mockPersistedData);
+      }));
+      const service = createBackupService({ dataStore, logService });
+      const running = service.createBackupOutcome('manual');
+      await vi.waitFor(() => expect(dataStore.loadPersistedData).toHaveBeenCalled());
+
+      expect(await service.createBackupOutcome('manual')).toEqual({ entry: null, reason: 'in_progress' });
+      release();
+      expect(await running).toMatchObject({ entry: { type: 'manual' }, reason: null });
+    });
+
+    it('says a backup failed when the store could not be read', async () => {
+      dataStore.loadPersistedData.mockRejectedValueOnce(new Error('DB error'));
+      const service = createBackupService({ dataStore, logService });
+      expect(await service.createBackupOutcome('manual')).toEqual({ entry: null, reason: 'failed' });
     });
   });
 

@@ -1092,9 +1092,15 @@ This notification was sent from RetroGemini.
 
     try {
       const { label } = req.body || {};
-      const entry = await backupService.createBackup('manual', label || undefined);
+      // Two different refusals: another backup is running (retry later), or
+      // the store could not be read whole (a corrupt row: the pod log and the
+      // Logs tab name it). Answering 409 for both read "a backup is already in
+      // progress" for as long as the row stayed corrupt.
+      const { entry, reason } = await backupService.createBackupOutcome('manual', label || undefined);
       if (!entry) {
-        return res.status(409).json({ error: 'backup_in_progress' });
+        return reason === 'in_progress'
+          ? res.status(409).json({ error: 'backup_in_progress' })
+          : res.status(500).json({ error: 'create_failed' });
       }
       await securityEvents.record(req, {
         action: SECURITY_ACTIONS.BACKUP_CREATE,

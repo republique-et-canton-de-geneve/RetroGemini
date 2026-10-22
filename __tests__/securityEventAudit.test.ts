@@ -155,6 +155,7 @@ const createMockDataStore = () => {
 
 const createBackupService = () => ({
   createBackup: vi.fn(async () => ({ id: 'backup-1', type: 'manual', teamCount: 2 })),
+  createBackupOutcome: vi.fn(async () => ({ entry: { id: 'backup-1', type: 'manual', teamCount: 2 }, reason: null })),
   listBackups: vi.fn(async () => [{ id: 'backup-1' }]),
   getBackupConfig: vi.fn(() => ({ enabled: true, maxCount: 7 })),
   getBackupData: vi.fn(async () => ({ filename: 'backup-1.json.gz', data: Buffer.from('gz') })),
