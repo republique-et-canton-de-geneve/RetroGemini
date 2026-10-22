@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [41.0] - 2026-10-21
 
 ### Added
-- Create the actions of a retrospective or a health check in Jira as sub-tasks of one parent issue made for it, and name another parent issue when you send them if you wish; super admins can also import a backup file in the Backups tab and restore one or more teams from it
+- Create the actions of a retrospective or a health check in Jira as sub-tasks of one parent issue made for it, and name another parent issue when you send them if you wish; super admins can also import a backup file in the Backups tab and restore one or more teams from it; Jira issues now quote the card in full and list the cards of the group an action came from
 
 ## [40.0] - 2026-10-21
 

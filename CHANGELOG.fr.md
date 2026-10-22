@@ -7,7 +7,7 @@ translates the releases it already lists.
 ## [41.0] - 2026-10-21
 
 ### Added
-- Créez dans Jira les actions d'une rétrospective ou d'un bilan de santé en sous-tâches d'un ticket parent créé pour l'occasion, et indiquez si vous le souhaitez un autre ticket parent au moment de l'envoi ; les super administrateurs peuvent aussi importer un fichier de sauvegarde dans l'onglet Sauvegardes et en restaurer une ou plusieurs équipes
+- Créez dans Jira les actions d'une rétrospective ou d'un bilan de santé en sous-tâches d'un ticket parent créé pour l'occasion, et indiquez si vous le souhaitez un autre ticket parent au moment de l'envoi ; les super administrateurs peuvent aussi importer un fichier de sauvegarde dans l'onglet Sauvegardes et en restaurer une ou plusieurs équipes ; les tickets Jira citent désormais la carte en entier et listent les cartes du groupe d'où vient l'action
 
 ## [40.0] - 2026-10-21
 
