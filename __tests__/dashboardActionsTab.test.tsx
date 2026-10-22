@@ -1,10 +1,11 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import DashboardActionsTab from '../components/dashboard/DashboardActionsTab';
 import { Team, User } from '../types';
 import { ROTI_FOLLOW_UP_LINK_ID } from '../components/session/retroConstants';
 import LanguageProvider from '../i18n/LanguageProvider';
+import { statusWith } from './helpers/jiraClientFetch';
 
 const facilitator: User = {
   id: 'fac-1',
@@ -105,6 +106,54 @@ describe('DashboardActionsTab', () => {
     render(<DashboardActionsTab {...baseProps} filteredActions={twoActions} />);
     expect(screen.getAllByRole('textbox', { name: 'Action text' }).map(field => (field as HTMLInputElement).value))
       .toEqual(['Write the release checklist', 'Archive the old wiki pages']);
+  });
+
+  // Maintainer, on this tab: "améliorer l'affichage de ce texte qui décale
+  // tout et c'est moche". The filters and "Create in Jira" share one toolbar
+  // row; the reason hangs under the button and never moves it. jsdom cannot
+  // measure: e2e/jira.spec.ts measures the boxes at 1280 and 320px.
+  describe('the Jira button on the filters’ row', () => {
+    const blocked = statusWith({ token: { configured: false, usable: false } });
+    const follows = (first: Element, second: Element) =>
+      (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+    it('puts the button on the filters’ row, the reason under it, before the list', () => {
+      render(<DashboardActionsTab {...baseProps} filteredActions={twoActions} jiraStatus={blocked} isFacilitator requestedBy="Facilitator" />);
+      const open = screen.getByRole('button', { name: 'Open' });
+      const toolbar = open.parentElement!.parentElement!;
+      const button = screen.getByRole('button', { name: 'Create in Jira (2)' });
+      expect(button.parentElement!.parentElement).toBe(toolbar);
+      expect(toolbar).toHaveClass('flex', 'flex-wrap', 'justify-between');
+      expect(open.parentElement).toHaveClass('flex', 'flex-wrap', 'gap-2');
+
+      const note = screen.getByText(/Jira is not connected for this team/).closest('p')!;
+      const order = [open, screen.getByRole('button', { name: 'Closed' }), screen.getByRole('button', { name: 'All' }), button, note, screen.getAllByRole('textbox', { name: 'Action text' })[0]];
+      for (let i = 1; i < order.length; i += 1) expect(follows(order[i - 1], order[i])).toBe(true);
+      expect(button).toHaveAccessibleDescription('Jira is not connected for this team: add an access token in Settings → Jira.');
+    });
+
+    it.each([
+      ['a participant', { jiraStatus: blocked, isFacilitator: false }],
+      ['a deployment without Jira', { jiraStatus: { ...blocked, enabled: false }, isFacilitator: true }],
+      ['no Jira status read yet', { jiraStatus: null, isFacilitator: true }]
+    ])('leaves the filters alone on their row for %s, with no empty wrapper', (_label, jira) => {
+      render(<DashboardActionsTab {...baseProps} filteredActions={twoActions} {...jira} requestedBy="Facilitator" />);
+      const toolbar = screen.getByRole('button', { name: 'Open' }).parentElement!.parentElement!;
+      expect(toolbar.children).toHaveLength(1);
+      expect(within(toolbar).getAllByRole('button').map((pill) => pill.textContent)).toEqual(['Open', 'Closed', 'All']);
+    });
+
+    it('says it in French', () => {
+      render(
+        <LanguageProvider initialLanguage="fr">
+          <DashboardActionsTab {...baseProps} filteredActions={twoActions} jiraStatus={blocked} isFacilitator requestedBy="Facilitator" />
+        </LanguageProvider>
+      );
+      const toolbar = screen.getByRole('button', { name: 'Ouvertes' }).parentElement!.parentElement!;
+      const button = within(toolbar).getByRole('button', { name: 'Créer dans Jira (2)' });
+      expect(button).toHaveAccessibleDescription('Jira n’est pas connecté pour cette équipe\u00a0: ajoutez un jeton d’accès dans Paramètres → Jira.');
+      expect(within(toolbar).getAllByRole('button').map((pill) => pill.textContent)).toEqual(['Ouvertes', 'Clôturées', 'Toutes', expect.stringContaining('Créer dans Jira (2)')]);
+    });
   });
 
   it('names them in French', () => {

@@ -29,6 +29,11 @@ const REASON_KEYS: Record<Exclude<Extract<JiraAvailability, { state: 'blocked' }
  * being a message that disappears. Shown to facilitators only (participants
  * cannot fix it), only on a deployment with Jira, and only when creation is
  * impossible; otherwise it renders nothing.
+ *
+ * A small bordered note, the codebase's amber notice: two clean edges, the
+ * right one lined up with the button it describes (`JiraBatchButton` docks
+ * both). slate-700 on amber-50 is 9.98:1; the icon is amber-700 (4.87:1) and
+ * hidden from assistive technology, and the text carries the reason.
  */
 const JiraReasonLine: React.FC<Props> = ({ status, isFacilitator, id, className = '' }) => {
   const { t, locale } = useTranslation();
@@ -40,9 +45,12 @@ const JiraReasonLine: React.FC<Props> = ({ status, isFacilitator, id, className 
     : t(REASON_KEYS[availability.reason]);
 
   return (
-    <p id={id} className={`flex items-start gap-1.5 text-xs text-slate-600 ${className}`}>
-      <span className="material-symbols-outlined text-sm text-amber-600" aria-hidden="true">info</span>
-      <span>{text}</span>
+    <p id={id} className={`flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs leading-snug text-slate-700 ${className}`}>
+      {/* `text-base!`: a plain `text-sm` is overridden by the unlayered
+          `.material-symbols-outlined` rule in index.css, which left a 24px
+          glyph beside 12px text. `leading-none` keeps its own line-height out. */}
+      <span className="material-symbols-outlined shrink-0 text-base! leading-none text-amber-700" aria-hidden="true">info</span>
+      <span className="min-w-0">{text}</span>
     </p>
   );
 };

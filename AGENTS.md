@@ -523,6 +523,15 @@ that test in hand.
    depends on; check what that costs before proposing it
 3. **QR codes** are generated client-side using the `qrcode` npm package — no external API needed
 4. **Test with network disabled** — verify that the feature works with no internet access
+5. **Size an icon with the important modifier.** `.material-symbols-outlined`
+   in `index.css` is declared outside any cascade layer, so it beats every
+   Tailwind utility (which live in `@layer utilities`): a plain `text-sm` on an
+   icon has no effect and the glyph stays 24px. Write `text-base! leading-none`
+   — `leading-none` because the important size otherwise brings its own
+   line-height. That is what left the Jira reason note's icon a 24px glyph
+   beside 12px text. Most icons in `components/` still carry an inert size
+   class; moving the rule into `@layer base` would make all of them take effect
+   at once, an app-wide visual change that needs its own review
 
 ## Internationalisation (EN/FR)
 
@@ -2193,9 +2202,16 @@ Rules:
   read on Review entry, on each reconnect and after a settings save — never
   from `dataService` while rendering (`useJiraStatus`).
 - **Who may press is the screens' rule.** The controls show to facilitators,
-  on open actions only (the server answers `closed` anyway); a reason line tied
+  on open actions only (the server answers `closed` anyway); a reason note tied
   to an `aria-disabled` control says why a facilitator cannot create (no token,
-  enter it again, refused by Jira, no target). The health-check Review closes
+  enter it again, refused by Jira, no target). At all three sites (the
+  Dashboard's Actions tab, where the batch button shares the filters' row, and
+  both Review steps) the button is docked to the right edge from `sm` up and
+  the note hangs under it as a small bordered amber note, right-aligned with it
+  and at most 24rem wide, so it never moves the button (`JiraBatchButton`,
+  `JiraReasonLine`; a left-aligned stack on a phone). With nothing to send the
+  note stands alone in the button's place: per-action controls render nothing
+  while creation is blocked. The health-check Review closes
   and assigns actions through `toggleGlobalAction` / `updateGlobalAction`, as
   the retro's does: it used to write only the session row, so the Dashboard —
   and the batch — saw closed actions as open. In `sessionParent` mode both
@@ -2318,14 +2334,18 @@ cards, each escaped, and the 32,767 guard: whole cards only, linear),
 `jiraIssuePreview.test.ts` and `jiraIssues.test.ts` → *the preview and the
 server agree* (a group's cards, a huge card over a cut stored context, an
 overflowing group) and *the parent preview and the server agree*, `reviewPhaseJira.test.tsx`,
-`healthCheckReviewJira.test.tsx` and `dashboardJira.test.tsx` (the parent line
+`healthCheckReviewJira.test.tsx` and `dashboardJira.test.tsx` (the reason note
+docked under the button, with `jiraBatchButton.test.tsx`,
+`dashboardActionsTab.test.tsx` and `jiraReasonLine.test.tsx`; the parent line
 and the rows' dialog), `i18nJira.test.tsx`,
 `jiraBatchSessionConvergence.test.ts`, `jiraErrorCodes.test.ts` (every code
 the routes answer reads as a sentence in both languages), `shutdown.test.ts`
 (the forced exit outlasts one Jira call and ends inside the grace period),
 and `e2e/jira.spec.ts` — the whole flow with two browsers, one parent issue
 per retrospective reused for its later actions, the dashboard's own parent and
-a parent named for one send, and the axe audit of the seven Jira screens. A local PostgreSQL run of several of the suites that
+a parent named for one send, a ~300-character card reaching Jira whole, the
+Dashboard's reason note measured under its button at 1280 and 320px, and the
+axe audit of the seven Jira screens. A local PostgreSQL run of several of the suites that
 read `TEST_DATABASE_URL` shares global rows between files: run it with
 `--no-file-parallelism`.
 

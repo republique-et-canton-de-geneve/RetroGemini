@@ -128,22 +128,24 @@ const DashboardActionsTab: React.FC<Props> = ({
       </div>
     </form>
 
-    <div className="flex space-x-2 mb-4 text-sm font-medium">
-      {(['OPEN', 'CLOSED', 'ALL'] as const).map((filter) => (
-        <button
-          key={filter}
-          onClick={() => onActionFilterChange(filter)}
-          className={`px-3 py-1.5 rounded-full border transition ${actionFilter === filter ? 'bg-indigo-50 border-retro-primary text-retro-primary' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}
-        >
-          {t(`dashboard.actions.filter.${filter}`)}
-        </button>
-      ))}
-    </div>
-
-    {/* "Create in Jira (N)" over the open actions listed, with its reason line
-        when the team cannot create yet (finding U-1). Hidden when it renders
-        nothing, so a deployment without Jira keeps its layout. */}
-    <div className="mb-3 flex justify-end empty:hidden">
+    {/* One toolbar row: the filters on the left, "Create in Jira (N)" over
+        the open actions listed on the right, its reason note under it when
+        the team cannot create yet (finding U-1). The note never moves the
+        button (see JiraBatchButton). When the button renders nothing, the row
+        holds the filters alone, so a deployment without Jira keeps its
+        layout. */}
+    <div className="mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+      <div className="flex flex-wrap gap-2 text-sm font-medium">
+        {(['OPEN', 'CLOSED', 'ALL'] as const).map((filter) => (
+          <button
+            key={filter}
+            onClick={() => onActionFilterChange(filter)}
+            className={`px-3 py-1.5 rounded-full border transition ${actionFilter === filter ? 'bg-indigo-50 border-retro-primary text-retro-primary' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}
+          >
+            {t(`dashboard.actions.filter.${filter}`)}
+          </button>
+        ))}
+      </div>
       <JiraBatchButton
         actions={listedRecordActions}
         status={jiraStatus}

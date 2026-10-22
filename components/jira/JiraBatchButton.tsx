@@ -39,8 +39,20 @@ interface Props {
  * When the team cannot create (no token, a token to enter again or that Jira
  * refused, no target), the button stays visible and reachable by keyboard,
  * marked unavailable with `aria-disabled` rather than `disabled` (which would
- * take it out of the tab order), and it is described by the reason line
- * beside it, which says what to fix in Settings → Jira (finding U-1).
+ * take it out of the tab order), and it is described by the reason note
+ * under it, which says what to fix in Settings → Jira (finding U-1).
+ *
+ * Layout, the same at its three sites (the Dashboard's Actions tab and both
+ * Review steps): the button is first and docked to the right edge of its row
+ * from `sm` up (`sm:ml-auto sm:items-end`, which also holds when the column
+ * wraps onto a line of its own); the note hangs under it, right-aligned with
+ * it and at most 24rem wide, and never moves it. The column used to be as
+ * wide as the sentence with the button at its left edge, so the button landed
+ * wherever the sentence started, lined up with nothing (the maintainer's
+ * "décale tout et c'est moche"). On a phone it is a left-aligned stack. With
+ * nothing to send, the note stands alone in the button's place: per-action
+ * controls render nothing while creation is blocked, so it is the only thing
+ * saying why there is no Jira control.
  *
  * With nothing left to send it disappears — except after a batch it ran
  * itself: then it stays, unavailable, so that closing the dialog gives the
@@ -106,7 +118,7 @@ const JiraBatchButton: React.FC<Props> = ({
   const dialogStatus = status ?? openedWith;
 
   return (
-    <div className="flex flex-col items-start gap-1">
+    <div className="flex max-w-full flex-col items-start gap-1.5 sm:ml-auto sm:max-w-sm sm:items-end">
       {showButton && (
         <button
           ref={buttonRef}
@@ -122,7 +134,11 @@ const JiraBatchButton: React.FC<Props> = ({
           onBlur={() => setLingering(false)}
           className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-60 aria-disabled:hover:bg-white"
         >
-          <span className="material-symbols-outlined text-base" aria-hidden="true">add_task</span>
+          {/* `!`: the unlayered `.material-symbols-outlined` rule in index.css
+              (24px) beats plain utilities; 18px keeps the button at the
+              filter pills' 34px. `leading-none` stops the important size
+              bringing its own line-height. */}
+          <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">add_task</span>
           {tp('jira.createCount', sendable.length)}
         </button>
       )}
