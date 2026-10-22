@@ -635,7 +635,11 @@ const registerSocketHandlers = ({
     // connection that died) stopped the periodic sweep of its pod for good —
     // the only cover for a degraded adapter and for joins accepted during an
     // outage. A tick that finds a run younger than one period still going
-    // skips its turn rather than stacking a second run on it.
+    // skips its turn. Ticks come about one period apart, so that skip rarely
+    // fires: while runs hang (a database that stopped answering), a new run
+    // starts roughly every period beside them, each waiting on its own query.
+    // That is accepted — a hung database stalls every route anyway — and it is
+    // what keeps one dead run from ending revocation on this pod.
     let running = null;
     const tick = () => {
       const startedAt = clock();
