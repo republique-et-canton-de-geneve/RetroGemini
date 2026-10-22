@@ -4,6 +4,7 @@ import type { AddressInfo } from 'net';
 import { createTeamService } from '../server/services/teamService.js';
 import { createTokenService } from '../server/services/sessionTokens.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * What a team answer carries (synthesis item 8).
@@ -31,6 +32,8 @@ const createMockDataStore = () => {
   return {
     loadTeam: async (teamId: string) => teams.get(teamId) || null,
     teamExists: async (teamId: string) => teams.has(teamId),
+    // Decision D3b: every token check reads the team's session epoch.
+    loadTeamAuthState: createTeamAuthStateDouble((teamId) => teams.has(teamId)).loadTeamAuthState,
     saveTeam: async (teamId: string, teamData: Team) => {
       teams.set(teamId, structuredClone(teamData));
     },
