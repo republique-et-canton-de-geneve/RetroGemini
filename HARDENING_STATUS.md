@@ -150,8 +150,16 @@ reading `git log`. If the file has grown a history section, prune it.
   (`backupArchiveStream.test.ts`, both engines). **Log ring and cache:** the
   per-write and redundant reconnect socket lines are `console.debug`, stdout
   only; the session cache gains a byte cap, `SESSION_CACHE_MAX_MB` (32), sized
-  from the store's own text lengths. The residuals are under H10. — version set
-  at integration — 2026-10-22
+  from the store's own text lengths. **Text jsonb refuses:** on PostgreSQL a
+  team row holding half an emoji or a NUL — valid to Node, refused by
+  `value::jsonb` — used to leave a facilitator unable to change anything
+  facilitator-only (the join's summary read threw, so every write found the
+  role unknown) and failed the legacy password pass whole; the join now falls
+  back to the full record and the pass to one row at a time, and every writer
+  that cut stored text by UTF-16 unit (three session screens, the feedback
+  routes, AI group titles) now cuts through `utils/textCut.js`, never halving
+  a pair. The residuals are under H10. — version set at integration —
+  2026-10-22
 
 - **H45 — privileged actions now leave a durable, append-only trace.** Every
   super-admin login (**including the failures**), team deletion and rename,
@@ -1261,22 +1269,71 @@ Keep visible so nobody "rediscovers" them as bugs:
   malformed `retro-meta`) fails rather than storing an archive missing teams;
   every snapshot fails with it, so both whole-store restores, the single-team
   restore and console deletion answer `503` — including the restore someone
-  might want in order to repair that very row. It is not a new dead end: the
-  summary projection cannot read such a row either, so the login picker and
-  the console's Teams tab are already down, and only SQL repairs it
-  (`k8s/README.md` → *A backup that cannot read a team fails*). The other
-  choice, archiving the readable teams and recording the skipped keys, needs a
-  backups-table column, a console string and a decision. A failed automatic
-  backup runs no retention, so the last good backups are kept. During the
-  rollout, a pod from before this change still stores an empty archive on
-  such a row, and its retention can purge a good backup.
-- **On SQLite, an archive is read one team row at a time**, interleaved with
-  writes, so a multi-team operation landing mid-backup (a console deletion
-  moving a merge source's feedbacks into the merged team) can be half in it.
-  PostgreSQL reads every team in one `REPEATABLE READ` snapshot; SQLite has one
-  connection, and a read transaction held across the awaits would swallow
-  every other request's writes. On both engines `retro-meta` is read after the
-  teams, so at worst a feedback shows twice in an archive, never zero times.
+  might want in order to repair that very row. For a **team** row it is not a
+  new dead end: an unparsable or empty row makes the summary projection throw,
+  so the login picker and the console's Teams tab are already down; a row that
+  parses but is not an object (`null`, an array) gives a summary with no name,
+  which fails the login picker (its sort in `/api/team/list`, or its render)
+  while the Teams tab still loads, with a nameless row that fails only when
+  sorted by name or merged. A **malformed `retro-meta`** is the quiet case: its
+  readers see empty lists, so nothing else visibly breaks, and the only signs
+  are `[Backup] Failed to create backup: Record "retro-meta" cannot be
+  archived (…)` in the pod log and the Logs tab, and no new automatic backups.
+  Only SQL repairs either, by key (`k8s/README.md` → *A backup that cannot
+  read a team fails*: a team row deleted by hand takes its name-index entries
+  with it unless a backup brings it straight back; `retro-meta` is repaired in
+  place, never deleted). The other choice, archiving the readable teams and
+  recording the skipped keys, needs a backups-table column, a console string
+  and a decision. A failed automatic backup runs no retention, so the last
+  good backups are kept. During the rollout, a pod from before this change
+  still stores an empty archive on such a row, and its retention can purge a
+  good backup.
+- **An archive's teams are fixed when its build starts, and `retro-meta` is
+  read at its end.** The set of teams comes from one `REPEATABLE READ`
+  snapshot on PostgreSQL and from the key list on SQLite (which then reads the
+  rows one at a time, interleaved with writes: SQLite has one connection, and a
+  read transaction held across the awaits would swallow every other request's
+  writes). Reading `retro-meta` last covers feedbacks moving *into* it: a team
+  deleting itself mid-backup orphans its feedbacks before its row goes, so they
+  show at worst twice (its copy and the orphaned one), never zero times —
+  `__tests__/backupStrictReads.test.ts` pins that order. It does not cover
+  feedbacks moving *out of* it, nor, on SQLite, between two teams; either can
+  miss that one archive:
+  - a single-team restore of a team deleted since the backup moves its
+    orphaned feedbacks into the recreated record, which an archive already
+    building does not list, then removes them from `retro-meta` before the
+    archive reads it — on both engines;
+  - on SQLite, a console deletion of a merge source moves its feedbacks into
+    the merged team: when the merged team's key sorts first, the archive read
+    it before the move and finds the source gone afterwards.
+
+  Nothing serializes those with a build: the restore gate covers the three
+  restore routes only, a scheduled backup runs on another pod or after the
+  restore's own snapshot, and the `/api/super-admin/backup` download takes no
+  `backupInProgress` flag, so it overlaps a restore even on the same pod. No
+  data leaves the store — the restore's pre-restore snapshot and the next
+  backup both hold the feedbacks; only that one archive misses them.
+- **A team row PostgreSQL's jsonb refuses still breaks the list projections.**
+  A lone half of an emoji (Node writes it `\ud83d`) or a NUL (`\u0000`) is
+  valid JSON to Node and refused by `value::jsonb` (`22P02`, `22P05`). Every
+  writer that cut stored text by UTF-16 unit now cuts through
+  `utils/textCut.js` and never halves a pair — the action-context excerpt of
+  three session screens, feedback titles, descriptions and comments, AI group
+  titles (`__tests__/textCut.test.ts`, `storedTextCuts.test.ts`) — and the two
+  reads this lane made depend on the cast fall back to Node on such a row: the
+  socket join reads the role from the full record once the summary read
+  throws (`socketWriteRefusal.test.ts`, and on a real row
+  `socketJoinUnreadableSummary.test.ts`), and the legacy password pass reads
+  the rows one at a time on `22P02`/`22P05` (`jsonbRefusal.test.ts`, and on a
+  real row `passwordMigrationProjection.test.ts`). The rows stored before, and
+  any a 41.0 client writes during the rollout, still fail the summary list
+  (login picker, console Teams tab, boot email heal, merge and deletion
+  checks) and the feedback projection, as they have since 38.0: those cast
+  every row in one statement. `k8s/README.md` → *A team record PostgreSQL's
+  jsonb refuses* finds and repairs them in SQL. A Node-side fallback for the
+  list projections is not built (the feedback projection is being reworked
+  beside this change); a boot-time heal is not built either, since a live
+  session would write the text back.
 - **The per-write socket lines reach stdout only.** Accepted `update-session`
   lines and the redundant reconnect lines are `console.debug`: never in the
   super-admin log ring (they turned it over in seconds), still on stdout with
