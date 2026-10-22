@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ActionItem, JiraStatus, JiraTarget } from '../../types';
+import { isJiraIssueKey } from '../../utils/jira.js';
 import { jiraService, JiraServiceError, type CreateIssuesOutcome } from '../../services/jiraService';
 import { useTranslation } from '../../i18n/I18nContext';
 import type { PluralKey } from '../../i18n/translate';
@@ -8,9 +9,19 @@ import { translateErrorMessage } from '../../i18n/errorMessages';
 import ModalDialog from '../common/ModalDialog';
 import JiraLinkBadge from './JiraLinkBadge';
 import JiraTargetFields from './JiraTargetFields';
+import JiraParentField from './JiraParentField';
+import {
+  EMPTY_JIRA_PARENT_FIELD,
+  isJiraParentChecked,
+  jiraParentSubtaskType,
+  type JiraParentFieldValue
+} from './jiraParentDraft';
+import JiraParentPreviewList from './JiraParentPreviewList';
+import JiraParentResults from './JiraParentResults';
 import { jiraInFlight } from './jiraInFlight';
 import { isJiraStatusStaleCode, type JiraActionKind } from './jiraAvailability';
-import { jiraIssuePreview, type PreviewSession, type PreviewTeam } from './jiraIssuePreview';
+import { jiraIssuePreview, jiraParentPreviews, type PreviewSession, type PreviewTeam } from './jiraIssuePreview';
+import { jiraScopeLabel } from './jiraParentLabels';
 import { draftFromTarget, targetFromDraft } from './jiraTargetDraft';
 import { groupJiraResults, type JiraBatchGroups } from './jiraBatchResults';
 
@@ -24,8 +35,15 @@ interface Props {
   team: PreviewTeam;
   session?: PreviewSession;
   requestedBy: string;
+  /**
+   * One action that may already be in Jira, opened through "Create anyway":
+   * the dialog warns, its button says "Create anyway", and the request sends
+   * `force`.
+   */
+  force?: boolean;
   onClose: () => void;
-  onDone?: (outcome: CreateIssuesOutcome) => void;
+  /** After the batch, with the route's code when it refused a request outright. */
+  onDone?: (outcome: CreateIssuesOutcome, refusal?: string | null) => void;
   onStatusStale?: () => void;
 }
 
@@ -42,6 +60,17 @@ const withFullStop = (line: string) => (/[.!?…]$/u.test(line) ? line : `${line
 /**
  * The confirmation before a batch, and its results (findings U-2, U-4, U-8).
  *
+ *  - In the sub-task modes it offers a parent issue for this send ("Parent
+ *    issue (optional)", `JiraParentField`), sent as a one-time `parent`-mode
+ *    target; in `sessionParent` mode with `adoptParent`, so the issue named
+ *    becomes the parent of the sessions that have none, once a sub-task of
+ *    theirs landed under it (and replaces theirs with the box ticked). In
+ *    `sessionParent` mode it lists the parent issue of each session the send
+ *    touches (`JiraParentPreviewList`): existing, new with its title, or in
+ *    doubt with the box that creates one anyway — for the rows it shows in
+ *    doubt, and only those (`forceParents`, review F2-1); the confirm button
+ *    counts the parent issues it creates (design F2 [R9]), and the results
+ *    say what became of each (`JiraParentResults`).
  *  - It names the target — project or parent issue, issue type, labels — and
  *    lets the facilitator change it for this one creation (another parent
  *    issue for this sprint, say). The target it shows, the stored one as last
@@ -81,6 +110,7 @@ const JiraBatchDialog: React.FC<Props> = ({
   team,
   session,
   requestedBy,
+  force = false,
   onClose,
   onDone,
   onStatusStale
@@ -94,6 +124,12 @@ const JiraBatchDialog: React.FC<Props> = ({
     preview: `${baseId}-preview`,
     results: `${baseId}-results`
   };
+  const [parentField, setParentField] = useState<JiraParentFieldValue>(EMPTY_JIRA_PARENT_FIELD);
+  const [parentSendError, setParentSendError] = useState<React.ComponentProps<typeof JiraParentField>['sendError']>(null);
+  const [replaceParents, setReplaceParents] = useState(false);
+  const [forceParent, setForceParent] = useState(false);
+  const parentInputRef = useRef<HTMLInputElement>(null);
+  const parentTypeRef = useRef<HTMLSelectElement>(null);
   const [phase, setPhase] = useState<Phase>('confirm');
   const [changingTarget, setChangingTarget] = useState(false);
   const [draft, setDraft] = useState(() => draftFromTarget(status.target));
@@ -104,8 +140,9 @@ const JiraBatchDialog: React.FC<Props> = ({
   const [summary, setSummary] = useState('');
   const closeRef = useRef<HTMLButtonElement>(null);
   const mounted = useRef(true);
-  // The stored type's name, kept with the target it was read for.
-  const [storedType, setStoredType] = useState<{ target: string; name: string } | null>(null);
+  // The stored types' names, kept with the target they were read for: the
+  // type of each action's issue, and in `sessionParent` mode the parent's.
+  const [storedType, setStoredType] = useState<{ target: string; name: string | null; parentName: string | null } | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -123,10 +160,13 @@ const JiraBatchDialog: React.FC<Props> = ({
     let cancelled = false;
     jiraService.getIssueTypes(teamId, source).then((answer) => {
       if (cancelled) return;
-      const match = answer.issueTypes.find(type => type?.id === stored.issueTypeId);
-      if (match && typeof match.name === 'string' && match.name.trim() !== '') {
-        setStoredType({ target: storedTargetJson, name: match.name });
-      }
+      const nameOf = (id: string | undefined) => {
+        const match = id ? answer.issueTypes.find(type => type?.id === id) : undefined;
+        return match && typeof match.name === 'string' && match.name.trim() !== '' ? match.name : null;
+      };
+      const name = nameOf(stored.issueTypeId);
+      const parentName = stored.mode === 'sessionParent' ? nameOf(stored.parentIssueTypeId) : null;
+      if (name || parentName) setStoredType({ target: storedTargetJson, name, parentName });
     }, () => {
       // Said by its id: the creation reports what Jira really refuses.
     });
@@ -157,9 +197,51 @@ const JiraBatchDialog: React.FC<Props> = ({
     return { actionId: action.id, summary: fields.summary, description: asJiraShowsIt(fields.description), language: fields.language };
   }), [actions, team, session, kind, sessionId, requestedBy, language]);
 
+  // The target the dialog shows: the stored one, or the change for this
+  // creation as typed so far. The parent field and the parents preview follow
+  // its mode.
+  const shownMode = changingTarget ? draft.mode : status.target?.mode;
+  const shownTarget: JiraTarget | null = useMemo(() => {
+    if (!changingTarget) return status.target ?? null;
+    const built = targetFromDraft(draft);
+    return built.ok ? built.target : null;
+  }, [changingTarget, draft, status.target]);
+  const shownIssueTypeId = changingTarget ? draft.issueTypeId : status.target?.issueTypeId ?? '';
+  const shownParentKey = changingTarget ? draft.parentKey.trim() : status.target?.parentKey ?? '';
+  const subtaskMode = shownMode === 'parent' || shownMode === 'sessionParent';
+  const typedParent = subtaskMode ? parentField.key.trim() : '';
+  const explicitKey = isJiraIssueKey(typedParent) ? typedParent : null;
+
+  // Built as the server decides which parent issue each action goes under.
+  const parentPreviews = useMemo(() => jiraParentPreviews({
+    actions,
+    team,
+    session,
+    kind,
+    sessionId: kind === 'backlog' ? undefined : sessionId,
+    requestedBy,
+    language
+  }), [actions, team, session, kind, sessionId, requestedBy, language]);
+  const showParents = shownMode === 'sessionParent';
+  const replaceable = showParents && explicitKey
+    ? parentPreviews.flatMap(preview => (preview.parent.state === 'existing' && preview.parent.key !== explicitKey
+      ? [{ scope: preview.scope, label: jiraScopeLabel(preview.kind, preview.sessionName, t), key: preview.parent.key }]
+      : []))
+    : [];
+  // [R9] The issues the click creates: the actions, and the parent issues it
+  // creates for them. The preview can say "new" where the server reuses a
+  // parent created meanwhile, so the count can be high by one for each such
+  // session (several on a Dashboard batch, which spans sessions), never low.
+  const newParents = showParents && !explicitKey
+    ? parentPreviews.filter(preview => preview.parent.state === 'new' || (forceParent && preview.parent.state === 'uncertain')).length
+    : 0;
+  const issueCount = actions.length + newParents;
+
   const groups: JiraBatchGroups | null = outcome ? groupJiraResults(outcome) : null;
 
-  const countLines = (g: JiraBatchGroups): [PluralKey, number][] => ([
+  const countLines = (g: JiraBatchGroups, result: CreateIssuesOutcome): [PluralKey, number][] => ([
+    ['jira.batch.result.parentsCreated', result.parents.filter(entry => entry.status === 'created').length],
+    ['jira.batch.result.parentsNotSaved', result.parents.filter(entry => entry.status === 'not_saved').length],
     ['jira.batch.result.created', g.created.length],
     ['jira.batch.result.alreadyLinked', g.alreadyLinked.length],
     ['jira.batch.result.notSaved', g.notSaved.length],
@@ -167,6 +249,8 @@ const JiraBatchDialog: React.FC<Props> = ({
     ['jira.batch.result.noText', g.noText.length],
     ['jira.batch.result.skipped', g.skipped.length],
     ['jira.batch.result.uncertain', g.uncertain.length],
+    ['jira.batch.result.parentUncertain', g.parentUncertain.length],
+    ['jira.batch.result.parentRefused', g.parentRefused.length],
     ['jira.batch.result.notSent', g.notSent.length],
     ['jira.batch.result.unknown', g.unknown.length]
   ] as [PluralKey, number][]).filter(([, count]) => count > 0);
@@ -198,6 +282,31 @@ const JiraBatchDialog: React.FC<Props> = ({
       target = built.target;
     }
     setTargetError(null);
+
+    // A parent issue named for this send: checked with Jira, with a sub-task
+    // type its project offers, or nothing is sent (design F2 §4.2).
+    let adoptParent = false;
+    if (typedParent) {
+      if (!isJiraIssueKey(typedParent) || !isJiraParentChecked(parentField) || !parentField.checked) {
+        setParentSendError({ notice: { key: 'jira.batch.parent.notChecked' }, on: 'key' });
+        parentInputRef.current?.focus();
+        return;
+      }
+      const subtaskType = jiraParentSubtaskType(parentField, target?.issueTypeId ?? '');
+      if (!subtaskType) {
+        if (parentField.checked.subtaskTypes.length === 0) {
+          setParentSendError({ notice: { key: 'jira.target.noSubtaskTypes' }, on: 'key' });
+          parentInputRef.current?.focus();
+        } else {
+          setParentSendError({ notice: { key: 'jira.batch.parent.subtaskTypeMissing', params: { project: parentField.checked.projectKey } }, on: 'type' });
+          parentTypeRef.current?.focus();
+        }
+        return;
+      }
+      adoptParent = target?.mode === 'sessionParent';
+      target = { mode: 'parent', parentKey: typedParent, issueTypeId: subtaskType, labels: target?.labels ?? [] };
+    }
+    setParentSendError(null);
     setPhase('sending');
 
     const actionIds = actions.map(action => action.id);
@@ -210,6 +319,15 @@ const JiraBatchDialog: React.FC<Props> = ({
         sessionId: kind === 'backlog' ? undefined : sessionId,
         requestedBy,
         language,
+        force: force || undefined,
+        adoptParent: adoptParent || undefined,
+        replaceParents: adoptParent && replaceParents ? true : undefined,
+        // Only for the parents the stored or changed target creates itself,
+        // and only the ones this dialog showed in doubt: a confirmation is for
+        // a doubt the facilitator checked, never for one the server finds.
+        forceParents: !typedParent && target?.mode === 'sessionParent' && forceParent
+          ? parentPreviews.flatMap(preview => (preview.parent.state === 'uncertain' ? [{ scope: preview.scope, actionIds: [...preview.actionIds] }] : []))
+          : undefined,
         onProgress: (results) => {
           if (mounted.current) setSentCount(results.length);
         }
@@ -218,16 +336,16 @@ const JiraBatchDialog: React.FC<Props> = ({
       // The route refused the request itself: nothing more was sent.
       refusedWith = err instanceof JiraServiceError ? err.code : 'unknown_error';
       result = err instanceof JiraServiceError
-        ? { results: err.results, notSent: err.notSent, unknown: [] }
-        : { results: [], notSent: actionIds, unknown: [] };
+        ? { results: err.results, notSent: err.notSent, unknown: [], parents: err.parents }
+        : { results: [], notSent: actionIds, unknown: [], parents: [] };
     } finally {
       jiraInFlight.remove(actionIds);
     }
 
-    onDone?.(result);
+    onDone?.(result, refusedWith);
     if (isJiraStatusStaleCode(refusedWith ?? result.stopped)) onStatusStale?.();
     if (!mounted.current) return;
-    const lines = countLines(groupJiraResults(result)).map(([key, count]) => withFullStop(tp(key, count)));
+    const lines = countLines(groupJiraResults(result), result).map(([key, count]) => withFullStop(tp(key, count)));
     setOutcome(result);
     setRefusal(refusedWith);
     setSummary(lines.join(' '));
@@ -237,6 +355,7 @@ const JiraBatchDialog: React.FC<Props> = ({
   const busy = phase === 'sending';
   const storedTarget = status.target;
   const storedTypeName = storedType && storedType.target === storedTargetJson ? storedType.name : null;
+  const storedParentTypeName = storedType && storedType.target === storedTargetJson ? storedType.parentName : null;
   const progress = t('jira.batch.progress', { done: sentCount, total: actions.length });
   const actionList = (actionIds: string[]) => (
     <ul className="mt-1 list-disc pl-5 text-slate-700">
@@ -268,6 +387,9 @@ const JiraBatchDialog: React.FC<Props> = ({
     >
       <div className="flex flex-col gap-4 p-6">
         <h2 id={ids.title} className="text-lg font-bold text-slate-800">{t('jira.batch.title')}</h2>
+        {force && phase !== 'done' && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{t('jira.batch.forceWarning')}</p>
+        )}
 
         {phase !== 'done' && (
           <>
@@ -275,12 +397,22 @@ const JiraBatchDialog: React.FC<Props> = ({
               <h3 id={ids.target} className="text-sm font-semibold text-slate-700">{t('jira.target.title')}</h3>
               {!changingTarget && storedTarget && (
                 <div className="text-sm text-slate-700">
-                  <p>
-                    {storedTarget.mode === 'parent'
-                      ? t('jira.batch.target.parent', { parent: storedTarget.parentKey ?? '' })
-                      : t('jira.batch.target.project', { project: storedTarget.projectKey ?? '' })}
-                  </p>
-                  <p>{t('jira.batch.target.issueType', { type: storedTypeName ?? storedTarget.issueTypeId })}</p>
+                  {storedTarget.mode === 'sessionParent' ? (
+                    <>
+                      <p>{t('jira.batch.target.sessionParent', { project: storedTarget.projectKey ?? '' })}</p>
+                      <p>{t('jira.batch.target.parentIssueType', { type: storedParentTypeName ?? storedTarget.parentIssueTypeId ?? '' })}</p>
+                      <p>{t('jira.batch.target.subtaskType', { type: storedTypeName ?? storedTarget.issueTypeId })}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p>
+                        {storedTarget.mode === 'parent'
+                          ? t('jira.batch.target.parent', { parent: storedTarget.parentKey ?? '' })
+                          : t('jira.batch.target.project', { project: storedTarget.projectKey ?? '' })}
+                      </p>
+                      <p>{t('jira.batch.target.issueType', { type: storedTypeName ?? storedTarget.issueTypeId })}</p>
+                    </>
+                  )}
                   <p>
                     {storedTarget.labels.length > 0
                       ? t('jira.batch.target.labels', { labels: storedTarget.labels.join(', ') })
@@ -315,6 +447,44 @@ const JiraBatchDialog: React.FC<Props> = ({
               )}
               {targetError && <p role="alert" className="text-xs text-red-700">{noticeText(targetError, t)}</p>}
             </section>
+
+            {subtaskMode && (
+              // Always visible in both sub-task modes, never behind "Change
+              // the target"; off while it sends, like the override.
+              <fieldset disabled={busy} className="min-w-0 flex flex-col gap-3">
+                <JiraParentField
+                  teamId={teamId}
+                  idPrefix={`${baseId}-parent`}
+                  mode={shownMode === 'parent' ? 'parent' : 'sessionParent'}
+                  targetParentKey={shownParentKey}
+                  targetIssueTypeId={shownIssueTypeId}
+                  value={parentField}
+                  onChange={setParentField}
+                  sendError={parentSendError}
+                  onSendErrorClear={() => setParentSendError(null)}
+                  inputRef={parentInputRef}
+                  typeSelectRef={parentTypeRef}
+                  replace={showParents ? {
+                    checked: replaceParents,
+                    onChange: setReplaceParents,
+                    sessions: replaceable,
+                    baseUrl: status.baseUrl
+                  } : null}
+                />
+                {showParents && (
+                  <JiraParentPreviewList
+                    previews={parentPreviews}
+                    explicitKey={explicitKey}
+                    replace={replaceParents}
+                    baseUrl={status.baseUrl}
+                    target={shownTarget}
+                    forceParent={forceParent}
+                    onForceParentChange={setForceParent}
+                    idPrefix={`${baseId}-parents`}
+                  />
+                )}
+              </fieldset>
+            )}
 
             <section className="flex flex-col gap-2">
               <h3 id={ids.preview} className="text-sm font-semibold text-slate-700">{t('jira.batch.previewHeading')}</h3>
@@ -384,6 +554,22 @@ const JiraBatchDialog: React.FC<Props> = ({
               {groups.uncertain.length > 0 && (
                 <li><p className="font-semibold text-amber-800">{tp('jira.batch.result.uncertain', groups.uncertain.length)}</p>{actionList(groups.uncertain)}</li>
               )}
+              {groups.parentUncertain.length > 0 && (
+                <li><p className="font-semibold text-amber-800">{tp('jira.batch.result.parentUncertain', groups.parentUncertain.length)}</p>{actionList(groups.parentUncertain)}</li>
+              )}
+              {groups.parentRefused.length > 0 && (
+                <li>
+                  <p className="font-semibold text-red-800">{tp('jira.batch.result.parentRefused', groups.parentRefused.length)}</p>
+                  {actionList(groups.parentRefused.map(entry => entry.actionId))}
+                </li>
+              )}
+              <JiraParentResults
+                parents={outcome.parents}
+                previews={parentPreviews}
+                team={team}
+                baseUrl={status.baseUrl}
+                target={shownTarget}
+              />
               {groups.notSent.length > 0 && (
                 <li>
                   <p className="font-semibold text-slate-800">{tp('jira.batch.result.notSent', groups.notSent.length)}</p>
@@ -432,7 +618,7 @@ const JiraBatchDialog: React.FC<Props> = ({
                 aria-disabled={busy ? true : undefined}
                 className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 aria-disabled:cursor-wait aria-disabled:opacity-70"
               >
-                {busy ? t('jira.creating') : tp('jira.batch.confirm', actions.length)}
+                {busy ? t('jira.creating') : force ? t('jira.action.createAnyway') : tp('jira.batch.confirm', issueCount)}
               </button>
             </>
           )}

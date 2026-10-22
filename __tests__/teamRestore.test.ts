@@ -181,6 +181,63 @@ describe('planTeamRestore — a team that still exists', () => {
   });
 });
 
+// sessionParent mode (F2): each session's parent issue is a routing decision
+// the team keeps making, and the claims on parents being created are live
+// bookkeeping. Rolled back, the first would send a session's next actions
+// under a parent it was moved away from (or create a second one), the second
+// could create a parent twice.
+describe('planTeamRestore — the parents of sessionParent mode', () => {
+  const parentKey = (key: string) => ({ key, createdAt: '2026-10-19T00:00:00.000Z', subtaskTypeId: '10005' });
+
+  it('carries the current parents onto the archive, and keeps the current claims', () => {
+    const archived = {
+      ...archivedTeam(),
+      jiraParents: { 'retro:r1': parentKey('OLD-1'), 'retro:r2': parentKey('OLD-2'), backlog: { uncertainSince: '2026-01-01T00:00:00.000Z' } },
+      jiraParentClaims: { 'retro:r2': { at: 'then', requestId: 'old' } }
+    };
+    const current = {
+      ...currentTeam(),
+      jiraParents: { 'retro:r1': parentKey('NOW-1'), backlog: parentKey('NOW-9'), 'healthcheck:h1': { uncertainSince: '2026-10-18T00:00:00.000Z' } },
+      jiraParentClaims: { 'retro:r9': { at: 'now', requestId: 'live' } }
+    };
+
+    const { team } = plan({ archived, current });
+    // The current key over the archived one, an archived key where the team
+    // has none now, a key over a mark, a current mark where the archive has none.
+    expect(team.jiraParents).toEqual({
+      'retro:r1': parentKey('NOW-1'),
+      'retro:r2': parentKey('OLD-2'),
+      backlog: parentKey('NOW-9'),
+      'healthcheck:h1': { uncertainSince: '2026-10-18T00:00:00.000Z' }
+    });
+    expect(team.jiraParentClaims).toEqual(current.jiraParentClaims);
+    expect(KEPT_FROM_CURRENT).toContain('jiraParentClaims');
+
+    // The claims are dropped when the team has none now.
+    const noClaims = plan({ archived, current: { ...current, jiraParentClaims: undefined } }).team;
+    expect('jiraParentClaims' in noClaims).toBe(false);
+  });
+
+  it('shares nothing with the current record', () => {
+    const current = { ...currentTeam(), jiraParents: { backlog: parentKey('NOW-9') } };
+    const { team } = plan({ current });
+    team.jiraParents.backlog.key = 'CHANGED-1';
+    expect(current.jiraParents.backlog.key).toBe('NOW-9');
+  });
+
+  it('brings a deleted team’s parents and claims back as the archive holds them', () => {
+    // Its claims expire into uncertain parents: the safe way to be wrong.
+    const archived = {
+      ...archivedTeam(),
+      jiraParents: { 'retro:r1': parentKey('OLD-1') },
+      jiraParentClaims: { 'retro:r2': { at: 'then', requestId: 'old' } }
+    };
+    const { team } = plan({ archived, current: null });
+    expect(team.jiraParents).toEqual(archived.jiraParents);
+    expect(team.jiraParentClaims).toEqual(archived.jiraParentClaims);
+  });
+});
+
 describe('planTeamRestore — a team deleted since the backup', () => {
   it('comes back with the archived credentials, under its old name or the one given', () => {
     // Guards: a recreated team nobody can open.

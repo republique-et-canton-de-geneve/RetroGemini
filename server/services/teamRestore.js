@@ -37,8 +37,20 @@
 //    archived actions (`carryJiraLinks`); an archived key is never replaced,
 //    and an archived "may already be in Jira" marker gives way to a key the
 //    action has now.
+//  - **A session's parent issue stays the one it has now** (`sessionParent`
+//    mode). The parents are carried onto the archive (`carryJiraParents`): per
+//    session, the current key, else the archived key, else a mark. A parent is
+//    a routing decision the team may have changed since ("Also use … for their
+//    later actions"), so the newest one wins between two keys, unlike an
+//    action's own issue. The claims on parents being created are kept as they
+//    are now, like the actions' claims.
 
-import { carryJiraLinks } from '../../utils/actionImpact.js';
+import { carryJiraLinks, carryJiraParents } from '../../utils/actionImpact.js';
+// One rule for what an archive's team entry must be, shared with the import
+// and the whole-store restores. Since 41.0 every imported row was checked
+// with it at write time, so the filter below is belt and braces for rows
+// written before.
+import { isTeamShape } from './archiveShape.js';
 
 /**
  * Fields of the live record a restore never rolls back while the team exists.
@@ -47,7 +59,9 @@ import { carryJiraLinks } from '../../utils/actionImpact.js';
  * `jiraTarget` goes with the team's Jira token, which a restore never touches:
  * an archived target could name a project the current token cannot reach.
  * `jiraClaims` records the issues being created right now; rolled back, an
- * issue in flight could be created a second time.
+ * issue in flight could be created a second time. `jiraParentClaims` is the
+ * same for the parent issues of `sessionParent` mode. (`jiraParents` is not
+ * kept whole: it is carried, `carryJiraParents`.)
  */
 const KEPT_FROM_CURRENT = Object.freeze([
   'name',
@@ -58,7 +72,8 @@ const KEPT_FROM_CURRENT = Object.freeze([
   'mergedFrom',
   'lastConnectionDate',
   'jiraTarget',
-  'jiraClaims'
+  'jiraClaims',
+  'jiraParentClaims'
 ]);
 
 /** The two lists whose entries are also `session:{id}` rows. */
@@ -92,9 +107,6 @@ const revOf = (entry) => {
 };
 
 const countOf = (list) => (Array.isArray(list) ? list.length : 0);
-
-const isTeamShape = (team) =>
-  !!team && typeof team === 'object' && typeof team.id === 'string' && team.id !== '' && typeof team.name === 'string';
 
 /** The teams an archive holds, ignoring entries no team record could be. */
 const archivedTeams = (archive) => (Array.isArray(archive?.teams) ? archive.teams.filter(isTeamShape) : []);
@@ -165,9 +177,11 @@ const planTeamRestore = ({ archived, current, orphanedFeedbacks, sessionRevs, na
   const malformed = malformedLists(archived);
   if (malformed.length > 0) throw new TeamRestoreError('archived_team_malformed', 422, { fields: malformed });
 
-  // `carryJiraLinks` shares unchanged parts with the archive; the clone below
-  // is what keeps the plan from aliasing either input.
-  const team = structuredClone(current ? carryJiraLinks(archived, current) : archived);
+  // `carryJiraLinks` and `carryJiraParents` share unchanged parts with the
+  // archive; the clone below is what keeps the plan from aliasing either input.
+  // The route plans inside the final write, against the record as it is then,
+  // so a parent created while the restore ran is carried too.
+  const team = structuredClone(current ? carryJiraParents(carryJiraLinks(archived, current), current) : archived);
   delete team._rev;
   delete team._updatedAt;
   team.id = archived.id;

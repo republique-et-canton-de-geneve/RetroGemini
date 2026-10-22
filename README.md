@@ -59,7 +59,7 @@ Render's free web services sleep after 15 minutes without traffic and use an eph
 | Guided facilitation | Icebreaker, Brainstorm, Group, Vote, Discuss, Review, and Close phases, with contextual tips and timeboxes, and the same shared countdown timer in retrospectives and health checks |
 | Live collaboration | Real-time WebSocket sync, participant presence, typing activity, anonymous brainstorming, comments, grouping, and voting |
 | Continuous improvement | Action proposals, assignees, carry-over between sessions, ROTI follow-up, reports, and team health trends |
-| Team administration | Password-protected workspaces with a mandatory recovery email, member management, invitations, favorites, search, feedback hub, backup, and restore (the whole store or a single team) |
+| Team administration | Password-protected workspaces with a mandatory recovery email, member management, invitations, favorites, search, feedback hub, backup, and restore (the whole store or a single team, also from a backup file) |
 | Optional AI | OpenAI-compatible ticket grouping, retrospective summaries, and cross-retrospective release analysis |
 | Optional Jira | Create the actions of a retrospective or health check as Jira issues in one click, from the Review step or the Dashboard, on Jira Data Center or Jira Cloud, each action then linked to its issue |
 | Enterprise deployment | SQLite or PostgreSQL, multi-pod Socket.IO adapters, Redis support, rolling-update recovery, proxies, custom CAs, Kubernetes, and OpenShift |
@@ -157,8 +157,8 @@ All configuration is provided through environment variables. See [`.env.example`
 | `BACKUP_INTERVAL_HOURS` | Hours between automatic backups | `24` |
 | `BACKUP_MAX_COUNT` | Maximum automatic backups to keep | `7` |
 | `BACKUP_ON_STARTUP` | Create a backup when the server starts | `true` |
-| `RESTORE_MAX_BODY_MB` | Maximum compressed restore upload size | `128` |
-| `RESTORE_MAX_DECOMPRESSED_MB` | Maximum decompressed restore size | `512` |
+| `RESTORE_MAX_BODY_MB` | Maximum compressed restore or import upload size (the uploaded restore and the Backups tab's file import) | `128` |
+| `RESTORE_MAX_DECOMPRESSED_MB` | Maximum decompressed restore or import size | `512` |
 | `AUTH_RATE_LIMIT_MAX` | **Rejected** team-create / restore-session credentials per IP per 15 minutes. Only `401` responses count, so a legitimate user is never blocked however often they reload. Counted **per pod** (no shared store, so a multi-pod deployment allows up to `replicas ×` this value) | `5` |
 | `PUBLIC_BASE_URL` | Canonical public URL used to build mailed links. **Required to send password-reset email** — that mail carries a live token and its caller is anonymous, so without a configured origin the route answers `501 public_base_url_not_configured` rather than trusting the request's `Host`. Invitations are authenticated and fall back to the request origin when it is unset. May include a sub-path | None (invitations fall back to the request origin) |
 | `CORS_ORIGIN` | Restrict Socket.IO CORS to specific origin(s) | `*` |
@@ -235,8 +235,11 @@ until it is set up in two places:
    is bound to the address it was checked against and is never sent anywhere
    else.
 2. **Each team saves one Jira token** in the Dashboard's *Settings → Jira*, and
-   chooses where its issues go: a project and an issue type, or the sub-tasks of
-   one parent issue, plus labels (`retrospective` by default).
+   chooses where its issues go: a project and an issue type, the sub-tasks of
+   one parent issue, or the sub-tasks of a parent issue RetroGemini creates for
+   each retrospective or health check (and one for the Dashboard's actions),
+   plus labels (`retrospective` by default). In both sub-task modes, another
+   parent issue can be named when the actions are sent.
    - **Data Center / Server:** a personal access token (Jira 8.14 or later),
      with the email left empty.
    - **Cloud:** the account's email and a **classic API token**, not an API
@@ -274,7 +277,9 @@ What an issue holds: the action's text as its summary (one line, at most 255
 characters), and a description naming the retrospective or health check, its
 date, the ticket or group the action came from (quoted, in anonymous sessions
 too) and who asked, written in the session's template language; the labels come
-from the team's target. Required custom fields are not supported: Jira's own
+from the team's target. In the mode with a parent issue per session, each
+parent issue carries the session's name and date (the team's name for the
+Dashboard's parent) and who asked, in the same language. Required custom fields are not supported: Jira's own
 message is shown instead. An action already linked to an issue is never sent
 again, and two clicks at once create one issue. When Jira's answer is lost, the
 action says it may already be in Jira and asks the facilitator to check before

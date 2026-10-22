@@ -22,9 +22,19 @@ const createTeamService = ({ dataStore, tokenService = null }) => {
     // mergedFrom (the super-admin merge's provenance) is server-only: no
     // screen reads it, and `/update` refuses it anyway.
     // jiraClaims too: the Jira route's record of the issues being created
-    // right now, which no screen reads and `/update` ignores. `jiraTarget`
-    // stays: it is a team setting the screens show.
-    const { passwordHash, inviteEpoch, mergedFrom: _mergedFrom, jiraClaims: _jiraClaims, ...safeTeam } = team;
+    // right now, which no screen reads and `/update` ignores, and
+    // jiraParentClaims, its twin for the parent issues of `sessionParent`
+    // mode. `jiraTarget` stays: it is a team setting the screens show; so does
+    // `jiraParents`, the keys of each session's parent issue, which the batch
+    // dialog and the Review step read.
+    const {
+      passwordHash,
+      inviteEpoch,
+      mergedFrom: _mergedFrom,
+      jiraClaims: _jiraClaims,
+      jiraParentClaims: _jiraParentClaims,
+      ...safeTeam
+    } = team;
     return safeTeam;
   };
 

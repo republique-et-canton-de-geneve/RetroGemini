@@ -9,6 +9,10 @@ const MAX_SEARCH_WORDS = 12;
  * A link to a Jira search for the issue an uncertain creation may have made
  * ("May already be in Jira: check it"): the target's project, or the sub-tasks
  * of its parent issue, and the action's words in the summary, newest first.
+ * In `sessionParent` mode the search is in the target's project — a parent
+ * issue that may already exist is searched there by its title words — unless
+ * `parentKey` names the parent the action goes under, which then replaces the
+ * target's clause: a parent named for a send may be in another project.
  *
  * The query is built from words only. Every character that is not a letter or
  * a digit becomes a space, so nothing a participant typed can close the quoted
@@ -23,7 +27,7 @@ const MAX_SEARCH_WORDS = 12;
  */
 export const jiraSearchUrl = (
   baseUrl: string | null | undefined,
-  { text, target }: { text: string; target: JiraTarget | null | undefined }
+  { text, target, parentKey }: { text: string; target: JiraTarget | null | undefined; parentKey?: string | null }
 ): string | null => {
   const base = parseJiraBaseUrl(baseUrl);
   if (!base) return null;
@@ -39,8 +43,10 @@ export const jiraSearchUrl = (
   if (words.length === 0) return null;
 
   const clauses: string[] = [];
-  if (target?.mode === 'project' && isJiraProjectKey(target.projectKey)) clauses.push(`project = "${target.projectKey}"`);
-  if (target?.mode === 'parent' && isJiraIssueKey(target.parentKey)) clauses.push(`parent = "${target.parentKey}"`);
+  if (isJiraIssueKey(parentKey)) clauses.push(`parent = "${parentKey}"`);
+  else if ((target?.mode === 'project' || target?.mode === 'sessionParent') && isJiraProjectKey(target.projectKey)) {
+    clauses.push(`project = "${target.projectKey}"`);
+  } else if (target?.mode === 'parent' && isJiraIssueKey(target.parentKey)) clauses.push(`parent = "${target.parentKey}"`);
   clauses.push(`summary ~ "${words.join(' ')}"`);
 
   const jql = `${clauses.join(' AND ')} ORDER BY created DESC`;

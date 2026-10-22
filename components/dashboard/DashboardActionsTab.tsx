@@ -233,6 +233,7 @@ const DashboardActionsTab: React.FC<Props> = ({
                   isFacilitator={isFacilitator}
                   kind={jiraKindOf(action.id)}
                   requestedBy={requestedBy}
+                  team={team}
                   onCreated={() => onJiraChanged?.()}
                   onStatusStale={onJiraStatusStale}
                 />

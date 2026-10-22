@@ -71,6 +71,12 @@ export const BASELINE: Record<string, number> = {
   'jira-review-step': 0,
   'jira-batch-dialog': 0,
   'jira-dashboard-actions': 0,
+  // One parent issue per session (41.0): the card with both type lists, and
+  // the dialog with its parent field and its parent issues.
+  'jira-settings-card-session-parent': 0,
+  'jira-batch-dialog-session-parent': 0,
+  // e2e/admin-team-restore.spec.ts
+  'admin-backup-import-card': 0,
 };
 
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];

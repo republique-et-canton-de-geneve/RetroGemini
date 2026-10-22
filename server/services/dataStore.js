@@ -3,7 +3,7 @@ import { dirname, join } from 'path';
 import Database from 'better-sqlite3';
 import pg from 'pg';
 import { createKeyedQueue } from './keyedQueue.js';
-import { carryJiraLinks } from '../../utils/actionImpact.js';
+import { carryJiraLinks, carryJiraParents } from '../../utils/actionImpact.js';
 
 const TEAM_PREFIX = 'team:';
 const SESSION_PREFIX = 'session:';
@@ -1425,14 +1425,18 @@ const createDataStore = ({ rootDir }) => {
     // The archive may predate issues created since. The team's token stays, so
     // an action restored without its link would be created in Jira again on
     // the next click: the current links are carried onto the archived copies
-    // (`carryJiraLinks`). Each current record is read right before the archived
-    // one replaces it, one at a time, so a restore never holds every team in
-    // memory at once. A record that cannot be read is restored without the
-    // carry: losing links is recoverable, a failed restore may not be.
+    // (`carryJiraLinks`), and so are the session parents of `sessionParent`
+    // mode (`carryJiraParents`: the current key wins, since a parent the team
+    // re-pointed since must not come back; the archive's claims come back as
+    // they were, and expire into uncertain parents). Each current record is
+    // read right before the archived one replaces it, one at a time, so a
+    // restore never holds every team in memory at once. A record that cannot
+    // be read is restored without the carry: losing links is recoverable, a
+    // failed restore may not be.
     const withCurrentJiraLinks = async (team) => {
       try {
         const current = await loadTeam(team.id);
-        return current ? carryJiraLinks(team, current) : team;
+        return current ? carryJiraParents(carryJiraLinks(team, current), current) : team;
       } catch (err) {
         console.warn(`[Server] Restore: team ${JSON.stringify(String(team.id))} is restored without carrying its current Jira links (its record could not be read)`, err);
         return team;

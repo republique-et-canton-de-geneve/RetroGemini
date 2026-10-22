@@ -32,6 +32,11 @@ const buildApp = () => {
   app.use(express.json({ limit: '1mb' }));
 
   const savePersistedData = vi.fn(async () => undefined);
+  const importBackup = vi.fn(async () => ({
+    entry: { id: 'imported-1', type: 'imported', teamCount: 1, sizeBytes: 1 },
+    sha256: 'x',
+    compressed: false
+  }));
 
   registerSuperAdminRoutes({
     app,
@@ -54,12 +59,12 @@ const buildApp = () => {
     escapeHtml: (value: string) => String(value ?? ''),
     superAdminPassword: VALID_PASSWORD,
     sessionCache: new Map(),
-    backupService: { createBackup: vi.fn(async () => ({ id: 'pre-restore' })) },
+    backupService: { createBackup: vi.fn(async () => ({ id: 'pre-restore' })), importBackup },
     aiService: {},
     serverRuntime: { multiPodAdapter: false }
   });
 
-  return { app, savePersistedData };
+  return { app, savePersistedData, importBackup };
 };
 
 const ARCHIVE = { teams: [{ id: 'team-1', name: 'Platform Team', members: [] }] };
@@ -131,5 +136,39 @@ describe('uploaded restore archive content types (H30)', () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'missing_archive' });
     expect(savePersistedData).not.toHaveBeenCalled();
+  });
+});
+
+describe('import', () => {
+  // The backup import (`/api/super-admin/backups/import`) takes the same raw
+  // body as the uploaded restore, behind the same global parser: the same
+  // H30 trap applies, and the same three types are the ones that work.
+  const importUpload = (contentType: string, body: Buffer | string) => ({
+    method: 'POST' as const,
+    headers: { 'content-type': contentType, 'x-super-admin-password': VALID_PASSWORD },
+    body: typeof body === 'string' ? body : new Uint8Array(body)
+  });
+
+  it.each([
+    ['application/gzip', () => gzipSync(JSON.stringify(ARCHIVE))],
+    ['application/x-gzip', () => gzipSync(JSON.stringify(ARCHIVE))],
+    ['application/octet-stream', () => JSON.stringify(ARCHIVE)]
+  ])('hands a file sent as %s to the import', async (contentType, body) => {
+    const { app, importBackup } = buildApp();
+
+    const response = await request(app, '/api/super-admin/backups/import', importUpload(contentType, body()));
+
+    expect(response.status).toBe(200);
+    expect(importBackup).toHaveBeenCalledTimes(1);
+  });
+
+  it('cannot accept anything under application/json, because the global parser claims it first', async () => {
+    const { app, importBackup } = buildApp();
+
+    const response = await request(app, '/api/super-admin/backups/import', importUpload('application/json', JSON.stringify(ARCHIVE)));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'missing_archive' });
+    expect(importBackup).not.toHaveBeenCalled();
   });
 });

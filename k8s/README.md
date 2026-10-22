@@ -11,6 +11,7 @@
 4. [Secrets reference](#secrets-reference)
 5. [Network policies](#network-policies)
 6. [TLS](#tls)
+   - [Upload size and timeouts](#upload-size-and-timeouts)
 7. [PostgreSQL management](#postgresql-management)
    - [Reading the audit trail](#reading-the-audit-trail-who-did-that)
 8. [Jira](#jira)
@@ -434,6 +435,89 @@ kubectl apply -k k8s/overlays/nodeport
 creates a Route with edge termination and an HTTP→HTTPS redirect, which is
 already the right answer there.
 
+### Upload size and timeouts
+
+Two super-admin routes take a whole backup file as their body:
+`/api/super-admin/restore` (the console's *Restore Data* card) and
+`/api/super-admin/backups/import` (the Backups tab's *Import a backup file*).
+The application bounds them itself with `RESTORE_MAX_BODY_MB` (default 128) and
+answers its own refusals as JSON. What sits in front of it has limits of its
+own, and they are the operator's:
+
+- **ingress-nginx refuses any body over 1 MiB** by default
+  (`client_max_body_size`), and `k8s/base/ingress.yaml` sets no
+  `proxy-body-size`. On the base manifest every real archive is refused with
+  nginx's own HTML 413 before it reaches the application; the console says so
+  ("The network in front of the server refused a file this large…") rather
+  than blame the file.
+- **The OpenShift Route has no body limit, but a 30 s timeout** by default. An
+  internal-network upload of a few tens of MB fits easily. Raise it on the
+  Route with `haproxy.router.openshift.io/timeout` (for example `120s`) if you
+  import larger files. When the Route gives up first it answers 504 while the
+  pod is still parsing and inserting: the console reads that as *uncertain*,
+  reads the backups list again at once and 20 s later, and asks the admin to
+  check the list before importing again. A retry that reaches the same pod
+  while the first import still runs is refused (`409 import_in_progress`).
+
+Do **not** raise the nginx limit host-wide. With request buffering on (its
+default) ingress-nginx spools a whole body before proxying it, so a 128 MB
+limit on `/` would let any anonymous caller make the controller spool 128 MB per
+request to routes whose application limit is 1 MB. Raise it only on the two
+paths, with a second Ingress for the same host — ingress-nginx merges the
+Ingresses of one host, and an `Exact` path wins over the base Ingress's `/`
+prefix. Ready to apply (substitute the same hostname and TLS Secret as the base
+Ingress, and keep `proxy-body-size` equal to `RESTORE_MAX_BODY_MB`):
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retrogemini-backup-upload
+  labels:
+    app: retrogemini
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Equal to RESTORE_MAX_BODY_MB; the application enforces its own limit.
+    nginx.ingress.kubernetes.io/proxy-body-size: "128m"
+spec:
+  tls:
+    - hosts:
+        - retrogemini.local
+      secretName: retrogemini-tls
+  rules:
+    - host: retrogemini.local
+      http:
+        paths:
+          - path: /api/super-admin/restore
+            pathType: Exact
+            backend:
+              service:
+                name: retrogemini-service
+                port:
+                  number: 8080
+          - path: /api/super-admin/backups/import
+            pathType: Exact
+            backend:
+              service:
+                name: retrogemini-service
+                port:
+                  number: 8080
+```
+
+It is deliberately not part of `k8s/base`: whether it is needed depends on the
+controller, and OpenShift does not use an Ingress at all. Apply it next to the
+base one (`kubectl -n retrogemini apply -f backup-upload-ingress.yaml`), then
+check that a file larger than 1 MiB now gets the application's answer (a JSON
+`401` without a credential) instead of nginx's HTML 413:
+
+```bash
+head -c 2000000 /dev/urandom > /tmp/big.bin
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' \
+  -H 'Content-Type: application/octet-stream' --data-binary @/tmp/big.bin \
+  https://retrogemini.local/api/super-admin/backups/import
+# expect: 401 application/json; charset=utf-8   (not 413 text/html)
+```
+
 ---
 
 ## PostgreSQL management
@@ -472,8 +556,12 @@ kubectl exec deployment/postgresql-retrogemini -- \
 kubectl exec deployment/postgresql-retrogemini -- \
   psql -U retrogemini -d retrogemini -c \
   "SELECT * FROM security_events
-     WHERE action IN ('team.delete','team.merge','backup.restore','team.restore')
+     WHERE action IN ('team.delete','team.merge','backup.import','backup.restore','team.restore')
        AND created_at >= '2026-09-04' ORDER BY id;"
+# A restore from an imported file reads as two rows: the backup.import, whose
+# target is the new backup's id (its detail carries the file's sha256), then a
+# team.restore whose detail.backupId — or a backup.restore whose target — is
+# that same id.
 
 # "Nobody received the password-reset mail" — who changed the recovery address?
 kubectl exec deployment/postgresql-retrogemini -- \
@@ -777,6 +865,8 @@ RetroGemini includes an automatic server-side backup system that creates compres
 - **Retention**: Old automatic backups are pruned when the limit is reached; protected backups are kept
 - **Restore**: Any backup can be restored from the super admin panel (a pre-restore snapshot is created automatically)
 - **Team deletion from the console**: deleting a team from the super admin panel — typically the two original teams after a merge — first takes a protected *Pre-delete snapshot* of the whole store. Protected backups are never pruned, so each deleted team leaves one full archive behind: delete the ones you no longer need from the Backups tab, as for pre-restore snapshots
+- **Imported files**: a backup file uploaded in the Backups tab (*Import a backup file*) becomes a row of type `imported`, from which one or more teams — or the whole store — can be restored. Imported rows are **never pruned**, each can be up to `RESTORE_MAX_BODY_MB`, and they survive every restore: delete them by hand when done. So are the protected *Pre-restore snapshot* rows each restore leaves — restoring five teams from one import leaves five whole-store snapshots to delete as well. A team from **another** deployment also comes back with its Jira target and the parent issue of each of its sessions: in the mode that gives each session a parent issue, its next sends go as sub-tasks under those keys in this deployment's Jira, which is right only when both deployments use the same Jira. Check the parent issues the batch dialog lists before sending, or re-point them (name a parent and replace, or change the target in *Settings → Jira*)
+- **Memory**: an import holds the uploaded body, its unpacked bytes and the parsed archive at once, one import at a time per pod. *Restoring* from a row costs more than importing it: the single-team restore holds the parsed archive across its whole-store snapshot (as it does for every stored backup), and on PostgreSQL the row's `bytea` arrives as hex text, twice its stored size, before it becomes a buffer. The practical ceiling is therefore the restore's, not the import's — against the 384 Mi pod limit, tens of MB unpacked; an import that passes does not prove a restore from it fits. Raise the pod's memory limit before restoring larger archives
 
 ### Configuration
 
@@ -788,8 +878,8 @@ These environment variables are set directly in `deployment.yaml` (not in secret
 | `BACKUP_INTERVAL_HOURS` | `24` | Hours between automatic backups |
 | `BACKUP_MAX_COUNT` | `7` | Max automatic backups to keep |
 | `BACKUP_ON_STARTUP` | `true` | Create backup when server starts |
-| `RESTORE_MAX_BODY_MB` | `128` | Max compressed/uploaded restore archive size in MB |
-| `RESTORE_MAX_DECOMPRESSED_MB` | `512` | Max decompressed restore archive size in MB |
+| `RESTORE_MAX_BODY_MB` | `128` | Max compressed/uploaded restore or import archive size in MB (the uploaded whole-store restore and the Backups tab's file import; see [Upload size and timeouts](#upload-size-and-timeouts) for the proxy in front) |
+| `RESTORE_MAX_DECOMPRESSED_MB` | `512` | Max decompressed restore or import archive size in MB |
 
 ### Multi-pod support
 

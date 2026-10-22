@@ -23,7 +23,12 @@ import { isJiraIssueKey } from '../../utils/jira.js';
  *  - `notSent`: never attempted (a stop, a refusal of the request), safe to
  *    send again;
  *  - `unknown`: sent in a request whose answer was lost; never sent again
- *    automatically.
+ *    automatically;
+ *  - `parentUncertain`, `parentRefused` (`sessionParent` mode): nothing was
+ *    sent for the action, because its parent issue may already be in Jira, or
+ *    Jira refused to create it (with Jira's words). Never read as "may already
+ *    be in Jira" for the action itself: the action was not sent. A parent
+ *    being created by another request (`parent_in_progress`) is `skipped`.
  */
 export interface JiraBatchGroups {
   created: { actionId: string; key: string }[];
@@ -35,6 +40,8 @@ export interface JiraBatchGroups {
   uncertain: string[];
   notSent: string[];
   unknown: string[];
+  parentUncertain: string[];
+  parentRefused: { actionId: string; messages: string[]; refusesLabels: boolean }[];
 }
 
 /** Jira's own words in a refusal, the blank ones dropped. */
@@ -46,8 +53,10 @@ export const jiraMessagesOf = (result: Pick<JiraIssueResult, 'jiraMessages'>): s
  * field refuses every issue that sets them (plan J-5). Jira's sentence names
  * the field, not the fix, which is in the team's settings.
  */
-export const refusesJiraLabels = (result: Pick<JiraIssueResult, 'status' | 'jiraFields'>): boolean =>
-  result.status === 'refused' && Array.isArray(result.jiraFields) && result.jiraFields.includes('labels');
+export const refusesJiraLabels = (result: Pick<JiraIssueResult, 'status' | 'jiraFields'> | { status: string; jiraFields?: string[] }): boolean =>
+  (result.status === 'refused' || result.status === 'parent_refused')
+  && Array.isArray(result.jiraFields)
+  && result.jiraFields.includes('labels');
 
 /** The refusal the server makes itself, for an action with no text; never one of Jira's. */
 export const isNoTextRefusal = (result: Pick<JiraIssueResult, 'status' | 'reason'>): boolean =>
@@ -63,7 +72,9 @@ export const groupJiraResults = (outcome: CreateIssuesOutcome): JiraBatchGroups 
     skipped: [],
     uncertain: [],
     notSent: [...outcome.notSent],
-    unknown: [...outcome.unknown]
+    unknown: [...outcome.unknown],
+    parentUncertain: [],
+    parentRefused: []
   };
   for (const result of outcome.results) {
     const keyed = isJiraIssueKey(result.key) ? { actionId: result.actionId, key: result.key as string } : null;
@@ -83,7 +94,14 @@ export const groupJiraResults = (outcome: CreateIssuesOutcome): JiraBatchGroups 
       case 'in_progress':
       case 'closed':
       case 'not_found':
+      case 'parent_in_progress':
         groups.skipped.push(result.actionId);
+        break;
+      case 'parent_uncertain':
+        groups.parentUncertain.push(result.actionId);
+        break;
+      case 'parent_refused':
+        groups.parentRefused.push({ actionId: result.actionId, messages: jiraMessagesOf(result), refusesLabels: refusesJiraLabels(result) });
         break;
       default:
         // `uncertain`, and any status this client does not know: the safe

@@ -138,6 +138,17 @@ const backups: BackupEntry[] = [
     sizeBytes: 512,
     teamCount: 2,
     protected: true
+  },
+  {
+    id: 'backup-3',
+    filename: 'retrogemini-import-2026-09-03T06-00-00-000Z.json.gz',
+    type: 'imported',
+    // The file name the admin uploaded: shown as typed, never translated.
+    label: 'Sauvegarde de septembre.json.gz',
+    createdAt: '2026-09-03T06:00:00.000Z',
+    sizeBytes: 2048,
+    teamCount: 3,
+    protected: false
   }
 ];
 
@@ -156,7 +167,8 @@ const routes = (): Record<string, Reply> => ({
     status: 200,
     body: {
       backups,
-      config: { enabled: true, intervalHours: 24, maxCount: 7, backupDir: '/data/backups', onStartup: true }
+      config: { enabled: true, intervalHours: 24, maxCount: 7, onStartup: true },
+      limits: { maxArchiveBytes: 128 * 1024 * 1024, maxUnpackedBytes: 512 * 1024 * 1024 }
     }
   },
   ...overrides
@@ -225,6 +237,7 @@ describe('the super-admin console in French', () => {
     expect(screen.getByRole('heading', { name: /Sauvegarde des données/ })).toBeTruthy();
     expect(screen.getByRole('heading', { name: /Restauration des données/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Importer et restaurer/ })).toBeTruthy();
+    expect(screen.getByLabelText('Fichier de sauvegarde à restaurer')).toBeTruthy();
 
     expect(screen.getByRole('button', { name: /Équipes \(2\)/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Retours \(2\)/ })).toBeTruthy();
@@ -542,17 +555,21 @@ describe('the super-admin console in French', () => {
     }
     expect(screen.getByText('démarrage')).toBeTruthy();
     expect(screen.getByText('manuelle')).toBeTruthy();
+    expect(screen.getByText('importée')).toBeTruthy();
+    expect(screen.getByText('Sauvegarde de septembre.json.gz')).toBeTruthy();
+    // No "Directory:" line: the server never reported one.
+    expect(screen.queryByText(/Répertoire/)).toBeNull();
     expect(screen.getByText('Démarrage du serveur')).toBeTruthy();
     expect(screen.getByText(`${localizeDecimal('1.5', FR_LOCALE)} Ko`)).toBeTruthy();
     expect(screen.getByText('512 o')).toBeTruthy();
     expect(screen.getByText(new Date('2026-09-01T06:00:00.000Z').toLocaleString(FR_LOCALE))).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: 'Télécharger la sauvegarde' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'Restaurer la sauvegarde' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Télécharger la sauvegarde' })).toHaveLength(3);
+    expect(screen.getAllByRole('button', { name: 'Restaurer la sauvegarde' })).toHaveLength(3);
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Supprimer la sauvegarde' })[0]);
     expect(confirmSpy).toHaveBeenCalledWith('Supprimer la sauvegarde «\u00a0Démarrage du serveur\u00a0»\u202f?');
 
-    for (const english of ['Create Checkpoint', 'Server startup', 'Loading backups...', 'Enabled', 'startup']) {
+    for (const english of ['Create Checkpoint', 'Server startup', 'Loading backups...', 'Enabled', 'startup', 'imported', 'Import a backup file']) {
       expect(screen.queryByText(english), english).toBeNull();
     }
   });

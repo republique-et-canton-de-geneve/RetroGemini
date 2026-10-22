@@ -942,8 +942,9 @@ the English file does not have. Both files ship in the image (`Dockerfile`,
    it cannot go stale), and
    `e2e/accessibility-audit.spec.ts` caps the serious/critical
    WCAG rules axe-core reports on ten screens (two of them **dark**) — **at 0
-   since 2026-08-25** — and `e2e/jira.spec.ts` on the five Jira screens, at 0
-   since they joined (2026-10-20), so
+   since 2026-08-25** — `e2e/jira.spec.ts` on the seven Jira screens, at 0
+   since they joined (2026-10-20), and `e2e/admin-team-restore.spec.ts` on the
+   console's backup import card (41.0), so
    any new serious or critical rule on those screens fails the pull request.
    Both run `audit()` from `e2e/helpers/axe.ts`, which holds the one
    `BASELINE` table; a screen joins it at 0, and a card added to a screen the
@@ -1162,8 +1163,8 @@ See `README.md` for full list. Key ones:
 - `BACKUP_INTERVAL_HOURS` - Hours between automatic backups (default: `24`); across multiple pods the scheduled `auto` backup is elected via the shared store (each pod skips if another already wrote an `auto` backup within the interval), so `N` pods produce one backup per interval instead of `N`
 - `BACKUP_MAX_COUNT` - Max automatic backups to keep (default: `7`)
 - `BACKUP_ON_STARTUP` - Create backup on server start (default: `true`)
-- `RESTORE_MAX_BODY_MB` - Max compressed/uploaded super-admin restore archive size in MB (default: `128`)
-- `RESTORE_MAX_DECOMPRESSED_MB` - Max decompressed restore archive size in MB for uploaded and stored gzip restores (default: `512`)
+- `RESTORE_MAX_BODY_MB` - Max compressed/uploaded super-admin restore or import archive size in MB (default: `128`); bounds both the uploaded whole-store restore and the Backups tab's file import, and the console checks a file against it before sending (`/backups/list` → `limits`)
+- `RESTORE_MAX_DECOMPRESSED_MB` - Max decompressed restore or import archive size in MB, for uploaded and stored gzip restores and for imported files (default: `512`)
 - `WIFI_SSID` - Wi-Fi network name; when set with `WIFI_PASSWORD`, shows a Wi-Fi QR code in the invite modal
 - `WIFI_PASSWORD` - Wi-Fi password; both `WIFI_SSID` and `WIFI_PASSWORD` must be set to enable the feature. Served only to an authenticated team (audit H31) — `/api/wifi-config` is a POST requiring a team credential, so setting these does not publish the password to anyone who can reach the deployment
 - `AUTH_RATE_LIMIT_MAX` - Max **rejected** `/api/team/create` and `/api/team/restore-session` credentials per IP per 15 minutes (default: `5`). The meter is scoped to `401` responses alone, so nothing a legitimate user does can consume it — a restored session, a page load with no stored token, a team deleted since, a facilitator colliding on an existing team name. This matters because `restore-session` runs on **every page load** for a returning user, so a request-counting limiter locked whole offices out of running retrospectives. It does **not** cover `/api/super-admin/verify`, which has its own separate limiter fixed at 5 wrong passwords per 15 minutes. Counted **per pod**: `express-rate-limit` runs without a shared store, so `N` replicas admit up to `N × AUTH_RATE_LIMIT_MAX` failures per window; a hard cluster-wide ceiling needs the Ingress/WAF or a Redis store
@@ -1312,7 +1313,7 @@ clients can avoid resending the password on every call.
 | `/api/team/list` | GET | Team summaries for the login screen picker |
 | `/api/team/exists/:teamName` | GET | Check team-name availability. The name arrives **already percent-decoded** — Express decodes route params — so the handler must not decode it again: a second `decodeURIComponent` threw `URIError` on a bare `%` (answered `500`, and `dataService.renameTeam` fails the rename when this check does not answer, so no team could ever be renamed to "Sprint 50%") and silently answered about a different name when a decoded name still looked encoded |
 | `/api/team/:teamId` | POST | Fetch the authenticated team's current state |
-| `/api/team/:teamId/update` | POST | Update team fields. A rename claims the new index key, writes the record, then releases the old key (`409 team_name_exists` if another team holds the name) — never the reverse, which left the old name free across the record write and needed a rollback that could evict whoever took it. **It never replaces a list another route owns.** `retrospectives`, `healthChecks`, `globalActions` and `teamFeedbacks` are ignored; `customTemplates` and `customHealthCheckTemplates` are **merged add-only** (a retro template is added unless one with the same name and columns is stored; a health-check template is added by a new id or replaces the stored one with that id; nothing is ever removed); one warning line names what was ignored and what was merged. A whole-list replace from a second tab left on a stale Dashboard erased a live retro from the team record (incident ISS, 2026-10-12), and the template lists had the same flaw. New clients use the template routes below and `/api/feedbacks/*`. The add-only merge exists for the clients from before that fix, which save a template only by sending the whole list: during and after a rolling update their tabs stay open, and stripping the lists silently discarded every template they saved. Their deletes simply do not stick, which is the safe way to be wrong. A `facilitatorEmail` in the updates follows the shared email rule (see *Email addresses*): it is judged before anything is written, the name claim included (`400 invalid_email`), stored cleaned, and `null`, `''` or a blank value **clears** it — the Dashboard sends `null`, because the `undefined` it used to send vanished in JSON and the address could never be emptied. `mergedFrom` is ignored like `passwordHash`: only the super-admin merge writes it. So are `jiraTarget` (written by `/jira/target` alone) and `jiraClaims` (server-only, see *Jira*). A change of `facilitatorEmail` is recorded as `team.recovery-email-change` (that address is where a reset link goes), with the credential `authenticateTeam` actually accepted (`via`), never inferred from the body — a valid token wins over any password sent beside it. A rename also answers `409 team_name_exists` when another **record** displays the name with no index entry, as the super-admin rename does |
+| `/api/team/:teamId/update` | POST | Update team fields. A rename claims the new index key, writes the record, then releases the old key (`409 team_name_exists` if another team holds the name) — never the reverse, which left the old name free across the record write and needed a rollback that could evict whoever took it. **It never replaces a list another route owns.** `retrospectives`, `healthChecks`, `globalActions` and `teamFeedbacks` are ignored; `customTemplates` and `customHealthCheckTemplates` are **merged add-only** (a retro template is added unless one with the same name and columns is stored; a health-check template is added by a new id or replaces the stored one with that id; nothing is ever removed); one warning line names what was ignored and what was merged. A whole-list replace from a second tab left on a stale Dashboard erased a live retro from the team record (incident ISS, 2026-10-12), and the template lists had the same flaw. New clients use the template routes below and `/api/feedbacks/*`. The add-only merge exists for the clients from before that fix, which save a template only by sending the whole list: during and after a rolling update their tabs stay open, and stripping the lists silently discarded every template they saved. Their deletes simply do not stick, which is the safe way to be wrong. A `facilitatorEmail` in the updates follows the shared email rule (see *Email addresses*): it is judged before anything is written, the name claim included (`400 invalid_email`), stored cleaned, and `null`, `''` or a blank value **clears** it — the Dashboard sends `null`, because the `undefined` it used to send vanished in JSON and the address could never be emptied. `mergedFrom` is ignored like `passwordHash`: only the super-admin merge writes it. So are `jiraTarget` (written by `/jira/target` alone), `jiraClaims` (server-only, see *Jira*), `jiraParents` and `jiraParentClaims` (each session's parent issue and the claims on parents being created, written by `/jira/issues` alone). A change of `facilitatorEmail` is recorded as `team.recovery-email-change` (that address is where a reset link goes), with the credential `authenticateTeam` actually accepted (`via`), never inferred from the body — a valid token wins over any password sent beside it. A rename also answers `409 team_name_exists` when another **record** displays the name with no index entry, as the super-admin rename does |
 | `/api/team/:teamId/retrospective/:retroId` | POST | Persist one retrospective. Carries a rev guard: a blob built on an older `_rev` than the stored one is dropped, and so is a blob with **no** `_rev` over an entry that has one — an invite placeholder must never overwrite a real retro. For an existing entry it **keeps the stored `name`**: every client persists its whole blob here, so the stored title used to be whatever the last saver's cache held. A name is set by creation and by the `/name` route, nowhere else. An action's `jira` is never taken from the blob: the stored value is kept, and a link the record does not hold is dropped, on new actions too (`withoutUnstoredJiraLinks`) |
 | `/api/team/:teamId/retrospective/:retroId/name` | POST | Rename one retrospective. **Granular on purpose** (audit H35): renaming by persisting the whole blob sends the caller's cached `_rev`, which is stale for any retro a live session has since advanced, so the rev guard above dropped the entire write and the title reverted with nothing reporting a problem. This route carries no revision, touches only `name`, and deliberately does **not** bump the stored `_rev` — a title change must not make every live client lose its next optimistic-concurrency race. Answers `404 retrospective_not_found` when the id matches nothing; a rename to the name it already has is a success, not a 404. **It also renames the live session** (`server/services/liveSessionRename.js`, wired from `server.js`): when `session:{id}` exists for the same team, the name goes through the session compare-and-swap (which bumps the *session* `_rev`, never the team record's) and the room receives the new state. Best-effort and after the answer, so it never fails or delays the rename (during a rolling update, a rename handled by a pod from before this change reaches the team record only; the next rename heals the session); it runs even when the team record already held the name, which is what heals a session left diverged. Without it, a rename made after the invitations went out left every participant on the old title, and the server refused each of their writes (incident ISS) |
 | `/api/team/:teamId/healthcheck/:hcId` | POST | Persist one health check (same rev guard, same rules on a missing `_rev`, on the stored `name` and on `jira`) |
@@ -1333,9 +1334,9 @@ clients can avoid resending the password on every call.
 | `/api/team/:teamId/jira/status` | POST | The team's Jira state for the screens (`JiraStatus` in `types.ts`): `{ enabled, baseUrl, target, token: { configured, usable, reason, connectedAs, deploymentType, setAt, refusedAt } }`. Never calls Jira and never returns the token. `baseUrl` is returned whenever one is configured, even with Jira off (a stored key still renders as a link). `reason` is `address_changed` (the console's address moved since the token was saved) or `unreadable` (the key changed: `SESSION_TOKEN_SECRET`). The target comes from the summary cache, never the record: every participant reads this on Review entry and on each reconnect. Its own read limiter (120/min per IP); `500 failed_to_load` |
 | `/api/team/:teamId/jira/token` | POST | Save or replace the team's Jira token `{ token, email? }` — an email means Jira Cloud (Basic `email:token`), none a Data Center personal access token (Bearer). **Any team credential may** (maintainer decision D1), an invitation-link login included. Checked against Jira first (`serverInfo` then `myself`, authenticated), then sealed and stored (see *Jira*); the team's existence is re-checked after the save, and the secret removed again if it was deleted meanwhile (`401 team_not_found`). Answers `JiraStatus`. `409 jira_not_configured`, `503 jira_secret_unavailable` (no stable `SESSION_TOKEN_SECRET`), `400 jira_token_missing` / `invalid_email` / `jira_auth_failed` (also for a value no Jira accepts, refused without calling it) / `jira_auth_failed_cloud` (a Cloud 401: usually a scoped or expired API token) / `jira_forbidden`, `404 jira_not_found`, `429 jira_rate_limited` (with `retryAfterSeconds`), `502 jira_unreachable` / `jira_unavailable`, `500 failed_to_save`. A Jira 401 is never answered `401`: on these routes that status means *our* credential, and a client reading it so would sign the facilitator out. Recorded as `team.jira-token-change` (`cleared: false`, `via`) |
 | `/api/team/:teamId/jira/token/delete` | POST | Remove the team's Jira token; answers `JiraStatus`. Recorded as `team.jira-token-change` (`cleared: true`, `via`) only when a token was stored: a row saying "cleared" for a team that had none would show a removal that never happened. `500 failed_to_delete` |
-| `/api/team/:teamId/jira/target` | POST | Store where the team's issues go, `{ target: JiraTarget \| null }` (`null` clears it): `{ mode: 'project' \| 'parent', projectKey \| parentKey, issueTypeId, labels }`, judged by `validateJiraTarget` (`utils/jira.js`, the rule the form applies): `400 invalid_jira_target` / `invalid_jira_labels` (at most 10, no spaces, 255 characters each; an empty list is allowed, and no labels are sent). Written through `atomicTeamUpdate` and only here — `/update` ignores `jiraTarget` — and an unchanged target writes nothing. Answers `JiraStatus` |
-| `/api/team/:teamId/jira/issue-types` | POST | The issue types the target form offers, read from Jira with the team's token (createmeta, every page): `{ projectKey }` → the project's types that are not sub-tasks; `{ parentKey }` → the sub-task types of the parent's project, `400 jira_parent_invalid` when the parent is itself a sub-task. Answers `{ issueTypes: [{ id, name, subtask }], projectKey }`. `400 invalid_jira_target`, `409 jira_not_configured` / `jira_token_missing` / `jira_token_unusable`, and Jira's failures as on `/jira/token`; a Jira 401 also stamps `refusedAt` on the token that was refused — not on one saved while the call ran |
-| `/api/team/:teamId/jira/issues` | POST | Create issues for `{ actionIds (1–10, distinct), target?, sessionId?, requestedBy?, language?, force? }` — see *Jira* for the rules. Checked in this order: the credential, the body (`400 invalid_request`), the connection and the token (`409 jira_not_configured` / `jira_token_missing` / `jira_token_unusable`), the target, the one-time override or the stored one (`400 jira_target_missing` / `invalid_jira_target` / `invalid_jira_labels`). Every answer past those is `200 { results, remaining, stopped?, retryAfterSeconds? }`, whatever Jira said. `results` has one entry per id attempted, in order: `created` / `already_linked` (with `key`) / `uncertain` / `in_progress` / `closed` / `not_found` / `refused` (Jira's `jiraMessages`; or `reason: 'no_text'` and no message when the server refused an action with no text without calling Jira — a wordless refusal by Jira has no reason) / `created_not_saved` (the issue exists, its `key` could not be written here). A `refused` also carries `jiraFields`, the fields Jira's `errors` named, when there are any. `remaining` holds the ids not attempted; `stopped` is one of `token_refused`, `jira_forbidden`, `jira_not_found`, `jira_rate_limited`, `jira_unavailable`, `jira_unreachable`, `link_not_saved`, `server_restarting`, `client_gone`, `jira_parent_invalid`, `jira_target_refused` (Jira refused a field the target sets — labels, issue type, project, parent — for the action just reported `refused`; every other action would be refused the same way, so they stay in `remaining`). `force: true` lifts the skip of `uncertain` actions and nothing else. `500 failed_to_create` when a claim cannot be written or the route fails unexpectedly: earlier actions of the same request may have been created and linked, so the client treats it as outcome unknown and re-reads the team (`settleUnknown`). Its own write limiter (60 requests/min per IP) |
+| `/api/team/:teamId/jira/target` | POST | Store where the team's issues go, `{ target: JiraTarget \| null }` (`null` clears it): `{ mode: 'project' \| 'parent' \| 'sessionParent', projectKey \| parentKey, parentIssueTypeId?, issueTypeId, labels }` (`sessionParent`: a project, the standard type of the parent issue created per session, and the sub-task type of the actions, two different ids), judged by `validateJiraTarget` (`utils/jira.js`, the rule the form applies): `400 invalid_jira_target` / `invalid_jira_labels` (at most 10, no spaces, 255 characters each; an empty list is allowed, and no labels are sent). Written through `atomicTeamUpdate` and only here — `/update` ignores `jiraTarget` — and an unchanged target writes nothing. Answers `JiraStatus` |
+| `/api/team/:teamId/jira/issue-types` | POST | The issue types the target form offers, read from Jira with the team's token (createmeta, every page): `{ projectKey }` → **every** type of the project, sub-task types included (the `sessionParent` form needs the standard ones for the parent and the sub-task ones for the actions from one read; every form filters by its mode), with `subtasksIncluded: true` — a pod from before 41.0 answered standard types only, and no flag; `{ parentKey }` → the sub-task types of the parent's project, `400 jira_parent_invalid` when the parent cannot hold sub-tasks: a sub-task, or on Cloud a type above level 0 (an epic). Answers `{ issueTypes: [{ id, name, subtask, hierarchyLevel? }], projectKey, subtasksIncluded? }` (`hierarchyLevel` is Jira Cloud's, −1 to 1 and above; Data Center sends none). `400 invalid_jira_target`, `409 jira_not_configured` / `jira_token_missing` / `jira_token_unusable`, and Jira's failures as on `/jira/token`; a Jira 401 also stamps `refusedAt` on the token that was refused — not on one saved while the call ran |
+| `/api/team/:teamId/jira/issues` | POST | Create issues for `{ actionIds (1–10, distinct), target?, sessionId?, requestedBy?, language?, force?, adoptParent?, replaceParents?, forceParentScopes? }` — see *Jira* for the rules. `adoptParent` and `replaceParents` are booleans, and `replaceParents` comes only with `adoptParent`; `forceParentScopes` is a list of scopes (`isJiraParentScope`), each once and at most one per action id (anything else is `400 invalid_request`). Checked in this order: the credential, the body (`400 invalid_request`), the connection and the token (`409 jira_not_configured` / `jira_token_missing` / `jira_token_unusable`), the target, the one-time override or the stored one (`400 jira_target_missing` / `invalid_jira_target` / `invalid_jira_labels`), then `adoptParent` without a `parent`-mode one-time `target` (`400 invalid_request`: there is no parent named to adopt). Every answer past those is `200 { results, remaining, stopped?, retryAfterSeconds?, parents? }`, whatever Jira said. `results` has one entry per id attempted, in order: `created` / `already_linked` (with `key`) / `uncertain` / `in_progress` / `closed` / `not_found` / `refused` (Jira's `jiraMessages`; or `reason: 'no_text'` and no message when the server refused an action with no text without calling Jira — a wordless refusal by Jira has no reason) / `created_not_saved` (the issue exists, its `key` could not be written here) / `parent_uncertain` / `parent_in_progress` / `parent_refused` (`sessionParent` mode: **nothing was sent for the action**, because its session's parent may already be in Jira, is being created by another request, or was refused — with Jira's words). `created` and `created_not_saved` carry `parentKey` in both sub-task modes. A `refused` or `parent_refused` also carries `jiraFields`, the fields Jira's `errors` named, when there are any. `parents` (present when there is one) has one entry per scope met (`retro:<id>`, `healthcheck:<id>`, `backlog`): `{ scope, status: 'created' \| 'adopted' \| 'uncertain' \| 'in_progress' \| 'refused' \| 'not_saved', key?, uncertainSince?, jiraMessages?, jiraFields? }` — `created` names the key the scope holds (a rival's, when its key won, and also when another request stored a parent after this one saw the scope `in_progress` or `uncertain`: the entry always names what the scope holds, since the client caches it), `not_saved` the key that could not be stored. `remaining` holds the ids not attempted; `stopped` is one of `token_refused`, `jira_forbidden`, `jira_not_found`, `jira_rate_limited`, `jira_unavailable`, `jira_unreachable`, `link_not_saved`, `server_restarting`, `client_gone`, `jira_parent_invalid`, `jira_target_refused` (Jira refused a field the target sets — labels, issue type, project, parent — for the action just reported `refused`; every other action would be refused the same way, so they stay in `remaining`), `jira_parent_refused` (Jira refused a session's parent: the same type, project and labels go on every parent). `force: true` lifts the skip of `uncertain` actions and nothing else; `forceParentScopes` lifts the skip of those scopes' uncertain parents and nothing else — never for a scope whose doubt the request found itself (an expired parent claim), whether it is listed or not. `500 failed_to_create` when a claim cannot be written or the route fails unexpectedly: earlier actions of the same request may have been created and linked, so the client treats it as outcome unknown and re-reads the team (`settleUnknown`). Its own write limiter (60 requests/min per IP) |
 | `/api/feedbacks/create` / `all` / `comment` / `comment/delete` / `delete` | POST | Team feedback (bug reports / feature requests) CRUD. **Success must follow the write, never the preliminary read**: these handlers look the feedback up once to choose where to write and re-check it inside the compare-and-swap, and an aborted updater reads as "nothing to change", so a handler that trusts the first read reports success for a write that never happened. `comment` answers `404 feedback_not_found` when the target is in neither the owning team's record nor `orphanedFeedbacks` — an author may delete a feedback while someone is replying to it, and answering `200` there discarded the comment *and* the text the client had cleared. `comment/delete` answers `404 comment_not_found` on the same principle, covering all three reasons its updater aborts (feedback gone, comment gone, comment owned by another team — one opaque answer, so the route cannot be used to probe comment ids). `delete` answers `404 feedback_not_found` for the three reasons *its* updater aborts (the team record carries no `teamFeedbacks`, the feedback is not in it, the feedback belongs to another team), again as one opaque answer: reporting success for a refused delete left the entry on the board with the UI reporting no problem, so the user could not tell "deleted" from "not allowed". `TeamFeedback.tsx` reloads on `404` as well as on `ok`, so the board converges either way. **`create` carries its images inline, and the JSON body limit is 1 MiB** (`express.json` in server.js, and ingress-nginx's default): the browser reduces each image before attaching it (`utils/feedbackImages.ts`: at most 1600² pixels and 4096 px a side, WebP or JPEG, stepped down until it fits its share — what is left of an 800,000-character total, divided among the images still to attach, at most 300,000 each; these count data-URL characters, a third more than the file's bytes, so one image is at most about 220 kB of file; a small image and an animation are sent as they are, an animation that does not fit is refused rather than flattened, and its notice names the largest file that would have fitted, computed by `prepareFeedbackImage` from the limit it applied, so the text cannot drift from the constant), decoding through a `data:` URL because the CSP refuses `blob:` images. One ordinary screenshot used to be refused with a 413 after the form had cleared itself, so the feedback and its text were lost; the form now keeps its draft until the server has stored it and says why otherwise. Do not raise the body limit for images instead: they would be stored in the team record, which every team write rewrites. **A retry of `create` is idempotent through an optional `submissionId`** (`/^[A-Za-z0-9_-]{8,64}$/`, anything else is ignored as if absent): it is stored on the feedback, and when the posting team's `teamFeedbacks` already holds it — decided inside the `atomicTeamUpdate` updater, under the row lock, so two racing retries cannot both append — nothing is written and the route answers `200 { success, feedback: <the stored entry>, duplicate: true }`. The form reuses an id only for a resend of exactly the same draft (type, title, description, images): after an edit the server would answer with the old content and the edit would vanish silently, while a new id costs at worst a visible duplicate. A pod from before this change ignores the id, so a retry routed there during a rolling update can store a duplicate — the safe way to be wrong. What the client makes of the answer lives in `services/feedbackSubmission.ts`: a 2xx is `sent` (a duplicate too, and it notifies the admin, since the lost first answer never did), `413` is `too_large`, `401` is `session_expired`, any other status is `not_saved`, and no answer or a 2xx that is not JSON is `offline`; each has its own message on the form. While a send is on its way the draft is locked as it was sent (title and description read-only; type, the image picker, image removal, Cancel and *New Feedback* disabled): the "sent" answer clears the form, and used to erase whatever had been typed meanwhile. An image still being reduced when its draft is cancelled adds nothing to the next one (a draft generation counter), and every refusal of one pick is listed in the form's alert, each naming its file |
 | `/api/send-invite` | POST | Send email invitations. Requires `teamId` **and** a team credential (`sessionToken` or `password`) — it mails a caller-supplied link through the deployment's SMTP identity, so it is never anonymous. The team name in the mail comes from the authenticated record, not the request body. Optional `language` (`en`/`fr`, anything else reads as English) writes the mail in the sender's interface language — the invitee reads it before ever seeing the app. **There is deliberately no cap on how many invitations an authenticated team may send** — inviting a whole department in one batch is the normal case. The only meter counts *rejected credentials* per IP (20/15min), scoped to `401`s alone so nothing a real facilitator does (a typo'd address, a deployment without SMTP, a send failure) can trip it; it exists solely to bound the data-store reads an anonymous prober can drive. The address follows the shared email rule (see *Email addresses*): `400 invalid_email` unless it is one valid address, and the mail goes to its cleaned form — nodemailer would otherwise mail every address it can parse out of a pasted list |
 | `/api/send-password-reset` | POST | Send password reset email. Optional `language` (`en`/`fr`, anything else reads as English) picks the language of the mail. The typed address must be one valid address (`400 invalid_email`, a blank one included); the team is looked up by its trimmed name; the typed and stored addresses are compared **after both are cleaned** by the shared rule, and the mail goes to the **stored** cleaned address under the stored team name, never to the caller's strings. A stored value holding two addresses never matches (`204`), on purpose: mailing either one would let the anonymous caller choose who receives a live token |
@@ -1362,10 +1363,11 @@ super-admin log ring instead; `/api/super-admin/test-ai` is the diagnostic path 
 | `/api/super-admin/merge-teams/preview` | POST | What merging `{ primaryTeamId, secondaryTeamId }` would produce, with nothing written: `{ report, liveSessions, fingerprints, defaults }`. `liveSessions` is `null` when open sessions cannot be known (a cross-pod adapter configured but down, `fetchSockets` failing). `409 related_teams` when one team was built from the other, `422 source_needs_repair` with `anomalies` for a team the planner cannot carry whole, `503 session_read_failed` when a live session row cannot be read. The three routes build their own rate limiters, with the console's read and action settings. See *Merging teams* |
 | `/api/super-admin/merge-teams` | POST | Create the merged team (`201 { team: { id, name }, report }`): `{ primaryTeamId, secondaryTeamId, name, passwordSource: 'primary' \| 'secondary' \| 'new', newPassword?, facilitatorEmail?, expectedFingerprints }`. `400 missing_fingerprints` without the preview's fingerprints, `409 sources_changed_since_preview` when either team changed after that preview, `409 related_teams`, `409 team_name_exists` (index **or** any record), `400 team_name_empty` / `team_name_too_long` (`utils/teamNamePolicy.js`, the reset route's cap) / `invalid_password_source` / `password_too_short` / `password_unavailable` (a source with no hashed password) / `invalid_email`. The two teams are never written. A save that throws keeps the name claimed when the record landed anyway |
 | `/api/super-admin/delete-team` | POST | Delete a team from the console: `{ teamId, confirmName, mergedInto?, acknowledge?, confirmation? }`. The name is typed back (`400 confirm_name_mismatch`). Every way the deletion could lose something is answered `409 confirmation_required` with `reasons` (`source_changed`, `merge_unverified`, `merged_team_changed`, `sources_deleted`, `sessions_open`, `sessions_unknown`), their facts and a `confirmation` digest of them; it proceeds only when every reason is in `acknowledge` **and** `confirmation` still matches the facts. A protected "Pre-delete snapshot" is taken first (`503 pre_delete_snapshot_failed` when none could be made), then the record is read again: `409 team_changed` when it moved meanwhile, nothing deleted. Feedbacks move into `mergedInto` only when that team's signed provenance names this one; otherwise they are orphaned as on any deletion. `503 failed_to_move_feedbacks` stops before anything is removed |
-| `/api/super-admin/backups/list` | POST | List server-side backups and config |
+| `/api/super-admin/backups/list` | POST | List server-side backups and config, and `limits: { maxArchiveBytes, maxUnpackedBytes }` (`RESTORE_MAX_BODY_MB` / `RESTORE_MAX_DECOMPRESSED_MB` in bytes; additive, an older console ignores it). A row's `type` is `auto`, `manual`, `startup` or `imported` |
 | `/api/super-admin/backups/create` | POST | Create a manual checkpoint |
+| `/api/super-admin/backups/import` | POST | Store an uploaded backup file as a backup row of type `imported` (`server/routes/superAdminBackupImportRoutes.js`). **Raw body**, `application/octet-stream` (a gzip file or plain JSON alike), `application/gzip` or `application/x-gzip` — never `application/json`, which the global parser claims first (H30); the credential in `x-super-admin-session-token` / `x-super-admin-password`, checked before one byte of the body is read; the original file name percent-encoded in `x-backup-label` (a header, not the query string, which lands in access logs), cleaned by `server/services/backupLabel.js` and shown as typed. The file is parsed and checked once (`archiveShapeProblem`); the stored bytes are the upload itself when it is gzip, else its gzip, so a download returns the very file imported. **One `backups` row and nothing else**: no team, KV or session row, no retention (an imported row is never purged), no restore gate, no snapshot, no `backupInProgress`. Answers `200 { success, backup }`; `400 missing_archive` (empty, or a content type the raw parser did not take), `400 invalid_backup_format` (not JSON, not gzip, a truncated or corrupt gzip, a malformed request body), `400 invalid_backup_data` with `reason` (`not_an_object`, `teams_missing`, `team_malformed { count, positions }`, `team_id_duplicated { ids }`, `list_malformed { field }`), `401 unauthorized`, `409 import_in_progress` (this pod's import gate, held until the handler settles), `413 backup_file_too_large { maxBytes }` (JSON, from the route's own error handler), `413 restore_archive_too_large { maxBytes }`, `500 import_failed` (only body-parser errors read as the file's fault). A 413 that is not JSON comes from a proxy in front of the app (k8s/README.md → *Upload size and timeouts*). Recorded as `backup.import` with the new backup id, the counts and the file's SHA-256 |
 | `/api/super-admin/backups/download` | POST | Download a specific backup |
-| `/api/super-admin/backups/restore` | POST | Restore from a backup. `409 restore_in_progress` while another restore runs on this pod (see *Restoring one team*) |
+| `/api/super-admin/backups/restore` | POST | Restore from a backup. `404 backup_not_found` for an unknown id, answered from the metadata before the gate and before any snapshot; `409 restore_in_progress` while another restore runs on this pod (see *Restoring one team*); after the protected snapshot, the archive is read and checked, and a refusal deletes the snapshot it just took: `422 invalid_backup_data` with `reason` (`unreadable` for a corrupt archive, else an `archiveShapeProblem` reason), `413 restore_archive_too_large`, `404 backup_not_found` (deleted between the check and the read) |
 | `/api/super-admin/backups/teams` | POST | The teams a stored backup holds: `{ teams: [{ id, name, status: 'present' \| 'renamed' \| 'deleted', currentName, nameTaken, counts }] }`. `404 backup_not_found`. See *Restoring one team* |
 | `/api/super-admin/backups/restore-team` | POST | Restore **one** team `{ backupId, teamId, expected?, name? }` from a stored backup, leaving every other team as it is. `expected` (`'existing'` / `'deleted'`) is what the console showed; `name` is read only for a team deleted since the backup. `404 backup_not_found` / `team_not_in_backup`, `422 archived_team_malformed` with `fields`, `409 team_name_exists` (a deleted team's name taken since), `409 team_changed` (the team was deleted or created again meanwhile, or is not what `expected` says), `400 team_name_empty` / `team_name_too_long`, `503 session_read_failed` / `pre_restore_snapshot_failed` / `team_secret_delete_failed` (a team deleted since the backup still has a Jira secret row its deletion left behind, and it could not be removed before the team is recreated), `409 restore_in_progress` — no refusal leaves team data written (one after the snapshot deletes the snapshot it took). Answers `{ team, recreated, counts, sessionsUpdated, sessionsSeeded, sessionsNotUpdated, feedbacksStillOrphaned, preRestoreSnapshot }`. Recorded as `team.restore` |
 | `/api/super-admin/backups/delete` | POST | Delete a backup |
@@ -1397,7 +1399,7 @@ The application uses a **per-team KV store** architecture to eliminate write con
 
 **Two things are SQL tables rather than KV records, and both for the same
 reason: a restore rewrites the KV store wholesale.** `backups` holds the archives
-themselves; `security_events` (audit H45) holds the audit trail, which would be
+themselves (imported files included, `type: 'imported'`); `security_events` (audit H45) holds the audit trail, which would be
 worthless if a restore could erase it. Neither is in a backup archive — see
 `__tests__/archiveContract.test.ts` for what the archive does and does not carry.
 
@@ -1456,8 +1458,15 @@ responses and protected against writes through `/api/team/:teamId/update`, like
 `mergedFrom`, the provenance a super-admin merge writes on the team it creates
 (see *Merging teams*), is server-only in the same way: stripped from every
 client response and ignored by `/update`. So is `jiraClaims`, the Jira route's
-record of the issues being created right now (see *Jira*). `jiraTarget`, where
-the team's issues go, is sent to clients but written by `/jira/target` alone.
+record of the issues being created right now (see *Jira*), and
+`jiraParentClaims`, its twin for the parent issues of `sessionParent` mode.
+`jiraTarget`, where the team's issues go, is sent to clients but written by
+`/jira/target` alone; `jiraParents`, each session's parent issue keyed by
+`retro:<id>`, `healthcheck:<id>` or `backlog` (`{ key, createdAt,
+subtaskTypeId? }` or `{ uncertainSince }`), is sent to clients but written by
+`/jira/issues` alone. Neither is on a retro entry nor a `session:{id}` row: a
+persist replaces the whole entry with a participant's blob, and a session row is
+participant-writable.
 
 ### Team Index Structure (`team-index`)
 ```json
@@ -1486,7 +1495,7 @@ the team's issues go, is sent to clients but written by `/jira/target` alone.
 - **Team index**: Used for login (name-to-ID lookup) and team creation (uniqueness check). The index and the `team:{teamId}` records are **two separate writes with no transaction between them**, so both handlers that touch the pair carry a compensating write. Creation claims the index entry *before* saving the record and **releases the claim if the record write fails** — keyed on its own team id, so a concurrent creation that legitimately won the name is never evicted. Deletion clears the index entry **first** and **never restores it**: that order is what keeps the record — and therefore the ability to authenticate a retry — alive when the second write fails, and the missing rollback is deliberate. Restoring the mapping after a failed `deleteTeamRecord` recreates the very state this ordering prevents as soon as two deletions overlap (A clears the entry and fails; B sees no entry, deletes the record, succeeds; A restores a mapping to a record that is gone). No re-check closes that, because the record can vanish between the check and the write, so the rule is structural: **a deletion only ever narrows the index.** Deletion clears **every** key mapping to the team, not the first match — a rename in flight legitimately holds two. **Renaming follows the same rule** (`/api/team/:teamId/update` and `/api/super-admin/rename-team`, both through `server/services/teamNameIndex.js`): it *claims* the new key while keeping the old one, writes the record, and only then releases **every key the team held at claim time** — the old name plus any alias a previously lost release left behind, which releasing the old name alone would have left claimed for good. That set is captured *before* the claim, so a key claimed by a concurrent rename of the same team is never in it and two overlapping renames cannot delete each other's claim. No failure path ever has to restore a mapping, and a claim that finds the name already the team's own is not released on failure, because this request did not add it. The rollback it replaces did restore one, and that is what made it dangerous — for the width of the record write the old name was free, so a concurrent creation could take it and then be silently evicted by the rollback (its record survives, its name resolves to the other team, nothing in the UI reaches the state), and a deletion landing in the same window left the restored name pointing at a record that was gone. A compensating write may only ever remove a mapping **it added itself**. The state all these guards exist to prevent is a name that resolves to no record: `/api/team/create` answers `409 team_name_exists` from the index alone, `/api/team/login` answers `401 team_not_found`, `/api/team/list` scans records so the team is invisible, and nothing in the UI can free the name again. Team names are trimmed on creation, on rename and in the availability check, so all three agree on what a name resolves to
 - **orphanedFeedbacks**: `TeamFeedback` objects preserved from deleted teams. When a team is deleted, its feedbacks are moved to `retro-meta` so bug reports and feature requests are never lost. All feedback endpoints check both `team.teamFeedbacks` and `orphanedFeedbacks`. The move is an **upsert by feedback id**, because a deletion that fails on a later step is meant to be retried: an unconditional push duplicated every feedback (`/api/feedbacks/all` concatenates team and orphaned feedbacks, so the duplicates show on the board, and every writer resolves an orphan by first match, so only one copy of the pair would ever be updated again), while merely *skipping* an already-preserved id lost data the other way. Every feedback writer — the comment routes and the super-admin status/comment/delete routes — looks in the team record first and only falls back to `orphanedFeedbacks`, so a change made between a failed attempt and its retry lands on the **live** copy; the retry must therefore replace the stale snapshot, not keep it.
 - **Automatic migration**: On startup, the server checks for legacy `retro-data` single-blob format and automatically migrates to per-team storage
-- **Backup/restore**: Uses `loadPersistedData()` / `savePersistedData()` which reconstruct/decompose the legacy monolithic format for compatibility. Restore is a **faithful replace**, not a merge: `savePersistedData(data, { mode: 'replace' })` upserts the archive's teams/index/meta and then makes the store match the archive exactly — it deletes `team:{id}` records absent from the archive (so a team deleted since the backup no longer lingers as a "ghost" in prefix scans / the super-admin dashboard) and clears all live `session:*` state (a backup never carries session blobs, and a stale session could let a client re-persist pre-restore state). `mode` defaults to `'merge'` (the historical additive behaviour) so non-restore callers are untouched. Both restore routes (`/api/super-admin/restore` and `/api/super-admin/backups/restore`) take a **protected** pre-restore snapshot first (survives retention purge — it may be the only copy of the pre-restore state; prune old ones manually) and **abort with `503 pre_restore_snapshot_failed` if that snapshot cannot be created** (never run the destructive replace with no recovery point); the uploaded route also **rejects a payload whose `teams` is missing or not an array** (`400 invalid_backup_data`) so a malformed upload cannot be coerced into a wipe-everything empty restore (an explicit `teams: []` still restores to empty). Then, after the replace, they clear this pod's session cache and `io.serverSideEmit('sessions-invalidated')` so **every other pod drops its session cache too** (correct at `replicas:2`; single-pod deployments skip the broadcast), and finally re-run `migrateLegacyPasswords` over the restored records: an archive predating password hashing puts clear-text passwords back into a store the startup migration already cleaned, and the startup pass runs only at boot. The rehash never changes the restore's outcome — a restore that really happened must not be reported as failed. Residual: a client actively connected to a live session at the instant of restore can re-persist its in-memory session once as a fresh row — bounded (a new session, never a ghost team) and expected during a global rollback, so run restores during low activity.
+- **Backup/restore**: Uses `loadPersistedData()` / `savePersistedData()` which reconstruct/decompose the legacy monolithic format for compatibility. Restore is a **faithful replace**, not a merge: `savePersistedData(data, { mode: 'replace' })` upserts the archive's teams/index/meta and then makes the store match the archive exactly — it deletes `team:{id}` records absent from the archive (so a team deleted since the backup no longer lingers as a "ghost" in prefix scans / the super-admin dashboard) and clears all live `session:*` state (a backup never carries session blobs, and a stale session could let a client re-persist pre-restore state). `mode` defaults to `'merge'` (the historical additive behaviour) so non-restore callers are untouched. Both restore routes (`/api/super-admin/restore` and `/api/super-admin/backups/restore`) take a **protected** pre-restore snapshot first (survives retention purge — it may be the only copy of the pre-restore state; prune old ones manually) and **abort with `503 pre_restore_snapshot_failed` if that snapshot cannot be created** (never run the destructive replace with no recovery point); **every path that applies an archive checks it with one rule first**, `archiveShapeProblem` (`server/services/archiveShape.js`): an object, a `teams` array whose every entry has a non-empty string `id` and a string `name` with no id twice, and `resetTokens` / `orphanedFeedbacks` lists when present (extra top-level keys stay inert). `normalizePersistedData` turns a bad `teams` into `[]`, so a malformed upload would otherwise be coerced into a wipe-everything empty restore (an explicit `teams: []` still restores to empty), and a nameless team crashes the replace partway, after the earlier teams are written and before the index, the meta and the cleanup. The uploaded route checks before its snapshot (`400 invalid_backup_data` with `reason`) and answers its body limit as JSON; the import checks at write time; the stored-backup route checks the backup exists **from the metadata alone** before the gate and the snapshot (an unknown id used to leave an orphaned protected snapshot), then reads and checks the archive **after** the snapshot, deleting the snapshot on a refusal — never parse a whole-store archive before the snapshot, which dumps the whole store too and would hold both copies at once. Imported rows (`type: 'imported'`) are never purged and survive every restore: `savePersistedData` never touches the `backups` table. Then, after the replace, they clear this pod's session cache and `io.serverSideEmit('sessions-invalidated')` so **every other pod drops its session cache too** (correct at `replicas:2`; single-pod deployments skip the broadcast), and finally re-run `migrateLegacyPasswords` over the restored records: an archive predating password hashing puts clear-text passwords back into a store the startup migration already cleaned, and the startup pass runs only at boot. The rehash never changes the restore's outcome — a restore that really happened must not be reported as failed. **Nor may the parsed archive still be reachable when that pass runs**: it parses every team record again (`loadAllTeams`), which right after a replace is the archive's data, and an async route's suspended frame keeps every local it declared, so both routes read, check and apply the archive in a helper of their own (`applyStoredArchive`, `applyUploadedArchive`) that answers only the outcome. `__tests__/restoreArchiveRetention.test.ts` observes it with `gc()` in a child `node --expose-gc`. Residual: a client actively connected to a live session at the instant of restore can re-persist its in-memory session once as a fresh row — bounded (a new session, never a ghost team) and expected during a global rollback, so run restores during low activity.
 - **Rating a closed action is team-record-owned too, and it is the one place many clients write the same record.** Every other per-user value lives in the session blob behind the `_rev` CAS; `impactRatings` lives on the action, because the dashboard rollup reads the team record and a vote must outlive the session that collected it. Three rules follow. **`closedAt` is stamped only by the paths that actually close an action** (`dataService.toggleGlobalAction`, `updateGlobalAction`, and `/api/team/:teamId/action`) — never from a full-session persist, which carries no reliable closing moment; an action with no `closedAt` is never proposed for rating, which is what keeps the pre-feature backlog out. **A vote goes through the narrow `/action/impact` route**, never a whole-action write. **Both closed-action guards — `reconcileRetroActionState` (client) and its server mirror — preserve `closedAt`, `impactRatings` (union) and `impactDeferredBy`** on top of `done`, because all three are written through routes that do not advance the retro `_rev`, and all three are additive: a session blob never legitimately removes a vote, a closing date or a deferral. Which closed actions a retro asks about is derived, not stamped — an action is "already asked" when it appears in a previous retro's `closedActionsSnapshot`, so there is no moment a fast facilitator can skip past, and `impactDeferredBy` (set by "Rate later") is the only decision that needs storing. **`closedActionsSnapshot` is the list the round *displays*, not the list it *asks about*.** Those were the same thing until the deferral became a toggle, and every consumer that means "the actions we are waiting on answers for" now has to go through `isDeferredInRound` / `rateableRoundActions` in `closedActionsForRating.ts`. Reading `snapshot.length` instead is what made a round of 9 with 2 postponed report `7/9` forever with the green tick unreachable, and the numerator matters as much as the denominator: a participant who answered before the deferral otherwise read `7/7` while someone who had not read `5/7`. **"Rate later" is a toggle and the row stays on screen while it is on** — removing it was the obvious implementation and the wrong one, because the only control that could bring a row back ("Rate now") lives on the *open* actions list, which no longer holds a closed action, so a mis-click cost the round that action with no undo anywhere in the session. Deferring never discards the votes already cast either: they are the participants' answers, and un-deferring has to put the row back as it was. The lag is structural: `selectClosedActionsForRating` excludes anything that was in this session's `openActionsSnapshot`, so an action ticked off right now belongs to the *next* retro's round unless the facilitator explicitly pulls it in with "Rate now"
 - **Closing an action is team-record-owned**: An action is closed/re-opened (`done` toggled) through the granular action endpoints (`toggleGlobalAction`, i.e. `/api/team/:teamId/action`), which update the team record first — from the Dashboard **and** from inside a session (`OpenActionsPhase` and `ReviewPhase` both toggle through them, for carried-over *and* newly created actions). A full retro-session persist (`dataService.updateSession` → `/retrospective`) therefore runs `reconcileRetroActionState`, which guards the single `done: true → false` transition: a stale full-session blob — an open Session whose React state predates a close, or a lagging client re-persisting a retro while browsing — can no longer silently re-open a closed action. A *legitimate* re-open still works because it goes through the granular endpoint (which sets the stored record open first, so the guard lets it through). `assigneeId`/`text` and proposal state are deliberately **not** reconciled: several session-only flows (accepting/editing a proposal in Discuss, assigning a ROTI follow-up in Close) legitimately set them through the session blob without a granular endpoint. The `/api/team/:teamId/retrospective/:retroId` server handler enforces the **same** closed-only guard (`/action` does not advance the retro `_rev`, so a full-retro persist from a client that never saw the close would otherwise clear the rev guard and re-open it), which also protects the multi-client case where the reverting client's own cache is stale.
 
@@ -1661,9 +1670,15 @@ Rules that look like details and are not:
   (`merge_unverified`) and the feedbacks are orphaned, which is safe.
 - **Jira: links travel, the token does not.** An action's `jira` is
   record-owned like `done` (`RECORD_OWNED_ACTION_FIELDS`), the merged team takes
-  the primary's `jiraTarget` by the unknown-key rule, and `jiraClaims` is a
-  known key that is never carried. The token is a row of its own
-  (`team-secret:{teamId}`) and is not copied: the merged team enters one. **An
+  the primary's `jiraTarget` by the unknown-key rule, and `jiraClaims` and
+  `jiraParentClaims` are known keys that are never carried. The session
+  parents (`jiraParents`) are **re-keyed** to the merged team's session ids
+  through each source's id maps (`mergedJiraParents`): a parent of a session
+  the source no longer holds is dropped, and the dashboard's (`backlog`) is the
+  primary's, else the secondary's. Carried as an unknown key, the primary's
+  would name ids no session has and the secondary's would read as a conflict.
+  The token is a row of its own (`team-secret:{teamId}`) and is not copied:
+  the merged team enters one. **An
   action that is not in Jira yet keeps its id in the merged team**, so until the
   sources are deleted the source and the merged team can each create an issue
   for it — a residual, not gated (see *Jira*).
@@ -1742,21 +1757,68 @@ other team back. The console's **Backups** tab therefore has a second action
 per backup, *Restore a team*: `components/admin/TeamRestoreDialog.tsx` lists the
 teams the backup holds and what became of each since (still there, renamed,
 deleted), `server/routes/superAdminTeamRestoreRoutes.js` holds the two routes,
-and `server/services/teamRestore.js` (pure) decides the record it writes. Only
-stored backups, not an uploaded archive.
+and `server/services/teamRestore.js` (pure) decides the record it writes.
+
+- **A file is restored by importing it first.** The Backups tab's *Import a
+  backup file* card (`components/admin/BackupImportCard.tsx`) sends it to
+  `/api/super-admin/backups/import`, which stores it as one row of the shared
+  `backups` table, of type `imported` (a violet "imported" badge, the file name
+  as its label). Every backup route then reads that row unchanged — this
+  dialog, the whole-store *Restore*, the download, the delete — and the console
+  opens this dialog on the new row by itself, unless the file holds no team.
+  The row holds the uploaded bytes (gzipped first when they were plain JSON),
+  validated once at import by the rule every restore applies
+  (`archiveShapeProblem`) and read back by the same parser. Nothing is kept in
+  memory between requests, so the calls that follow can land on any pod: the
+  row is committed before the import answers. Several teams can be restored
+  from one import, and the row is deleted by hand when done. A team from
+  another deployment comes back as "deleted since the backup", with the
+  archive's password and **no feedbacks** (they are never taken from an
+  archive). A pod from before 41.0 answers the import with an HTML 404, which
+  the console reads as "not available yet, try again in a few minutes"; it
+  lists, restores from, downloads and deletes an imported row like any other.
+  The upload limits are `RESTORE_MAX_BODY_MB` / `RESTORE_MAX_DECOMPRESSED_MB`;
+  in front of the application, ingress-nginx's 1 MiB default and the
+  OpenShift Route's 30 s timeout are the operator's (k8s/README.md → *Upload
+  size and timeouts*), and the console tells a proxy's HTML 413 from the
+  app's JSON one. A lost answer (a 504 at 30 s while the server still works)
+  reads as *uncertain*: the list is read now and again 20 s later, because a
+  blind retry would leave a duplicate row.
+- **Residuals of restoring from a file, stated on purpose.** *Each team
+  restored leaves its own protected "Pre-restore snapshot"*, which retention
+  never prunes, so restoring five teams from one import leaves five
+  whole-store copies to delete by hand, with the imported row; the card says
+  so. *A team from another deployment keeps its actions' Jira keys*
+  (`ActionItem.jira` is a key, never a URL): they render against **this**
+  deployment's Jira address and read as "already in Jira", which is right only
+  when both deployments use the same Jira. No archive records which Jira a key
+  belongs to, so this is stated, not detected. *It also keeps its Jira target
+  and each session's parent issue* (`jiraParents`: a team from another
+  deployment comes back as "deleted since the backup", and that branch of
+  `planTeamRestore` takes the archive's map whole). Unlike an action's key, a
+  parent key routes: in the mode that gives each session a parent, the next
+  sends go as sub-tasks under those keys in **this** deployment's Jira, with no
+  lookup first (`destinationOf`), and a key this Jira also holds is accepted
+  silently. Before sending, check the parent issues the batch dialog and the
+  Review step list; to re-point a session, name a parent and tick the replace
+  box (`replaceParents`), or change the target in *Settings → Jira*.
 
 - **The work comes back; how people get in does not.** Retrospectives, health
   checks, the backlog, members, archived members, templates and team settings
   (except the Jira target) are the backup's. While the team exists, its **name,
   password, invite epoch, recovery address, feedbacks, merge provenance, last
-  connection, Jira target and the server-only `jiraClaims`** stay as they are
-  now (`KEPT_FROM_CURRENT`): rolling a password back locks out everyone who
-  knows the current one, and rolling the invite epoch back revives revoked
-  invite links. The current Jira links are carried onto the restored actions
-  (`carryJiraLinks`; a current key also replaces an archived "may already be in
-  Jira" mark), and the team's Jira token is never touched. A team deleted
-  since the backup has no current values, so it returns with the archived
-  ones — under its old name, or a name the admin types when another team holds
+  connection, Jira target and the server-only `jiraClaims` and
+  `jiraParentClaims`** stay as they are now (`KEPT_FROM_CURRENT`): rolling a
+  password back locks out everyone who knows the current one, and rolling the
+  invite epoch back revives revoked invite links. The current Jira links are
+  carried onto the restored actions (`carryJiraLinks`; a current key also
+  replaces an archived "may already be in Jira" mark), the session parents too
+  (`carryJiraParents`: per session the current key, else the archived key,
+  else a mark — the newest routing decision wins, since a session re-pointed
+  since must not go back), planned inside the final write so a parent created
+  while the restore ran is kept, and the team's Jira token is never touched.
+  A team deleted since the backup has no current values, so it returns with
+  the archived ones — under its old name, or a name the admin types when another team holds
   it now (`409 team_name_exists` otherwise, with nothing written).
 - **Feedbacks are never rolled back.** They are a board shared with the super
   admin, not the team's work. A team that exists keeps its own; a deleted one
@@ -1824,7 +1886,17 @@ stored backups, not an uploaded archive.
   leave a hybrid of two backups. The gate is **per pod**: two requests routed to
   two replicas do not see each other. A shared lock needs a store record with an
   expiry; restores are rare and deliberate, so that residual is accepted and
-  stated here rather than built for.
+  stated here rather than built for. **An import is not a restore**: it writes
+  one `backups` row and nothing a restore writes, so it takes its own per-pod
+  gate (`createImportGateMiddleware`, `409 import_in_progress`), entered before
+  the body is read and **held until the handler settles, not until the client
+  leaves** — `res` emits `'close'` when the client disconnects (a gateway 504
+  included) while the handler is still gunzipping, parsing and inserting, and
+  the retry that follows must not stack a second upload on a 384 Mi pod. Each
+  entry has one release, called once: by the handler's `finally`, by the
+  body-error handler, or by `'close'` only when the handler never started. It
+  bounds import against import; an import beside a restore on the same pod is
+  the documented memory ceiling (k8s/README.md → *Automated backups*).
 - **The console says every partial outcome.** Sessions not updated (ask for a
   reload) and feedbacks left in two places (delete the extra copy in the
   Feedback tab) each have their own notice, and one notice when both happen. The password and
@@ -1843,7 +1915,11 @@ Dashboard's batch sends every open action the tab lists, and each row has its
 own control too. The super administrator connects **one** Jira for the
 deployment in the console (`components/admin/JiraSettingsCard.tsx`); each team
 stores **one** token and a target in *Settings → Jira*
-(`components/jira/JiraTeamSettings.tsx`). The
+(`components/jira/JiraTeamSettings.tsx`). A target is one of three modes:
+`project` (issues in a project), `parent` (sub-tasks of one issue) and
+`sessionParent` (sub-tasks of one parent issue per retrospective or health
+check, created in a project the first time one of its actions is sent; the
+dashboard's actions share one parent for the whole team). The
 browser never talks to Jira — the CSP's `connect-src 'self'` forbids it, and
 Data Center sends no CORS headers — so every call goes through
 `server/routes/jiraRoutes.js` → `server/services/jiraClient.js` →
@@ -1909,7 +1985,14 @@ Rules:
   `jiraClaims` are kept from the current record in a single-team restore
   (`KEPT_FROM_CURRENT`); `jiraClaims` is server-only (stripped from every
   response, ignored by `/update`, never carried by a merge) and `/update`
-  ignores `jiraTarget` too.
+  ignores `jiraTarget` too. The session parents follow the same line:
+  `jiraParents` (sent to clients) and `jiraParentClaims` (server-only, stripped
+  like `jiraClaims`) are on the team record only — never on a retro entry,
+  whose persist replaces the whole entry, nor on a session row — written by
+  `/jira/issues` alone and ignored by `/update`. The single-team restore keeps
+  the current claims and carries the parents, the whole-store restore carries
+  them too (`carryJiraParents`), and a merge re-keys them (see *Merging
+  teams*).
 - **Claim, then call — and a lost answer is "uncertain", never a retry.** Each
   action is claimed inside `atomicTeamUpdate` — the row lock, so the claim is
   exclusive across pods — in `team.jiraClaims[actionId] = { at, requestId }`,
@@ -1930,6 +2013,51 @@ Rules:
   that confirmation sends `force`. An issue is created on a connection of its
   own (`keepAlive: false`): a pooled socket Jira closed at the wrong moment
   would otherwise fake a lost answer.
+- **One parent per session, claimed like an action** (`sessionParent` mode).
+  An action's scope comes from the very `issueSource` its content is written
+  from (`jiraParentScope`): `retro:<id>`, `healthcheck:<id>`, or `backlog` for
+  an action no session holds — so an earlier action sent from a later retro's
+  Review goes under its own retro's parent. A parent is claimed only for an
+  action about to be sent (every skip and refusal is decided first), in
+  `team.jiraParentClaims[scope]`, under the same row lock; the action is not
+  claimed in that write. The parent's `201` lands in one write that stores
+  `jiraParents[scope] = { key, createdAt, subtaskTypeId }`, drops the parent
+  claim and claims the action under the key — so each claim spans exactly one
+  Jira call, and a key another request stored meanwhile wins (the duplicate is
+  logged). Every later send of the scope reuses the key, with no parent call.
+  A live foreign claim answers `parent_in_progress`; an expired one marks the
+  **scope** `{ uncertainSince }`, dated by the claim, and the action
+  `parent_uncertain`. A lost answer marks the scope, never the action (it was
+  not sent), keeps an earlier mark, and stops the batch; a marked scope is
+  skipped until the facilitator confirms **that scope**
+  (`forceParentScopes`), which lifts that skip and nothing else (`force` is
+  the action's). A confirmation is for the doubt the dialog showed, never the
+  request's: a doubt the server finds during the send — an expired claim,
+  which no screen can see, so the dialog previewed that session as "new" — is
+  never lifted by it, for the rest of that request (`doubtsFound`), and the
+  client stops confirming a scope once an answer reported it in doubt, so the
+  next requests of the batch do not lift it either [review F2-1]. The client
+  sends with each request only the confirmed scopes of that request's own
+  actions, which is what bounds the list to one per action. Any Jira refusal
+  of a parent stops the batch (`jira_parent_refused`): the same type, project
+  and labels go on every parent — Data Center's required Epic Name is the
+  typical case. A parent key that cannot be stored is answered `not_saved` with the key, stops
+  `link_not_saved`, and its claim expires into a mark. The sub-task goes in the
+  parent's project (`jiraProjectKeyOf`), with the target's sub-task type when
+  that is the target's project, else the type recorded with the parent. The
+  parent's summary and description are `parentIssueFields`, in the scope's
+  content language, labels included; its title is fixed at creation.
+- **A parent named at send time is adopted only once Jira took a sub-task
+  under it** [R1]. A `parent`-mode one-time target with `adoptParent` sends
+  every action under the parent named, and makes it the stored parent of each
+  scope with no key (or only a mark, or only an expired claim; with
+  `replaceParents`, one with a key too) **in the write that stores the key of a
+  sub-task created under it** (`adoptParent` in `jiraIssues.js`) — never in the
+  claim write. A refused sub-task, a lost answer or a key that cannot be saved
+  changes no scope; a live foreign parent claim is left alone. The adopted key
+  is the one Jira's lookup answered, and a parent that cannot hold sub-tasks — a
+  sub-task, or on Cloud a type above level 0 (an epic) — is refused once,
+  before anything is created (`jira_parent_invalid`, `cannotHoldSubtasks`).
 - **A request is short.** At most `JIRA_MAX_ACTIONS_PER_REQUEST` (10) ids; no new
   creation after 10 s (the first always starts, or a slow Jira would answer
   every request with nothing done and the client would loop); 15 s idle and
@@ -1943,16 +2071,24 @@ Rules:
   creation always starts, so a slow Jira can push one request past 30 s; the
   Route then answers 504 while the server finishes the call in flight and then
   stops (`client_gone`), and the client reads it as `outcome_unknown`. A
+  session's parent counts as one creation: the budget, the caller and the
+  drain are read again before the sub-task that follows a fresh parent, and
+  once more after the parent's write [R6], so a `SIGTERM` during that write
+  releases the action's claim and starts no call; a parent created past the
+  budget is stored and its action waits in `remaining`. A Dashboard request of
+  ten actions from ten sessions can need twenty calls: the budget cuts it. A
   draining pod is forced out `DEFAULT_SHUTDOWN_TIMEOUT_MS` (20 s) after
   `SIGTERM`: one Jira call (`JIRA_CALL_DEADLINE_MS`) and the write of its key,
   inside the 25 s the manifest's grace period leaves after `preStop`
-  (`__tests__/shutdown.test.ts` holds both bounds).
+  (`__tests__/shutdown.test.ts` holds both bounds, and that a claim outlives
+  the one call and write it spans).
 - **One live-session patch per session per request.** After the loop, each
   session holding an affected action — and the request's `sessionId`, once its
   row's `teamId` matches — is patched once through `createLiveSessionPatch`
   (the rename's compare-and-swap, generalised in `liveSessionRename.js`),
   stamping `jira` on `actions`, `openActionsSnapshot` and
-  `historyActionsSnapshot`; a patch with nothing to change writes nothing. That
+  `historyActionsSnapshot`; a patch with nothing to change writes nothing, and
+  a parent, never on a session row, adds nothing to patch. That
   patch is how a participant learns a key: receivers never read the team record
   again, and the previous actions a retro shows exist only in its history
   snapshot. One per issue would move the revision N times and refuse N of the
@@ -1972,7 +2108,41 @@ Rules:
   every request of the batch, never "whatever is stored now": any team session
   may save another target meanwhile (D1), and a batch longer than one request
   would otherwise land in two places. It names the stored target's issue type,
-  read once when it opens (its id until Jira answers, or when it cannot).
+  read once when it opens (its id until Jira answers, or when it cannot) — and
+  in `sessionParent` mode the parent issue's type too, from the same read.
+  In `sessionParent` mode it also lists the parent issue of each session the
+  send touches (`jiraParentPreviews`, built from the same `issueSource` →
+  `jiraParentScope` → `parentIssueFields` as the server): the existing key, the
+  new parent's title (in its own language, marked with `lang`), or a parent in
+  doubt with a search for its title and the one box that confirms the rows it
+  shows in doubt — those scopes, with the actions listed under each
+  (`forceParents` → `forceParentScopes`), never a row it shows as new.
+  It reads this browser's copy of the team, so a row can say "new" where the
+  server reuses a parent created meanwhile — never the reverse — and the
+  confirm button counts the actions plus the new parents [R9]: high by one
+  for each session whose parent another window created since this browser read
+  the team (several on a Dashboard batch, which spans sessions), never low. A parent a one-time `sessionParent` change creates is stored for its
+  session like any other [R3], and the dialog says so whenever a row is new.
+- **The parent issue can always be named, and only through the dialog.** In
+  both sub-task modes the dialog shows "Parent issue (optional)"
+  (`JiraParentField`), never behind "Change the target": checked with Jira on
+  leaving the field (`/jira/issue-types {parentKey}`, which refuses a sub-task
+  or a Cloud epic), with a required "Sub-task type in …" list when the
+  parent's project does not offer the target's type; Create sends nothing for
+  a key not checked or without a type, and says so on the field — an error
+  that goes once the check it asked for answers, or when the field is left or
+  Enter pressed, since a click on Create leaves the field first and can land
+  while that check runs [review F2-2]. It is sent as
+  the one-time `parent`-mode target, plus `adoptParent` in `sessionParent`
+  mode (and `replaceParents` when "Also use … for their later actions" is
+  ticked, offered only when a session of the send already has a parent). So in
+  the sub-task modes one action's control is "Create in Jira…"
+  (`aria-haspopup="dialog"`) and opens the dialog with that one action — "Create
+  anyway" too, with `force` — and when it closes after a key landed the
+  keyboard goes to the new link. Project mode keeps the one click, and that
+  click sends the target its status shows [R2], as the dialog does: a screen
+  whose status went stale while someone saved another target creates where it
+  said it would, never a session parent with no chance to name it.
 - **The discovery note shows once per browser and person, and only where Jira
   exists.** `JiraDiscoveryNote` remembers who dismissed it in `localStorage`
   (`retro-jira-note-seen`, a list of user ids, every access in try/catch) and
@@ -1991,17 +2161,34 @@ Rules:
   record — so only what the record cannot explain is left for the facilitator
   to check in Jira. It waits for `dataService.whenPersisted()` first
   (an action typed a moment ago must have reached the record), follows
-  `remaining` chunk by chunk, and writes what came back into every cached copy
-  with `applyJiraLinks` (no persist). The status is read on Review entry, on
-  each reconnect and after a settings save — never from `dataService` while
-  rendering (`useJiraStatus`).
+  `remaining` chunk by chunk, with the same target and flags, and writes what
+  came back into every cached copy with `applyJiraLinks` (no persist). The
+  parents of `sessionParent` mode follow the same path: each answer's
+  `parents` is read (an entry whose scope or key is not one is dropped) and
+  kept with its last status per scope; a request that only created a parent
+  is progress, never an idle round; `applyJiraParents` caches each `created`
+  or `adopted` key and each dated mark — a reported key replaces the cached
+  one (a scope's parent can be replaced, unlike an action's issue), a mark
+  never replaces a key or an earlier mark, and a `not_saved` key is not cached
+  — and `settleUnknown` caches the record's `jiraParents` too. The status is
+  read on Review entry, on each reconnect and after a settings save — never
+  from `dataService` while rendering (`useJiraStatus`).
 - **Who may press is the screens' rule.** The controls show to facilitators,
   on open actions only (the server answers `closed` anyway); a reason line tied
   to an `aria-disabled` control says why a facilitator cannot create (no token,
   enter it again, refused by Jira, no target). The health-check Review closes
   and assigns actions through `toggleGlobalAction` / `updateGlobalAction`, as
   the retro's does: it used to write only the session row, so the Dashboard —
-  and the batch — saw closed actions as open.
+  and the batch — saw closed actions as open. In `sessionParent` mode both
+  Review steps show the facilitator the session's parent ("Parent issue in
+  Jira:" and its key-only link, or the doubt and a search, `JiraParentLine`);
+  never a participant, whose cache never learns a parent created after their
+  login. A row's dialog that reported a parent refreshes the step even when
+  the action itself is unchanged — a fresh parent whose first sub-task Jira
+  refused, a parent left in doubt [review F2-3]. An action held back by its
+  parent (`parent_uncertain`, `parent_in_progress`, `parent_refused`) is said as "not sent", in its own
+  words, and never as "may already be in Jira" (`jiraBatchResults`,
+  `JiraActionControl`): it was not sent.
 
 Residuals, stated on purpose:
 
@@ -2011,9 +2198,9 @@ Residuals, stated on purpose:
   account reaches, with any requester name in the description (the browser's,
   unverified), and look up through `/jira/issue-types` whether a project or an
   issue key exists, an issue's project and a project's issue types — metadata
-  of anything the account can see, never issue content. Moving the stored
-  target moves where the facilitator's next per-action creations go (that
-  control does not show the target; the batch dialog sends the one it shows).
+  of anything the account can see, never issue content. It can also create one parent issue per session or for the dashboard, send
+  under a parent of its choosing anywhere the account reaches, and re-point a
+  session's later actions (`adoptParent` with `replaceParents`).
   `SECURITY.md` says so; a technical account limited to the team's projects is
   the mitigation.
 - **A session token minted before a password rotation keeps Jira access for up
@@ -2056,18 +2243,66 @@ Residuals, stated on purpose:
   Review step and hides its button there. No write path stores it on the
   record, the Dashboard still offers the action, and a value that is not a key
   renders nothing.
+- **Pods from before 41.0 and `sessionParent`.** They refuse the mode
+  everywhere and create nothing (`/jira/target` and an override answer
+  `invalid_jira_target`, the stored target reads as `jira_target_missing`,
+  the status as no target); they ignore `adoptParent`, so a session sent
+  under a named parent through one creates its own parent next time; their
+  `/update` accepts `jiraParents` and `jiraParentClaims` (no client sends
+  them); their merge carries the primary's parents with stale ids and their
+  restores do not carry the current ones, so a second parent follows — do
+  not merge or restore during the rollout; their `/jira/issue-types` answers
+  no sub-task type for a project and no `subtasksIncluded` (the form then says
+  the sub-task types cannot be read yet). A screen of that release whose
+  status went stale before a `sessionParent` target was saved still offers its
+  one-click, which sends no target: on a new pod it runs the stored target and
+  creates the session's parent with no dialog (or reads a `parent_*` status as
+  "may already be in Jira"). Nothing is created twice, and a screen of this
+  release cannot do it: its one-click sends the target it shows [R2].
+- **Empty parent issues can stay in Jira**, always logged with their key: a
+  fresh parent whose first sub-task Jira refuses (a type that cannot hold
+  sub-tasks, on a Jira that gives no hierarchy level), one whose key could not
+  be stored (`not_saved`, also answered), one created by two requests on pods
+  whose clocks disagree by more than the claim lifetime (the scope keeps the
+  first key), one the facilitator confirmed with `forceParentScopes`.
+- **A stored parent deleted or moved in Jira** has every default send of its
+  session refused (`jira_target_refused`, Jira names `parent`): the remedy is to
+  name a parent and replace (`replaceParents`). A parent Jira refuses
+  sub-tasks under never becomes a stored parent in the first place.
+- **A deleted session's parent stays on the record**: its unsent actions become
+  backlog actions and go under the team's parent, and a single-team restore
+  that brings the session back finds its parent again. A merge source keeps
+  its parents: a parent a source creates after the merge is not in the merged
+  team, which creates its own for that session.
 
 The guards: `__tests__/jiraRouteAuth.test.ts` (every team Jira route, derived
 from the router: a forged or foreign credential gets `401`, Jira untouched, no
 secret read, no audit row), `jiraIssues.test.ts` and `jiraRoutes.test.ts` (the
 batch and the routes against the mock), `secretBox.test.ts` and
 `teamSecretStore.test.ts`, `jiraTeamRecordGuards.test.ts` and
-`actionJiraLinks.test.ts` (every write path), `archiveContract.test.ts`,
+`actionJiraLinks.test.ts` (every write path, the session parents included),
+`jiraParentsCarry.test.ts` (the parents' carry rule), the `sessionParent`
+cases of `jiraUtils.test.ts`, `jiraIssueContent.test.ts`, `jiraIssues.test.ts`
+(one parent per session, claimed like an action, adopted only once a sub-task
+landed under it), `teamMerge.test.ts` / `superAdminTeamMergeRoutes.test.ts`
+(re-keyed parents) and `teamRestore.test.ts` / `superAdminTeamRestoreRoutes.test.ts`
+(carried parents), `archiveContract.test.ts`, on the screens
+`jiraBatchDialogParents.test.tsx` (the parent field, the parents preview and
+their results, the request bodies), `jiraActionControl.test.tsx` (the
+one-click's target, the dialog of the sub-task modes, the `parent_*`
+outcomes), `jiraTargetFields.test.tsx` (the third mode, and a project form
+that never offers a sub-task type from the route's full list),
+`jiraService.test.ts` / `dataServiceJira.test.ts` (parents read, cached and
+counted as progress), `jiraIssuePreview.test.ts` and `jiraIssues.test.ts` →
+*the parent preview and the server agree*, `reviewPhaseJira.test.tsx`,
+`healthCheckReviewJira.test.tsx` and `dashboardJira.test.tsx` (the parent line
+and the rows' dialog), `i18nJira.test.tsx`,
 `jiraBatchSessionConvergence.test.ts`, `jiraErrorCodes.test.ts` (every code
 the routes answer reads as a sentence in both languages), `shutdown.test.ts`
 (the forced exit outlasts one Jira call and ends inside the grace period),
-and `e2e/jira.spec.ts` — the whole flow with two browsers, and the axe audit of
-the five Jira screens. A local PostgreSQL run of several of the suites that
+and `e2e/jira.spec.ts` — the whole flow with two browsers, one parent issue
+per retrospective reused for its later actions, the dashboard's own parent and
+a parent named for one send, and the axe audit of the seven Jira screens. A local PostgreSQL run of several of the suites that
 read `TEST_DATABASE_URL` shares global rows between files: run it with
 `--no-file-parallelism`.
 

@@ -21,11 +21,13 @@ number they allow can fall, never rise.
 | Gate | What it checks | Where |
 |---|---|---|
 | axe-core, ten screens | Serious/critical WCAG 2.0/2.1 A + AA rules on login, team creation, the dashboard, five retrospective phases (icebreaker, open actions with a live impact-rating round, brainstorm, group, close) and two health-check screens (survey, close) — including two **dark** screens, which a light-only sweep cannot check | `e2e/accessibility-audit.spec.ts` |
-| axe-core, five Jira screens | The same rules, with a Jira connected and a second participant in the session: the Review step with the discovery note, the "Create in Jira" button and a control on every action; the open batch dialog with its preview; the Dashboard's Actions tab with a linked and an unlinked action; the team's *Settings → Jira* card; the console's Jira card. The two cards, the dialog and the Review step (without the session header and participants panel, see gap 6) are audited on their own; the Dashboard's Actions tab is audited whole. The screens around the cards are not otherwise audited, and their findings are listed below rather than charged to the card | `e2e/jira.spec.ts` |
+| axe-core, seven Jira screens | The same rules, with a Jira connected and a second participant in the session: the Review step with the discovery note, the "Create in Jira" button and a control on every action; the open batch dialog with its preview; the Dashboard's Actions tab with a linked and an unlinked action; the team's *Settings → Jira* card; the console's Jira card; and, since 41.0, two states of the one-parent-issue-per-session mode: the *Settings → Jira* card with its three modes and both issue-type lists loaded, and the batch dialog with its "Parent issue (optional)" field and its list of parent issues. The two cards (in both of the team card's states), the dialogs and the Review step (without the session header and participants panel, see gap 6) are audited on their own; the Dashboard's Actions tab is audited whole. The screens around the cards are not otherwise audited, and their findings are listed below rather than charged to the card | `e2e/jira.spec.ts` |
+| axe-core, the console's backup import card | The same rules on the Backups tab's *Import a backup file* card, audited on its own with a file chosen, before it is sent: the labelled file input, its hint, and the import button (white on teal-700, 5.39:1 — teal-600 would measure 3.66:1). The rest of the console is not otherwise audited (gap 2) | `e2e/admin-team-restore.spec.ts` |
 | `eslint-plugin-jsx-a11y` | Accessibility rules across the whole React tree, inside the repository's two-way lint budget | `eslint.config.js`, `scripts/lint.mjs` |
 
 **Current measurement (2026-08-26): zero axe violations at any severity on all
-ten screens; since 2026-10-20 on the five Jira screens too.** The cap for every
+ten screens; since 2026-10-20 on the Jira screens too (five, seven since
+41.0).** The console's backup import card joined at 0 with 41.0. The cap for every
 screen is one table, `BASELINE` in `e2e/helpers/axe.ts`. The lint budget carries 17 accessibility warnings (2026-10-08), listed by
 rule in `scripts/lint.mjs` — down from 71, after every form label was
 associated with its control and each `autoFocus` was judged (see below). The
@@ -116,12 +118,13 @@ Stated because a documented gap is honest and silence is not.
    editor it opens takes focus, saves on Enter and cancels on Escape.)
 2. **Screens not covered by the automated audit.** The ten screens of
    `e2e/accessibility-audit.spec.ts` are the main flows, and they include a
-   dark one at each end (both close screens). `e2e/jira.spec.ts` adds five Jira
-   screens: the Dashboard's Actions tab, audited whole, and four audited only
+   dark one at each end (both close screens). `e2e/jira.spec.ts` adds seven Jira
+   screens: the Dashboard's Actions tab, audited whole, and six audited only
    within the feature's own area (the console's Jira card, the team's
-   *Settings → Jira* card, the batch dialog, and the Review step without the
-   session header and participants panel). The super-admin panel is audited
-   for its Jira card only; the rest of it, the team feedback board, the
+   *Settings → Jira* card in project mode and in the one-parent-per-session
+   mode, the batch dialog without and with its parent-issue field and list,
+   and the Review step without the session header and participants panel). The super-admin panel is audited
+   for its Jira card and its backup import card only; the rest of it, the team feedback board, the
    template builders and the Discuss phase are checked by the lint rules but
    have no axe run. **This gap has now cost something measurable:** the nameless switch in
    the row above is a defect axe *does* report, sitting on a dialog the audit
@@ -131,8 +134,13 @@ Stated because a documented gap is honest and silence is not.
    before scoping its run to the Jira card (2026-10-20): **two rules** —
    `color-contrast` on 182 nodes, from the header's subtitle down (muted grey on
    the console's light grey page), and `label` on one field, the file input of
-   *Restore Data* (beside "Upload & Restore"). Both are left as found, and
-   stated here.
+   *Restore Data* (beside "Upload & Restore"). The `label` finding is **fixed**
+   (41.0): the field is named "Backup file to restore" — not "Backup file",
+   the name of the Backups tab's import field, since two same-named file
+   inputs on one page, one of them a whole-store replace, are
+   indistinguishable in a screen reader's list of form fields — and
+   `__tests__/formLabelAssociation.test.tsx` pins it. The `color-contrast`
+   finding on the console is left as found, and stated here.
 3. **54 buttons announce their icon before their label.** A button with both
    an icon and text — "Save Message", "What's New" — has no `aria-hidden` on
    the icon span, so its name is the ligature *and* the text:

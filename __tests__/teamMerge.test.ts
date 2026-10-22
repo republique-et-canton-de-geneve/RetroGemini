@@ -316,6 +316,66 @@ describe('planTeamMerge — nothing is lost', () => {
   });
 });
 
+// sessionParent mode (F2): each session's parent issue is keyed by the
+// session's id, and the merged team gives every session a new one. Carried
+// as the unknown keys are, the primary's parents would name ids no session
+// has any more and the secondary's would read as a conflict: the merged team
+// would create a second parent for every session.
+describe('planTeamMerge — the session parents of sessionParent mode', () => {
+  const parent = (key: string) => ({ key, createdAt: '2026-10-01T00:00:00.000Z', subtaskTypeId: '10005' });
+  const newIdOf = (team: Record<string, any>, list: 'retrospectives' | 'healthChecks', name: string) =>
+    team[list].find((entry: Record<string, any>) => entry.name === name).id;
+
+  it('re-keys both sources’ parents to the merged sessions, drops those of deleted sessions, and never carries a claim', () => {
+    const primary = primaryTeam() as Record<string, any>;
+    primary.jiraParents = {
+      'retro:ra1': parent('AAA-1'),
+      'healthcheck:ha1': { uncertainSince: '2026-10-02T00:00:00.000Z' },
+      // A retro deleted since: its parent names no session of the merged team.
+      'retro:gone': parent('AAA-9'),
+      backlog: parent('AAA-5')
+    };
+    primary.jiraParentClaims = { 'retro:ra2': { at: '2026-10-13T11:59:00.000Z', requestId: 'r1' } };
+    const secondary = secondaryTeam() as Record<string, any>;
+    secondary.jiraParents = { 'retro:rb1': parent('BBB-1'), backlog: parent('BBB-5') };
+    secondary.jiraParentClaims = { backlog: { at: '2026-10-13T11:59:00.000Z', requestId: 'r2' } };
+
+    const { team, report } = merge({ primary, secondary });
+
+    expect(team.jiraParents).toEqual({
+      [`retro:${newIdOf(team, 'retrospectives', 'Retro ra1')}`]: parent('AAA-1'),
+      [`healthcheck:${newIdOf(team, 'healthChecks', 'Health ha1')}`]: { uncertainSince: '2026-10-02T00:00:00.000Z' },
+      [`retro:${newIdOf(team, 'retrospectives', 'Retro rb1')}`]: parent('BBB-1'),
+      // The dashboard's parent: the main team's.
+      backlog: parent('AAA-5')
+    });
+    expect(team).not.toHaveProperty('jiraParentClaims');
+    expect(report.unknownKeys.carried).not.toContain('jiraParents');
+    expect(report.unknownKeys.carried).not.toContain('jiraParentClaims');
+    expect(report.unknownKeys.conflicting).not.toContain('jiraParents');
+    // No source session id survives as a scope.
+    expect(Object.keys(team.jiraParents).some((scope) => /:(ra1|ha1|rb1|gone)$/.test(scope))).toBe(false);
+  });
+
+  it('takes the second team’s dashboard parent when the main team has none, and stores nothing when neither has any', () => {
+    const secondary = secondaryTeam() as Record<string, any>;
+    secondary.jiraParents = { backlog: parent('BBB-5') };
+    expect(merge({ secondary }).team.jiraParents).toEqual({ backlog: parent('BBB-5') });
+    expect(merge().team).not.toHaveProperty('jiraParents');
+  });
+
+  it('carries only keys and marks, and nothing it cannot read', () => {
+    const primary = primaryTeam() as Record<string, any>;
+    primary.jiraParents = { 'retro:ra1': { key: 'not a key' }, 'retro:ra2': 'AAA-1', 'board:x': parent('AAA-2'), backlog: parent('AAA-5') };
+    const { team } = merge({ primary });
+    expect(team.jiraParents).toEqual({ backlog: parent('AAA-5') });
+
+    const odd = primaryTeam() as Record<string, any>;
+    odd.jiraParents = ['retro:ra1'];
+    expect(merge({ primary: odd }).team).not.toHaveProperty('jiraParents');
+  });
+});
+
 describe('planTeamMerge — the sources are never written', () => {
   it('leaves both inputs exactly as they were', () => {
     const primary = primaryTeam();

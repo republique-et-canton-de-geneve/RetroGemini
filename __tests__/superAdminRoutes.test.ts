@@ -114,8 +114,13 @@ const createBackupService = () => ({
   listBackups: vi.fn(async () => [{ id: 'backup-1' }]),
   getBackupConfig: vi.fn(() => ({ enabled: true, maxCount: 7 })),
   getBackupData: vi.fn(async () => ({ filename: 'backup-1.json.gz', data: Buffer.from('gz') })),
+  readBackupArchive: vi.fn(async (_backupId: string): Promise<{ filename: string; data: unknown } | null> => ({
+    filename: 'backup-1.json.gz',
+    data: { teams: [{ id: 'team-1', name: 'Platform' }] }
+  })),
   restoreFromBackup: vi.fn(async () => ({ id: 'backup-1' })),
-  deleteBackup: vi.fn(async () => true),
+  importBackup: vi.fn(async () => ({ entry: { id: 'backup-imported', type: 'imported' }, sha256: 'x', compressed: true })),
+  deleteBackup: vi.fn(async (_backupId: string) => true),
   updateBackup: vi.fn(async (id: string, updates: Record<string, unknown>) => ({ id, ...updates }))
 });
 
@@ -229,6 +234,13 @@ describe('super-admin authentication', () => {
       '/api/super-admin/update-jira-settings',
       '/api/super-admin/test-jira'
     ]));
+  });
+
+  it('covers the backup import, registered from inside this registrar', () => {
+    // A raw-body route with header auth (`superAdminBackupImportRoutes.js`):
+    // the forged-credential case below reaches it only because it is
+    // registered here. It posts JSON with no header, so it must get 401.
+    expect(PRIVILEGED_ROUTES).toContain('/api/super-admin/backups/import');
   });
 
   it.each(PRIVILEGED_ROUTES)('rejects an unauthenticated call to %s', async (path) => {
@@ -1041,10 +1053,19 @@ describe('super-admin backups', () => {
 
     const response = await request(app, '/api/super-admin/backups/list', postJson(auth()));
 
-    expect(await response.json()).toEqual({
+    const body = await response.json();
+    expect(body).toMatchObject({
       backups: [{ id: 'backup-1' }],
       config: { enabled: true, maxCount: 7 }
     });
+    // The upload limits the console checks a file against (additive).
+    expect(body.limits).toEqual({ maxArchiveBytes: expect.any(Number), maxUnpackedBytes: expect.any(Number) });
+  });
+
+  it('reports the injected upload limits', async () => {
+    const { app } = buildApp({ restoreMaxBodyBytes: 2048, restoreMaxDecompressedBytes: 4096 });
+    const response = await request(app, '/api/super-admin/backups/list', postJson(auth()));
+    expect((await response.json()).limits).toEqual({ maxArchiveBytes: 2048, maxUnpackedBytes: 4096 });
   });
 
   it('creates a labelled manual checkpoint', async () => {
@@ -1091,6 +1112,78 @@ describe('super-admin backups', () => {
     expect(sessionCache.size).toBe(0);
     // Single-pod deployments do not broadcast.
     expect(io.serverSideEmit).not.toHaveBeenCalled();
+  });
+
+  it('passes the archive it checked to the restore, rather than parse it twice', async () => {
+    const { app, backupService } = buildApp();
+
+    await request(app, '/api/super-admin/backups/restore', postJson(auth({ backupId: 'backup-1' })));
+
+    expect(backupService.restoreFromBackup).toHaveBeenCalledWith('backup-1', {
+      archive: { filename: 'backup-1.json.gz', data: { teams: [{ id: 'team-1', name: 'Platform' }] } }
+    });
+    // Read after the snapshot, never before: the snapshot dumps the whole
+    // store, and a parsed archive held across it would double the peak.
+    expect(backupService.createBackup.mock.invocationCallOrder[0])
+      .toBeLessThan(backupService.readBackupArchive.mock.invocationCallOrder[0]);
+  });
+
+  it('answers 404 for an unknown backup before taking any snapshot', async () => {
+    const { app, backupService } = buildApp();
+
+    const response = await request(app, '/api/super-admin/backups/restore', postJson(auth({ backupId: 'ghost' })));
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'backup_not_found' });
+    expect(backupService.createBackup).not.toHaveBeenCalled();
+    expect(backupService.readBackupArchive).not.toHaveBeenCalled();
+    expect(backupService.restoreFromBackup).not.toHaveBeenCalled();
+  });
+
+  it('refuses a stored archive with no teams list, removing the snapshot it took', async () => {
+    const backupService = createBackupService();
+    backupService.createBackup = vi.fn(async () => ({ id: 'snapshot-1', type: 'auto' }));
+    backupService.readBackupArchive = vi.fn(async () => ({ filename: 'bad.json.gz', data: { teams: {} } }));
+    const { app } = buildApp({ backupService });
+
+    const response = await request(app, '/api/super-admin/backups/restore', postJson(auth({ backupId: 'backup-1' })));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ error: 'invalid_backup_data', reason: 'teams_missing' });
+    expect(backupService.restoreFromBackup).not.toHaveBeenCalled();
+    expect(backupService.deleteBackup).toHaveBeenCalledWith('snapshot-1');
+  });
+
+  it.each([
+    ['an unreadable gzip', () => Object.assign(new Error('unexpected end of file'), { code: 'Z_BUF_ERROR' }), 422, { error: 'invalid_backup_data', reason: 'unreadable' }],
+    ['an archive that is not JSON', () => Object.assign(new Error('Invalid restore archive'), { code: 'INVALID_RESTORE_ARCHIVE' }), 422, { error: 'invalid_backup_data', reason: 'unreadable' }],
+    ['an archive past the unpacked cap', () => Object.assign(new Error('too large'), { code: 'RESTORE_ARCHIVE_TOO_LARGE' }), 413, { error: 'restore_archive_too_large' }],
+    ['a store that fails the read', () => new Error('store down'), 500, { error: 'restore_failed' }]
+  ])('refuses %s after the snapshot, and removes the snapshot', async (_label, makeError, status, body) => {
+    const backupService = createBackupService();
+    backupService.createBackup = vi.fn(async () => ({ id: 'snapshot-1', type: 'auto' }));
+    backupService.readBackupArchive = vi.fn(async () => { throw makeError(); });
+    const { app } = buildApp({ backupService });
+
+    const response = await request(app, '/api/super-admin/backups/restore', postJson(auth({ backupId: 'backup-1' })));
+
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual(body);
+    expect(backupService.restoreFromBackup).not.toHaveBeenCalled();
+    expect(backupService.deleteBackup).toHaveBeenCalledWith('snapshot-1');
+  });
+
+  it('answers 404 for a backup deleted between the check and the read, removing the snapshot', async () => {
+    const backupService = createBackupService();
+    backupService.createBackup = vi.fn(async () => ({ id: 'snapshot-1', type: 'auto' }));
+    backupService.readBackupArchive = vi.fn(async () => null);
+    const { app } = buildApp({ backupService });
+
+    const response = await request(app, '/api/super-admin/backups/restore', postJson(auth({ backupId: 'backup-1' })));
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'backup_not_found' });
+    expect(backupService.deleteBackup).toHaveBeenCalledWith('snapshot-1');
   });
 
   it('aborts a stored-backup restore when the pre-restore snapshot fails', async () => {
