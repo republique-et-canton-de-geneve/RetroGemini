@@ -42,6 +42,8 @@ import {
   initialTemplateLanguage
 } from '../i18n/content/retroTemplates';
 import { effectiveSessionStatus } from '../utils/sessionStatus';
+import { avatarColorClasses } from '../utils/participantColors';
+import { HEALTH_RATING_BADGE } from '../utils/healthRatingColors';
 
 interface Props {
   team: Team;
@@ -1565,7 +1567,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
         <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
           {team.members.map((member) => (
             <div key={member.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-full ${member.color} text-white flex items-center justify-center font-bold uppercase`}>
+              <div className={`w-10 h-10 rounded-full ${avatarColorClasses(member.color)} flex items-center justify-center font-bold uppercase`}>
                 {member.name.substring(0, 2)}
               </div>
               <div className="flex flex-col flex-1">
@@ -1864,21 +1866,23 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                     {totalVotes > 0 && (
                                       <div className="invisible group-hover/cell:visible absolute left-1/2 bottom-full mb-2 -translate-x-1/2 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl pointer-events-none min-w-[200px] z-50">
                                         <div className="space-y-1.5">
-                                          {[5, 4, 3, 2, 1].map(rating => {
+                                          {([5, 4, 3, 2, 1] as const).map(rating => {
                                             const count = distribution[rating] || 0;
                                             const percentage = totalVotes > 0 ? (count / totalVotes) * 100 : 0;
-                                            const bgColor = rating === 5 ? 'bg-emerald-600' : rating === 4 ? 'bg-emerald-400' : rating === 3 ? 'bg-amber-500' : rating === 2 ? 'bg-orange-500' : 'bg-rose-600';
+                                            // The digit's colour is measured, not assumed:
+                                            // white failed on all five (utils/healthRatingColors.ts).
+                                            const ratingBadge = HEALTH_RATING_BADGE[rating];
                                             const badgeBg = rating === 5 ? 'bg-emerald-100 text-emerald-700' : rating === 4 ? 'bg-emerald-50 text-emerald-700' : rating === 3 ? 'bg-amber-100 text-amber-700' : rating === 2 ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700';
                                             return (
                                               <div key={rating} className="flex items-center gap-2">
                                                 <div className="flex items-center gap-1 w-16">
-                                                  <span className={`w-5 h-5 rounded-full ${bgColor} text-white flex items-center justify-center text-xs font-bold`}>
+                                                  <span className={`w-5 h-5 rounded-full ${ratingBadge.bg} ${ratingBadge.text} flex items-center justify-center text-xs font-bold`}>
                                                     {rating}
                                                   </span>
                                                   <span className={`px-1.5 py-0.5 rounded-sm text-xs font-bold ${badgeBg}`}>{count}</span>
                                                 </div>
                                                 <div className="flex-1 bg-slate-200 rounded-full h-2 overflow-hidden">
-                                                  <div className={`h-full ${bgColor} transition-all`} style={{ width: `${percentage}%` }}></div>
+                                                  <div className={`h-full ${ratingBadge.bg} transition-all`} style={{ width: `${percentage}%` }}></div>
                                                 </div>
                                               </div>
                                             );

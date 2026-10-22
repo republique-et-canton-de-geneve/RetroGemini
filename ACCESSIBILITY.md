@@ -1,6 +1,6 @@
 # Accessibility statement — RetroGemini
 
-_Last reviewed: 2026-10-08. Audit method and remaining gaps below._
+_Last reviewed: 2026-10-22. Audit method and remaining gaps below._
 
 ## The standard we work to
 
@@ -20,15 +20,21 @@ number they allow can fall, never rise.
 
 | Gate | What it checks | Where |
 |---|---|---|
-| axe-core, ten screens | Serious/critical WCAG 2.0/2.1 A + AA rules on login, team creation, the dashboard, five retrospective phases (icebreaker, open actions with a live impact-rating round, brainstorm, group, close) and two health-check screens (survey, close) — including two **dark** screens, which a light-only sweep cannot check | `e2e/accessibility-audit.spec.ts` |
-| axe-core, seven Jira screens | The same rules, with a Jira connected and a second participant in the session: the Review step with the discovery note, the "Create in Jira" button and a control on every action; the open batch dialog with its preview; the Dashboard's Actions tab with a linked and an unlinked action; the team's *Settings → Jira* card; the console's Jira card; and, since 41.0, two states of the one-parent-issue-per-session mode: the *Settings → Jira* card with its three modes and both issue-type lists loaded, and the batch dialog with its "Parent issue (optional)" field and its list of parent issues. The two cards (in both of the team card's states), the dialogs and the Review step (without the session header and participants panel, see gap 6) are audited on their own; the Dashboard's Actions tab is audited whole. The screens around the cards are not otherwise audited, and their findings are listed below rather than charged to the card | `e2e/jira.spec.ts` |
-| axe-core, the console's backup import card | The same rules on the Backups tab's *Import a backup file* card, audited on its own with a file chosen, before it is sent: the labelled file input, its hint, and the import button (white on teal-700, 5.39:1 — teal-600 would measure 3.66:1). The rest of the console is not otherwise audited (gap 2) | `e2e/admin-team-restore.spec.ts` |
+| axe-core, the main flows | Serious/critical WCAG 2.0/2.1 A + AA rules on ten screens — login, team creation, the dashboard, five retrospective phases (icebreaker, open actions with a live impact-rating round, brainstorm, group, close) and two health-check screens (survey, close), including two **dark** screens, which a light-only sweep cannot check — and, since 2026-10-22, four states with more than one person: the Dashboard's Members tab with one member per participant colour (and one colour the palette does not know), the invite link's member picker, a participant's own Group screen, and the Group phase with a participant marked as departed. Every retrospective screen from the icebreaker on is audited with **two participants of different colours** (the facilitator's indigo and a lime participant, the palette's worst case for white initials) | `e2e/accessibility-audit.spec.ts` |
+| axe-core, the administration console | The same rules on the whole console page, once per tab: Teams, and a team's inline editor open; the settings cards opened up (the AI fields shown, an info message previewed, a restore file chosen); Feedback, and its comment dialog; Live, with a session running in another browser; Server Logs; Backups, with a protected and an unprotected row. The run cannot change the server: every console call outside the reads and the three backup writes it means to make is aborted and fails the test. The merge, delete and one-team-restore dialogs are audited on their own, over real data, in the specs that open them | `e2e/admin-console-accessibility.spec.ts`, `e2e/admin-team-merge.spec.ts`, `e2e/admin-team-restore.spec.ts` |
+| axe-core, seven Jira screens | The same rules, with a Jira connected and a second participant in the session: the Review step with the discovery note, the "Create in Jira" button and a control on every action; the open batch dialog with its preview; the Dashboard's Actions tab with a linked and an unlinked action; the team's *Settings → Jira* card; the console's Jira card; and, since 41.0, two states of the one-parent-issue-per-session mode: the *Settings → Jira* card with its three modes and both issue-type lists loaded, and the batch dialog with its "Parent issue (optional)" field and its list of parent issues. The two cards (in both of the team card's states), the dialogs and the Review step (without the session header and participants panel, which `accessibility-audit.spec.ts` audits on five other phases, with two participants) are audited on their own; the Dashboard's Actions tab is audited whole. The console around its Jira card is audited whole by its own spec, which never turns Jira on; the Dashboard's Settings tab around the team's card is not otherwise audited (gap 2) | `e2e/jira.spec.ts` |
+| axe-core, the console's backup import card | The same rules on the Backups tab's *Import a backup file* card, audited on its own with a file chosen, before it is sent: the labelled file input, its hint, and the import button (white on teal-700, 5.39:1 — teal-600 would measure 3.66:1) | `e2e/admin-team-restore.spec.ts` |
 | `eslint-plugin-jsx-a11y` | Accessibility rules across the whole React tree, inside the repository's two-way lint budget | `eslint.config.js`, `scripts/lint.mjs` |
 
-**Current measurement (2026-08-26): zero axe violations at any severity on all
-ten screens; since 2026-10-20 on the Jira screens too (five, seven since
-41.0).** The console's backup import card joined at 0 with 41.0. The cap for every
-screen is one table, `BASELINE` in `e2e/helpers/axe.ts`. The lint budget carries 17 accessibility warnings (2026-10-08), listed by
+**Current measurement (2026-10-22): zero axe violations at any severity on
+every audited state — 33 in all: fourteen in the main flows, eight console
+states and three console dialogs, seven Jira screens and the backup import
+card.** The ten main screens have been at zero since 2026-08-26, the Jira
+screens since 2026-10-20 (five, seven since 41.0), the import card since 41.0,
+and the four multi-participant states and the console since 2026-10-22. The cap
+for every state is one table, `BASELINE` in `e2e/helpers/axe.ts`, and each
+`color-contrast` finding is printed with its colour pairs and ratios, so a fix
+can be checked against the surface it lands on. The lint budget carries 17 accessibility warnings (2026-10-08), listed by
 rule in `scripts/lint.mjs` — down from 71, after every form label was
 associated with its control and each `autoFocus` was judged (see below). The
 largest remaining group is controls that respond to a click with no keyboard
@@ -67,6 +73,13 @@ where a light-screen contrast sweep had made things worse.
 | **Action text fields with no name** — on the Review step and the Dashboard's Actions tab, each action's text is an editable field, and none had an accessible name: a screen reader announced an unnamed edit field per row. Neither screen had been audited with actions on it (the dashboard audit runs before any action exists), so the first Jira audit found it, one critical `label` finding per row | 4.1.2 Name, Role, Value, 1.3.1 | **Fixed 2026-10-20.** Each is named "Action text" ("Texte de l'action"), fixed text so the name does not change while typing; the value says which action it is. `__tests__/reviewPhaseActionTextName.test.tsx` and `__tests__/dashboardActionsTab.test.tsx` pin it in both languages |
 | **The retrospective chip on a Dashboard action** — the retrospective an action came from, grey on a light grey chip, measured 4.34:1 | 1.4.3 Contrast | **Fixed 2026-10-20**, one step darker; found by the same audit |
 | **The first shape of the keyboard fix broke `nested-interactive`** — a card turned into a `role="button"` around its own reaction buttons | 4.1.2 Name, Role, Value | **Fixed before landing**, and the Group phase was added to the audit: it was the one interactive screen the audit did not walk |
+| **Avatar initials were white on every participant colour**, and seven of the eight are too light for white: lime measured 1.96:1, emerald 2.46, amber 2.15, cyan 2.36, fuchsia 3.54, pink 3.58, rose 3.76. Only the facilitator's indigo passed (4.58), which is why ten screens walked by one facilitator never saw it. Drawn in ten places: the dashboard and session headers, the Members tab, the participants panel, the invite link's member picker, a card's author, and the comment dialog's three avatars | 1.4.3 Contrast | **Fixed 2026-10-22.** The initials' colour is chosen per colour by measured contrast — black on the seven light colours (5.59:1 to 10.74:1), white kept on indigo — through one module, `utils/participantColors.ts`. A colour the palette does not know is drawn neutral (slate-600, white initials, 7.56:1) instead of being written into the page as a class. `__tests__/participantColors.test.ts` measures every pair from Tailwind's theme with axe-core's own colour engine, so a Tailwind update that moves a colour fails the build. `__tests__/avatarColorSource.test.ts` refuses a raw `.color` in `App.tsx` and `components/` anywhere but those two functions, a `style` or `key` attribute, a copy into another participant record, or a key into a colour map (plus one listed exemption, an announcement type's own colour). The colour-by-author card background is that last case, kept on purpose: `Session.tsx` looks the colour up in its own `TAILWIND_COLOR_MAP` and paints the hex it finds, an unknown key gives the default card, and the text on it is chosen by measured contrast (`bestTextColorOn`). The guard follows reads of `.color`, so a colour destructured out of a participant (`const { color } = user`) is outside what it sees |
+| **A departed participant's avatar was faded to 50%**, which put its initials below the floor on every colour (1.40:1 on lime) | 1.4.3 Contrast | **Fixed 2026-10-22.** It is drawn in neutral grey, never faded (8.40:1); the "Left the session" chip beside it says why |
+| **"no tickets" in near-white** under a participant who has not written anything yet (1.48:1), and the "+N" overflow and rating progress at 4.26:1 on the current user's own tinted row | 1.4.3 Contrast | **Fixed 2026-10-22**, one step darker than the muted grey (6.77:1 on the tinted row) |
+| **Two hints of a member-email invite link** — "No email on file" under each name, at 4.26:1 on the selected row, and "Joining as …" at 4.35:1 on its grey box | 1.4.3 Contrast | **Fixed 2026-10-22**, one step darker (6.77:1 and 6.90:1). Not reached by the e2e audit, which opens the join screen through the plain team link; `__tests__/teamLoginInviteContrast.test.tsx` measures both as rendered |
+| **The comment dialog's author line at 70% opacity**, taking the initials and the name to about 2.9:1 | 1.4.3 Contrast | **Fixed 2026-10-22.** No opacity; the name is muted by colour, which is measured |
+| **The administration console**: muted grey on its grey page (4.35:1), mid-tone buttons and badges in white text (2.15:1 to 3.80:1), the active tab's colour on the page (2.93:1 to 3.34:1), and a per-team "Change Password" in amber-600 (3.19:1) — one node per team, most of the 182 measured on 2026-10-20 | 1.4.3 Contrast | **Fixed 2026-10-22, by surface, not by sweep.** `text-slate-500` stays on the console's white cards, where it measures 4.77:1, and goes one step darker only where it lands on the grey page or a tinted panel; each failing hue goes one step darker, and pairs between 4.5:1 and 4.6:1 one more step, so a Tailwind update cannot tip them. The Live tab's count badge no longer pulses (an animated opacity is measured at a random moment) |
+| **The health-check score tooltip's digits**, white on the five rating colours (1.94:1 to 3.65:1, and 4.51:1 on the lowest) | 1.4.3 Contrast | **Fixed 2026-10-22.** Black on all five, the better of black and white on each (`utils/healthRatingColors.ts`). The table is measured by `__tests__/participantColors.test.ts`, and each digit as the Dashboard paints it by `__tests__/healthRatingTooltipContrast.test.tsx`, which renders the tooltip. Not reached by the e2e audit: the tooltip shows on hover over a health check that has votes |
 
 ## Languages
 
@@ -116,31 +129,26 @@ Stated because a documented gap is honest and silence is not.
    share, the time is a button whenever pressing it does something — setting
    the duration, silencing the alarm — and its name carries the time shown; the
    editor it opens takes focus, saves on Enter and cancels on Escape.)
-2. **Screens not covered by the automated audit.** The ten screens of
+2. **Screens not covered by the automated audit.** The fourteen states of
    `e2e/accessibility-audit.spec.ts` are the main flows, and they include a
-   dark one at each end (both close screens). `e2e/jira.spec.ts` adds seven Jira
-   screens: the Dashboard's Actions tab, audited whole, and six audited only
-   within the feature's own area (the console's Jira card, the team's
+   dark screen at each end (both close screens). `e2e/jira.spec.ts` adds seven
+   Jira screens: the Dashboard's Actions tab, audited whole, and six audited
+   only within the feature's own area (the console's Jira card, the team's
    *Settings → Jira* card in project mode and in the one-parent-per-session
    mode, the batch dialog without and with its parent-issue field and list,
-   and the Review step without the session header and participants panel). The super-admin panel is audited
-   for its Jira card and its backup import card only; the rest of it, the team feedback board, the
-   template builders and the Discuss phase are checked by the lint rules but
-   have no axe run. **This gap has now cost something measurable:** the nameless switch in
-   the row above is a defect axe *does* report, sitting on a dialog the audit
+   and the Review step without the session header and participants panel).
+   The administration console is audited whole, once per tab
+   (`e2e/admin-console-accessibility.spec.ts`). The team feedback board, the
+   template builders, the Dashboard's Retrospectives, Health Checks and
+   Settings tabs (apart from the Jira card), the retrospective's Welcome, Vote
+   and Discuss phases, its Review step outside the Jira scope, and the health
+   check's Discuss and Review phases are checked by the lint rules but have no
+   axe run. **This gap has now cost something measurable:** the nameless switch
+   in the row above is a defect axe *does* report, sitting on a dialog the audit
    never opens. A source-level guard found it; the run would have, had it gone
-   there.
-   The Jira audit measured the super-admin console once, as a whole page,
-   before scoping its run to the Jira card (2026-10-20): **two rules** —
-   `color-contrast` on 182 nodes, from the header's subtitle down (muted grey on
-   the console's light grey page), and `label` on one field, the file input of
-   *Restore Data* (beside "Upload & Restore"). The `label` finding is **fixed**
-   (41.0): the field is named "Backup file to restore" — not "Backup file",
-   the name of the Backups tab's import field, since two same-named file
-   inputs on one page, one of them a whole-store replace, are
-   indistinguishable in a screen reader's list of form fields — and
-   `__tests__/formLabelAssociation.test.tsx` pins it. The `color-contrast`
-   finding on the console is left as found, and stated here.
+   there. (The console was the previous case: measured once on 2026-10-20 at
+   182 `color-contrast` nodes and one `label` finding, both fixed — the label in
+   41.0, the contrast on 2026-10-22.)
 3. **54 buttons announce their icon before their label.** A button with both
    an icon and text — "Save Message", "What's New" — has no `aria-hidden` on
    the icon span, so its name is the ligature *and* the text:
@@ -159,16 +167,17 @@ Stated because a documented gap is honest and silence is not.
 5. **Colour choices are the facilitator's.** Column colours are user-chosen.
    Titles are darkened automatically until they are readable, but a facilitator
    can still pick two colours that are hard to tell apart from each other.
-6. **Participants' avatars in a session with more than one person.** An
-   avatar's initials are white on the colour the participant was given, and
-   several of those colours are too light for white text (emerald measured
-   below 4.5:1, two `color-contrast` nodes in the participants panel of the
-   Jira run). The ten audited screens are walked by one facilitator, whose
-   avatar colour passes, so the audit never sees the others; the Jira run
-   audits the Review step without the session's header and panel for the same
-   reason. Fixing it means choosing the initials' colour by measured contrast
-   (`bestTextColorOn`), which changes how every avatar looks — a change to make
-   on purpose, not inside a Jira release.
+6. ~~Participants' avatars in a session with more than one person.~~ Closed
+   2026-10-22, see *What was found*.
+7. **A hidden card is hidden from sight only.** With "Reveal cards" off (the
+   default), another participant's card keeps its real text in the page,
+   painted transparent under a blur. A screen reader therefore reads every
+   hidden card aloud, and axe measures the blur as text at about 1.2:1. The
+   audit never walks a participant's Brainstorm with someone else's card on it
+   for that reason — it audits the participant in the Group phase, where every
+   card is shown. The fix is a placeholder that is not text (with a
+   screen-reader-only "Hidden card"), which changes what the reveal feature
+   looks like and what it announces, and it is left as a deliberate decision.
 
 ## Feedback
 
@@ -188,3 +197,9 @@ and what assistive technology you use, if any.
 - When adding a modal, use `components/common/ModalDialog.tsx`. Rebuilding the
   overlay by hand is how the product ended up with thirteen of them and one
   `role="dialog"`.
+- As a class, a participant's colour reaches the screen only through
+  `utils/participantColors.ts` (`avatarColorClasses` for initials,
+  `participantColorClass` for dots), never raw — not in a local variable
+  either. A colour added to
+  the palette needs its initials' colour in that module's table, and the theme
+  test will ask for it.

@@ -220,8 +220,9 @@ test.describe('Creating actions in Jira', () => {
     await consoleCard.getByLabel('Jira base URL').fill(mock.url);
     await consoleCard.getByRole('button', { name: 'Test', exact: true }).click();
     await expect(consoleCard.getByText('Jira answered: version 10.3.1, Jira Data Center or Server.')).toBeVisible({ timeout: 10_000 });
-    // The card, not the console: the console was never in the audit, and its
-    // own findings are not this card's to carry or to hide.
+    // The card, not the console: the console is audited whole by
+    // admin-console-accessibility.spec.ts, but never in this state (Jira on,
+    // the mock's address tested), so the card is measured here, on its own.
     await audit(facilitator, testInfo, 'jira-console-card', { scope: consoleCard });
     await consoleCard.getByRole('button', { name: 'Save the Jira settings' }).click();
     await expect(consoleCard.getByText('Jira settings saved')).toBeVisible({ timeout: 10_000 });
@@ -296,8 +297,9 @@ test.describe('Creating actions in Jira', () => {
     await expect(batchButton).toBeVisible({ timeout: 15_000 });
     await expect(facilitator.getByRole('button', { name: `Create in Jira, ${PREVIOUS_ACTION}` })).toBeVisible();
     // The step itself, under the session header: the header and the
-    // participants panel are the session's chrome, audited on every other
-    // phase by accessibility-audit.spec.ts.
+    // participants panel are the session's chrome, which
+    // accessibility-audit.spec.ts audits on five other phases, with two
+    // participants of different colours.
     const reviewStep = facilitator.getByRole('heading', { name: 'Review Actions', level: 2 }).locator('xpath=../..');
     await audit(facilitator, testInfo, 'jira-review-step', { scope: reviewStep });
 

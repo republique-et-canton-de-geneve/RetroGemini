@@ -7,6 +7,7 @@ import { SessionSyncChip } from './SessionConnectionStatus';
 import SessionTimer from './SessionTimer';
 import { getRetroPhaseDefaultTimerSeconds } from './retroTips';
 import { DEFAULT_TIMER_SECONDS } from '../../utils/sessionTimer';
+import { avatarColorClasses } from '../../utils/participantColors';
 
 interface Props {
   session: RetroSession;
@@ -182,7 +183,7 @@ const SessionHeader: React.FC<Props> = ({
       </div>
       {/* The name and initials show from sm up; on a phone their width goes to
           the controls (the participants panel still names everyone). */}
-      <div className={`w-8 h-8 shrink-0 rounded-full ${currentUser.color} text-white hidden sm:flex items-center justify-center text-xs font-bold shadow-md`}>
+      <div className={`w-8 h-8 shrink-0 rounded-full ${avatarColorClasses(currentUser.color)} hidden sm:flex items-center justify-center text-xs font-bold shadow-md`}>
         {currentUser.name.substring(0, 2).toUpperCase()}
       </div>
     </div>

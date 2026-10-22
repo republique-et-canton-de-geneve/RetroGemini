@@ -90,6 +90,7 @@ import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessi
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import SyncStalledBanner from './session/SyncStalledBanner';
 import { jiraLinkFields, sameJiraLink, withJiraLinkFrom } from './jira/jiraLinkMerge';
+import { avatarColorClasses } from '../utils/participantColors';
 
 const generateLocalId = () => randomId();
 
@@ -2274,7 +2275,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
             {visible && !session.settings.isAnonymous && author && (
                 <div className="absolute top-2 right-2">
-                    <div className={`w-6 h-6 rounded-full ${author.color} text-white flex items-center justify-center text-[10px] font-bold shadow-xs ring-1 ring-white`}>
+                    <div className={`w-6 h-6 rounded-full ${avatarColorClasses(author.color)} flex items-center justify-center text-[10px] font-bold shadow-xs ring-1 ring-white`}>
                         {author.name.substring(0,2).toUpperCase()}
                     </div>
                 </div>
