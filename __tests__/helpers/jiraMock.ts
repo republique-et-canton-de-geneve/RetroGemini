@@ -17,8 +17,9 @@ import type { AddressInfo, Socket } from 'node:net';
  *    the second only, so a client that reads one page never finds it;
  *  - creating an issue is validated like Jira validates it — project, issue
  *    type valid in that project, sub-task rules, summary length counted as
- *    Java counts it, fields that are not on the create screen — and refused
- *    with Jira's `{ errorMessages, errors }` shape;
+ *    Java counts it, a description over Data Center's default 32,767
+ *    characters, fields that are not on the create screen — and refused with
+ *    Jira's `{ errorMessages, errors }` shape;
  *  - every failure the integration must survive is a knob (`setBehaviour`):
  *    a slow, silent or trickling Jira, a rate limit, a revoked token, a
  *    gateway error, and a connection dropped after the issue was created —
@@ -523,6 +524,11 @@ export const startJiraMock = async ({
 
     if (fields.description !== undefined && fields.description !== null && typeof fields.description !== 'string') {
       errors.set('description', 'Operation value must be a string');
+    } else if (typeof fields.description === 'string' && fields.description.length > 32767) {
+      // Data Center's default `jira.text.field.character.limit`. A literal on
+      // purpose, never the builder's constant: a wrong constant must not hide
+      // behind the mock that tests it.
+      errors.set('description', 'The entered text is too long. It exceeds the allowed limit of 32,767 characters.');
     }
 
     if (fields.labels !== undefined) {

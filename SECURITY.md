@@ -177,7 +177,7 @@ Residuals, stated rather than discovered:
   issue key exists, an issue's project and a project's issue types — metadata
   of anything the account can see, never issue content, bounded by the routes'
   per-IP limiter. Changing the stored target changes where the facilitator's
-  issues go, quoted ticket context included, once their screen reads the
+  issues go, quoted card and group context included, once their screen reads the
   team's Jira settings again (on entering Review, on a reconnect): every
   creation, the per-action one included, sends the target the screen last
   read, never one saved behind its back (the batch dialog shows it). In the mode that gives each retrospective or health check
@@ -189,9 +189,12 @@ Residuals, stated rather than discovered:
   up to 7 days**, on the Jira routes as on every other (see *Session Tokens*).
   Revoking sessions on a rotation is planned as separate work for every route.
 - **Enabling Jira exports retrospective content to it**: each issue carries the
-  action's text and context — up to 50 characters of the ticket it came from,
-  quoted in anonymous sessions too (maintainer decision, 2026-10-20) — the
-  retrospective's or health check's name and date, and the requester's name.
+  action's text and context — the full text of the card it came from or, for
+  an action on a group, the group's title and the full text of every card in
+  the group (never their authors), quoted in anonymous sessions too
+  (maintainer decision, 2026-10-20; full cards and group cards since
+  2026-10-22) — the retrospective's or health check's name and date, and the
+  requester's name. A sub-task's readers in Jira may be wider than the team.
   A session's parent issue carries the session's name and date (or the team's
   name, for the dashboard's parent) and the requester's name.
   The batch dialog previews exactly what is sent. Record Jira as a recipient in

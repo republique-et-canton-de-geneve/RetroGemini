@@ -275,9 +275,15 @@ environment variable is involved.
 
 What an issue holds: the action's text as its summary (one line, at most 255
 characters), and a description naming the retrospective or health check, its
-date, the ticket or group the action came from (quoted, in anonymous sessions
-too) and who asked, written in the session's template language; the labels come
-from the team's target. In the mode with a parent issue per session, each
+date, the card the action came from, quoted in full, or for an action on a
+group the group's title and the full text of each of its cards, one per line,
+in the board's order (in anonymous sessions too, never naming an author), and
+who asked, written in the session's template language; the labels come from
+the team's target. Only Jira's own limits shorten anything: the summary is the
+action's text up to 255 characters, and a description longer than 32,767
+characters lists as many whole cards as fit and says how many more are in
+RetroGemini. An action whose card no longer exists (its retrospective was
+deleted) quotes the context saved with it, which may be shortened. In the mode with a parent issue per session, each
 parent issue carries the session's name and date (the team's name for the
 Dashboard's parent) and who asked, in the same language. Required custom fields are not supported: Jira's own
 message is shown instead. An action already linked to an issue is never sent

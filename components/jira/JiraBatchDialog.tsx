@@ -20,7 +20,7 @@ import JiraParentPreviewList from './JiraParentPreviewList';
 import JiraParentResults from './JiraParentResults';
 import { jiraInFlight } from './jiraInFlight';
 import { isJiraStatusStaleCode, type JiraActionKind } from './jiraAvailability';
-import { jiraIssuePreview, jiraParentPreviews, type PreviewSession, type PreviewTeam } from './jiraIssuePreview';
+import { descriptionAsJiraShowsIt, jiraIssuePreview, jiraParentPreviews, type PreviewSession, type PreviewTeam } from './jiraIssuePreview';
 import { jiraScopeLabel } from './jiraParentLabels';
 import { draftFromTarget, targetFromDraft } from './jiraTargetDraft';
 import { groupJiraResults, type JiraBatchGroups } from './jiraBatchResults';
@@ -48,12 +48,6 @@ interface Props {
 }
 
 type Phase = 'confirm' | 'sending' | 'done';
-
-// The description as Jira shows it. `issueFields` escapes Jira's wiki markup
-// with a backslash before each special character (`2026\-10\-06`), which Jira
-// renders as the character alone. A participant's own backslashes became
-// spaces in the builder, so every backslash left is one of those escapes.
-const asJiraShowsIt = (description: string) => description.replace(/\\(.)/gsu, '$1');
 
 const withFullStop = (line: string) => (/[.!?…]$/u.test(line) ? line : `${line}.`);
 
@@ -84,8 +78,9 @@ const withFullStop = (line: string) => (/[.!?…]$/u.test(line) ? line : `${line
  *  - It shows, for each action, exactly what the issue will say, built by the
  *    shared builder the server uses (`utils/jiraIssueContent.js`), in the
  *    session's content language, so the facilitator sees what leaves for Jira
- *    before it does: a quoted card included, in anonymous sessions too
- *    (maintainer decision D2).
+ *    before it does: the card quoted in full and a group's cards included,
+ *    in anonymous sessions too (maintainer decision D2), with its line breaks
+ *    and the list's bullets as Jira shows them (`descriptionAsJiraShowsIt`).
  *  - While it sends it cannot be dismissed (no Escape, no backdrop, Cancel
  *    unavailable): closing would not stop the request, and the results would
  *    have nowhere to go. Its actions are held in `jiraInFlight`, so their own
@@ -194,7 +189,7 @@ const JiraBatchDialog: React.FC<Props> = ({
       requestedBy,
       language
     });
-    return { actionId: action.id, summary: fields.summary, description: asJiraShowsIt(fields.description), language: fields.language };
+    return { actionId: action.id, summary: fields.summary, description: descriptionAsJiraShowsIt(fields.description), language: fields.language };
   }), [actions, team, session, kind, sessionId, requestedBy, language]);
 
   // The target the dialog shows: the stored one, or the change for this
@@ -495,7 +490,9 @@ const JiraBatchDialog: React.FC<Props> = ({
                       <dt className="text-xs font-semibold text-slate-600">{t('jira.batch.previewSummary')}</dt>
                       <dd className="font-medium text-slate-800">{preview.summary}</dd>
                       <dt className="text-xs font-semibold text-slate-600">{t('jira.batch.previewDescription')}</dt>
-                      <dd lang={preview.language} className="text-slate-700">{preview.description}</dd>
+                      {/* Its line breaks kept: a group's cards are a list,
+                          one per line, as Jira shows them. */}
+                      <dd lang={preview.language} className="whitespace-pre-wrap wrap-break-word text-slate-700">{preview.description}</dd>
                     </dl>
                   </li>
                 ))}

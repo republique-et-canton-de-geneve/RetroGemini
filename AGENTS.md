@@ -2106,7 +2106,23 @@ Rules:
   with none reads English), else the team's latest retro's, else the clicker's,
   else English. The server creates with them and the batch dialog previews with
   them, so what the facilitator confirms is what is sent. The context is quoted
-  in anonymous sessions too (maintainer decision D2). The dialog sends the
+  in anonymous sessions too (maintainer decision D2). The description quotes
+  the linked card in full, or for an action on a group names the group and
+  lists the full text of each of its cards, one `* ` item each, in board order
+  (`retro.tickets` order), never an author (maintainer decision 2026-10-22,
+  "never abbreviate"; `actionGroupCards`). It derives the card from the
+  record, and uses a stored `contextText` only when the card or group no
+  longer exists — that value is whatever a screen stored, which may be cut at
+  50 characters or written in the reader's language. Jira's limits are the
+  only cuts: the summary at 255, and the description at 32,767
+  (`DESCRIPTION_MAX_LENGTH`, line breaks counted twice), where whole cards are
+  dropped from the end and counted in a closing line, and a quote too long to
+  fit is replaced by a sentence saying so. `wikiText` escapes each item, and
+  the list is the one construct the template writes (nothing interpolated can
+  start a line). The guard is linear, because it runs under the team's row
+  lock (the claim step) and in the dialog on every live update. The dialog
+  renders the description with its line breaks and the list's bullets
+  (`descriptionAsJiraShowsIt`, `whitespace-pre-wrap`). The dialog sends the
   target it shows — the stored one as last read, or the one-time change — with
   every request of the batch, never "whatever is stored now": any team session
   may save another target meanwhile (D1), and a batch longer than one request
@@ -2296,8 +2312,12 @@ one-click's target, the dialog of the sub-task modes, the `parent_*`
 outcomes), `jiraTargetFields.test.tsx` (the third mode, and a project form
 that never offers a sub-task type from the route's full list),
 `jiraService.test.ts` / `dataServiceJira.test.ts` (parents read, cached and
-counted as progress), `jiraIssuePreview.test.ts` and `jiraIssues.test.ts` →
-*the parent preview and the server agree*, `reviewPhaseJira.test.tsx`,
+counted as progress), `jiraIssueContent.test.ts` (the full quote, a group's
+cards, each escaped, and the 32,767 guard: whole cards only, linear),
+`jiraMock.test.ts` (the mock refuses a description over 32,767 as Jira does),
+`jiraIssuePreview.test.ts` and `jiraIssues.test.ts` → *the preview and the
+server agree* (a group's cards, a huge card over a cut stored context, an
+overflowing group) and *the parent preview and the server agree*, `reviewPhaseJira.test.tsx`,
 `healthCheckReviewJira.test.tsx` and `dashboardJira.test.tsx` (the parent line
 and the rows' dialog), `i18nJira.test.tsx`,
 `jiraBatchSessionConvergence.test.ts`, `jiraErrorCodes.test.ts` (every code

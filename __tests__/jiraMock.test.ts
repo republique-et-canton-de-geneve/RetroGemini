@@ -152,6 +152,23 @@ describe('jiraMock', () => {
     expect(server.issues().map((issue) => issue.summary)).toEqual(['First', 'Second', 'Third']);
   });
 
+  // Data Center's default `jira.text.field.character.limit`: the builder's
+  // guard (`DESCRIPTION_MAX_LENGTH`) is only tested if the mock refuses past
+  // it, with its own literal so a wrong constant cannot hide behind it.
+  it('refuses a description over 32,767 characters with Jira’s words, and accepts exactly 32,767', async () => {
+    const tooLong = await createTask('Too long', { description: 'd'.repeat(32768) });
+    expect(tooLong.status).toBe(400);
+    expect(JSON.parse(tooLong.body)).toEqual({
+      errorMessages: [],
+      errors: { description: 'The entered text is too long. It exceeds the allowed limit of 32,767 characters.' }
+    });
+    expect(server.issues()).toHaveLength(0);
+
+    const exact = await createTask('Exact', { description: 'd'.repeat(32767) });
+    expect(exact.status).toBe(201);
+    expect(server.issues().map((issue) => issue.description?.length)).toEqual([32767]);
+  });
+
   it('lists the issues under one parent, or those with none', async () => {
     const parent = server.addIssue({ projectKey: 'PROJ', issueTypeId: '10001', summary: 'Parent' });
     const sub = await request({

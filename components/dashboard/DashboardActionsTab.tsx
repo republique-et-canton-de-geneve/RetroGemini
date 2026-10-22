@@ -76,12 +76,13 @@ const DashboardActionsTab: React.FC<Props> = ({
     retroActionIds.has(actionId) ? 'retro' : healthCheckActionIds.has(actionId) ? 'healthcheck' : 'backlog';
 
   // What the batch sends and previews: the listed actions as the team record
-  // holds them, the copies the server builds each issue from. The rows above
-  // are display copies whose `contextText` was made for this screen (the
-  // whole card, "Group: …" in the reader's language), and the shared builder
-  // quotes a stored `contextText` as it is, so a preview built from them
-  // would not be what Jira receives (finding U-8). First copy of each id, in
-  // the order the server looks: the backlog, the retros, the health checks.
+  // holds them, the copies the server builds each issue from. The shared
+  // builder quotes the card from the record, and a stored `contextText` only
+  // for a card that is gone; the rows above are display copies whose
+  // `contextText` was made for this screen (the whole card, "Group: …" in the
+  // reader's language), so for such a card a preview built from them would
+  // not be what Jira receives (finding U-8). First copy of each id, in the
+  // order the server looks: the backlog, the retros, the health checks.
   const recordActions = new Map<string, ActionItem>();
   [
     ...team.globalActions,

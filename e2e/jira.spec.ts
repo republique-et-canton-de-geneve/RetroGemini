@@ -35,6 +35,12 @@ const SUPER_ADMIN_PASSWORD = 'e2e-super-admin-password';
 const LABEL = `e2e-${STAMP}`;
 
 const TICKET = 'Releases keep slipping';
+// The first test's own card: longer than every limit the builder has (the
+// summary's 255, the 50 the screens cut a quote at), plain words with no
+// character Jira reads as markup (so it reaches Jira exactly as typed), and an
+// end marker a cut at any length would lose. The issue quotes it whole
+// (maintainer, 2026-10-22: "Il ne faut pas abréger sinon on sait plus").
+const LONG_TICKET = `Releases keep slipping because ${'the checklist grows and nobody owns the last step '.repeat(5)}END OF THE CARD`;
 const NEW_ACTIONS = ['Write the release checklist', 'Book a weekly release review'];
 const PREVIOUS_ACTION = 'Automate the changelog';
 const REMAINING_ACTION = 'Archive the old wiki pages';
@@ -266,9 +272,9 @@ test.describe('Creating actions in Jira', () => {
     await facilitator.getByRole('button', { name: 'BRAINSTORM', exact: true }).click();
     const idea = facilitator.getByRole('textbox', { name: 'Add an idea...' }).first();
     await expect(idea).toBeVisible({ timeout: 15_000 });
-    await idea.fill(TICKET);
+    await idea.fill(LONG_TICKET);
     await idea.press('Enter');
-    await expect(facilitator.getByText(TICKET)).toBeVisible();
+    await expect(facilitator.getByText(LONG_TICKET)).toBeVisible();
     await wait(1_000);
 
     await facilitator.getByRole('button', { name: 'DISCUSS', exact: true }).click();
@@ -337,6 +343,9 @@ test.describe('Creating actions in Jira', () => {
     expect(sentBody.actionIds).toHaveLength(2);
     expect(issueCount(mock)).toBe(2);
     const newKeys = NEW_ACTIONS.map(text => keyOf(mock, text));
+    // The only place the session, the record and the route meet end to end:
+    // the issue quotes the card whole, not the 50 characters the screens show.
+    expect(mock.issues({ label: LABEL }).find(issue => issue.summary === NEW_ACTIONS[0])?.description).toContain(LONG_TICKET);
     for (const key of newKeys) await expect(dialog.getByRole('link', { name: linkName(key) })).toBeVisible();
     await dialog.getByRole('button', { name: 'Close' }).click();
     await expect(dialog).toHaveCount(0);
