@@ -1319,6 +1319,11 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const livePhase = (session: ActiveSession) =>
     session.phase === LIVE_PLACEHOLDER.phase ? t('adminLive.unknownPhase') : codeLabel(PHASE_KEYS, session.phase);
 
+  // Contrast is decided by the surface a token lands on (audit H42): muted
+  // text is `text-slate-500` on the white cards (4.77:1) and `text-slate-600`
+  // on this grey page and on tinted panels, where slate-500 measures 4.35:1.
+  // No dark surface here carries muted text. The whole page is audited per tab
+  // by e2e/admin-console-accessibility.spec.ts.
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
@@ -1332,7 +1337,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <span className="material-symbols-outlined mr-3 text-red-600">shield_person</span>
               {t('admin.header.title')}
             </h1>
-            <p className="text-slate-500 text-sm mt-1">{t('admin.header.subtitle')}</p>
+            <p className="text-slate-600 text-sm mt-1">{t('admin.header.subtitle')}</p>
           </div>
           <div className="flex items-center gap-3 ml-auto">
             <LanguageSwitcher className="shrink-0" />
@@ -1347,7 +1352,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         </div>
 
         {error && (
-          <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-4 flex items-center">
+          <div className="bg-red-50 text-red-700 p-4 rounded-lg mb-4 flex items-center">
             <span className="material-symbols-outlined mr-2">error</span>
             {noticeText(withLocalizedMax(error, locale), t)}
           </div>
@@ -1395,7 +1400,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                     infoMessageSaving
                       ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                      : 'bg-amber-500 text-white hover:bg-amber-600'
+                      : 'bg-amber-700 text-white hover:bg-amber-800'
                   }`}
                 >
                   <span className="material-symbols-outlined text-base">
@@ -1445,7 +1450,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                     adminEmailSaving
                       ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                      : 'bg-green-600 text-white hover:bg-green-700'
+                      : 'bg-green-700 text-white hover:bg-green-800'
                   }`}
                 >
                   <span className="material-symbols-outlined text-base">
@@ -1526,7 +1531,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {aiEnabled && (
               <div className="flex flex-col gap-3 border-t border-slate-200 pt-4">
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="ai-api-url" className="text-sm font-medium text-slate-700">{t('admin.ai.apiUrlLabel')} <span className="text-red-400">*</span></label>
+                  <label htmlFor="ai-api-url" className="text-sm font-medium text-slate-700">{t('admin.ai.apiUrlLabel')} <span className="text-red-700">*</span></label>
                   <input
                     id="ai-api-url"
                     type="url"
@@ -1706,7 +1711,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                     restoreUploading || !restoreFile
                       ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                      : 'bg-amber-500 text-white hover:bg-amber-600'
+                      : 'bg-amber-700 text-white hover:bg-amber-800'
                   }`}
                 >
                   <span className="material-symbols-outlined text-base">
@@ -1726,7 +1731,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             className={`px-6 py-3 font-bold text-sm flex items-center transition ${
               tab === 'TEAMS'
                 ? 'border-b-2 border-indigo-600 text-indigo-600'
-                : 'text-slate-500 hover:text-indigo-600'
+                : 'text-slate-600 hover:text-indigo-600'
             }`}
           >
             <span className="material-symbols-outlined mr-2">groups</span>
@@ -1737,13 +1742,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             className={`px-6 py-3 font-bold text-sm flex items-center transition relative ${
               tab === 'FEEDBACKS'
                 ? 'border-b-2 border-indigo-600 text-indigo-600'
-                : 'text-slate-500 hover:text-indigo-600'
+                : 'text-slate-600 hover:text-indigo-600'
             }`}
           >
             <span className="material-symbols-outlined mr-2">feedback</span>
             {t('admin.tabs.feedbacks', { count: feedbacks.length })}
             {unreadCount > 0 && (
-              <span className="ml-2 bg-red-500 text-white text-xs rounded-full px-2 py-0.5">
+              <span className="ml-2 bg-red-600 text-white text-xs rounded-full px-2 py-0.5">
                 {unreadCount}
               </span>
             )}
@@ -1752,14 +1757,16 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             onClick={() => setTab('LIVE')}
             className={`px-6 py-3 font-bold text-sm flex items-center transition ${
               tab === 'LIVE'
-                ? 'border-b-2 border-green-600 text-green-600'
-                : 'text-slate-500 hover:text-green-600'
+                ? 'border-b-2 border-green-800 text-green-800'
+                : 'text-slate-600 hover:text-green-800'
             }`}
           >
             <span className="material-symbols-outlined mr-2">stream</span>
             {t('admin.tabs.live')}
+            {/* No pulse: an opacity animation is measured at a random moment,
+                and a count that moves forever is a WCAG 2.2.2 concern. */}
             {activeSessions.length > 0 && (
-              <span className="ml-2 bg-green-500 text-white text-xs rounded-full px-2 py-0.5 animate-pulse">
+              <span className="ml-2 bg-green-700 text-white text-xs rounded-full px-2 py-0.5">
                 {activeSessions.length}
               </span>
             )}
@@ -1768,14 +1775,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             onClick={() => setTab('LOGS')}
             className={`px-6 py-3 font-bold text-sm flex items-center transition ${
               tab === 'LOGS'
-                ? 'border-b-2 border-orange-600 text-orange-600'
-                : 'text-slate-500 hover:text-orange-600'
+                ? 'border-b-2 border-orange-700 text-orange-700'
+                : 'text-slate-600 hover:text-orange-700'
             }`}
           >
             <span className="material-symbols-outlined mr-2">terminal</span>
             {t('admin.tabs.logs')}
             {serverLogs.filter(l => l.level === 'error').length > 0 && (
-              <span className="ml-2 bg-red-500 text-white text-xs rounded-full px-2 py-0.5">
+              <span className="ml-2 bg-red-600 text-white text-xs rounded-full px-2 py-0.5">
                 {serverLogs.filter(l => l.level === 'error').length}
               </span>
             )}
@@ -1784,8 +1791,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             onClick={() => setTab('BACKUPS')}
             className={`px-6 py-3 font-bold text-sm flex items-center transition ${
               tab === 'BACKUPS'
-                ? 'border-b-2 border-teal-600 text-teal-600'
-                : 'text-slate-500 hover:text-teal-600'
+                ? 'border-b-2 border-teal-700 text-teal-700'
+                : 'text-slate-600 hover:text-teal-700'
             }`}
           >
             <span className="material-symbols-outlined mr-2">backup</span>
@@ -1801,7 +1808,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         {loading && tab === 'TEAMS' ? (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-            <p className="text-slate-500 mt-4">{t('adminTeams.loading')}</p>
+            <p className="text-slate-600 mt-4">{t('adminTeams.loading')}</p>
           </div>
         ) : tab === 'TEAMS' ? (
           <div className="bg-white rounded-xl shadow-lg overflow-hidden">
@@ -1870,13 +1877,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             />
                             <button
                               onClick={() => handleRenameTeam(team.id)}
-                              className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
+                              className="bg-green-700 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-800"
                             >
                               {t('common.save')}
                             </button>
                             <button
                               onClick={cancelEdit}
-                              className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
+                              className="bg-slate-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-700"
                             >
                               {t('common.cancel')}
                             </button>
@@ -1921,13 +1928,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             />
                             <button
                               onClick={() => handleUpdateEmail(team.id)}
-                              className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
+                              className="bg-green-700 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-800"
                             >
                               {t('common.save')}
                             </button>
                             <button
                               onClick={cancelEdit}
-                              className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
+                              className="bg-slate-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-700"
                             >
                               {t('common.cancel')}
                             </button>
@@ -1962,13 +1969,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               />
                               <button
                                 onClick={() => handleUpdatePassword(team.id)}
-                                className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
+                                className="bg-green-700 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-800"
                               >
                                 {t('common.save')}
                               </button>
                               <button
                                 onClick={cancelEdit}
-                                className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
+                                className="bg-slate-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-700"
                               >
                                 {t('common.cancel')}
                               </button>
@@ -1984,7 +1991,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               </button>
                               <button
                                 onClick={() => startEditPassword(team)}
-                                className="text-amber-600 hover:text-amber-800 px-3 py-1 rounded-sm border border-amber-600 hover:bg-amber-50 text-sm font-medium"
+                                className="text-amber-700 hover:text-amber-800 px-3 py-1 rounded-sm border border-amber-700 hover:bg-amber-50 text-sm font-medium"
                                 title={t('adminTeams.changePasswordTitle')}
                               >
                                 {t('adminTeams.changePassword')}
@@ -2073,7 +2080,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
             {/* Status Filters */}
             <div className="mb-6 flex gap-2 flex-wrap items-center">
-              <span className="text-sm text-slate-500 mr-2">{t('adminFeedbacks.filter.statusLabel')}</span>
+              <span className="text-sm text-slate-600 mr-2">{t('adminFeedbacks.filter.statusLabel')}</span>
               {(['all', 'pending', 'in_progress', 'resolved', 'rejected'] as const).map((status) => (
                 <button
                   key={status}
@@ -2145,12 +2152,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{commentAuthorName(comment, t)}</span>
                               {!comment.isAdmin && (
                                 <>
-                                  <span className="text-slate-500"> · </span>
-                                  <span className="text-slate-500">{comment.teamName}</span>
+                                  <span className="text-slate-600"> · </span>
+                                  <span className="text-slate-600">{comment.teamName}</span>
                                 </>
                               )}
-                              <span className="text-slate-500"> · </span>
-                              <span className="text-slate-500">{formatDate(comment.createdAt)}</span>
+                              <span className="text-slate-600"> · </span>
+                              <span className="text-slate-600">{formatDate(comment.createdAt)}</span>
                             </div>
                             <p className={`text-sm mt-1 ${comment.isAdmin ? 'text-amber-700' : 'text-slate-700'}`}>{comment.content}</p>
                           </div>
@@ -2213,7 +2220,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </div>
               <button
                 onClick={loadActiveSessions}
-                className="px-3 py-1.5 bg-green-100 text-green-700 rounded-sm text-sm font-medium hover:bg-green-200 flex items-center gap-1"
+                className="px-3 py-1.5 bg-green-100 text-green-800 rounded-sm text-sm font-medium hover:bg-green-200 flex items-center gap-1"
               >
                 <span className="material-symbols-outlined text-base">refresh</span>
                 {t('admin.refresh')}
@@ -2264,8 +2271,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                           }`}>
                             {session.type === 'healthcheck' ? t('adminLive.type.healthcheck') : t('adminLive.type.retrospective')}
                           </span>
-                          <span className="flex items-center gap-1 text-green-600">
-                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                          <span className="flex items-center gap-1 text-green-700">
+                            <span className="w-2 h-2 rounded-full bg-green-500 motion-safe:animate-pulse"></span>
                             <span className="text-xs font-medium">{t('adminLive.live')}</span>
                           </span>
                         </div>
@@ -2275,7 +2282,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       <div className="text-right">
                         <div className="bg-slate-100 rounded-lg px-3 py-2">
                           <p className="text-2xl font-bold text-slate-800">{session.connectedCount}</p>
-                          <p className="text-xs text-slate-500">{t('adminLive.connected')}</p>
+                          <p className="text-xs text-slate-600">{t('adminLive.connected')}</p>
                         </div>
                       </div>
                     </div>
@@ -2329,7 +2336,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <div className="flex gap-2">
                 <button
                   onClick={loadServerLogs}
-                  className="px-3 py-1.5 bg-orange-100 text-orange-700 rounded-sm text-sm font-medium hover:bg-orange-200 flex items-center gap-1"
+                  className="px-3 py-1.5 bg-orange-100 text-orange-800 rounded-sm text-sm font-medium hover:bg-orange-200 flex items-center gap-1"
                 >
                   <span className="material-symbols-outlined text-base">refresh</span>
                   {t('admin.refresh')}
@@ -2414,7 +2421,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             log.level === 'error' ? 'bg-red-50' : log.level === 'warn' ? 'bg-amber-50' : ''
                           }`}
                         >
-                          <td className="p-3 text-slate-500 font-mono text-xs whitespace-nowrap">
+                          <td className="p-3 text-slate-600 font-mono text-xs whitespace-nowrap">
                             {new Date(log.timestamp).toLocaleString(locale)}
                           </td>
                           <td className="p-3">
@@ -2422,7 +2429,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               log.level === 'error'
                                 ? 'bg-red-100 text-red-700'
                                 : log.level === 'warn'
-                                ? 'bg-amber-100 text-amber-700'
+                                ? 'bg-amber-100 text-amber-800'
                                 : 'bg-blue-100 text-blue-700'
                             }`}>
                               {codeLabel(LOG_LEVEL_KEYS, log.level)}
@@ -2435,7 +2442,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 : log.source === 'socket'
                                 ? 'bg-purple-100 text-purple-700'
                                 : log.source === 'email'
-                                ? 'bg-green-100 text-green-700'
+                                ? 'bg-green-100 text-green-800'
                                 : 'bg-slate-100 text-slate-700'
                             }`}>
                               {codeLabel(LOG_SOURCE_KEYS, log.source)}
@@ -2466,10 +2473,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   {t('adminBackups.config.title')}
                 </h3>
                 <div className="flex flex-wrap gap-4 text-sm text-slate-600">
-                  <span>{tRich('adminBackups.config.auto', { value: <span className={`font-medium ${backupConfig.enabled ? 'text-green-600' : 'text-red-600'}`}>{backupConfig.enabled ? t('adminBackups.config.enabled') : t('adminBackups.config.disabled')}</span> })}</span>
+                  <span>{tRich('adminBackups.config.auto', { value: <span className={`font-medium ${backupConfig.enabled ? 'text-green-700' : 'text-red-600'}`}>{backupConfig.enabled ? t('adminBackups.config.enabled') : t('adminBackups.config.disabled')}</span> })}</span>
                   <span>{tRich('adminBackups.config.interval', { value: <span className="font-medium">{t('adminBackups.config.hours', { hours: backupConfig.intervalHours })}</span> })}</span>
                   <span>{tRich('adminBackups.config.maxCount', { value: <span className="font-medium">{backupConfig.maxCount}</span> })}</span>
-                  <span>{tRich('adminBackups.config.onStartup', { value: <span className={`font-medium ${backupConfig.onStartup ? 'text-green-600' : 'text-slate-500'}`}>{backupConfig.onStartup ? t('common.yes') : t('common.no')}</span> })}</span>
+                  <span>{tRich('adminBackups.config.onStartup', { value: <span className={`font-medium ${backupConfig.onStartup ? 'text-green-700' : 'text-slate-500'}`}>{backupConfig.onStartup ? t('common.yes') : t('common.no')}</span> })}</span>
                 </div>
               </div>
             )}
@@ -2495,7 +2502,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   className={`px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 ${
                     backupCreating
                       ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                      : 'bg-teal-600 text-white hover:bg-teal-700'
+                      : 'bg-teal-700 text-white hover:bg-teal-800'
                   }`}
                 >
                   <span className="material-symbols-outlined text-base">
@@ -2518,7 +2525,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {backupsLoading ? (
               <div className="text-center py-12">
                 <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600"></div>
-                <p className="text-slate-500 mt-4">{t('adminBackups.loading')}</p>
+                <p className="text-slate-600 mt-4">{t('adminBackups.loading')}</p>
               </div>
             ) : backups.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm p-12 text-center">
@@ -2582,8 +2589,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               onClick={() => handleToggleProtected(backup)}
                               className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition ${
                                 backup.protected
-                                  ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                  ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                               }`}
                               title={backup.protected ? t('adminBackups.protected.on') : t('adminBackups.protected.off')}
                             >
@@ -2655,7 +2662,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             // The comment is unsaved text: a stray backdrop click must not throw
             // it away. Escape is the deliberate way out.
             closeOnBackdropClick={false}
-            overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            overlayClassName="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
             panelClassName="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6"
           >
             <>
