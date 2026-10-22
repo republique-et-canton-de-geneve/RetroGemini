@@ -115,10 +115,11 @@
  * A `parent`-mode one-time target names the parent this send goes under. With
  * `adoptParent`, it also becomes the stored parent of each scope the send
  * touches that has no key (or only a mark, or only an expired claim; with
- * `replaceParents`, even one with a key) — but only in the write that stores
- * the key of a sub-task Jira created under it (`adoptParent`). A parent Jira
- * refuses sub-tasks under, a lost answer, a key that cannot be saved: none of
- * them changes any scope.
+ * `replaceParents`, even one with a key) — but only in the write that lands
+ * the key of a sub-task Jira created under it (`adoptParent`), even when that
+ * action's copy no longer takes the key (deleted, or a rival key kept). A
+ * parent Jira refuses sub-tasks under, a lost answer, a key that cannot be
+ * saved: none of them changes any scope.
  */
 
 import { randomUUID } from 'crypto';
@@ -657,11 +658,14 @@ export const createJiraIssues = ({
 
     /**
      * Lands a created key in the write under way (`writeLink`), and adopts its
-     * parent when the send named one with `adoptParent` (`adoptParent`): the
-     * same write, so a scope adopts a parent exactly when a sub-task of it
-     * under that parent is stored. A retried write cannot tell its own landed
-     * adoption from one made before; it reports the scope as adopted when the
-     * scope holds that key.
+     * parent when the send named one with `adoptParent` (`adoptParent`), in
+     * that same write: a scope adopts the parent in the write that lands the
+     * key of a sub-task Jira created under that parent, even when that
+     * action's copy no longer takes the key (the action was deleted meanwhile,
+     * or a rival key was kept), since the sub-task exists under that parent
+     * either way. A retried write cannot tell its own landed adoption from one
+     * made before; it reports the scope as adopted when the scope holds that
+     * key.
      */
     const landPending = (team, landing, nowDate, attempt) => {
       const link = writeLink(team, landing, requestId);

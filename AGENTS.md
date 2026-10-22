@@ -2051,9 +2051,10 @@ Rules:
   under it** [R1]. A `parent`-mode one-time target with `adoptParent` sends
   every action under the parent named, and makes it the stored parent of each
   scope with no key (or only a mark, or only an expired claim; with
-  `replaceParents`, one with a key too) **in the write that stores the key of a
-  sub-task created under it** (`adoptParent` in `jiraIssues.js`) — never in the
-  claim write. A refused sub-task, a lost answer or a key that cannot be saved
+  `replaceParents`, one with a key too) **in the write that lands the key of a
+  sub-task Jira created under it** (`adoptParent` in `jiraIssues.js`) — even
+  when that action's copy no longer takes the key (deleted, or a rival key
+  kept), and never in the claim write. A refused sub-task, a lost answer or a key that cannot be saved
   changes no scope; a live foreign parent claim is left alone. The adopted key
   is the one Jira's lookup answered, and a parent that cannot hold sub-tasks — a
   sub-task, or on Cloud a type above level 0 (an epic) — is refused once,
@@ -2072,10 +2073,12 @@ Rules:
   Route then answers 504 while the server finishes the call in flight and then
   stops (`client_gone`), and the client reads it as `outcome_unknown`. A
   session's parent counts as one creation: the budget, the caller and the
-  drain are read again before the sub-task that follows a fresh parent, and
-  once more after the parent's write [R6], so a `SIGTERM` during that write
-  releases the action's claim and starts no call; a parent created past the
-  budget is stored and its action waits in `remaining`. A Dashboard request of
+  drain are read again before the parent's write, to decide whether the
+  sub-task that follows a fresh parent may start, and only the caller and the
+  drain (not the budget) are read once more after that write [R6], so a
+  `SIGTERM` during that write releases the action's claim and starts no call;
+  a parent created past the budget is stored and its action waits in
+  `remaining`. A Dashboard request of
   ten actions from ten sessions can need twenty calls: the budget cuts it. A
   draining pod is forced out `DEFAULT_SHUTDOWN_TIMEOUT_MS` (20 s) after
   `SIGTERM`: one Jira call (`JIRA_CALL_DEADLINE_MS`) and the write of its key,
