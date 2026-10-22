@@ -38,9 +38,18 @@ const PG_ENV_KEYS = [
 
 const PASSWORD = 'correct-horse-battery';
 
+// `session-<team>` reads as a token from before decision D3b (no epoch claim,
+// no issue time), `epoch.<team>.<epoch>` as one minted under that epoch (an
+// epoch is base64url, which has `-` and `_` but never `.`).
 const tokenService = {
   createSessionToken: (teamId: string) => `session-${teamId}`,
-  validateSessionToken: (token: string) => (token?.startsWith('session-') ? { teamId: token.slice('session-'.length) } : null),
+  validateSessionToken: (token: string) => {
+    if (token?.startsWith('epoch.')) {
+      const [, teamId, sessionEpoch] = token.split('.');
+      return { teamId, sessionEpoch, createdAt: Date.now() };
+    }
+    return token?.startsWith('session-') ? { teamId: token.slice('session-'.length) } : null;
+  },
   invalidateSessionToken: () => {},
   createInviteCredential: () => 'invite',
   validateInviteCredential: () => null,
@@ -163,6 +172,71 @@ describe('authenticating a write without loading the team record', () => {
 
       expect(res.status).toBe(401);
       expect(await res.json()).toEqual({ error: 'team_not_found' });
+    });
+
+    // Decision D3b: the epoch check reads the team's small auth row, never
+    // the record, so a rotation brings back no parse on the hot path.
+    describe('after a password rotation (decision D3b)', () => {
+      let currentEpoch: string;
+
+      beforeEach(async () => {
+        currentEpoch = (await dataStore.rotateTeamSessionEpoch('t1')).sessionEpoch;
+      });
+
+      it('refuses a token minted under the old epoch without reading the record', async () => {
+        const loadTeam = vi.spyOn(dataStore, 'loadTeam');
+
+        const res = await post('/api/team/t1/retrospective/r1', { sessionToken: 'epoch.t1.old', retrospective: { id: 'r1', _rev: 1 } });
+
+        expect(res.status).toBe(401);
+        expect(await res.json()).toEqual({ error: 'session_revoked' });
+        expect(loadTeam).not.toHaveBeenCalled();
+      });
+
+      it('accepts the current epoch with one auth read and no record read', async () => {
+        const loadTeam = vi.spyOn(dataStore, 'loadTeam');
+        const loadTeamAuthState = vi.spyOn(dataStore, 'loadTeamAuthState');
+
+        const res = await post('/api/team/t1/retrospective/r1', { sessionToken: `epoch.t1.${currentEpoch}`, retrospective: { id: 'r1', _rev: 1 } });
+
+        expect(res.status).toBe(200);
+        expect(loadTeam).not.toHaveBeenCalled();
+        expect(loadTeamAuthState).toHaveBeenCalledTimes(1);
+      });
+
+      it('answers a revoked token sent alone on a route that needs the team before parsing the record', async () => {
+        // Right after a rotation every invite-link participant's in-flight
+        // write arrives with a revoked token and no password: each of them
+        // used to fall through to a full parse of the team's history only to
+        // be refused.
+        const loadTeam = vi.spyOn(dataStore, 'loadTeam');
+
+        const res = await post('/api/team/t1', { sessionToken: 'epoch.t1.old' });
+
+        expect(res.status).toBe(401);
+        expect(await res.json()).toEqual({ error: 'session_revoked' });
+        expect(loadTeam).not.toHaveBeenCalled();
+      });
+
+      it('answers session_revoked, after one record read, for a revoked token beside the old password', async () => {
+        const rotatedHash = await hashPassword('the-new-team-password');
+        await dataStore.atomicTeamUpdate('t1', (team: Record<string, unknown>) => ({ ...team, passwordHash: rotatedHash }));
+        const loadTeam = vi.spyOn(dataStore, 'loadTeam');
+
+        const res = await post('/api/team/t1', { sessionToken: 'epoch.t1.old', password: PASSWORD });
+
+        expect(res.status).toBe(401);
+        expect(await res.json()).toEqual({ error: 'session_revoked' });
+        expect(loadTeam).toHaveBeenCalledTimes(1);
+      });
+
+      it('still refuses a token from before the release once the team has rotated after it', async () => {
+        // The double's legacy token has no issue time: it predates everything.
+        const res = await post('/api/team/t1/retrospective/r1', { sessionToken: 'session-t1', retrospective: { id: 'r1', _rev: 1 } });
+
+        expect(res.status).toBe(401);
+        expect(await res.json()).toEqual({ error: 'session_revoked' });
+      });
     });
   });
 });

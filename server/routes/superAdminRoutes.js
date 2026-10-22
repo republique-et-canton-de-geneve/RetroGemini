@@ -15,6 +15,7 @@ import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.j
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { claimTeamNameKey, nameHeldByAnotherRecord, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
+import { NO_OP_SESSION_REVOCATION } from '../services/sessionRevocation.js';
 import { registerSuperAdminTeamMergeRoutes } from './superAdminTeamMergeRoutes.js';
 import { registerSuperAdminTeamRestoreRoutes } from './superAdminTeamRestoreRoutes.js';
 import { registerSuperAdminBackupImportRoutes } from './superAdminBackupImportRoutes.js';
@@ -47,6 +48,11 @@ const registerSuperAdminRoutes = ({
   // `__tests__/securityEventAudit` asserts the real wiring against `server.js`
   // itself; that check is the price of this default.
   securityEvents = NO_OP_SECURITY_EVENTS,
+  // Decision D3b — cuts the live-session sockets of a team whose password
+  // changed (update-password, the single-team restore of a deleted team) and
+  // re-checks every socket after a whole-store restore. A no-op by default for
+  // the reason given for `securityEvents`; `server.js` is the wiring.
+  sessionRevocation = NO_OP_SESSION_REVOCATION,
   // What the Jira route tests inject into the Jira client (short timeouts).
   jiraClientOptions = {}
 }) => {
@@ -63,6 +69,11 @@ const registerSuperAdminRoutes = ({
   // state. This pod clears its own cache directly; the cross-pod broadcast
   // reaches the others via the Socket.IO adapter (skipped on single-pod
   // deployments, whose in-memory adapter does not support serverSideEmit).
+  //
+  // Decision D3b: the replace may also have given teams a new session epoch
+  // (a password rolled back, a team brought back or deleted), so this pod
+  // re-checks every live socket against its team's epoch, and the other pods
+  // do the same on `sessions-invalidated` (socketHandlers.js).
   const invalidateSessionCaches = () => {
     if (sessionCache && typeof sessionCache.clear === 'function') {
       sessionCache.clear();
@@ -74,6 +85,9 @@ const registerSuperAdminRoutes = ({
         console.warn('[Server] Failed to broadcast cross-pod session invalidation', err);
       }
     }
+    sessionRevocation.sweepAllLocal().catch((err) => {
+      console.warn('[Server] Session revocation sweep after a restore failed', err);
+    });
   };
 
   // Decision D1 / H23 prerequisite 2 — a restore is the one operation that can
@@ -185,6 +199,7 @@ const registerSuperAdminRoutes = ({
     sessionCache,
     backupService,
     securityEvents,
+    sessionRevocation,
     afterRestore: async () => {
       await rehashRestoredPasswords();
       await healRestoredEmails();
@@ -783,12 +798,15 @@ This notification was sent from RetroGemini.
 
     try {
       const newPasswordHash = await hashPassword(newPassword);
+      // Decision D3b: and every session token of the team, in the same
+      // transaction. The super admin is no team member, so no token comes
+      // back. Writing the epoch blindly also repairs a corrupt one.
       const result = await dataStore.atomicTeamUpdate(teamId, (team) => {
         team.passwordHash = newPasswordHash;
         // Password rotation revokes outstanding invite links (stage 7e).
         team.inviteEpoch = getTeamInviteEpoch(team) + 1;
         return team;
-      });
+      }, { rotateSessionEpoch: true });
       if (!result.success) {
         return res.status(404).json({ error: 'team_not_found' });
       }
@@ -796,9 +814,13 @@ This notification was sent from RetroGemini.
         action: SECURITY_ACTIONS.TEAM_PASSWORD_CHANGE,
         actor: 'super-admin',
         outcome: 'success',
-        target: teamId
+        target: teamId,
+        detail: { sessionsRevoked: true }
       });
       res.json({ success: true });
+      sessionRevocation.revokeTeamSessions(teamId).catch((err) => {
+        console.warn('[Server] Session revocation after a console password change failed', err);
+      });
     } catch (err) {
       console.error('[Server] Failed to update password', err);
       res.status(500).json({ error: 'failed_to_save' });

@@ -22,6 +22,7 @@ import { createSecurityHeaders } from './server/services/securityHeaders.js';
 import { createRequestContext } from './server/services/logContext.js';
 import { createSecurityEventLog } from './server/services/securityEvents.js';
 import { createLiveSessionPatch, createLiveSessionRename } from './server/services/liveSessionRename.js';
+import { createSessionRevocation } from './server/services/sessionRevocation.js';
 
 import { registerAiRoutes } from './server/routes/aiRoutes.js';
 import { registerCoreRoutes } from './server/routes/coreRoutes.js';
@@ -132,6 +133,16 @@ const shutdown = createShutdownHandler({
 // H50). `/health` renders it; nothing gates traffic on it.
 const serverRuntime = { multiPodAdapter: false, socketAdapter: null };
 
+// Decision D3b: a password rotation revokes the team's session tokens. Every
+// HTTP route refuses them at once (each request reads the team's session
+// epoch); this cuts the live-session sockets, on this pod and — through the
+// adapter, which `serverRuntime` says is up — on the others. Built before the
+// routes that rotate, which receive it, and handed to the socket handlers,
+// which attach the sweep. Every registrar defaults it to a no-op, so this
+// wiring is the load-bearing part — `__tests__/sessionRevocationWiring`
+// asserts it against this file.
+const sessionRevocation = createSessionRevocation({ io, serverRuntime });
+
 logService.attachConsole();
 
 // Audit H44: mounted before every route — including `/health` and the SPA
@@ -181,6 +192,7 @@ registerTeamRoutes({
   securityEvents,
   liveSessionRename,
   liveSessionPatch,
+  sessionRevocation,
   isShuttingDown: shutdown.isShuttingDown
 });
 
@@ -202,7 +214,8 @@ registerPasswordResetRoutes({
   hashResetToken,
   pruneResetTokens,
   publicOrigin,
-  securityEvents
+  securityEvents,
+  sessionRevocation
 });
 
 registerSuperAdminRoutes({
@@ -218,17 +231,18 @@ registerSuperAdminRoutes({
   backupService,
   aiService,
   serverRuntime,
-  securityEvents
+  securityEvents,
+  sessionRevocation
 });
 
 registerAiRoutes({
   app,
-  dataStore,
   tokenService,
+  teamService,
   aiService
 });
 
-registerSocketHandlers({ io, dataStore, sessionCache, tokenService });
+registerSocketHandlers({ io, dataStore, sessionCache, tokenService, sessionRevocation });
 
 app.use(express.static(join(__dirname, 'dist')));
 
@@ -272,6 +286,15 @@ const startServer = async () => {
       console.info(`[Server] Jira team secrets: ${removed} orphaned row(s) removed`);
     } catch (err) {
       console.warn('[Server] Jira team secrets: the orphan sweep could not run; it runs again at the next start', err);
+    }
+    // The same for the session epochs (decision D3b): a deletion whose last
+    // step failed, or one served by a pod from before this release, leaves
+    // the team's `team-auth:` row behind. Never a failed boot either.
+    try {
+      const removed = await dataStore.sweepOrphanedTeamAuthRows();
+      console.info(`[Server] Team session epochs: ${removed} orphaned row(s) removed`);
+    } catch (err) {
+      console.warn('[Server] Team session epochs: the orphan sweep could not run; it runs again at the next start', err);
     }
     // Publishes the adapter state onto `serverRuntime` and, when a configured
     // adapter failed, logs loudly and retries in the background (audit H50).

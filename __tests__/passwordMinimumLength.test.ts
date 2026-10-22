@@ -9,6 +9,7 @@ import { hashResetToken, pruneResetTokens } from '../server/services/security.js
 import { hashPassword, verifyPassword } from '../server/services/passwordHashing.js';
 import { PASSWORD_MIN_LENGTH } from '../utils/passwordPolicy.js';
 import { postJson, request } from './helpers/routeTestServer';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * Audit H39 — one password minimum, enforced on every path that *writes* a
@@ -69,6 +70,8 @@ const createMockDataStore = (seed: Team[] = []) => {
   return {
     teams,
     loadTeam,
+    // Decision D3b: login and creation read the team's session epoch.
+    loadTeamAuthState: createTeamAuthStateDouble((teamId) => teams.has(teamId)).loadTeamAuthState,
     loadTeamRaw: loadTeam,
     saveTeam: async (teamId: string, teamData: Team) => {
       teams.set(teamId, { ...teamData });

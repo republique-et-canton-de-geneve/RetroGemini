@@ -1,6 +1,7 @@
 import express from 'express';
 import { describe, expect, it, vi } from 'vitest';
 import { registerAiRoutes } from '../server/routes/aiRoutes.js';
+import { createTeamService } from '../server/services/teamService.js';
 
 const request = async (app: express.Express, path: string, init: Parameters<typeof fetch>[1] = {}) => {
   const server = app.listen(0);
@@ -24,22 +25,28 @@ const createAiServiceMock = () => ({
   generateReleaseAnalysis: vi.fn(async () => 'analysis')
 });
 
-type SessionClaims = { teamId: string; visitorId: string | null; createdAt: number } | null;
+type SessionClaims = { teamId: string; visitorId: string | null; createdAt: number; sessionEpoch?: string | null } | null;
+type AuthState = { exists: boolean; sessionEpoch: string; revokedAt: number | null };
 
+// The team service is the real one: the AI routes decide through it, on the
+// team's auth row (decision D3b), so a double of it would test nothing.
 const createApp = ({
   aiService = createAiServiceMock(),
-  validateSessionToken = vi.fn((_token: string): SessionClaims => ({ teamId: 'team-1', visitorId: null, createdAt: 0 })),
+  validateSessionToken = vi.fn((_token: string): SessionClaims => ({ teamId: 'team-1', visitorId: null, createdAt: 0, sessionEpoch: '0' })),
+  loadTeamAuthState = vi.fn(async (_teamId: string): Promise<AuthState> => ({ exists: true, sessionEpoch: '0', revokedAt: null })),
   loadTeam = vi.fn(async () => ({ id: 'team-1', name: 'Team One' }))
 } = {}) => {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
+  const dataStore = { loadTeam, loadTeamAuthState };
+  const tokenService = { validateSessionToken };
   registerAiRoutes({
     app,
-    dataStore: { loadTeam },
-    tokenService: { validateSessionToken },
+    tokenService,
+    teamService: createTeamService({ dataStore, tokenService }),
     aiService
   });
-  return { app, aiService, validateSessionToken, loadTeam };
+  return { app, aiService, validateSessionToken, loadTeamAuthState, loadTeam };
 };
 
 const aiEndpoints = [
@@ -60,7 +67,7 @@ const aiEndpoints = [
 describe('AI route authentication', () => {
   it.each(aiEndpoints)('rejects $path without a session token before calling the AI service', async ({ path, body, serviceCall }) => {
     const validateSessionToken = vi.fn((_token: string): SessionClaims => null);
-    const { app, aiService, loadTeam } = createApp({ validateSessionToken });
+    const { app, aiService, loadTeamAuthState, loadTeam } = createApp({ validateSessionToken });
 
     const response = await request(app, path, {
       method: 'POST',
@@ -71,12 +78,13 @@ describe('AI route authentication', () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: 'unauthorized' });
     expect(aiService[serviceCall]).not.toHaveBeenCalled();
+    expect(loadTeamAuthState).not.toHaveBeenCalled();
     expect(loadTeam).not.toHaveBeenCalled();
   });
 
   it.each(aiEndpoints)('rejects $path when the token references a missing team', async ({ path, body, serviceCall }) => {
-    const loadTeam = vi.fn(async () => null);
-    const { app, aiService } = createApp({ loadTeam });
+    const loadTeamAuthState = vi.fn(async (): Promise<AuthState> => ({ exists: false, sessionEpoch: '0', revokedAt: null }));
+    const { app, aiService } = createApp({ loadTeamAuthState });
 
     const response = await request(app, path, {
       method: 'POST',
@@ -90,7 +98,7 @@ describe('AI route authentication', () => {
   });
 
   it('accepts an authenticated suggest-group-title call', async () => {
-    const { app, aiService, validateSessionToken, loadTeam } = createApp();
+    const { app, aiService, validateSessionToken, loadTeamAuthState, loadTeam } = createApp();
 
     const response = await request(app, '/api/ai/suggest-group-title', {
       method: 'POST',
@@ -101,8 +109,26 @@ describe('AI route authentication', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ title: 'Suggested title' });
     expect(validateSessionToken).toHaveBeenCalledWith('valid-token');
-    expect(loadTeam).toHaveBeenCalledWith('team-1');
+    expect(loadTeamAuthState).toHaveBeenCalledWith('team-1');
+    // The team's existence comes from its auth row: the record, which these
+    // routes never use, is not parsed for it.
+    expect(loadTeam).not.toHaveBeenCalled();
     expect(aiService.suggestGroupTitle).toHaveBeenCalledWith(['Great teamwork', 'Good communication']);
+  });
+
+  it.each(aiEndpoints)('rejects $path with session_revoked when a password change revoked the token (decision D3b)', async ({ path, body, serviceCall }) => {
+    const loadTeamAuthState = vi.fn(async (): Promise<AuthState> => ({ exists: true, sessionEpoch: 'rotated', revokedAt: 1 }));
+    const { app, aiService } = createApp({ loadTeamAuthState });
+
+    const response = await request(app, path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, sessionToken: 'valid-token' })
+    });
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: 'session_revoked' });
+    expect(aiService[serviceCall]).not.toHaveBeenCalled();
   });
 
   it('accepts an authenticated retro summary call', async () => {
@@ -175,7 +201,7 @@ describe('AI route authentication', () => {
 
   it('does not let invalid-token spam consume an authenticated team rate-limit budget', async () => {
     const validateSessionToken = vi.fn((token: string): SessionClaims =>
-      token === 'valid-token' ? { teamId: 'team-1', visitorId: null, createdAt: 0 } : null
+      token === 'valid-token' ? { teamId: 'team-1', visitorId: null, createdAt: 0, sessionEpoch: '0' } : null
     );
     const { app, aiService } = createApp({ validateSessionToken });
 

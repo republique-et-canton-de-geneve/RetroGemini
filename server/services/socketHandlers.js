@@ -1,6 +1,27 @@
 import { findProtectedFieldViolations, restoreProtectedFields, isSameSessionState } from './sessionGuard.js';
 import { runWithContext, setContextValue } from './logContext.js';
 import { createRepeatCoalescer } from './logCoalescer.js';
+import { SESSION_REVOKED_ERROR, TeamAuthRowCorruptError, sessionVerdict } from './sessionEpoch.js';
+import { NO_OP_SESSION_REVOCATION, TEAM_SESSIONS_REVOKED_EVENT } from './sessionRevocation.js';
+
+// Decision D3b: how often each pod re-checks its joined sockets against their
+// team's session epoch. The broadcast of a rotation cuts them at once; this
+// covers a pod that missed it (a degraded cross-pod adapter) and the sockets
+// joined unverified during a database outage. A constant, not a setting: one
+// tiny read per team with live sockets per minute is no capacity question.
+const REVOCATION_SWEEP_MS = 60_000;
+
+// A timer that never holds the process open (the adapter's retries do the
+// same, socketAdapter.js).
+const scheduleUnref = (run, delayMs) => {
+  const timer = setTimeout(run, delayMs);
+  if (typeof timer.unref === 'function') timer.unref();
+};
+
+// The id a client gives its join, echoed in a denial so a client can tell the
+// denial of an earlier join from that of its latest one. Anything else is
+// ignored: it reaches a log line and goes back over the wire.
+const JOIN_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 // How long to wait before refreshing a team's `lastConnectionDate` again.
 // Without this, every participant join (and every reconnection after a rolling
@@ -270,7 +291,15 @@ const registerSocketHandlers = ({
   // Refusal lines are coalesced per socket (logCoalescer.js): a client stuck
   // re-sending a refused write must not be able to flush the 1000-line log
   // ring the super admin investigates from. Injectable for tests.
-  refusalLog = createRepeatCoalescer()
+  refusalLog = createRepeatCoalescer(),
+  // Decision D3b — the routes that rotate a password call its
+  // `revokeTeamSessions`, which runs the sweep attached below. A no-op by
+  // default for the test harnesses; `server.js` is the wiring.
+  sessionRevocation = NO_OP_SESSION_REVOCATION,
+  // The periodic sweep's interval, 0 to turn it off, and its timer: injectable
+  // so a harness can run it fast, or not at all.
+  revocationSweepMs = REVOCATION_SWEEP_MS,
+  schedule = scheduleUnref
 }) => {
   // Per-socket update-session throttle configuration, read once at startup.
   const updateThrottle = parseUpdateThrottleConfig();
@@ -284,9 +313,21 @@ const registerSocketHandlers = ({
   // clear theirs. serverSideEmit never loops back to the sender, so this
   // listener only ever fires on the *other* replicas; single-pod deployments
   // (in-memory adapter) never emit it.
+  //
+  // Decision D3b: the restore may also have given teams a new session epoch,
+  // so every socket on this pod is re-checked (`sweepRevokedSockets`, below).
   io.on('sessions-invalidated', () => {
     sessionCache.clear();
     console.info('[Server] Cleared session cache after cross-pod restore invalidation');
+    sweepRevokedSockets(null).catch((err) => console.warn('[Server] Session revocation sweep after a restore failed', err));
+  });
+
+  // Decision D3b: another pod changed a team's password. The payload is only
+  // a hint — the decision is always the team's epoch, read again here — so a
+  // forged, late or duplicated event can never cut a socket that is current.
+  io.on(TEAM_SESSIONS_REVOKED_EVENT, (payload) => {
+    if (typeof payload?.teamId !== 'string' || payload.teamId === '') return;
+    sweepRevokedSockets(payload.teamId).catch((err) => console.warn('[Server] Session revocation sweep failed', err));
   });
 
   // Resolve the sender's role from the team roster (the database record, not
@@ -418,6 +459,87 @@ const registerSocketHandlers = ({
     socket.sessionId = null;
   };
 
+  // ---------------------------------------------------------------------------
+  // Decision D3b — cutting the sockets whose token a password rotation revoked
+  // ---------------------------------------------------------------------------
+
+  // Takes a joined socket out of its session for good: it leaves the room
+  // (the others get `member-left` and a roster), and is told why with the
+  // denial its join would get now. It stays *connected*: socket.io clients do
+  // not reconnect on their own after a denial, so there is no reconnect storm,
+  // and every later write is refused 'not-joined' and persists nothing. Cut
+  // once: a second sweep reaching the same socket finds no session and sends
+  // nothing, never a denial naming no session.
+  const revokeSocket = async (socket, cause) => {
+    const sessionId = socket.sessionId;
+    if (!sessionId || !socket.data.authClaims) return;
+    const joinId = socket.data.joinId ?? undefined;
+    socket.data.authClaims = null;
+    socket.data.authTeamId = undefined;
+    socket.data.sessionRole = undefined;
+    socket.data.authUnverified = false;
+    await leaveCurrentSession(socket);
+    socket.emit('join-denied', { sessionId, reason: 'unauthenticated', cause, ...(joinId ? { joinId } : {}) });
+    console.info(`[Server] Signed ${JSON.stringify(socket.userName || 'unknown')} out of session ${sessionId}: ${cause}`);
+  };
+
+  // Re-checks this pod's joined sockets — of one team, or of all teams for a
+  // null `teamId` — against their team's session epoch, one tiny read per
+  // team. A read that fails is "unknown", never "revoked": the socket stays,
+  // and the next sweep tries again. A corrupt epoch row is permanent, and is
+  // treated as revoked (the HTTP routes refuse every token of that team too).
+  const sweepRevokedSockets = async (teamId = null) => {
+    const byTeam = new Map();
+    // A snapshot: the loop awaits, and the live Map changes meanwhile.
+    for (const socket of [...(io.sockets?.sockets?.values?.() ?? [])]) {
+      // A join that read the old epoch finishes first, so its socket is
+      // judged on the claims it ends up holding.
+      if (socket.data.joinInFlight) await socket.data.joinInFlight;
+      const claims = socket.data.authClaims;
+      if (!claims || !socket.sessionId || (teamId && claims.teamId !== teamId)) continue;
+      if (!byTeam.has(claims.teamId)) byTeam.set(claims.teamId, []);
+      byTeam.get(claims.teamId).push(socket);
+    }
+    for (const [tid, sockets] of byTeam) {
+      let state;
+      try {
+        state = await dataStore.loadTeamAuthState(tid);
+      } catch (err) {
+        if (!(err instanceof TeamAuthRowCorruptError)) {
+          console.warn(`[Server] Session revocation sweep: the session epoch of team ${JSON.stringify(tid)} could not be read; its sockets are checked again on the next sweep`, err);
+          continue;
+        }
+        console.error(`[Server] Session revocation sweep: ${err.message}`);
+        state = null;
+      }
+      for (const socket of sockets) {
+        // Read after the await: a re-join may have moved it, another sweep
+        // may have cut it.
+        const claims = socket.data.authClaims;
+        if (!claims || !socket.sessionId || claims.teamId !== tid) continue;
+        const verdict = state ? sessionVerdict(claims, state) : 'revoked';
+        if (verdict === 'current') {
+          socket.data.authUnverified = false;
+          continue;
+        }
+        await revokeSocket(socket, verdict === 'team_not_found' ? 'team_not_found' : SESSION_REVOKED_ERROR);
+      }
+    }
+  };
+
+  sessionRevocation.attachLocalSweeper(sweepRevokedSockets);
+
+  if (revocationSweepMs > 0) {
+    const sweepPeriodically = () => {
+      schedule(() => {
+        sweepRevokedSockets(null)
+          .catch((err) => console.warn('[Server] Periodic session revocation sweep failed', err))
+          .finally(sweepPeriodically);
+      }, revocationSweepMs);
+    };
+    sweepPeriodically();
+  }
+
   io.on('connection', (socket) => {
     // Audit H44, the socket half of the correlation id. The HTTP middleware
     // cannot help here: a socket outlives the request that upgraded it, and
@@ -444,12 +566,16 @@ const registerSocketHandlers = ({
     // already holds after login, and that token must belong to the team that
     // owns the session. Nothing (not the room membership, not one field of
     // state) happens before both checks pass.
-    const handleJoinSession = async ({ sessionId, userId, userName, sessionToken }) => {
+    const handleJoinSession = async ({ sessionId, userId, userName, sessionToken, joinId: rawJoinId }) => {
       console.log(`[Server] User ${userName} (${userId}) joining session ${sessionId}`);
+      // Decision D3b: echoed in a denial, so the client can tell the denial of
+      // an earlier join (made with a token it has since replaced) from that of
+      // its latest one. A client from before it sends none, and is sent none.
+      const joinId = typeof rawJoinId === 'string' && JOIN_ID_PATTERN.test(rawJoinId) ? rawJoinId : null;
 
-      const denyJoin = (reason) => {
-        console.warn(`[Server] Denied join for session ${sessionId} from ${userName || 'unknown'}: ${reason}`);
-        socket.emit('join-denied', { sessionId, reason });
+      const denyJoin = (reason, cause = null) => {
+        console.warn(`[Server] Denied join for session ${sessionId} from ${userName || 'unknown'}: ${reason}${cause ? ` (${cause})` : ''}`);
+        socket.emit('join-denied', { sessionId, reason, ...(cause ? { cause } : {}), ...(joinId ? { joinId } : {}) });
       };
 
       if (!sessionId || typeof sessionId !== 'string') {
@@ -459,6 +585,38 @@ const registerSocketHandlers = ({
       const claims = tokenService.validateSessionToken(sessionToken);
       if (!claims) {
         return denyJoin('unauthenticated');
+      }
+
+      // Decision D3b: a token a password rotation revoked joins nothing, and
+      // neither does one whose team was deleted. A socket presenting such a
+      // credential also leaves the session it is in: its client holds no
+      // other token, so whatever it joined with is gone too.
+      const denyRevokedJoin = async (cause) => {
+        if (socket.sessionId) {
+          socket.data.authClaims = null;
+          socket.data.authTeamId = undefined;
+          socket.data.sessionRole = undefined;
+          await leaveCurrentSession(socket);
+        }
+        denyJoin('unauthenticated', cause);
+      };
+      // A read error is accepted on the signature, flagged, and re-checked by
+      // the periodic sweep once the database answers — continuity over the
+      // guard during an outage, the 2026-10-12 precedent. A corrupt row is no
+      // outage, it is permanent: accepting on it would let every token of the
+      // team join, revoked ones included, for as long as it stays corrupt.
+      let authUnverified = false;
+      try {
+        const verdict = sessionVerdict(claims, await dataStore.loadTeamAuthState(claims.teamId));
+        if (verdict === 'revoked') return await denyRevokedJoin(SESSION_REVOKED_ERROR);
+        if (verdict === 'team_not_found') return await denyRevokedJoin('team_not_found');
+      } catch (err) {
+        if (err instanceof TeamAuthRowCorruptError) {
+          console.error(`[Server] Join refused: ${err.message}`);
+          return await denyRevokedJoin(null);
+        }
+        console.warn(`[Server] The session epoch of team ${JSON.stringify(claims.teamId)} could not be read; the join is accepted on its token's signature and checked again by the next sweep`, err);
+        authUnverified = true;
       }
 
       // Load the persisted session BEFORE joining the room: the credential has
@@ -502,6 +660,11 @@ const registerSocketHandlers = ({
       // The authenticated team, from the signed token — never from the client
       // payload. Bounds every later write on this socket to one team.
       socket.data.authTeamId = claims.teamId;
+      // Decision D3b: what the revocation sweep judges this socket by, and the
+      // join id its denial would echo.
+      socket.data.authClaims = { teamId: claims.teamId, sessionEpoch: claims.sessionEpoch ?? null, createdAt: claims.createdAt };
+      socket.data.joinId = joinId;
+      socket.data.authUnverified = authUnverified;
       // Role is per session and per claimed user; re-resolve after every join.
       socket.data.sessionRole = undefined;
 
