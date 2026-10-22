@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from '../App';
 import { dataService } from '../services/dataService';
 import { Team, User } from '../types';
@@ -96,5 +96,30 @@ describe('App: the Dashboard reuses a fresh whole-team load', () => {
     await screen.findByRole('button', { name: 'Open the retro' });
     await waitFor(() => expect(dataService.refreshFromServer).toHaveBeenCalledTimes(2));
     expect(dataService.refreshFromServer).toHaveBeenLastCalledWith({ maxAgeMs: 5000 });
+  });
+
+  // `dataService` keeps the team after App signs out (getTeam still answers
+  // it), so a refresh answered after the logout used to put the team and the
+  // user back with the view left on LOGIN: App rendered its empty shell — no
+  // login screen, no Dashboard — and saved `view: 'LOGIN'`, which the next
+  // page load restored into the same empty shell.
+  it('never brings the team back when a refresh still on its way is answered after a logout', async () => {
+    let answerRefresh: () => void = () => {};
+    vi.mocked(dataService.refreshFromServer).mockImplementationOnce(
+      () => new Promise<void>((resolve) => { answerRefresh = resolve; })
+    );
+    render(<App />);
+    await screen.findByRole('button', { name: 'Open the retro' });
+    await waitFor(() => expect(dataService.refreshFromServer).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Logout Team' }));
+    expect(await screen.findByRole('heading', { name: 'RetroGemini' })).toBeTruthy();
+    expect(localStorage.getItem('retro-open-session')).toBeNull();
+
+    await act(async () => { answerRefresh(); });
+
+    expect(screen.getByRole('heading', { name: 'RetroGemini' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Open the retro' })).toBeNull();
+    expect(localStorage.getItem('retro-open-session')).toBeNull();
   });
 });

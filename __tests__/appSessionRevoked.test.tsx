@@ -171,6 +171,43 @@ describe('App when the team password is changed (decision D3b)', () => {
     expect(screen.queryByText('Dashboard stub')).toBeNull();
   });
 
+  // The Dashboard's entry refresh can still be on its way when "Log in again"
+  // is pressed. Answered after the sign-out, it used to put the team back with
+  // the view on LOGIN: the login screen and its notice gave way to App's empty
+  // shell until the revocation signed out a second time, and in between the
+  // saved session — here another tab's, with its newer token — was rewritten
+  // with `view: 'LOGIN'`, which that tab's next reload restored into the
+  // empty shell.
+  it('keeps the login screen, its notice and the other tab\'s saved session when the Dashboard refresh is answered after "Log in again"', async () => {
+    let answerRefresh: () => void = () => {};
+    vi.mocked(dataService.refreshFromServer).mockImplementationOnce(
+      () => new Promise<void>((resolve) => { answerRefresh = resolve; })
+    );
+    saveSession('DASHBOARD', NEWER);
+    const view = render(<App />);
+    await screen.findByText('Dashboard stub');
+    await waitFor(() => expect(dataService.refreshFromServer).toHaveBeenCalledTimes(1));
+
+    act(() => markSessionRevoked());
+    fireEvent.click(screen.getByRole('button', { name: 'Log in again' }));
+    const loginHeading = await screen.findByRole('heading', { name: 'RetroGemini' });
+    const notice = screen.getByText(NOTICE);
+
+    await act(async () => { answerRefresh(); });
+
+    // The same elements: the login screen was never taken off the page.
+    expect(loginHeading.isConnected).toBe(true);
+    expect(notice.isConnected).toBe(true);
+    expect(screen.queryByText('Dashboard stub')).toBeNull();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')).toMatchObject({ view: 'DASHBOARD', sessionToken: NEWER });
+
+    // What the other tab's reload finds.
+    view.unmount();
+    clearSessionRevoked();
+    render(<App />);
+    expect(await screen.findByText('Dashboard stub')).toBeTruthy();
+  });
+
   it('shows the banner in a session, and its way out lands on the login screen with the notice', async () => {
     saveSession('SESSION', OLDER);
     render(<App />);

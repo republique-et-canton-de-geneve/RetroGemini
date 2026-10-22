@@ -362,12 +362,17 @@ const App: React.FC = () => {
       const refreshedTeam = dataService.getTeam(currentTeam.id);
       if (!refreshedTeam) return;
 
-      setCurrentTeam(refreshedTeam);
+      // A refresh updates the team that is open; it never opens one. The
+      // answer can arrive after a sign-out (Logout, or "Log in again" once the
+      // session was revoked), and dataService still holds the team then:
+      // setting it again left the view on LOGIN with a team, which renders
+      // App's empty shell and saves `view: 'LOGIN'` for the next reload.
+      setCurrentTeam((open) => (open?.id === refreshedTeam.id ? refreshedTeam : open));
 
       if (currentUser) {
         const refreshedUser = refreshedTeam.members.find(m => m.id === currentUser.id);
         if (refreshedUser) {
-          setCurrentUser(refreshedUser);
+          setCurrentUser((open) => (open?.id === refreshedUser.id ? refreshedUser : open));
         }
       }
     });
