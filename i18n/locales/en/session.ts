@@ -60,6 +60,7 @@ const session = {
   'session.column.moveRightNumbered': 'Move column {number} right',
   'session.column.addIdeaPlaceholder': 'Add an idea...',
   'session.column.reconnectingPlaceholder': 'Reconnecting… editing paused',
+  'session.column.pausedPlaceholder': 'Editing paused',
   'session.column.pressEnterToAdd': 'Press Enter to add',
   'session.column.addIdea': 'Add idea',
   'session.column.moveSelectedCardHere': 'Move selected card here',

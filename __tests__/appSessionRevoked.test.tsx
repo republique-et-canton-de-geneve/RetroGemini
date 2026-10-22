@@ -220,6 +220,10 @@ describe('App when the team password is changed (decision D3b)', () => {
     expect(screen.getByRole('alert').textContent).toContain('The team password was changed');
     // Still the retro: a participant halfway through a card can copy it.
     expect(screen.getByRole('button', { name: 'BRAINSTORM' })).toBeTruthy();
+    // Paused, and not "Reconnecting…": no reconnection is coming.
+    const idea = screen.getByPlaceholderText('Editing paused');
+    expect((idea as HTMLTextAreaElement).disabled).toBe(true);
+    expect(screen.queryByPlaceholderText('Reconnecting… editing paused')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Log in again' }));
 
     expect(await screen.findByRole('heading', { name: 'RetroGemini' })).toBeTruthy();

@@ -61,6 +61,7 @@ const session: Record<keyof typeof en, string> = {
   'session.column.moveRightNumbered': 'Déplacer la colonne {number} vers la droite',
   'session.column.addIdeaPlaceholder': 'Ajouter une idée…',
   'session.column.reconnectingPlaceholder': 'Reconnexion… modification en pause',
+  'session.column.pausedPlaceholder': 'Modification en pause',
   'session.column.pressEnterToAdd': 'Appuyez sur Entrée pour ajouter',
   'session.column.addIdea': 'Ajouter l’idée',
   'session.column.moveSelectedCardHere': 'Déplacer la carte sélectionnée ici',

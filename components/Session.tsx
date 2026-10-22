@@ -3010,7 +3010,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         } as React.CSSProperties : undefined}
                                     >
                                         <textarea
-                                            placeholder={isLive ? tr('session.column.addIdeaPlaceholder') : tr('session.column.reconnectingPlaceholder')}
+                                            placeholder={isLive
+                                                ? tr('session.column.addIdeaPlaceholder')
+                                                // Refused (a revoked token, a denied join): no reconnection is coming.
+                                                : deniedReason ? tr('session.column.pausedPlaceholder') : tr('session.column.reconnectingPlaceholder')}
                                             disabled={!isLive}
                                             className="w-full text-sm resize-none outline-hidden bg-transparent text-slate-900 auto-textarea disabled:opacity-60 disabled:cursor-not-allowed"
                                             data-brainstorm-input={col.id}

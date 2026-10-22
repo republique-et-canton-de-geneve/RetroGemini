@@ -131,7 +131,8 @@ test.describe('Session revocation on a password change', () => {
     // ---- The participant is signed out, and told why ----
     const banner = participant.getByRole('alert').filter({ hasText: 'The team password was changed' });
     await expect(banner).toBeVisible({ timeout: 10_000 });
-    await expect(participant.locator('textarea[placeholder="Add an idea..."]').first()).toBeDisabled();
+    // Paused, not "Reconnecting…": no reconnection is coming.
+    await expect(participant.locator('textarea[placeholder="Editing paused"]').first()).toBeDisabled();
     await participant.getByRole('button', { name: 'Log in again' }).click();
     await expect(
       participant.getByRole('status').filter({ hasText: 'The team password was changed, so you were signed out.' })
