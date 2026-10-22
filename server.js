@@ -4,7 +4,6 @@ import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-import rateLimit from 'express-rate-limit';
 import { createDataStore } from './server/services/dataStore.js';
 import { createLogService } from './server/services/logService.js';
 import { createMailerService } from './server/services/mailerService.js';
@@ -19,6 +18,7 @@ import { createBoundedCache } from './server/services/boundedCache.js';
 import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneResetTokens } from './server/services/security.js';
 import { createShutdownHandler } from './server/services/shutdown.js';
 import { createSecurityHeaders } from './server/services/securityHeaders.js';
+import { createJsonCompression } from './server/services/jsonCompression.js';
 import { createRequestContext } from './server/services/logContext.js';
 import { createSecurityEventLog } from './server/services/securityEvents.js';
 import { createLiveSessionPatch, createLiveSessionRename } from './server/services/liveSessionRename.js';
@@ -28,6 +28,7 @@ import { registerCoreRoutes } from './server/routes/coreRoutes.js';
 import { registerFeedbackRoutes } from './server/routes/feedbackRoutes.js';
 import { registerPasswordResetRoutes } from './server/routes/passwordResetRoutes.js';
 import { registerPublicRoutes } from './server/routes/publicRoutes.js';
+import { registerStaticRoutes } from './server/routes/staticRoutes.js';
 import { createPublicOriginResolver } from './server/services/publicOrigin.js';
 import { migrateLegacyPasswords } from './server/services/passwordMigration.js';
 import { healStoredEmails } from './server/services/emailMigration.js';
@@ -148,6 +149,14 @@ app.use(createRequestContext());
 // one uncovered, which is exactly the kind of gap this finding was about.
 app.use(createSecurityHeaders());
 
+// Gzip for JSON answers of 1 KiB and more (synthesis item 9). After the
+// security headers, which are therefore already set when an answer is
+// compressed, and compression never touches them: the CSP reaches every
+// compressed answer. Before the first route, so `/api/version` is covered.
+// It wraps `res.json` only: files, streams, Buffers and Socket.IO are never
+// touched (see the module for why a handler must not throw after answering).
+app.use(createJsonCompression());
+
 registerCoreRoutes({ app, versionService, serverRuntime });
 
 app.use(express.json({ limit: '1mb' }));
@@ -230,19 +239,11 @@ registerAiRoutes({
 
 registerSocketHandlers({ io, dataStore, sessionCache, tokenService });
 
-app.use(express.static(join(__dirname, 'dist')));
-
-const staticLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 600,
-  message: { error: 'too_many_requests', retryAfter: '1 minute' },
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
-app.get(/.*/, staticLimiter, (_req, res) => {
-  res.sendFile(join(__dirname, 'dist', 'index.html'));
-});
+// The built frontend, last: the hashed bundle precompressed and cached for a
+// year, everything else revalidated, a missing asset a text 404 that keeps the
+// CSP, and the SPA fallback (synthesis item 9, AGENTS.md → *Compression and
+// caching*). Boots without a build, as the default e2e job runs it.
+registerStaticRoutes({ app, distDir: join(__dirname, 'dist') });
 
 const PORT = process.env.PORT || 3000;
 

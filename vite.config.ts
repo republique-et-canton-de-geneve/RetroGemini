@@ -31,5 +31,8 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     minify: true,
+    // dist/.vite/manifest.json: the hashed files server.js may serve as
+    // immutable (server/routes/staticRoutes.js). Without it nothing is.
+    manifest: true,
   }
 });
