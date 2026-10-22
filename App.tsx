@@ -419,6 +419,9 @@ const App: React.FC = () => {
     if (isSessionRevoked()) react();
     return onSessionRevokedChange((revoked) => {
       if (revoked) react();
+      // Cleared while still signed in: another tab's token took over, and
+      // the reason no longer applies to this tab.
+      else if (currentTeam) setSignedOutNotice(null);
     });
   }, [currentTeam, view, signOut]);
 
