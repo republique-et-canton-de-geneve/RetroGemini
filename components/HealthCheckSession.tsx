@@ -27,7 +27,8 @@ import { getAssignableMembers } from './session/assignableMembers';
 import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessionRoster';
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import SyncStalledBanner from './session/SyncStalledBanner';
-import { SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
+import { JOIN_DENIED_REVOKED, SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
+import { isSessionLive, useSessionRevoked } from './session/useSessionRevoked';
 import LanguageSwitcher from './common/LanguageSwitcher';
 import { useTranslation } from '../i18n/I18nContext';
 import { localizeDecimal } from '../i18n/formatNumber';
@@ -37,8 +38,10 @@ import { getHealthCheckPhaseDefaultTimerSeconds, resetTimer } from '../utils/ses
 import JiraActionControl from './jira/JiraActionControl';
 import JiraBatchButton from './jira/JiraBatchButton';
 import JiraDiscoveryNote from './jira/JiraDiscoveryNote';
+import JiraParentLine from './jira/JiraParentLine';
 import { withJiraLinkFrom } from './jira/jiraLinkMerge';
 import { useJiraStatus } from './jira/useJiraStatus';
+import { avatarColorClasses } from '../utils/participantColors';
 
 interface Props {
   team: Team;
@@ -145,6 +148,10 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // this never heals on its own, so it must survive a later `connect` event.
   const [joinDeniedReason, setJoinDeniedReason] = useState<string | null>(null);
   const joinDeniedRef = useRef<string | null>(null);
+  // Decision D3b: the team's password was changed under this session (see
+  // Session.tsx; the behaviour is the shared hook's).
+  const sessionRevoked = useSessionRevoked({ isLiveRef, setIsLive, joinDeniedRef });
+  const deniedReason = sessionRevoked ? JOIN_DENIED_REVOKED : joinDeniedReason;
   const presenceBroadcasted = useRef(false);
   const sessionRef = useRef(session);
 
@@ -215,9 +222,18 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // reaches it, and the rows must not offer "Create in Jira" meanwhile
   // (finding A-6). Read in the handler, not while rendering.
   const [recordJiraLinks, setRecordJiraLinks] = useState<Map<string, JiraLink>>(() => new Map());
+  // The team's parent issues (sessionParent mode), the same way: a batch puts
+  // the one it created in the cache (`applyJiraParents`), and the next dialog
+  // and the Review step's parent line must name it.
+  // Kept with the record it was read beside, so a newer team record (a
+  // reload) is not hidden behind an older read.
+  const [readJiraParents, setReadJiraParents] = useState<{ base: Team['jiraParents']; read: Team['jiraParents'] } | null>(null);
+  const recordJiraParents = readJiraParents && readJiraParents.base === team.jiraParents ? readJiraParents.read : team.jiraParents;
   const readRecordJiraLinks = () => {
-    const stored = dataService.getTeam(team.id)?.healthChecks?.find(h => h.id === sessionId)?.actions ?? [];
+    const cached = dataService.getTeam(team.id);
+    const stored = cached?.healthChecks?.find(h => h.id === sessionId)?.actions ?? [];
     setRecordJiraLinks(new Map(stored.filter(a => a?.jira).map(a => [a.id, a.jira as JiraLink])));
+    setReadJiraParents({ base: team.jiraParents, read: cached?.jiraParents ?? team.jiraParents });
   };
 
   // Get participants
@@ -415,7 +431,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         extendOwnChanges(ownChangesRef.current, Date.now() - offlineSinceRef.current);
         offlineSinceRef.current = null;
       }
-      const live = connected && joinDeniedRef.current === null;
+      const live = isSessionLive(connected, joinDeniedRef.current);
       isLiveRef.current = live;
       setIsLive(live);
     });
@@ -869,7 +885,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         {/* Real-time sync indicator. As in the retro header, the reassuring
             "live" chip steps aside on the narrowest phones; a lost connection,
             a refused join or a stalled sync always shows (the chip decides). */}
-        <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
+        <SessionSyncChip isLive={isLive} joinDeniedReason={deniedReason} />
 
         {/* Participant progress - shown when panel is collapsed or on smaller screens */}
         {(participantsPanelCollapsed || window.innerWidth < 1024) && (
@@ -914,7 +930,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           <span className="text-[10px] font-bold text-slate-500 uppercase">{t('healthCheck.header.user')}</span>
           <span className="max-w-32 truncate text-sm font-bold text-slate-700" title={currentUser.name}>{currentUser.name}</span>
         </div>
-        <div className={`w-8 h-8 shrink-0 rounded-full ${currentUser.color} text-white hidden sm:flex items-center justify-center text-xs font-bold shadow-md`}>
+        <div className={`w-8 h-8 shrink-0 rounded-full ${avatarColorClasses(currentUser.color)} hidden sm:flex items-center justify-center text-xs font-bold shadow-md`}>
           {currentUser.name.substring(0, 2).toUpperCase()}
         </div>
       </div>
@@ -1417,6 +1433,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
   // Render Review Phase
   const renderReview = () => {
+    // The team the Jira dialog previews from, with the parent issues as the
+    // cache last held them.
+    const jiraTeam = recordJiraParents === team.jiraParents ? team : { ...team, jiraParents: recordJiraParents };
     const newActions = session.actions
       .filter(a => a.type === 'new')
       .map(a => withJiraLinkFrom(a, recordJiraLinks.get(a.id)));
@@ -1458,11 +1477,23 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   isFacilitator={isFacilitator}
                   sessionId={session.id}
                   kind="healthcheck"
-                  team={team}
+                  team={jiraTeam}
                   session={session}
                   requestedBy={currentUser.name}
                   onDone={readRecordJiraLinks}
                   onStatusStale={() => { void refreshJiraStatus(); }}
+                />
+              </div>
+
+              {/* The health check's parent issue (sessionParent mode), for the facilitator. */}
+              <div className="border-b border-slate-200 px-4 py-2 empty:hidden">
+                <JiraParentLine
+                  link={recordJiraParents?.[`healthcheck:${session.id}`]}
+                  status={jiraStatus}
+                  isFacilitator={isFacilitator}
+                  kind="healthcheck"
+                  session={session}
+                  team={jiraTeam}
                 />
               </div>
 
@@ -1508,6 +1539,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                 sessionId={session.id}
                                 kind="healthcheck"
                                 requestedBy={currentUser.name}
+                                team={jiraTeam}
+                                session={session}
                                 onCreated={readRecordJiraLinks}
                                 onStatusStale={() => { void refreshJiraStatus(); }}
                               />
@@ -1669,7 +1702,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       {renderHeader()}
       <SessionConnectionBanner
         isLive={isLive}
-        joinDeniedReason={joinDeniedReason}
+        joinDeniedReason={deniedReason}
         onReturnToLogin={onSessionExpired ?? onExit}
       />
       <SyncStalledBanner />

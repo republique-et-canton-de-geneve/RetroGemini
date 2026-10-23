@@ -10,13 +10,16 @@ import { normalizeJiraLabels, validateJiraTarget } from '../../utils/jira.js';
  *
  * Both keys are kept while the mode changes, so switching modes back and forth
  * does not lose what was typed; the target built from the draft carries only
- * the key of its mode.
+ * the key of its mode. `project` and `sessionParent` share the project key.
  */
 export interface JiraTargetDraft {
-  mode: 'project' | 'parent';
+  mode: 'project' | 'parent' | 'sessionParent';
   projectKey: string;
   parentKey: string;
+  /** The type of each action's issue: a sub-task type in `parent` and `sessionParent` modes. */
   issueTypeId: string;
+  /** `sessionParent` only: the standard type of the issue created per retrospective or health check. */
+  parentIssueTypeId: string;
   /** As typed: labels separated by spaces or commas. */
   labels: string;
 }
@@ -26,13 +29,15 @@ export const DEFAULT_JIRA_LABELS = 'retrospective';
 
 export const draftFromTarget = (target: JiraTarget | null | undefined): JiraTargetDraft => {
   if (!target) {
-    return { mode: 'project', projectKey: '', parentKey: '', issueTypeId: '', labels: DEFAULT_JIRA_LABELS };
+    return { mode: 'project', projectKey: '', parentKey: '', issueTypeId: '', parentIssueTypeId: '', labels: DEFAULT_JIRA_LABELS };
   }
   return {
-    mode: target.mode === 'parent' ? 'parent' : 'project',
+    // A mode this release does not know reads as a project, as before.
+    mode: target.mode === 'parent' || target.mode === 'sessionParent' ? target.mode : 'project',
     projectKey: target.projectKey ?? '',
     parentKey: target.parentKey ?? '',
     issueTypeId: target.issueTypeId ?? '',
+    parentIssueTypeId: target.parentIssueTypeId ?? '',
     labels: Array.isArray(target.labels) ? target.labels.join(' ') : ''
   };
 };
@@ -52,6 +57,7 @@ export const targetFromDraft = (draft: JiraTargetDraft): JiraTargetFromDraft => 
   return validateJiraTarget({
     mode: draft.mode,
     ...key,
+    ...(draft.mode === 'sessionParent' ? { parentIssueTypeId: draft.parentIssueTypeId } : {}),
     issueTypeId: draft.issueTypeId,
     labels: splitJiraLabels(draft.labels)
   }) as JiraTargetFromDraft;
@@ -59,7 +65,8 @@ export const targetFromDraft = (draft: JiraTargetDraft): JiraTargetFromDraft => 
 
 /**
  * Whether two targets are the same once validated as the server stores them:
- * the key of the other mode is ignored, labels compare in order.
+ * the key of the other mode is ignored (and so is the parent issue's type
+ * outside `sessionParent`), labels compare in order.
  */
 export const sameJiraTarget = (a: JiraTarget | null | undefined, b: JiraTarget | null | undefined): boolean => {
   const left = validateJiraTarget(a);
@@ -70,6 +77,7 @@ export const sameJiraTarget = (a: JiraTarget | null | undefined, b: JiraTarget |
   return x.mode === y.mode
     && x.projectKey === y.projectKey
     && x.parentKey === y.parentKey
+    && x.parentIssueTypeId === y.parentIssueTypeId
     && x.issueTypeId === y.issueTypeId
     && x.labels.length === y.labels.length
     && x.labels.every((label, index) => label === y.labels[index]);

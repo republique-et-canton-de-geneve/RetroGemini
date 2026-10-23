@@ -3,6 +3,7 @@ import express from 'express';
 import type { AddressInfo } from 'net';
 import { createTeamService } from '../server/services/teamService.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * `teamRoutes.js` is the lowest-covered route in the gate (75.9% statements,
@@ -51,6 +52,8 @@ const createMockDataStore = () => {
     control,
     loadTeam: async (teamId: string) => teams.get(teamId) || null,
     teamExists: async (teamId: string) => teams.has(teamId),
+    // Decision D3b: the session epoch every token check reads.
+    loadTeamAuthState: createTeamAuthStateDouble((teamId) => teams.has(teamId)).loadTeamAuthState,
     loadTeamRaw: async (teamId: string) => teams.get(teamId) || null,
     saveTeam: async (teamId: string, teamData: Team) => {
       teams.set(teamId, { ...teamData });
@@ -262,9 +265,11 @@ describe('teamRoutes granular persist: failure paths and rev guards', () => {
       });
 
       expect(res.status).toBe(500);
-      // The success shape of this route is `{ team }`, so a caller that only
-      // checks `response.ok` would render a roster that was never persisted.
-      expect((await res.json()).team).toBeUndefined();
+      // The success shape of this route is `{ success: true }`: a failed write
+      // must carry neither it nor a team, so no caller can read it as stored.
+      const body = await res.json();
+      expect(body.success).toBeUndefined();
+      expect(body.team).toBeUndefined();
       // Creation seeds the facilitator, so the roster is not empty to begin
       // with — what must be absent is the member this failed write carried.
       const names = (stored(teamId).members as unknown as { name: string }[]).map((m) => m.name);

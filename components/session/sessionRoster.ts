@@ -1,4 +1,5 @@
 import type { User } from '../../types';
+import { PARTICIPANT_PALETTE } from '../../utils/participantColors';
 
 /**
  * Folding the server's live roster (`member-roster`) into a session's
@@ -13,17 +14,8 @@ import type { User } from '../../types';
  * writes then had to win. A roster that changes nothing now writes nothing.
  */
 
-/** Fallback colours for a participant the team record does not know. */
-export const PARTICIPANT_COLOR_POOL = [
-  'bg-indigo-500',
-  'bg-emerald-500',
-  'bg-amber-500',
-  'bg-rose-500',
-  'bg-cyan-500',
-  'bg-fuchsia-500',
-  'bg-lime-500',
-  'bg-pink-500',
-] as const;
+/** Fallback colours for a participant the team record does not know: the one palette. */
+export const PARTICIPANT_COLOR_POOL = PARTICIPANT_PALETTE;
 
 export interface RosterEntry {
   id: string;

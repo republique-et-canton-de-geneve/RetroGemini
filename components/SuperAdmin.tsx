@@ -4,19 +4,22 @@ import {
   isPasswordLongEnough
 } from '../utils/passwordPolicy.js';
 import { INVALID_EMAIL_ERROR, parseEmailInput } from '../utils/emailAddress.js';
-import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry, AiSettings } from '../types';
+import { Team, TeamFeedback, ActiveSession, ServerLogEntry, BackupEntry, BackupLimits, AiSettings } from '../types';
 import ModalDialog from './common/ModalDialog';
 import JiraSettingsCard from './admin/JiraSettingsCard';
 import LanguageSwitcher from './common/LanguageSwitcher';
 import ImageGallery from './common/ImageGallery';
 import { useTranslation } from '../i18n/I18nContext';
 import { Notice, NoticeError, noticeFromError, noticeText } from '../i18n/notice';
-import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
 import { commentAuthorName } from '../utils/feedbackCommentAuthor';
 import TeamMergeDialog from './admin/TeamMergeDialog';
 import TeamDeleteDialog, { MergeTarget } from './admin/TeamDeleteDialog';
 import TeamRestoreDialog from './admin/TeamRestoreDialog';
+import BackupImportCard from './admin/BackupImportCard';
+import type { ListReload } from './admin/backupImportApi';
+import { sizeRefusalNotice } from './admin/backupImportApi';
+import { formatBackupSize, megabytesText, withLocalizedMax } from './admin/backupFormat';
 
 // Codes the server stores and the console shows: named in the reader's
 // language, and shown as they came when this build does not know them.
@@ -34,7 +37,8 @@ const LOG_SOURCE_KEYS: Record<string, MessageKey> = {
 const BACKUP_TYPE_KEYS: Record<string, MessageKey> = {
   auto: 'adminBackups.type.auto',
   manual: 'adminBackups.type.manual',
-  startup: 'adminBackups.type.startup'
+  startup: 'adminBackups.type.startup',
+  imported: 'adminBackups.type.imported'
 };
 const SESSION_STATUS_KEYS: Record<string, MessageKey> = {
   IN_PROGRESS: 'adminLive.statusValue.IN_PROGRESS',
@@ -74,6 +78,17 @@ const SERVER_BACKUP_LABEL_KEYS: Record<string, Record<string, MessageKey>> = {
 // deleted. The response is left as it is, so a console and a pod of different
 // releases agree during a rolling update.
 const LIVE_PLACEHOLDER = { team: 'Unknown', session: 'Unknown Session', phase: 'Unknown' } as const;
+
+// The upload limits a pod from 41.0 on reports with the list; anything else
+// (an older pod, a malformed answer) reads as unknown, and the server alone
+// then judges a file's size.
+const readBackupLimits = (value: unknown): BackupLimits | null => {
+  if (!value || typeof value !== 'object') return null;
+  const { maxArchiveBytes, maxUnpackedBytes } = value as Record<string, unknown>;
+  return typeof maxArchiveBytes === 'number' && typeof maxUnpackedBytes === 'number'
+    ? { maxArchiveBytes, maxUnpackedBytes }
+    : null;
+};
 
 const keyFor = (keys: Record<string, MessageKey>, code: string): MessageKey | null =>
   Object.prototype.hasOwnProperty.call(keys, code) ? keys[code] : null;
@@ -138,6 +153,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   // Live sessions monitoring
   const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
+  // The last poll got no list. Shown instead of the empty state, which says
+  // it is safe to deploy: an unanswered poll does not know that.
+  const [liveLoadFailed, setLiveLoadFailed] = useState(false);
   const liveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveLoadingRef = useRef(false);
   const sessionTokenRef = useRef(sessionToken);
@@ -152,8 +170,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [backups, setBackups] = useState<BackupEntry[]>([]);
   const [backupsLoading, setBackupsLoading] = useState(false);
   const [backupConfig, setBackupConfig] = useState<{
-    enabled: boolean; intervalHours: number; maxCount: number; backupDir: string; onStartup: boolean;
+    enabled: boolean; intervalHours: number; maxCount: number; onStartup: boolean;
   } | null>(null);
+  // What the server accepts, for the import card's check and its messages.
+  const [backupLimits, setBackupLimits] = useState<BackupLimits | null>(null);
+  // The second read of the list after an import whose answer was lost.
+  const backupReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [checkpointLabel, setCheckpointLabel] = useState('');
   const [backupCreating, setBackupCreating] = useState(false);
   const [backupRestoring, setBackupRestoring] = useState<string | null>(null);
@@ -166,6 +188,17 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     return data?.retryAfter
       ? { key: 'login.superAdmin.tooManyAttemptsRetryIn', params: { retryAfter: String(data.retryAfter) } }
       : { key: 'login.superAdmin.tooManyAttemptsLater' };
+  };
+
+  // Both whole-store restores take a protected snapshot first and answer
+  // `503 pre_restore_snapshot_failed`, with nothing written, when it cannot be
+  // made: a team record the backup cannot read (every backup fails until the
+  // row is repaired, k8s/README.md), or a backup already running. A gateway's
+  // own 503 page carries no such code and keeps the generic message.
+  const isSnapshotRefusal = async (response: Response): Promise<boolean> => {
+    if (response.status !== 503) return false;
+    const data = await response.json().catch(() => null);
+    return data?.error === 'pre_restore_snapshot_failed';
   };
 
   // The address routes answer `400 invalid_email` for anything that is not one
@@ -183,6 +216,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     loadInfoMessage();
     loadAdminEmail();
     loadAiSettings();
+  }, []);
+
+  useEffect(() => () => {
+    if (backupReloadTimerRef.current) clearTimeout(backupReloadTimerRef.current);
   }, []);
 
   // Handle tab changes for live refresh
@@ -461,9 +498,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       if (response.ok) {
         const data = await response.json();
         setActiveSessions(data.sessions || []);
+        setLiveLoadFailed(false);
+      } else {
+        setActiveSessions([]);
+        setLiveLoadFailed(true);
       }
     } catch (err) {
       console.error('Failed to load active sessions', err);
+      setActiveSessions([]);
+      setLiveLoadFailed(true);
     } finally {
       liveLoadingRef.current = false;
     }
@@ -522,6 +565,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         const data = await response.json();
         setBackups(data.backups || []);
         setBackupConfig(data.config || null);
+        setBackupLimits(readBackupLimits(data.limits));
       }
     } catch (err) {
       console.error('Failed to load backups', err);
@@ -572,9 +616,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
+      // In the document while it is clicked, and the URL revoked only once the
+      // download has started: revoking it in the same task is the classic
+      // flake of blob downloads.
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch {
       setError({ key: 'admin.notice.downloadBackupFailed' });
     }
   };
@@ -596,6 +645,21 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         if (response.status === 401) throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         // One restore at a time (`server/services/restoreGate.js`).
         if (response.status === 409) throw new NoticeError({ key: 'adminBackups.notice.restoreInProgress' });
+        // Answered before anything is written: the backup is gone, or its
+        // content is not an archive this server can restore.
+        if (response.status === 404) {
+          // Deleted in another tab, or pruned by retention: the list is read
+          // again so the row the message calls gone leaves with its buttons.
+          void loadBackups();
+          throw new NoticeError({ key: 'adminBackups.teamRestore.error.backupNotFound' });
+        }
+        if (response.status === 422) throw new NoticeError({ key: 'adminBackups.notice.restoreInvalid' });
+        if (response.status === 413) {
+          throw new NoticeError(backupLimits
+            ? { key: 'adminBackups.import.error.tooLargeUnpacked', params: { max: megabytesText(backupLimits.maxUnpackedBytes) } }
+            : { key: 'adminBackups.notice.restoreInvalid' });
+        }
+        if (await isSnapshotRefusal(response)) throw new NoticeError({ key: 'adminBackups.teamRestore.error.snapshotFailed' });
         throw new NoticeError({ key: 'adminBackups.notice.restoreFailed' });
       }
       setSuccessMessage({ key: 'adminBackups.notice.restored' });
@@ -621,6 +685,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         setSuccessMessage({ key: 'adminBackups.notice.deleted' });
         setTimeout(() => setSuccessMessage(null), 3000);
         loadBackups();
+      } else if (response.status === 404) {
+        // Already deleted (another tab, retention): what the click wanted.
+        // The list is read again so the row leaves.
+        void loadBackups();
       }
     } catch (err) {
       setError({ key: 'adminBackups.notice.deleteFailed' });
@@ -642,12 +710,27 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     }
   };
 
-  const formatBackupSize = (bytes: number) => {
-    if (bytes < 1024) return t('adminBackups.size.bytes', { size: bytes });
-    if (bytes < 1024 * 1024) {
-      return t('adminBackups.size.kilobytes', { size: localizeDecimal((bytes / 1024).toFixed(1), locale) });
-    }
-    return t('adminBackups.size.megabytes', { size: localizeDecimal((bytes / (1024 * 1024)).toFixed(1), locale) });
+  // After an import that did not say "done": the row may be there, or still
+  // landing behind a gateway that gave up first, so the list is read now and,
+  // for a lost answer, once more 20 s later — one pending second read at most.
+  const reloadBackupsAfterImport = (when: ListReload) => {
+    void loadBackups();
+    if (when !== 'now-and-later') return;
+    if (backupReloadTimerRef.current) clearTimeout(backupReloadTimerRef.current);
+    backupReloadTimerRef.current = setTimeout(() => {
+      backupReloadTimerRef.current = null;
+      void loadBackups();
+    }, 20_000);
+  };
+
+  // The import card says it was imported, next to the control used: no page
+  // banner, and a stale one from an earlier action must not sit above it. The
+  // team-restore dialog then opens on the new row, unless it holds no team.
+  const handleBackupImported = (backup: BackupEntry) => {
+    setError(null);
+    setSuccessMessage(null);
+    void loadBackups();
+    if (backup.teamCount > 0) setTeamRestoreBackup(backup);
   };
 
   // A label the server wrote reads in the interface language; one the operator
@@ -1040,7 +1123,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
         if (response.status === 404) {
-          throw new NoticeError({ key: 'admin.data.directoryNotFound' });
+          throw new NoticeError({ key: 'admin.data.downloadUnavailable' });
         }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
@@ -1051,7 +1134,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
       const blob = await response.blob();
       const headerFilename = extractFilenameFromHeader(response.headers.get('Content-Disposition'));
-      const fallbackFilename = `retrogemini-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.tar.gz`;
+      const fallbackFilename = `retrogemini-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json.gz`;
       const filename = headerFilename || fallbackFilename;
 
       const url = window.URL.createObjectURL(blob);
@@ -1061,7 +1144,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       document.body.appendChild(link);
       link.click();
       link.remove();
-      window.URL.revokeObjectURL(url);
+      setTimeout(() => window.URL.revokeObjectURL(url), 0);
 
       setSuccessMessage({ key: 'admin.data.downloaded' });
       setTimeout(() => setSuccessMessage(null), 3000);
@@ -1087,7 +1170,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
       const response = await fetch('/api/super-admin/restore', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/gzip',
+          // Octet-stream, not gzip: a plain JSON archive must not be labelled
+          // gzip, and the server sniffs the gzip magic either way.
+          'Content-Type': 'application/octet-stream',
           'x-super-admin-session-token': sessionToken
         },
         body: restoreFile
@@ -1097,11 +1182,18 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         if (response.status === 401) {
           throw new NoticeError({ key: 'admin.notice.sessionExpired' });
         }
+        if (response.status === 413) {
+          // The server's own limit (JSON), or a proxy's page in front of it.
+          const body = await response.json().catch(() => null);
+          const notice = sizeRefusalNotice(body && typeof body === 'object' ? body : null, backupLimits);
+          if (notice) throw new NoticeError(notice);
+        }
         const rateLimitMessage = await getRateLimitMessage(response);
         if (rateLimitMessage) {
           throw new NoticeError(rateLimitMessage);
         }
         if (response.status === 409) throw new NoticeError({ key: 'adminBackups.notice.restoreInProgress' });
+        if (await isSnapshotRefusal(response)) throw new NoticeError({ key: 'adminBackups.teamRestore.error.snapshotFailed' });
         throw new NoticeError({ key: 'admin.data.restoreFailed' });
       }
 
@@ -1249,6 +1341,11 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const livePhase = (session: ActiveSession) =>
     session.phase === LIVE_PLACEHOLDER.phase ? t('adminLive.unknownPhase') : codeLabel(PHASE_KEYS, session.phase);
 
+  // Contrast is decided by the surface a token lands on (audit H42): muted
+  // text is `text-slate-500` on the white cards (4.77:1) and `text-slate-600`
+  // on this grey page and on tinted panels, where slate-500 measures 4.35:1.
+  // No dark surface here carries muted text. The whole page is audited per tab
+  // by e2e/admin-console-accessibility.spec.ts.
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
@@ -1262,7 +1359,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <span className="material-symbols-outlined mr-3 text-red-600">shield_person</span>
               {t('admin.header.title')}
             </h1>
-            <p className="text-slate-500 text-sm mt-1">{t('admin.header.subtitle')}</p>
+            <p className="text-slate-600 text-sm mt-1">{t('admin.header.subtitle')}</p>
           </div>
           <div className="flex items-center gap-3 ml-auto">
             <LanguageSwitcher className="shrink-0" />
@@ -1277,9 +1374,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         </div>
 
         {error && (
-          <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-4 flex items-center">
+          <div className="bg-red-50 text-red-700 p-4 rounded-lg mb-4 flex items-center">
             <span className="material-symbols-outlined mr-2">error</span>
-            {noticeText(error, t)}
+            {noticeText(withLocalizedMax(error, locale), t)}
           </div>
         )}
 
@@ -1325,7 +1422,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                     infoMessageSaving
                       ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                      : 'bg-amber-500 text-white hover:bg-amber-600'
+                      : 'bg-amber-700 text-white hover:bg-amber-800'
                   }`}
                 >
                   <span className="material-symbols-outlined text-base">
@@ -1375,7 +1472,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                     adminEmailSaving
                       ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                      : 'bg-green-600 text-white hover:bg-green-700'
+                      : 'bg-green-700 text-white hover:bg-green-800'
                   }`}
                 >
                   <span className="material-symbols-outlined text-base">
@@ -1456,7 +1553,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {aiEnabled && (
               <div className="flex flex-col gap-3 border-t border-slate-200 pt-4">
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="ai-api-url" className="text-sm font-medium text-slate-700">{t('admin.ai.apiUrlLabel')} <span className="text-red-400">*</span></label>
+                  <label htmlFor="ai-api-url" className="text-sm font-medium text-slate-700">{t('admin.ai.apiUrlLabel')} <span className="text-red-700">*</span></label>
                   <input
                     id="ai-api-url"
                     type="url"
@@ -1575,7 +1672,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 {t('admin.data.title')}
               </h2>
               <p className="text-sm text-slate-500 mt-1">
-                {tRich('admin.data.description', { folder: <code className="text-slate-700">/data</code> })}
+                {t('admin.data.description')}
               </p>
             </div>
             <button
@@ -1603,31 +1700,40 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </h3>
                 <p className="text-sm text-slate-500 mt-1">
                   {tRich('admin.data.restoreDescription', {
-                    extension: <code className="text-slate-700">.tar.gz</code>,
-                    folder: <code className="text-slate-700">/data</code>
+                    extension: <code className="text-slate-700">.json.gz</code>
                   })}
                 </p>
               </div>
               <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 text-sm">
                 {tRich('admin.data.restoreWarning', { warning: <strong>{t('admin.data.restoreWarningLabel')}</strong> })}
               </div>
-              <div className="flex flex-col gap-3 md:flex-row md:items-center">
-                <input
-                  type="file"
-                  accept=".tar.gz,application/gzip"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0] ?? null;
-                    setRestoreFile(file);
-                  }}
-                  className="flex-1 text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
-                />
+              <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                <div className="flex-1 min-w-0">
+                  {/* Not "Backup file": the Backups tab's import field has that
+                      name, and two same-named file inputs on one page, one of
+                      them a whole-store replace, are indistinguishable in a
+                      screen reader's list of form fields. */}
+                  <label htmlFor="admin-restore-file" className="block text-sm font-medium text-slate-700 mb-1">
+                    {t('admin.data.fileLabel')}
+                  </label>
+                  <input
+                    id="admin-restore-file"
+                    type="file"
+                    accept=".gz,.json,application/gzip,application/json"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null;
+                      setRestoreFile(file);
+                    }}
+                    className="w-full text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                  />
+                </div>
                 <button
                   onClick={handleRestoreBackup}
                   disabled={restoreUploading || !restoreFile}
                   className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                     restoreUploading || !restoreFile
                       ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                      : 'bg-amber-500 text-white hover:bg-amber-600'
+                      : 'bg-amber-700 text-white hover:bg-amber-800'
                   }`}
                 >
                   <span className="material-symbols-outlined text-base">
@@ -1647,7 +1753,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             className={`px-6 py-3 font-bold text-sm flex items-center transition ${
               tab === 'TEAMS'
                 ? 'border-b-2 border-indigo-600 text-indigo-600'
-                : 'text-slate-500 hover:text-indigo-600'
+                : 'text-slate-600 hover:text-indigo-600'
             }`}
           >
             <span className="material-symbols-outlined mr-2">groups</span>
@@ -1658,13 +1764,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             className={`px-6 py-3 font-bold text-sm flex items-center transition relative ${
               tab === 'FEEDBACKS'
                 ? 'border-b-2 border-indigo-600 text-indigo-600'
-                : 'text-slate-500 hover:text-indigo-600'
+                : 'text-slate-600 hover:text-indigo-600'
             }`}
           >
             <span className="material-symbols-outlined mr-2">feedback</span>
             {t('admin.tabs.feedbacks', { count: feedbacks.length })}
             {unreadCount > 0 && (
-              <span className="ml-2 bg-red-500 text-white text-xs rounded-full px-2 py-0.5">
+              <span className="ml-2 bg-red-600 text-white text-xs rounded-full px-2 py-0.5">
                 {unreadCount}
               </span>
             )}
@@ -1673,14 +1779,16 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             onClick={() => setTab('LIVE')}
             className={`px-6 py-3 font-bold text-sm flex items-center transition ${
               tab === 'LIVE'
-                ? 'border-b-2 border-green-600 text-green-600'
-                : 'text-slate-500 hover:text-green-600'
+                ? 'border-b-2 border-green-800 text-green-800'
+                : 'text-slate-600 hover:text-green-800'
             }`}
           >
             <span className="material-symbols-outlined mr-2">stream</span>
             {t('admin.tabs.live')}
+            {/* No pulse: an opacity animation is measured at a random moment,
+                and a count that moves forever is a WCAG 2.2.2 concern. */}
             {activeSessions.length > 0 && (
-              <span className="ml-2 bg-green-500 text-white text-xs rounded-full px-2 py-0.5 animate-pulse">
+              <span className="ml-2 bg-green-700 text-white text-xs rounded-full px-2 py-0.5">
                 {activeSessions.length}
               </span>
             )}
@@ -1689,14 +1797,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             onClick={() => setTab('LOGS')}
             className={`px-6 py-3 font-bold text-sm flex items-center transition ${
               tab === 'LOGS'
-                ? 'border-b-2 border-orange-600 text-orange-600'
-                : 'text-slate-500 hover:text-orange-600'
+                ? 'border-b-2 border-orange-700 text-orange-700'
+                : 'text-slate-600 hover:text-orange-700'
             }`}
           >
             <span className="material-symbols-outlined mr-2">terminal</span>
             {t('admin.tabs.logs')}
             {serverLogs.filter(l => l.level === 'error').length > 0 && (
-              <span className="ml-2 bg-red-500 text-white text-xs rounded-full px-2 py-0.5">
+              <span className="ml-2 bg-red-600 text-white text-xs rounded-full px-2 py-0.5">
                 {serverLogs.filter(l => l.level === 'error').length}
               </span>
             )}
@@ -1705,8 +1813,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             onClick={() => setTab('BACKUPS')}
             className={`px-6 py-3 font-bold text-sm flex items-center transition ${
               tab === 'BACKUPS'
-                ? 'border-b-2 border-teal-600 text-teal-600'
-                : 'text-slate-500 hover:text-teal-600'
+                ? 'border-b-2 border-teal-700 text-teal-700'
+                : 'text-slate-600 hover:text-teal-700'
             }`}
           >
             <span className="material-symbols-outlined mr-2">backup</span>
@@ -1722,7 +1830,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         {loading && tab === 'TEAMS' ? (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-            <p className="text-slate-500 mt-4">{t('adminTeams.loading')}</p>
+            <p className="text-slate-600 mt-4">{t('adminTeams.loading')}</p>
           </div>
         ) : tab === 'TEAMS' ? (
           <div className="bg-white rounded-xl shadow-lg overflow-hidden">
@@ -1791,13 +1899,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             />
                             <button
                               onClick={() => handleRenameTeam(team.id)}
-                              className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
+                              className="bg-green-700 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-800"
                             >
                               {t('common.save')}
                             </button>
                             <button
                               onClick={cancelEdit}
-                              className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
+                              className="bg-slate-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-700"
                             >
                               {t('common.cancel')}
                             </button>
@@ -1842,13 +1950,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             />
                             <button
                               onClick={() => handleUpdateEmail(team.id)}
-                              className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
+                              className="bg-green-700 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-800"
                             >
                               {t('common.save')}
                             </button>
                             <button
                               onClick={cancelEdit}
-                              className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
+                              className="bg-slate-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-700"
                             >
                               {t('common.cancel')}
                             </button>
@@ -1883,13 +1991,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               />
                               <button
                                 onClick={() => handleUpdatePassword(team.id)}
-                                className="bg-green-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-700"
+                                className="bg-green-700 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-800"
                               >
                                 {t('common.save')}
                               </button>
                               <button
                                 onClick={cancelEdit}
-                                className="bg-slate-400 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-500"
+                                className="bg-slate-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-700"
                               >
                                 {t('common.cancel')}
                               </button>
@@ -1905,7 +2013,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               </button>
                               <button
                                 onClick={() => startEditPassword(team)}
-                                className="text-amber-600 hover:text-amber-800 px-3 py-1 rounded-sm border border-amber-600 hover:bg-amber-50 text-sm font-medium"
+                                className="text-amber-700 hover:text-amber-800 px-3 py-1 rounded-sm border border-amber-700 hover:bg-amber-50 text-sm font-medium"
                                 title={t('adminTeams.changePasswordTitle')}
                               >
                                 {t('adminTeams.changePassword')}
@@ -1994,7 +2102,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
             {/* Status Filters */}
             <div className="mb-6 flex gap-2 flex-wrap items-center">
-              <span className="text-sm text-slate-500 mr-2">{t('adminFeedbacks.filter.statusLabel')}</span>
+              <span className="text-sm text-slate-600 mr-2">{t('adminFeedbacks.filter.statusLabel')}</span>
               {(['all', 'pending', 'in_progress', 'resolved', 'rejected'] as const).map((status) => (
                 <button
                   key={status}
@@ -2066,12 +2174,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{commentAuthorName(comment, t)}</span>
                               {!comment.isAdmin && (
                                 <>
-                                  <span className="text-slate-500"> · </span>
-                                  <span className="text-slate-500">{comment.teamName}</span>
+                                  <span className="text-slate-600"> · </span>
+                                  <span className="text-slate-600">{comment.teamName}</span>
                                 </>
                               )}
-                              <span className="text-slate-500"> · </span>
-                              <span className="text-slate-500">{formatDate(comment.createdAt)}</span>
+                              <span className="text-slate-600"> · </span>
+                              <span className="text-slate-600">{formatDate(comment.createdAt)}</span>
                             </div>
                             <p className={`text-sm mt-1 ${comment.isAdmin ? 'text-amber-700' : 'text-slate-700'}`}>{comment.content}</p>
                           </div>
@@ -2134,14 +2242,20 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </div>
               <button
                 onClick={loadActiveSessions}
-                className="px-3 py-1.5 bg-green-100 text-green-700 rounded-sm text-sm font-medium hover:bg-green-200 flex items-center gap-1"
+                className="px-3 py-1.5 bg-green-100 text-green-800 rounded-sm text-sm font-medium hover:bg-green-200 flex items-center gap-1"
               >
                 <span className="material-symbols-outlined text-base">refresh</span>
                 {t('admin.refresh')}
               </button>
             </div>
 
-            {activeSessions.length === 0 ? (
+            {liveLoadFailed ? (
+              <div role="alert" className="bg-white rounded-xl shadow-sm p-12 text-center">
+                <span className="material-symbols-outlined text-6xl mb-4 text-amber-600" aria-hidden="true">warning</span>
+                <p className="text-slate-700 text-lg">{t('adminLive.loadFailed')}</p>
+                <p className="text-slate-600 text-sm mt-2">{t('adminLive.loadFailedHint')}</p>
+              </div>
+            ) : activeSessions.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm p-12 text-center">
                 <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">cloud_off</span>
                 <p className="text-slate-500 text-lg">{t('adminLive.empty')}</p>
@@ -2185,8 +2299,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                           }`}>
                             {session.type === 'healthcheck' ? t('adminLive.type.healthcheck') : t('adminLive.type.retrospective')}
                           </span>
-                          <span className="flex items-center gap-1 text-green-600">
-                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                          <span className="flex items-center gap-1 text-green-700">
+                            <span className="w-2 h-2 rounded-full bg-green-500 motion-safe:animate-pulse"></span>
                             <span className="text-xs font-medium">{t('adminLive.live')}</span>
                           </span>
                         </div>
@@ -2196,7 +2310,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       <div className="text-right">
                         <div className="bg-slate-100 rounded-lg px-3 py-2">
                           <p className="text-2xl font-bold text-slate-800">{session.connectedCount}</p>
-                          <p className="text-xs text-slate-500">{t('adminLive.connected')}</p>
+                          <p className="text-xs text-slate-600">{t('adminLive.connected')}</p>
                         </div>
                       </div>
                     </div>
@@ -2250,7 +2364,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <div className="flex gap-2">
                 <button
                   onClick={loadServerLogs}
-                  className="px-3 py-1.5 bg-orange-100 text-orange-700 rounded-sm text-sm font-medium hover:bg-orange-200 flex items-center gap-1"
+                  className="px-3 py-1.5 bg-orange-100 text-orange-800 rounded-sm text-sm font-medium hover:bg-orange-200 flex items-center gap-1"
                 >
                   <span className="material-symbols-outlined text-base">refresh</span>
                   {t('admin.refresh')}
@@ -2335,7 +2449,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             log.level === 'error' ? 'bg-red-50' : log.level === 'warn' ? 'bg-amber-50' : ''
                           }`}
                         >
-                          <td className="p-3 text-slate-500 font-mono text-xs whitespace-nowrap">
+                          <td className="p-3 text-slate-600 font-mono text-xs whitespace-nowrap">
                             {new Date(log.timestamp).toLocaleString(locale)}
                           </td>
                           <td className="p-3">
@@ -2343,7 +2457,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               log.level === 'error'
                                 ? 'bg-red-100 text-red-700'
                                 : log.level === 'warn'
-                                ? 'bg-amber-100 text-amber-700'
+                                ? 'bg-amber-100 text-amber-800'
                                 : 'bg-blue-100 text-blue-700'
                             }`}>
                               {codeLabel(LOG_LEVEL_KEYS, log.level)}
@@ -2356,7 +2470,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 : log.source === 'socket'
                                 ? 'bg-purple-100 text-purple-700'
                                 : log.source === 'email'
-                                ? 'bg-green-100 text-green-700'
+                                ? 'bg-green-100 text-green-800'
                                 : 'bg-slate-100 text-slate-700'
                             }`}>
                               {codeLabel(LOG_SOURCE_KEYS, log.source)}
@@ -2387,11 +2501,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   {t('adminBackups.config.title')}
                 </h3>
                 <div className="flex flex-wrap gap-4 text-sm text-slate-600">
-                  <span>{tRich('adminBackups.config.auto', { value: <span className={`font-medium ${backupConfig.enabled ? 'text-green-600' : 'text-red-600'}`}>{backupConfig.enabled ? t('adminBackups.config.enabled') : t('adminBackups.config.disabled')}</span> })}</span>
+                  <span>{tRich('adminBackups.config.auto', { value: <span className={`font-medium ${backupConfig.enabled ? 'text-green-700' : 'text-red-600'}`}>{backupConfig.enabled ? t('adminBackups.config.enabled') : t('adminBackups.config.disabled')}</span> })}</span>
                   <span>{tRich('adminBackups.config.interval', { value: <span className="font-medium">{t('adminBackups.config.hours', { hours: backupConfig.intervalHours })}</span> })}</span>
                   <span>{tRich('adminBackups.config.maxCount', { value: <span className="font-medium">{backupConfig.maxCount}</span> })}</span>
-                  <span>{tRich('adminBackups.config.onStartup', { value: <span className={`font-medium ${backupConfig.onStartup ? 'text-green-600' : 'text-slate-500'}`}>{backupConfig.onStartup ? t('common.yes') : t('common.no')}</span> })}</span>
-                  <span>{tRich('adminBackups.config.directory', { value: <code className="text-xs bg-slate-100 px-1 rounded-sm">{backupConfig.backupDir}</code> })}</span>
+                  <span>{tRich('adminBackups.config.onStartup', { value: <span className={`font-medium ${backupConfig.onStartup ? 'text-green-700' : 'text-slate-500'}`}>{backupConfig.onStartup ? t('common.yes') : t('common.no')}</span> })}</span>
                 </div>
               </div>
             )}
@@ -2417,7 +2530,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   className={`px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 ${
                     backupCreating
                       ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                      : 'bg-teal-600 text-white hover:bg-teal-700'
+                      : 'bg-teal-700 text-white hover:bg-teal-800'
                   }`}
                 >
                   <span className="material-symbols-outlined text-base">
@@ -2428,11 +2541,19 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </div>
             </div>
 
+            {/* Import a backup file: it becomes a row of the list below */}
+            <BackupImportCard
+              sessionToken={sessionToken}
+              limits={backupLimits}
+              onImported={handleBackupImported}
+              onReloadList={reloadBackupsAfterImport}
+            />
+
             {/* Backups List */}
             {backupsLoading ? (
               <div className="text-center py-12">
                 <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600"></div>
-                <p className="text-slate-500 mt-4">{t('adminBackups.loading')}</p>
+                <p className="text-slate-600 mt-4">{t('adminBackups.loading')}</p>
               </div>
             ) : backups.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm p-12 text-center">
@@ -2465,10 +2586,18 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 ? 'bg-teal-100 text-teal-700'
                                 : backup.type === 'startup'
                                 ? 'bg-blue-100 text-blue-700'
+                                : backup.type === 'imported'
+                                ? 'bg-violet-100 text-violet-700'
                                 : 'bg-slate-100 text-slate-600'
                             }`}>
                               <span className="material-symbols-outlined text-xs">
-                                {backup.type === 'manual' ? 'flag' : backup.type === 'startup' ? 'rocket_launch' : 'schedule'}
+                                {backup.type === 'manual'
+                                  ? 'flag'
+                                  : backup.type === 'startup'
+                                  ? 'rocket_launch'
+                                  : backup.type === 'imported'
+                                  ? 'upload'
+                                  : 'schedule'}
                               </span>
                               {codeLabel(BACKUP_TYPE_KEYS, backup.type)}
                             </span>
@@ -2482,14 +2611,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             </div>
                           </td>
                           <td className="p-3 text-slate-600">{backup.teamCount}</td>
-                          <td className="p-3 text-slate-600 font-mono text-xs">{formatBackupSize(backup.sizeBytes)}</td>
+                          <td className="p-3 text-slate-600 font-mono text-xs">{formatBackupSize(backup.sizeBytes, t, locale)}</td>
                           <td className="p-3 text-center">
                             <button
                               onClick={() => handleToggleProtected(backup)}
                               className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition ${
                                 backup.protected
-                                  ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                  ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                               }`}
                               title={backup.protected ? t('adminBackups.protected.on') : t('adminBackups.protected.off')}
                             >
@@ -2561,7 +2690,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             // The comment is unsaved text: a stray backdrop click must not throw
             // it away. Escape is the deliberate way out.
             closeOnBackdropClick={false}
-            overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            overlayClassName="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
             panelClassName="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6"
           >
             <>

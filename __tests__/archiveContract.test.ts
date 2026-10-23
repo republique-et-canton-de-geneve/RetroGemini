@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { gunzipSync } from 'zlib';
 import { createDataStore } from '../server/services/dataStore.js';
+import { buildBackupArchive } from '../server/services/backupArchive.js';
 
 /**
  * What a backup archive carries — and what it deliberately does not (H43).
@@ -30,7 +32,9 @@ import { createDataStore } from '../server/services/dataStore.js';
  * Neither is in an archive: a restore into a fresh installation needs the
  * console's Jira settings entered again, and every team its token. What a
  * team record holds about Jira (`jiraTarget`, the issues `jiraClaims` was
- * creating) is team data, carried and restored like the rest of the record.
+ * creating, each session's parent issue in `jiraParents` and the parents
+ * `jiraParentClaims` was creating) is team data, carried and restored like the
+ * rest of the record.
  *
  * Runs against a real SQLite store in a temp directory rather than a stubbed
  * adapter: `createDataStore` takes a `rootDir`, and a test that mocks a shape
@@ -129,21 +133,66 @@ describe('the backup archive contract', () => {
     expect(serialised).not.toContain('jira.internal.example');
   });
 
+  it('does NOT carry any team\'s session epoch (decision D3b): a restore must never roll one back', async () => {
+    await store.saveTeam('t1', makeTeam('t1', 'Equipe Bilan'));
+    await store.saveTeamIndex(new Map([['equipe bilan', 't1']]));
+    const { sessionEpoch } = await store.rotateTeamSessionEpoch('t1');
+
+    // Really in the store, or the assertions below prove nothing.
+    expect((await store.loadTeamAuthState('t1')).sessionEpoch).toBe(sessionEpoch);
+
+    const archive = await store.loadPersistedData();
+
+    expect(archive.teams).toHaveLength(1);
+    const serialised = JSON.stringify(archive);
+    expect(serialised).not.toContain(sessionEpoch);
+    expect(serialised).not.toContain('team-auth');
+  });
+
+  // The cases above read `loadPersistedData`, the reference representation.
+  // What ships is the streamed builder's bytes: the same contract, on those.
+  it('holds the same exclusions in the archive bytes every backup stores', async () => {
+    await store.saveTeam('t1', makeTeam('t1', 'Equipe Bilan'));
+    await store.saveTeamIndex(new Map([['equipe bilan', 't1']]));
+    await store.updateGlobalSettings(() => ({
+      adminEmail: 'admin@example.org',
+      infoMessage: 'Maintenance Friday',
+      ai: { enabled: true, apiUrl: 'https://llm.internal.example/v1', apiKey: 'secret-key-xyz' }
+    }));
+    await store.saveJiraSettings({ enabled: true, baseUrl: 'https://jira.internal.example/jira', allowSelfSignedCerts: true });
+    await store.saveTeamSecret('t1', { jira: { v: 1, iv: 'aXY', tag: 'dGFn', ct: 'sealed-jira-token-ciphertext', connectedAs: 'Jira Robot' } });
+    // A team's session epoch (D3b) is excluded from what ships too.
+    const { sessionEpoch } = await store.rotateTeamSessionEpoch('t1');
+
+    const serialised = gunzipSync((await buildBackupArchive({ dataStore: store })).data).toString('utf8');
+    const archive = JSON.parse(serialised);
+
+    expect(Object.keys(archive)).toEqual(['teams', 'meta', 'resetTokens', 'orphanedFeedbacks']);
+    expect(archive.teams.map((t: { name: string }) => t.name)).toEqual(['Equipe Bilan']);
+    for (const absent of ['secret-key-xyz', 'admin@example.org', 'Maintenance Friday', 'sealed-jira-token-ciphertext', 'Jira Robot', 'jira.internal.example', sessionEpoch, 'team-auth']) {
+      expect(serialised).not.toContain(absent);
+    }
+  });
+
   it('carries the Jira fields of a team record and restores them as stored: they are team data', async () => {
     const target = { mode: 'project', projectKey: 'BILAN', issueTypeId: '10001', labels: ['retrospective'] };
     const claims = { a1: { at: '2026-10-20T09:00:00.000Z', requestId: 'req-1' } };
     const link = { key: 'BILAN-4', createdAt: '2026-10-20T09:00:01.000Z' };
+    const parents = { 'retro:r1': { key: 'BILAN-1', createdAt: '2026-10-20T08:59:00.000Z', subtaskTypeId: '10005' } };
+    const parentClaims = { backlog: { at: '2026-10-20T09:00:00.000Z', requestId: 'req-2' } };
     await store.saveTeam('t1', {
       ...makeTeam('t1', 'Equipe Bilan'),
       jiraTarget: target,
       jiraClaims: claims,
+      jiraParents: parents,
+      jiraParentClaims: parentClaims,
       globalActions: [{ id: 'a0', text: 'Linked', done: false, jira: link }]
     });
     await store.saveTeamIndex(new Map([['equipe bilan', 't1']]));
     await store.saveTeamSecret('t1', { jira: { v: 1, iv: 'aXY', tag: 'dGFn', ct: 'sealed' } });
 
     const archive = await store.loadPersistedData();
-    expect(archive.teams[0]).toMatchObject({ jiraTarget: target, jiraClaims: claims });
+    expect(archive.teams[0]).toMatchObject({ jiraTarget: target, jiraClaims: claims, jiraParents: parents, jiraParentClaims: parentClaims });
 
     // Restored into an empty installation: the record comes back whole, and
     // no token comes with it.
@@ -155,11 +204,40 @@ describe('the backup archive contract', () => {
       const restored = await fresh.loadTeam('t1');
       expect(restored.jiraTarget).toEqual(target);
       expect(restored.jiraClaims).toEqual(claims);
+      expect(restored.jiraParents).toEqual(parents);
+      expect(restored.jiraParentClaims).toEqual(parentClaims);
       expect(restored.globalActions[0].jira).toEqual(link);
       expect(await fresh.loadTeamSecret('t1')).toBeNull();
       expect(await fresh.loadJiraSettings()).toBeNull();
     } finally {
       await fresh.closeDatabase();
     }
+  });
+
+  // The parents exist in Jira and the team's token stays: rolled back, a
+  // session's next action would create a second parent, and a parent the
+  // team re-pointed since would come back. Per session the current key wins,
+  // then the archive's; the claims come back as the archive holds them.
+  it('carries the current session parents onto a team the whole-store restore puts back', async () => {
+    const archived = { 'retro:r1': { key: 'BILAN-1', createdAt: '2026-10-01T00:00:00.000Z' }, 'retro:r2': { key: 'BILAN-2', createdAt: '2026-10-01T00:00:00.000Z' } };
+    const archivedClaims = { backlog: { at: '2026-10-01T00:00:00.000Z', requestId: 'archived' } };
+    await store.saveTeam('t1', { ...makeTeam('t1', 'Equipe Bilan'), jiraParents: archived, jiraParentClaims: archivedClaims });
+    await store.saveTeamIndex(new Map([['equipe bilan', 't1']]));
+    const archive = JSON.parse(JSON.stringify(await store.loadPersistedData()));
+
+    const current = {
+      'retro:r1': { key: 'BILAN-7', createdAt: '2026-10-20T00:00:00.000Z', subtaskTypeId: '10005' },
+      'healthcheck:h1': { key: 'BILAN-8', createdAt: '2026-10-20T00:00:00.000Z' }
+    };
+    await store.saveTeam('t1', { ...makeTeam('t1', 'Equipe Bilan'), jiraParents: current, jiraParentClaims: { 'retro:r3': { at: 'now', requestId: 'live' } } });
+
+    await store.savePersistedData(archive, { mode: 'replace' });
+    const restored = await store.loadTeam('t1');
+    expect(restored.jiraParents).toEqual({
+      'retro:r1': current['retro:r1'],
+      'retro:r2': archived['retro:r2'],
+      'healthcheck:h1': current['healthcheck:h1']
+    });
+    expect(restored.jiraParentClaims).toEqual(archivedClaims);
   });
 });

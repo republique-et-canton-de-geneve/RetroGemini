@@ -11,6 +11,7 @@
 4. [Secrets reference](#secrets-reference)
 5. [Network policies](#network-policies)
 6. [TLS](#tls)
+   - [Upload size and timeouts](#upload-size-and-timeouts)
 7. [PostgreSQL management](#postgresql-management)
    - [Reading the audit trail](#reading-the-audit-trail-who-did-that)
 8. [Jira](#jira)
@@ -434,6 +435,89 @@ kubectl apply -k k8s/overlays/nodeport
 creates a Route with edge termination and an HTTP→HTTPS redirect, which is
 already the right answer there.
 
+### Upload size and timeouts
+
+Two super-admin routes take a whole backup file as their body:
+`/api/super-admin/restore` (the console's *Restore Data* card) and
+`/api/super-admin/backups/import` (the Backups tab's *Import a backup file*).
+The application bounds them itself with `RESTORE_MAX_BODY_MB` (default 128) and
+answers its own refusals as JSON. What sits in front of it has limits of its
+own, and they are the operator's:
+
+- **ingress-nginx refuses any body over 1 MiB** by default
+  (`client_max_body_size`), and `k8s/base/ingress.yaml` sets no
+  `proxy-body-size`. On the base manifest every real archive is refused with
+  nginx's own HTML 413 before it reaches the application; the console says so
+  ("The network in front of the server refused a file this large…") rather
+  than blame the file.
+- **The OpenShift Route has no body limit, but a 30 s timeout** by default. An
+  internal-network upload of a few tens of MB fits easily. Raise it on the
+  Route with `haproxy.router.openshift.io/timeout` (for example `120s`) if you
+  import larger files. When the Route gives up first it answers 504 while the
+  pod is still parsing and inserting: the console reads that as *uncertain*,
+  reads the backups list again at once and 20 s later, and asks the admin to
+  check the list before importing again. A retry that reaches the same pod
+  while the first import still runs is refused (`409 import_in_progress`).
+
+Do **not** raise the nginx limit host-wide. With request buffering on (its
+default) ingress-nginx spools a whole body before proxying it, so a 128 MB
+limit on `/` would let any anonymous caller make the controller spool 128 MB per
+request to routes whose application limit is 1 MB. Raise it only on the two
+paths, with a second Ingress for the same host — ingress-nginx merges the
+Ingresses of one host, and an `Exact` path wins over the base Ingress's `/`
+prefix. Ready to apply (substitute the same hostname and TLS Secret as the base
+Ingress, and keep `proxy-body-size` equal to `RESTORE_MAX_BODY_MB`):
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retrogemini-backup-upload
+  labels:
+    app: retrogemini
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Equal to RESTORE_MAX_BODY_MB; the application enforces its own limit.
+    nginx.ingress.kubernetes.io/proxy-body-size: "128m"
+spec:
+  tls:
+    - hosts:
+        - retrogemini.local
+      secretName: retrogemini-tls
+  rules:
+    - host: retrogemini.local
+      http:
+        paths:
+          - path: /api/super-admin/restore
+            pathType: Exact
+            backend:
+              service:
+                name: retrogemini-service
+                port:
+                  number: 8080
+          - path: /api/super-admin/backups/import
+            pathType: Exact
+            backend:
+              service:
+                name: retrogemini-service
+                port:
+                  number: 8080
+```
+
+It is deliberately not part of `k8s/base`: whether it is needed depends on the
+controller, and OpenShift does not use an Ingress at all. Apply it next to the
+base one (`kubectl -n retrogemini apply -f backup-upload-ingress.yaml`), then
+check that a file larger than 1 MiB now gets the application's answer (a JSON
+`401` without a credential) instead of nginx's HTML 413:
+
+```bash
+head -c 2000000 /dev/urandom > /tmp/big.bin
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' \
+  -H 'Content-Type: application/octet-stream' --data-binary @/tmp/big.bin \
+  https://retrogemini.local/api/super-admin/backups/import
+# expect: 401 application/json; charset=utf-8   (not 413 text/html)
+```
+
 ---
 
 ## PostgreSQL management
@@ -472,8 +556,12 @@ kubectl exec deployment/postgresql-retrogemini -- \
 kubectl exec deployment/postgresql-retrogemini -- \
   psql -U retrogemini -d retrogemini -c \
   "SELECT * FROM security_events
-     WHERE action IN ('team.delete','team.merge','backup.restore','team.restore')
+     WHERE action IN ('team.delete','team.merge','backup.import','backup.restore','team.restore')
        AND created_at >= '2026-09-04' ORDER BY id;"
+# A restore from an imported file reads as two rows: the backup.import, whose
+# target is the new backup's id (its detail carries the file's sha256), then a
+# team.restore whose detail.backupId — or a backup.restore whose target — is
+# that same id.
 
 # "Nobody received the password-reset mail" — who changed the recovery address?
 kubectl exec deployment/postgresql-retrogemini -- \
@@ -487,6 +575,13 @@ kubectl exec deployment/postgresql-retrogemini -- \
   "SELECT created_at, action, actor, target, detail FROM security_events
      WHERE action IN ('team.jira-token-change','jira-settings.update')
      ORDER BY id DESC LIMIT 20;"
+
+# "We changed the team password: were the old sessions signed out?" — every
+# password change since decision D3b carries detail.sessionsRevoked = true.
+kubectl exec deployment/postgresql-retrogemini -- \
+  psql -U retrogemini -d retrogemini -c \
+  "SELECT created_at, actor, target, detail FROM security_events
+     WHERE action = 'team.password-change' ORDER BY id DESC LIMIT 20;"
 
 # Someone trying the super-admin password.
 kubectl exec deployment/postgresql-retrogemini -- \
@@ -755,6 +850,12 @@ kubectl exec -it deployment/postgresql-retrogemini -- \
 kubectl rollout restart deployment/retrogemini
 ```
 
+**To sign everyone out of one team**, change its password (from the team's
+*Settings*, an emailed reset, or the super-admin console): every session token
+of that team stops working at once, on every pod and in every live session, and
+its invitation links stop working too (decision D3b). Nothing else is needed,
+and no other team is touched.
+
 **Changing `SESSION_TOKEN_SECRET`** needs no database step, and costs more than
 it looks: every session is signed out, every invite link sent so far stops
 working, and every team's stored Jira token becomes unreadable — each team's
@@ -777,6 +878,38 @@ RetroGemini includes an automatic server-side backup system that creates compres
 - **Retention**: Old automatic backups are pruned when the limit is reached; protected backups are kept
 - **Restore**: Any backup can be restored from the super admin panel (a pre-restore snapshot is created automatically)
 - **Team deletion from the console**: deleting a team from the super admin panel — typically the two original teams after a merge — first takes a protected *Pre-delete snapshot* of the whole store. Protected backups are never pruned, so each deleted team leaves one full archive behind: delete the ones you no longer need from the Backups tab, as for pre-restore snapshots
+- **Imported files**: a backup file uploaded in the Backups tab (*Import a backup file*) becomes a row of type `imported`, from which one or more teams — or the whole store — can be restored. Imported rows are **never pruned**, each can be up to `RESTORE_MAX_BODY_MB`, and they survive every restore: delete them by hand when done. So are the protected *Pre-restore snapshot* rows each restore leaves — restoring five teams from one import leaves five whole-store snapshots to delete as well. A team from **another** deployment also comes back with its Jira target and the parent issue of each of its sessions: in the mode that gives each session a parent issue, its next sends go as sub-tasks under those keys in this deployment's Jira, which is right only when both deployments use the same Jira. Check the parent issues the batch dialog lists before sending, or re-point them (name a parent and replace, or change the target in *Settings → Jira*)
+- **Memory**: a backup, a snapshot or a download holds one team at a time plus the compressed archive (it is built team by team through gzip), and on PostgreSQL one pooled connection for its duration (the teams are read in one consistent snapshot). An import holds the uploaded body, its unpacked bytes and the parsed archive at once, one import at a time per pod. *Restoring* from a row costs more than importing it: the parsed archive is held for the restore, so the single-team restore's peak is the parsed archive plus the team its snapshot is reading, and on PostgreSQL the row's `bytea` arrives as hex text, twice its stored size, before it becomes a buffer. The practical ceiling is therefore the restore's, not the import's — against the 384 Mi pod limit, tens of MB unpacked; an import that passes does not prove a restore from it fits. Raise the pod's memory limit before restoring larger archives
+- **A backup that cannot read a team fails**: a team row the database cannot parse (or an empty one), a team row that parses but is not an object (`null`, an array), or a `retro-meta` row that is not one valid object or whose lists are not lists, fails every backup instead of storing an archive that silently misses teams. Every snapshot fails with it, so until the row is repaired, **no restore can run** — whole-store, single-team or console deletion answer `503` — and the manual checkpoint answers *create failed*. A failed automatic backup purges nothing, so the last good backups stay. The pod log and the console's **Logs** tab name the key, never its content: `[Backup] Failed to create backup: Team record "team:<id>" cannot be archived (unparsable)` (or `empty`, `not_an_object`), and for the metadata row `Record "retro-meta" cannot be archived (…)` with `unparsable`, `not_an_object` or `list_malformed`. Take a `pg_dump` first, then inspect the row — `SELECT key, octet_length(value), left(value, 80) FROM kv_store WHERE key = '<key>';` — and act by key:
+  - **`team:<id>`**: repair the row in place if you can. If it is beyond repair, delete it — and what goes with the deletion depends on whether a backup holds the team:
+    - *A backup holds it*: delete the row (`DELETE FROM kv_store WHERE key = 'team:<id>';`) and restore the team straight away with *Restore a team*. The name index still maps its name to the same id, so the restore takes the name back. The team returns as that backup holds it, without its feedbacks, which a deletion by hand does not set aside as the console's does.
+    - *No backup holds it* (it was created after the last good one), or it will not be restored: drop its names from the index **in the same transaction**, otherwise its name answers "team name exists" on creation and "team not found" on login for good, and nothing in the console can free it (filtering by id also removes any alias an interrupted rename left behind):
+      ```sql
+      BEGIN;
+      DELETE FROM kv_store WHERE key = 'team:<id>';
+      UPDATE kv_store
+         SET value = jsonb_set(value::jsonb, '{teams}', COALESCE((
+               SELECT jsonb_object_agg(k, v) FROM jsonb_each(value::jsonb->'teams') e(k, v)
+                WHERE v <> to_jsonb('<id>'::text)), '{}'))::text
+       WHERE key = 'team-index';
+      COMMIT;
+      ```
+    The team's Jira token row (`team-secret:<id>`), if any, is removed by the next pod start's sweep.
+  - **`retro-meta`**: **never delete it** — it holds the feedbacks of every deleted team and the pending password-reset links. Repair it in place: a malformed `resetTokens` can be set to an empty list (`UPDATE kv_store SET value = jsonb_set(value::jsonb, '{resetTokens}', '[]')::text WHERE key = 'retro-meta';`, the links then have to be requested again); take a malformed or unparsable `orphanedFeedbacks` back from the `pg_dump` taken first rather than emptying it.
+
+  Backups and restores work again once the row reads. What else the row breaks, which tells you where to look: an **unparsable or empty team row** makes the summary projection throw, so the login screen's team list and the console's **Teams** tab are down too (the **Live** tab keeps working: it names each room's team one team at a time, and that team's rooms read as *Unknown*). A **team row that parses but is not an object** gives a summary with no name: the login screen's team list fails (its sort, or its render), while the **Teams** tab loads with a nameless row that fails only when sorted by name or merged. A **malformed `retro-meta`** shows nothing else at all — its readers see empty lists — so that log line and the absence of new automatic backups in the **Backups** tab are the only signs
+- **A team record PostgreSQL's jsonb refuses**: the row is valid JSON to Node but holds a lone half of an emoji, written as the escape `\ud83d` (a ticket excerpt cut through an emoji by a client from 41.0 or earlier, or a feedback or AI group title cut the same way by a server from then), or a NUL written `\u0000`. Node reads it, so backups, invitation links, live sessions, the legacy password pass and the console's **Live** tab (which then names each room's team one team at a time) keep working; every projection that casts the record to `jsonb` fails, for **every** team at once: the login screen's team list, the console's **Teams** tab and feedback views, the feedback board, the boot-time email heal and the console's merge and deletion checks — with `invalid input syntax for type json` (`22P02`, "Unicode low surrogate must follow a high surrogate") or `unsupported Unicode escape sequence` (`22P05`) in the pod log. Find the rows, take a `pg_dump`, and remove those escapes in place — the expression leaves an escaped backslash (a user who typed `\ud83d` literally) alone:
+  ```sql
+  SELECT key FROM kv_store
+   WHERE (key LIKE 'team:%' OR key LIKE 'session:%')
+     AND value ~ '(?<!\\)(?:\\\\)*\\u(?:[dD][89a-fA-F][0-9a-fA-F]{2}|0000)';
+
+  UPDATE kv_store
+     SET value = regexp_replace(value, '(?<!\\)((?:\\\\)*)\\u(?:[dD][89a-fA-F][0-9a-fA-F]{2}|0000)', '\1', 'g')
+   WHERE (key LIKE 'team:%' OR key LIKE 'session:%')
+     AND value ~ '(?<!\\)(?:\\\\)*\\u(?:[dD][89a-fA-F][0-9a-fA-F]{2}|0000)';
+  ```
+  The statement repairs the `session:*` rows too, and is best run while none of the team's sessions is open — the console's **Live** tab shows the open ones, and says so when it could not load them rather than reporting none: an unrepaired session row, or a browser still in the session, puts the text back into the team record with its next save. Node writes a well-formed emoji as itself, never as an escape, so every match is one of these broken halves or a NUL
 
 ### Configuration
 
@@ -788,8 +921,8 @@ These environment variables are set directly in `deployment.yaml` (not in secret
 | `BACKUP_INTERVAL_HOURS` | `24` | Hours between automatic backups |
 | `BACKUP_MAX_COUNT` | `7` | Max automatic backups to keep |
 | `BACKUP_ON_STARTUP` | `true` | Create backup when server starts |
-| `RESTORE_MAX_BODY_MB` | `128` | Max compressed/uploaded restore archive size in MB |
-| `RESTORE_MAX_DECOMPRESSED_MB` | `512` | Max decompressed restore archive size in MB |
+| `RESTORE_MAX_BODY_MB` | `128` | Max compressed/uploaded restore or import archive size in MB (the uploaded whole-store restore and the Backups tab's file import; see [Upload size and timeouts](#upload-size-and-timeouts) for the proxy in front) |
+| `RESTORE_MAX_DECOMPRESSED_MB` | `512` | Max decompressed restore or import archive size in MB |
 
 ### Multi-pod support
 
@@ -831,6 +964,13 @@ would empty the Service when both pods fail at once — turning degraded
 collaboration into a total outage — and readiness cannot express "some pods are
 still healthy".
 
+The adapter also carries **a team's password change to the other pods' live
+sessions** (decision D3b): the pod that served the change broadcasts
+`team-sessions-revoked` and cuts its own sockets of that team, and each pod
+cuts its stale ones. With the adapter down, the other pods still cut them within a
+minute through their periodic sweep, and every HTTP request is refused at once
+everywhere, since each one reads the team's session epoch from the database.
+
 ---
 
 ## Scaling & performance tuning
@@ -842,6 +982,7 @@ These environment variables tune performance for larger deployments. They are se
 | `AUTH_RATE_LIMIT_MAX` | `5` | **Rejected** team-create / restore-session credentials per IP per 15 minutes, counted **per pod** (see below). Only `401` responses count, so no amount of ordinary use can consume the budget |
 | `PG_POOL_MAX` | `10` | Max PostgreSQL connections **per pod** |
 | `SESSION_CACHE_MAX` | `500` | Max live sessions cached in memory per pod (bounds memory only; session state is always recoverable from the database) |
+| `SESSION_CACHE_MAX_MB` | `32` | Max total size, in MB of session JSON, of the per-pod session cache, beside the count above (bounds memory only; the session just written is never evicted) |
 | `SOCKET_MAX_BUFFER_SIZE` | `1000000` | Max Socket.IO message size in bytes (caps a single session update) |
 | `SOCKET_UPDATE_RATE` | `0` (disabled) | Sustained `update-session` writes/second allowed per socket (token bucket). Enabling it is capacity-sensitive — load-test at your real cadence first. Throttled writes are healed, not dropped |
 | `SOCKET_UPDATE_BURST` | `2 × rate` | Momentary burst of `update-session` writes allowed above `SOCKET_UPDATE_RATE` |
@@ -907,6 +1048,25 @@ value depends on your cluster's edge:
   Invitations keep working without it: that endpoint requires a team credential
   and the link it mails carries one the caller already holds, so it falls back to
   the origin the request arrived on. Setting `PUBLIC_BASE_URL` pins it too.
+- **Compression is the application's, so leave the router's off.** JSON
+  answers of 1 KiB and more are gzipped by `server.js`, and the bundle is
+  precompressed at build time. An OpenShift IngressController with
+  `httpCompression`, or ingress-nginx's `use-gzip`, leaves an answer that
+  already carries `Content-Encoding` alone, so turning it on buys nothing, and
+  the application's compression is the one that is tested.
+- **A corporate caching proxy is safe.** Every answer large enough to be
+  compressed carries `Vary: Accept-Encoding`, and `immutable` (a year) is set
+  only on the hashed bundle files, whose name changes with their content;
+  `index.html`, the fonts and the files of `public/` are revalidated on every
+  load (`no-cache`).
+- **Keep real file timestamps when you build the image.** `index.html` is
+  revalidated by size and modification time, and its size rarely changes
+  between releases. A build that normalises timestamps (kaniko
+  `--reproducible`, BuildKit `rewrite-timestamp`, a `SOURCE_DATE_EPOCH`
+  applied to files) would give every release the same validator, and returning
+  browsers would keep the previous release's page — a blank page after each
+  upgrade. The repository's Dockerfile keeps them; see AGENTS.md →
+  *Compression and caching* before changing that.
 
 ### What `AUTH_RATE_LIMIT_MAX` actually counts
 
@@ -924,6 +1084,12 @@ a retrospective already in progress, for fifteen minutes.
 
 What stays metered is the anonymous prober guessing tokens, where each guess costs
 a data-store read. That is the property the limiter exists for.
+
+**A token revoked by a password change is not counted either** (decision D3b).
+It is signature-valid, so it is no guess, and after a password change every
+browser of the team presents one on its next load: counted, six people behind
+one office address would spend the budget and every *valid* restore from there
+would get `429` for fifteen minutes.
 
 Two consequences worth knowing:
 
@@ -944,7 +1110,7 @@ Two consequences worth knowing:
 - Current default: 2 replicas × 10 = **20** connections — plenty of headroom.
 - If you scale up to handle more teams, size it together with the replica count, e.g. 6 replicas × 12 = 72 (still under 100). If you need to go higher, raise the database's `max_connections` too.
 
-`SESSION_CACHE_MAX` only bounds per-pod memory; at ~20-30 parallel retrospectives you will never approach 500, so the default is safe with the current pod memory limits.
+`SESSION_CACHE_MAX` and `SESSION_CACHE_MAX_MB` only bound per-pod memory. At ~20-30 parallel retrospectives you will never approach 500 sessions, and at 50-500 KB of JSON each they hold 1-15 MB, so the 32 MB cap only trims old sessions and pathological blobs: the cached objects take roughly three times their JSON size in the heap, well inside the 384 Mi limit. An evicted session is read from the database again on its next write; during a database outage that write has no baseline, the documented degraded-mode case.
 
 ---
 
@@ -1058,6 +1224,15 @@ Check storage class and PVC:
 kubectl -n retrogemini get storageclass
 kubectl -n retrogemini describe pvc retrogemini-postgresql-data
 ```
+
+### A team's logins answer `500 login_failed`, with `TeamAuthRowCorruptError` in the log
+
+The team's session-epoch row (`team-auth:<team id>` in `kv_store`, decision
+D3b) holds something that does not read as one: its logins and every route
+using one of its tokens answer `500`, and its live-session joins are refused,
+until it is replaced. A password change writes the row blindly, so it repairs
+it: an emailed password reset, or the super-admin console's password change.
+It signs the team's sessions out, which the corrupt row was doing already.
 
 ### PostgreSQL crash loop after changing secrets
 

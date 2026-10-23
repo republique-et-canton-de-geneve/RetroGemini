@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ActionItem } from '../types';
-import { jiraIssuePreview, withLiveSession } from '../components/jira/jiraIssuePreview';
+import { descriptionAsJiraShowsIt, jiraIssuePreview, jiraParentPreviews, withLiveSession } from '../components/jira/jiraIssuePreview';
 
 /**
  * The batch dialog's preview of each issue (`components/jira/jiraIssuePreview.ts`).
@@ -102,9 +102,155 @@ describe('jiraIssuePreview', () => {
       .toEqual({ summary, description, language: 'en' });
   });
 
+  // The cached team a screen was handed can lag its live session: a card put
+  // in the group since, on the facilitator's own screen. The server reads the
+  // record once the screen's writes landed.
+  it('lists a group’s cards from the live session, not from the cached team', () => {
+    const live = {
+      ...cachedRetro,
+      actions: [action('a1', { linkedTicketId: 'grp' })],
+      groups: [{ id: 'grp', title: 'Deploys' }],
+      tickets: [
+        { id: 't1', text: 'Deploys wait for approval', groupId: 'grp' },
+        { id: 't2', text: 'Grouped since the cache was read', groupId: 'grp' }
+      ]
+    };
+    const cached = { ...team, retrospectives: [{ ...live, tickets: [live.tickets[0]] }, team.retrospectives[1]] };
+    const preview = jiraIssuePreview({ action: live.actions[0], team: cached, session: live, kind: 'retro', sessionId: 'r1', requestedBy: 'Ann', language: 'en' });
+    expect(preview.description).toBe(
+      'Action from the retrospective Sprint 12 (2026\\-10\\-06) — Re: Group "Deploys". Requested in RetroGemini as Ann.\n'
+      + '\nCards in the group:\n* Deploys wait for approval\n* Grouped since the cache was read'
+    );
+  });
+
   it('describes an action the team holds no copy of from the copy on screen, as a backlog action', () => {
     const shown = action('nowhere', { text: 'Only on screen' });
     expect(jiraIssuePreview({ action: shown, team, kind: 'retro', sessionId: 'r1', requestedBy: '', language: 'en' }))
       .toEqual({ summary: 'Only on screen', description: 'Action from the team backlog. Created from RetroGemini.', language: 'en' });
+  });
+});
+
+/**
+ * The description as Jira shows it, for the dialog: the escapes the builder
+ * adds removed (Jira renders `\-` as `-`), the template's list items as
+ * bullets, and the line breaks kept, so the dialog shows the list Jira will.
+ */
+describe('descriptionAsJiraShowsIt', () => {
+  it('shows each escaped character as itself', () => {
+    expect(descriptionAsJiraShowsIt('Sprint 12 (2026\\-10\\-06) — Re: "\\[\\~admin\\] \\{code\\}"'))
+      .toBe('Sprint 12 (2026-10-06) — Re: "[~admin] {code}"');
+  });
+
+  it('shows the template’s items as bullets and keeps every line break', () => {
+    expect(descriptionAsJiraShowsIt('Head.\n\nCards in the group:\n* One\n* Two \\- three'))
+      .toBe('Head.\n\nCards in the group:\n• One\n• Two - three');
+  });
+
+  it('never turns a card’s escaped star into a bullet', () => {
+    expect(descriptionAsJiraShowsIt('Head.\n\nCards in the group:\n* \\* x\n* a \\* b'))
+      .toBe('Head.\n\nCards in the group:\n• * x\n• a * b');
+  });
+
+  it('leaves a one-line description on one line', () => {
+    expect(descriptionAsJiraShowsIt('Action from the team backlog. Created from RetroGemini.'))
+      .toBe('Action from the team backlog. Created from RetroGemini.');
+  });
+});
+
+/**
+ * The batch dialog's parent issues (`sessionParent` mode): one row per
+ * retrospective, health check or the team dashboard whose actions are sent,
+ * saying whether its parent issue exists, may exist, or will be created — and
+ * then with which title. Built as the server decides it: `issueSource` homes
+ * each action, `jiraParentScope` names its scope, the team's `jiraParents`
+ * holds what exists. `jiraIssues.test.ts` → *the preview and the server agree*
+ * checks the new parent's title against the issue the server creates.
+ */
+describe('jiraParentPreviews', () => {
+  const withParents = (jiraParents: Record<string, unknown>) => ({ ...team, name: 'Platform', jiraParents } as Parameters<typeof jiraParentPreviews>[0]['team']);
+
+  it('says a new parent issue will be created, with its title in the session\'s language', () => {
+    expect(jiraParentPreviews({
+      actions: [action('a1')], team: withParents({}), kind: 'retro', sessionId: 'r1', requestedBy: 'Ann', language: 'fr'
+    })).toEqual([{
+      scope: 'retro:r1',
+      kind: 'retro',
+      sessionName: 'Sprint 12',
+      actionIds: ['a1'],
+      parent: { state: 'new', summary: 'Retrospective actions: Sprint 12 (2026-10-06)', language: 'en' }
+    }]);
+  });
+
+  it('names the existing parent issue, and the one that may already be in Jira with its title to search for', () => {
+    const previews = jiraParentPreviews({
+      actions: [action('a1'), action('h-a')],
+      team: withParents({
+        'retro:r1': { key: 'TEAM-90', createdAt: 'x', subtaskTypeId: '10003' },
+        'healthcheck:h1': { uncertainSince: '2026-10-20T09:00:00.000Z' }
+      }),
+      kind: 'retro',
+      sessionId: 'r1',
+      requestedBy: 'Ann',
+      language: 'en'
+    });
+    expect(previews.map(preview => [preview.scope, preview.parent])).toEqual([
+      ['retro:r1', { state: 'existing', key: 'TEAM-90' }],
+      ['healthcheck:h1', { state: 'uncertain', since: '2026-10-20T09:00:00.000Z', searchText: 'Health check actions: Q3 (2026-09-01)' }]
+    ]);
+  });
+
+  it('groups the actions by the session that holds them, in the dialog\'s order', () => {
+    // a1 is listed on Sprint 11's screen (r0) but the backlog request names no
+    // session: the server homes it in the first retro that holds it.
+    const previews = jiraParentPreviews({
+      actions: [action('b1'), action('a1'), action('h-a'), action('nowhere')],
+      team: withParents({}),
+      kind: 'backlog',
+      sessionId: 'r0',
+      requestedBy: 'Ann',
+      language: 'en'
+    });
+    expect(previews.map(preview => [preview.scope, preview.sessionName, preview.actionIds])).toEqual([
+      ['backlog', null, ['b1']],
+      ['retro:r1', 'Sprint 12', ['a1']],
+      ['healthcheck:h1', 'Q3', ['h-a']]
+    ]);
+    // The team dashboard's parent is titled after the team, and an action the
+    // team holds no copy of goes under no parent (the server answers not_found).
+    expect(previews[0].parent).toEqual({ state: 'new', summary: 'Team actions: Platform', language: 'en' });
+  });
+
+  it('puts a previous action shown in a later retro under the parent of the retro it comes from', () => {
+    const previews = jiraParentPreviews({
+      actions: [action('a1')],
+      team: withParents({ 'retro:r0': { key: 'TEAM-80', createdAt: 'x' } }),
+      // Sprint 11's own Review step lists a1, which Sprint 11 holds.
+      kind: 'retro',
+      sessionId: 'r0',
+      requestedBy: 'Ann',
+      language: 'en'
+    });
+    expect(previews).toEqual([expect.objectContaining({ scope: 'retro:r0', sessionName: 'Sprint 11', parent: { state: 'existing', key: 'TEAM-80' } })]);
+
+    // From a later retro whose actions do not hold it, it goes under the
+    // first retro that does.
+    const later = { id: 'r2', name: 'Sprint 13', date: '2026-10-20', templateLanguage: 'en', actions: [action('x')] };
+    const fromLater = jiraParentPreviews({
+      actions: [action('h-a')], team: withParents({}), session: later, kind: 'retro', sessionId: 'r2', requestedBy: 'Ann', language: 'en'
+    });
+    expect(fromLater.map(preview => preview.scope)).toEqual(['healthcheck:h1']);
+  });
+
+  it('reads the live session on screen in place of the cached copy', () => {
+    const live = { ...cachedRetro, name: 'Sprint 12 bis', actions: [action('a1'), action('a-new')] };
+    const previews = jiraParentPreviews({
+      actions: [action('a-new')], team: withParents({}), session: live, kind: 'retro', sessionId: 'r1', requestedBy: '', language: 'en'
+    });
+    expect(previews).toEqual([expect.objectContaining({
+      scope: 'retro:r1',
+      sessionName: 'Sprint 12 bis',
+      actionIds: ['a-new'],
+      parent: { state: 'new', summary: 'Retrospective actions: Sprint 12 bis (2026-10-06)', language: 'en' }
+    })]);
   });
 });

@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createDataStore } from '../server/services/dataStore.js';
+import { createTokenService } from '../server/services/sessionTokens.js';
+import { sessionVerdict } from '../server/services/sessionEpoch.js';
 
 // Integration test against a real SQLite store (the default engine in CI). It
 // exercises the faithful-replace restore semantics of savePersistedData: a
@@ -131,3 +133,114 @@ describe('dataStore savePersistedData restore semantics (SQLite)', () => {
     expect(await dataStore.loadSessionState('s1')).toBeNull();
   });
 });
+
+/**
+ * Decision D3b — a session never outlives the password it was opened with,
+ * and a whole-store restore can put an older password back. So the replace
+ * gives a new session epoch to every team whose password it changes (or that
+ * it brings back), and leaves every other team's sessions alone: a restore
+ * that keeps a team's password signs nobody out of it.
+ */
+describe('dataStore savePersistedData and team session epochs (SQLite)', () => {
+  let dataStore: ReturnType<typeof createDataStore>;
+  let dir: string;
+  const savedEnv: Record<string, string | undefined> = {};
+  const tokens = createTokenService({
+    secureCompare: (a: string, b: string) => a === b,
+    superAdminPassword: null,
+    tokenSecret: 'restore-epoch-test-secret'
+  });
+
+  const team = (id: string, name: string, passwordHash: string) => ({ id, name, passwordHash, members: [], retrospectives: [] });
+  const archive = (...teams: ReturnType<typeof team>[]) => ({
+    teams,
+    meta: { revision: 1, updatedAt: '2025-01-01T00:00:00.000Z' },
+    resetTokens: [],
+    orphanedFeedbacks: []
+  });
+  // A token as a login mints it now, under the team's current epoch.
+  const loginToken = async (teamId: string) =>
+    tokens.createSessionToken(teamId, null, { sessionEpoch: (await dataStore.loadTeamAuthState(teamId)).sessionEpoch });
+  const verdict = async (token: string) => {
+    const claims = tokens.validateSessionToken(token);
+    return sessionVerdict(claims, await dataStore.loadTeamAuthState(claims!.teamId));
+  };
+
+  beforeEach(async () => {
+    for (const key of PG_ENV_KEYS) {
+      savedEnv[key] = process.env[key];
+      delete process.env[key];
+    }
+    dir = mkdtempSync(join(tmpdir(), 'retro-restore-epoch-'));
+    process.env.DATA_STORE_PATH = join(dir, 'data.sqlite');
+    dataStore = createDataStore({ rootDir: dir });
+    await dataStore.initDatabase();
+    await dataStore.saveTeam('t1', team('t1', 'Alpha', 'hash-alpha-now'));
+    await dataStore.saveTeam('t2', team('t2', 'Beta', 'hash-beta'));
+    await dataStore.saveTeamIndex(new Map([['alpha', 't1'], ['beta', 't2']]));
+  });
+
+  afterEach(() => {
+    try {
+      dataStore.closeDatabase();
+    } catch {
+      /* ignore */
+    }
+    rmSync(dir, { recursive: true, force: true });
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it('signs out a team whose password the archive rolls back, and nobody else', async () => {
+    const alpha = await loginToken('t1');
+    const beta = await loginToken('t2');
+
+    await dataStore.savePersistedData(archive(team('t1', 'Alpha', 'hash-alpha-then'), team('t2', 'Beta', 'hash-beta')), { mode: 'replace' });
+
+    expect(await verdict(alpha)).toBe('revoked');
+    expect(await verdict(beta)).toBe('current');
+  });
+
+  it('signs out a team the archive brings back, and forgets the epoch of a team it deletes', async () => {
+    await dataStore.saveTeam('t3', team('t3', 'Gamma', 'hash-gamma'));
+    await dataStore.rotateTeamSessionEpoch('t3');
+    // A team deleted since the backup, whose token outlived it.
+    const ghostToken = tokens.createSessionToken('t9', null, { sessionEpoch: '0' });
+
+    await dataStore.savePersistedData(
+      archive(team('t1', 'Alpha', 'hash-alpha-now'), team('t2', 'Beta', 'hash-beta'), team('t9', 'Delta', 'hash-delta')),
+      { mode: 'replace' }
+    );
+
+    expect(await verdict(ghostToken)).toBe('revoked');
+    const raw = dataStore.getSqliteDb().prepare('SELECT key FROM kv_store WHERE key = ?').get('team-auth:t3');
+    expect(raw).toBeUndefined();
+  });
+
+  it('closes the hole a failed rotation and its retry would leave', async () => {
+    // The replace writes Alpha with the archived password, and the rotation
+    // after the write fails (best-effort: the restore itself succeeds).
+    // Rotating only after the write would leave Alpha's sessions alive under
+    // the rolled-back password, and the admin's retry would compare two equal
+    // hashes and rotate nothing: the rotation *before* the write closes it.
+    const alpha = await loginToken('t1');
+    const db = dataStore.getSqliteDb();
+    // The first rotation inserts Alpha's row; the second would update it.
+    db.exec(`CREATE TRIGGER fail_second_rotation BEFORE UPDATE ON kv_store
+             WHEN OLD.key = 'team-auth:t1' BEGIN SELECT RAISE(ABORT, 'simulated outage'); END`);
+    const rolledBack = archive(team('t1', 'Alpha', 'hash-alpha-then'), team('t2', 'Beta', 'hash-beta'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await dataStore.savePersistedData(rolledBack, { mode: 'replace' });
+    expect(warn).toHaveBeenCalled();
+    db.exec('DROP TRIGGER fail_second_rotation');
+    await dataStore.savePersistedData(rolledBack, { mode: 'replace' });
+
+    expect((await dataStore.loadTeam('t1'))?.passwordHash).toBe('hash-alpha-then');
+    expect(await verdict(alpha)).toBe('revoked');
+    warn.mockRestore();
+  });
+});
+

@@ -519,3 +519,66 @@ export const carryJiraLinks = (archivedTeam, currentTeam) => {
   }
   return team;
 };
+
+// A parent issue's link as the batch writes it: a key, or a mark.
+const parentLinkKind = (value) => {
+  if (isJiraLinked({ jira: value })) return 'key';
+  if (isJiraUncertain({ jira: value })) return 'mark';
+  return null;
+};
+
+const isPlainMap = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * The archived team with the current team's session parents carried onto it
+ * (`team.jiraParents`, `sessionParent` mode), for the whole-store and the
+ * single-team restore alike.
+ *
+ * Per scope (`retro:<id>`, `healthcheck:<id>`, `backlog`): the current key,
+ * else the archived key, else the current mark, else the archived mark. A key
+ * always beats a mark. This differs from `carryJiraLinks`, where the archived
+ * key wins, on purpose: a parent is a routing decision rather than the
+ * action's own issue, and "Also use … for their later actions" can re-point a
+ * session; rolling that choice back would send the session's next actions
+ * under the parent it was moved away from. A current value that is neither a
+ * key nor a mark (anything the Jira route did not write) is not carried; an
+ * archived one nothing replaces stays as the archive holds it.
+ *
+ * The claims (`jiraParentClaims`) are not this function's: the single-team
+ * restore keeps the current ones (`KEPT_FROM_CURRENT`), and the whole-store
+ * restore puts the archive's back, which expire into uncertain parents.
+ *
+ * Pure: returns a new team object, shares no parent value with either
+ * argument, and mutates neither.
+ *
+ * @param {object} archivedTeam the team as the archive holds it
+ * @param {object|null|undefined} currentTeam the live record, or nothing when there is none
+ * @returns {object}
+ */
+export const carryJiraParents = (archivedTeam, currentTeam) => {
+  const team = { ...archivedTeam };
+  const archived = isPlainMap(archivedTeam?.jiraParents) ? archivedTeam.jiraParents : {};
+  const current = isPlainMap(currentTeam?.jiraParents) ? currentTeam.jiraParents : {};
+  const scopes = [...new Set([...Object.keys(archived), ...Object.keys(current)])];
+  if (scopes.length === 0) return team;
+
+  const entries = [];
+  for (const scope of scopes) {
+    const ownArchived = Object.hasOwn(archived, scope) ? archived[scope] : undefined;
+    const ownCurrent = Object.hasOwn(current, scope) ? current[scope] : undefined;
+    const archivedKind = parentLinkKind(ownArchived);
+    const currentKind = parentLinkKind(ownCurrent);
+    let chosen;
+    if (currentKind === 'key') chosen = ownCurrent;
+    else if (archivedKind === 'key') chosen = ownArchived;
+    else if (currentKind === 'mark') chosen = ownCurrent;
+    else if (ownArchived !== undefined) chosen = ownArchived;
+    else continue;
+    entries.push([scope, structuredClone(chosen)]);
+  }
+  // `fromEntries` defines own properties, so a scope named `__proto__` stays
+  // an ordinary key.
+  if (entries.length > 0) team.jiraParents = Object.fromEntries(entries);
+  else delete team.jiraParents;
+  return team;
+};

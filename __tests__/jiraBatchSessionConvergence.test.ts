@@ -131,8 +131,18 @@ describe('a Jira batch while the facilitator types the review summary', () => {
     }
   });
 
-  it('loses no character typed while Jira works, the one racing the single patch included', async () => {
+  // In sessionParent mode the batch first creates the retro's parent issue
+  // (F2): one more Jira call while the facilitator types, and still one patch
+  // of the session, since a parent is never put on the session row.
+  it.each([
+    ['in a project', { mode: 'project', projectKey: 'PROJ', issueTypeId: '10001', labels: [] }, ['PROJ-1', 'PROJ-2', 'PROJ-3', 'PROJ-4', 'PROJ-5'], 5],
+    ['as sub-tasks of the session’s parent', { mode: 'sessionParent', projectKey: 'PROJ', parentIssueTypeId: '10001', issueTypeId: '10005', labels: [] },
+      ['PROJ-2', 'PROJ-3', 'PROJ-4', 'PROJ-5', 'PROJ-6'], 6]
+  ])('loses no character typed while Jira works %s, the one racing the single patch included', async (_label, target, keys, calls) => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // Each case starts from a fresh session row and an empty Jira.
+    store.getSqliteDb()!.prepare('DELETE FROM kv_store WHERE key = ?').run(`session:${RETRO_ID}`);
+    jira.reset();
     const initial = retroSession();
     await store.saveTeam(TEAM_ID, {
       id: TEAM_ID,
@@ -251,13 +261,14 @@ describe('a Jira batch while the facilitator types the review summary', () => {
 
     try {
       await post(`/api/team/${TEAM_ID}/jira/token`, { token: JIRA_MOCK_PAT });
-      await post(`/api/team/${TEAM_ID}/jira/target`, { target: { mode: 'project', projectKey: 'PROJ', issueTypeId: '10001', labels: [] } });
+      await post(`/api/team/${TEAM_ID}/jira/target`, { target });
 
       const answer = await post(`/api/team/${TEAM_ID}/jira/issues`, { actionIds: ACTION_IDS, sessionId: RETRO_ID });
       if (loopFailure) throw loopFailure;
       expect(answer.results.map((result: { status: string }) => result.status)).toEqual(ACTION_IDS.map(() => 'created'));
-      // Fifteen characters were typed while Jira worked.
-      expect(typed).toBe(15);
+      // Three characters were typed per Jira call.
+      expect(typed).toBe(3 * calls);
+      expect(jira.issues()).toHaveLength(calls);
 
       // The batch's one write is on its way when the next keystroke leaves:
       // that keystroke was built on the revision before the patch.
@@ -279,10 +290,8 @@ describe('a Jira batch while the facilitator types the review summary', () => {
       expect(screen.reviewSummary).toBe(SUMMARY);
       expect(patchWrites).toHaveBeenCalledTimes(1);
       // And every key is on the facilitator's screen.
-      expect(screen.actions.map((entry) => entry.jira && 'key' in entry.jira ? entry.jira.key : null))
-        .toEqual(['PROJ-1', 'PROJ-2', 'PROJ-3', 'PROJ-4', 'PROJ-5']);
-      expect(server.actions.map((entry) => entry.jira && 'key' in entry.jira ? entry.jira.key : null))
-        .toEqual(['PROJ-1', 'PROJ-2', 'PROJ-3', 'PROJ-4', 'PROJ-5']);
+      expect(screen.actions.map((entry) => entry.jira && 'key' in entry.jira ? entry.jira.key : null)).toEqual(keys);
+      expect(server.actions.map((entry) => entry.jira && 'key' in entry.jira ? entry.jira.key : null)).toEqual(keys);
     } finally {
       await new Promise<void>((resolve) => listening.close(() => resolve()));
       vi.restoreAllMocks();

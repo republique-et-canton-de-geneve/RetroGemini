@@ -2,13 +2,22 @@ import type {
   JiraIssueResult,
   JiraIssueType,
   JiraLink,
+  JiraParentLink,
+  JiraParentResult,
   JiraStatus,
   JiraStopCode,
   JiraTarget
 } from '../types';
 import type { Language } from '../i18n/languages';
-import { JIRA_MAX_ACTIONS_PER_REQUEST, isJiraIssueKey, isJiraLinked, isJiraUncertain } from '../utils/jira.js';
+import {
+  JIRA_MAX_ACTIONS_PER_REQUEST,
+  isJiraIssueKey,
+  isJiraLinked,
+  isJiraParentScope,
+  isJiraUncertain
+} from '../utils/jira.js';
 import { dataService } from './dataService';
+import { noteRevokedAnswer } from './sessionRevocation';
 
 /**
  * The browser's side of the Jira routes (`/api/team/:teamId/jira/*`).
@@ -57,6 +66,8 @@ const rolloutDelayMs = (attempt: number) => 500 * 2 ** attempt;
 // A request answered with no result and nothing done, twice in a row, ends the
 // batch rather than looping: the server always attempts at least one action
 // unless something holds it up, and the facilitator can simply try again.
+// A request that created only a parent issue (`sessionParent` mode) is
+// progress, not an idle round.
 const MAX_IDLE_ROUNDS = 2;
 
 /** An error a Jira call rejects with. `message` is the code, translated at display (i18n/errorMessages.ts). */
@@ -66,13 +77,16 @@ export class JiraServiceError extends Error {
   readonly results: JiraIssueResult[];
   /** For `createIssues` only: the actions the refused request and the ones after it held. */
   readonly notSent: string[];
+  /** For `createIssues` only: what became of the parent issues before the refusal. */
+  readonly parents: JiraParentResult[];
 
-  constructor(code: string, partial: { results?: JiraIssueResult[]; notSent?: string[] } = {}) {
+  constructor(code: string, partial: { results?: JiraIssueResult[]; notSent?: string[]; parents?: JiraParentResult[] } = {}) {
     super(code);
     this.name = 'JiraServiceError';
     this.code = code;
     this.results = partial.results ?? [];
     this.notSent = partial.notSent ?? [];
+    this.parents = partial.parents ?? [];
   }
 }
 
@@ -112,10 +126,16 @@ const readAnswer = async (res: Response): Promise<Answer> => {
 // One POST, with the team credential as it stands now: the password when this
 // login holds one, and the session token. JSON drops the undefined ones, as
 // `apiCall` in dataService.ts does; the server accepts either.
-const post = async (endpoint: string, payload: Record<string, unknown>): Promise<Answer> => {
+//
+// Decision D3b: a `401 session_revoked` is reported, and sent again once when
+// this page holds another token by then — the password change made here, or
+// adopted from another tab. A batch then carries on instead of stopping on a
+// refusal of a token that is already replaced.
+const post = async (endpoint: string, payload: Record<string, unknown>, retried = false): Promise<Answer> => {
+  const sentToken = dataService.getSessionToken();
   const credential = {
     password: dataService.getAuthenticatedPassword() ?? undefined,
-    sessionToken: dataService.getSessionToken() ?? undefined
+    sessionToken: sentToken ?? undefined
   };
   let res: Response;
   try {
@@ -127,7 +147,12 @@ const post = async (endpoint: string, payload: Record<string, unknown>): Promise
   } catch {
     return { kind: 'unknown', status: 0 };
   }
-  return readAnswer(res);
+  const answer = await readAnswer(res);
+  if (answer.kind === 'refused' && answer.status === 401) {
+    const outcome = await noteRevokedAnswer(answer.status, answer.code, sentToken);
+    if (outcome === 'retry' && !retried) return post(endpoint, payload, true);
+  }
+  return answer;
 };
 
 const isOlderPod = (answer: Answer) => answer.kind === 'older-pod';
@@ -174,6 +199,24 @@ export interface CreateIssuesOptions {
   language: Language;
   /** Create the actions marked uncertain anyway, once the facilitator has checked Jira. */
   force?: boolean;
+  /**
+   * `sessionParent` mode, with a parent issue named for this send (sent as a
+   * one-time `parent`-mode `target`): it becomes the parent issue of every
+   * retrospective or health check of the send that has none, once Jira has
+   * created a sub-task of it there.
+   */
+  adoptParent?: boolean;
+  /** With `adoptParent`: it replaces the parent issue those already have too. */
+  replaceParents?: boolean;
+  /**
+   * The parent issues the dialog showed in doubt and the facilitator, having
+   * checked Jira, confirmed: created anyway, each for its own retrospective,
+   * health check or the team dashboard, with the actions the dialog listed
+   * under it. Each request carries the scopes of its own actions only, and
+   * none the server has since answered in doubt: that doubt was found during
+   * the send, never shown (review F2-1).
+   */
+  forceParents?: { scope: string; actionIds: string[] }[];
   /** Called after each request with every result so far. */
   onProgress?: (results: JiraIssueResult[]) => void;
 }
@@ -193,7 +236,33 @@ export interface CreateIssuesOutcome {
   unknown: string[];
   stopped?: JiraStopCode | 'outcome_unknown';
   retryAfterSeconds?: number;
+  /**
+   * What became of the parent issues (`sessionParent` mode): one entry per
+   * retrospective, health check or the team dashboard the server reported,
+   * with the last status it reported across the requests. Empty in the other
+   * modes, and from a pod of an older release.
+   */
+  parents: JiraParentResult[];
 }
+
+const stringsOf = (value: unknown): string[] | undefined =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined;
+
+// One parent entry of an answer, as this client may show and cache it: a
+// scope the server can hold, a status, and a key only when it is one. Anything
+// else in the entry is dropped; an entry that is not one is dropped whole.
+const parentResultOf = (entry: unknown): JiraParentResult | null => {
+  if (!isObject(entry) || !isJiraParentScope(entry.scope) || typeof entry.status !== 'string' || !entry.status) return null;
+  if (entry.key !== undefined && !isJiraIssueKey(entry.key)) return null;
+  const result: JiraParentResult = { scope: entry.scope as string, status: entry.status as JiraParentResult['status'] };
+  if (isJiraIssueKey(entry.key)) result.key = entry.key as string;
+  if (typeof entry.uncertainSince === 'string' && entry.uncertainSince) result.uncertainSince = entry.uncertainSince;
+  const jiraMessages = stringsOf(entry.jiraMessages);
+  if (jiraMessages) result.jiraMessages = jiraMessages;
+  const jiraFields = stringsOf(entry.jiraFields);
+  if (jiraFields) result.jiraFields = jiraFields;
+  return result;
+};
 
 // The parts of a `/jira/issues` answer that concern the actions this request
 // sent; `null` when the body is not such an answer at all.
@@ -209,6 +278,9 @@ const readIssuesAnswer = (data: Record<string, unknown>, sent: string[]) => {
   return {
     results,
     remaining,
+    parents: (Array.isArray(data.parents) ? data.parents : [])
+      .map(parentResultOf)
+      .filter((entry): entry is JiraParentResult => entry !== null),
     // Sent, and neither attempted nor left for later: nothing says what became of it.
     unaccounted: sent.filter(id => !answered.has(id)),
     stopped: typeof data.stopped === 'string' && data.stopped ? (data.stopped as JiraStopCode) : undefined,
@@ -228,6 +300,46 @@ const linksOf = (results: JiraIssueResult[]): { actionId: string; jira: JiraLink
     if (result.status === 'uncertain') return [{ actionId: result.actionId, jira: { uncertainSince: now } }];
     return [];
   });
+};
+
+// The parent links a request's parent entries put in the cache: the key a
+// scope now holds (created, or adopted from the parent named for the send),
+// and the mark of a parent that may exist. A key the server could not store
+// (`not_saved`) is not cached: the server reads that scope as uncertain once
+// the claim expires, and the dialog names the key. A mark without its date
+// was not stored either.
+const parentLinksOf = (parents: JiraParentResult[]): { scope: string; jira: JiraParentLink }[] => {
+  const now = new Date().toISOString();
+  return parents.flatMap((entry): { scope: string; jira: JiraParentLink }[] => {
+    if ((entry.status === 'created' || entry.status === 'adopted') && isJiraIssueKey(entry.key)) {
+      return [{ scope: entry.scope, jira: { key: entry.key as string, createdAt: now } }];
+    }
+    if (entry.status === 'uncertain' && typeof entry.uncertainSince === 'string') {
+      return [{ scope: entry.scope, jira: { uncertainSince: entry.uncertainSince } }];
+    }
+    return [];
+  });
+};
+
+// The parent links a team record holds, as the cache may take them.
+const recordedParents = (team: Record<string, unknown>): { scope: string; jira: JiraParentLink }[] => {
+  if (!isObject(team.jiraParents)) return [];
+  return Object.entries(team.jiraParents).flatMap(([scope, value]): { scope: string; jira: JiraParentLink }[] => {
+    if (!isJiraParentScope(scope) || !isObject(value)) return [];
+    if (isJiraIssueKey(value.key)) {
+      const createdAt = typeof value.createdAt === 'string' && value.createdAt ? value.createdAt : new Date().toISOString();
+      return [{ scope, jira: { key: value.key as string, createdAt } }];
+    }
+    if (typeof value.uncertainSince === 'string' && value.uncertainSince) return [{ scope, jira: { uncertainSince: value.uncertainSince } }];
+    return [];
+  });
+};
+
+// Every entry a request reported, by scope: a later status replaces an
+// earlier one (an `in_progress` the next request saw `created`), and the
+// first report keeps its place in the list.
+const mergeParents = (into: Map<string, JiraParentResult>, parents: JiraParentResult[]) => {
+  for (const entry of parents) into.set(entry.scope, entry);
 };
 
 // The Jira value the team record holds for each of `actionIds`: a valid key on
@@ -271,10 +383,12 @@ const recordedLinks = (team: Record<string, unknown>, actionIds: string[]): Map<
  * Read once, after the writes queued before it (the record is read whole, and
  * a write still queued would be missing from it), and never put in the cache
  * whole: only the links go there (`applyJiraLinks`, which never replaces a
- * key). An action the record shows linked becomes `already_linked` with its
- * key; a mark is cached, and the action stays unknown with every other one —
- * the server may still be finishing the call it was in. A read that fails
- * changes nothing.
+ * key), and the parent issues of the sessions (`applyJiraParents`), so the
+ * next dialog's preview says which parent the server holds — one the lost
+ * request created included. An action the record shows linked becomes
+ * `already_linked` with its key; a mark is cached, and the action stays
+ * unknown with every other one — the server may still be finishing the call
+ * it was in. A read that fails changes nothing.
  */
 const settleUnknown = async (teamId: string, outcome: CreateIssuesOutcome): Promise<CreateIssuesOutcome> => {
   if (outcome.unknown.length === 0) return outcome;
@@ -287,6 +401,9 @@ const settleUnknown = async (teamId: string, outcome: CreateIssuesOutcome): Prom
     console.warn('[jiraService] Could not read the team after a lost answer', err);
   }
   if (!team) return outcome;
+
+  const parentLinks = recordedParents(team);
+  if (parentLinks.length > 0) dataService.applyJiraParents(teamId, parentLinks);
 
   const links = recordedLinks(team, outcome.unknown);
   if (links.size === 0) return outcome;
@@ -310,9 +427,12 @@ const settleUnknown = async (teamId: string, outcome: CreateIssuesOutcome): Prom
  *
  * Waits first for every write queued before the click, so the server finds
  * the actions just typed. Each request sends what the server left for later
- * (`remaining`, its time budget: finding A-1) before the rest. After each one,
- * the keys and uncertain outcomes reach the cache (`applyJiraLinks`) and
- * `onProgress` hears every result so far.
+ * (`remaining`, its time budget: finding A-1) before the rest, with the same
+ * target and flags. After each one, the keys and uncertain outcomes reach the
+ * cache (`applyJiraLinks`, and `applyJiraParents` for the parent issues of
+ * `sessionParent` mode) and `onProgress` hears every result so far. A request
+ * that only created a parent issue made progress: the action it was for
+ * follows in the next one.
  *
  * Resolves on a stop with its code, and with `outcome_unknown` when an answer
  * was lost or was a 5xx or a 408 (see the module comment); whenever some
@@ -334,8 +454,23 @@ const sendIssues = async (
 ): Promise<CreateIssuesOutcome> => {
   const results: JiraIssueResult[] = [];
   const unknown: string[] = [];
+  const parentsByScope = new Map<string, JiraParentResult>();
+  const parents = () => [...parentsByScope.values()];
   let toSend = [...new Set(actionIds)];
-  if (toSend.length === 0) return { results, notSent: [], unknown };
+  if (toSend.length === 0) return { results, notSent: [], unknown, parents: [] };
+
+  // The confirmed parents in doubt, and the scopes an answer reported in
+  // doubt since: a confirmation is for the doubt the dialog showed.
+  const confirmed = (options.forceParents ?? []).filter(entry =>
+    entry && isJiraParentScope(entry.scope) && Array.isArray(entry.actionIds));
+  const doubtedSince = new Set<string>();
+  const confirmedFor = (sent: string[]): string[] | undefined => {
+    const inRequest = new Set(sent);
+    const scopes = [...new Set(confirmed
+      .filter(entry => !doubtedSince.has(entry.scope) && entry.actionIds.some(id => inRequest.has(id)))
+      .map(entry => entry.scope))];
+    return scopes.length > 0 ? scopes : undefined;
+  };
 
   await dataService.whenPersisted();
 
@@ -350,25 +485,34 @@ const sendIssues = async (
       sessionId: options.sessionId,
       requestedBy: options.requestedBy,
       language: options.language,
-      force: options.force ? true : undefined
+      force: options.force ? true : undefined,
+      adoptParent: options.adoptParent ? true : undefined,
+      replaceParents: options.replaceParents ? true : undefined,
+      forceParentScopes: confirmedFor(sent)
     });
 
     // A pod without the route answered every attempt: a rollout outlasted its
     // window. Nothing ran, so all of it can be sent again later.
-    if (answer.kind === 'older-pod') return { results, notSent: toSend, unknown, stopped: 'server_restarting' };
+    if (answer.kind === 'older-pod') return { results, notSent: toSend, unknown, parents: parents(), stopped: 'server_restarting' };
     // A 5xx or a 408 says nothing about what ran, even with the route's own
     // code: the route may have failed after creating issues (finding A-2).
     if (answer.kind !== 'ok' && (answer.status >= 500 || answer.status === 408)) {
-      return { results, notSent: later, unknown: [...unknown, ...sent], stopped: 'outcome_unknown' };
+      return { results, notSent: later, unknown: [...unknown, ...sent], parents: parents(), stopped: 'outcome_unknown' };
     }
-    if (answer.kind === 'refused') throw new JiraServiceError(answer.code, { results: [...results], notSent: toSend });
+    if (answer.kind === 'refused') {
+      throw new JiraServiceError(answer.code, { results: [...results], notSent: toSend, parents: parents() });
+    }
     const parsed = answer.kind === 'ok' ? readIssuesAnswer(answer.data, sent) : null;
-    if (!parsed) return { results, notSent: later, unknown: [...unknown, ...sent], stopped: 'outcome_unknown' };
+    if (!parsed) return { results, notSent: later, unknown: [...unknown, ...sent], parents: parents(), stopped: 'outcome_unknown' };
 
     results.push(...parsed.results);
     unknown.push(...parsed.unaccounted);
+    mergeParents(parentsByScope, parsed.parents);
+    for (const entry of parsed.parents) if (entry.status === 'uncertain') doubtedSince.add(entry.scope);
     const links = linksOf(parsed.results);
     if (links.length > 0) dataService.applyJiraLinks(teamId, links);
+    const parentLinks = parentLinksOf(parsed.parents);
+    if (parentLinks.length > 0) dataService.applyJiraParents(teamId, parentLinks);
     try {
       options.onProgress?.([...results]);
     } catch (err) {
@@ -378,12 +522,12 @@ const sendIssues = async (
 
     toSend = [...parsed.remaining, ...later];
     if (parsed.stopped) {
-      return { results, notSent: toSend, unknown, stopped: parsed.stopped, retryAfterSeconds: parsed.retryAfterSeconds };
+      return { results, notSent: toSend, unknown, parents: parents(), stopped: parsed.stopped, retryAfterSeconds: parsed.retryAfterSeconds };
     }
-    idleRounds = parsed.results.length === 0 ? idleRounds + 1 : 0;
-    if (idleRounds >= MAX_IDLE_ROUNDS) return { results, notSent: toSend, unknown };
+    idleRounds = parsed.results.length === 0 && parsed.parents.length === 0 ? idleRounds + 1 : 0;
+    if (idleRounds >= MAX_IDLE_ROUNDS) return { results, notSent: toSend, unknown, parents: parents() };
   }
-  return { results, notSent: [], unknown };
+  return { results, notSent: [], unknown, parents: parents() };
 };
 
 export const jiraService = {
@@ -423,15 +567,23 @@ export const jiraService = {
 
   /**
    * The issue types a project offers, or the sub-task types of a parent
-   * issue's project, read from Jira with the team's token.
+   * issue's project, read from Jira with the team's token. For a project, a
+   * pod of this release answers every type, sub-task types included, and says
+   * so (`subtasksIncluded`); a pod of an older release answers the standard
+   * types only, so the screens filter by mode and treat a missing flag as "no
+   * sub-task list yet".
    */
   getIssueTypes: async (
     teamId: string,
     source: { projectKey: string } | { parentKey: string }
-  ): Promise<{ issueTypes: JiraIssueType[]; projectKey: string }> => {
+  ): Promise<{ issueTypes: JiraIssueType[]; projectKey: string; subtasksIncluded: boolean }> => {
     const data = dataOrThrow(await postAcrossRollout(teamRoute(teamId, 'issue-types'), { ...source }));
     if (!Array.isArray(data.issueTypes)) throw new JiraServiceError('unknown_error');
-    return { issueTypes: data.issueTypes as JiraIssueType[], projectKey: String(data.projectKey ?? '') };
+    return {
+      issueTypes: data.issueTypes as JiraIssueType[],
+      projectKey: String(data.projectKey ?? ''),
+      subtasksIncluded: data.subtasksIncluded === true
+    };
   },
 
   createIssues

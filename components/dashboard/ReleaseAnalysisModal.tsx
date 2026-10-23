@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RetroSession } from '../../types';
 import { dataService } from '../../services/dataService';
+import { noteRevokedResponse } from '../../services/sessionRevocation';
 import MarkdownContent from '../common/MarkdownContent';
 import ModalDialog from '../common/ModalDialog';
 import { useTranslation } from '../../i18n/I18nContext';
@@ -162,6 +163,9 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
       });
 
       if (!response.ok) {
+        // Decision D3b: a token a password change revoked is reported, and
+        // App then says why above the Dashboard, with "Log in again".
+        await noteRevokedResponse(response, body.sessionToken as string | null);
         if (response.status === 404) {
           setError(t('dashboard.releaseAnalysis.errorNotEnabled'));
         } else {

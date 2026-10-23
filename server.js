@@ -4,7 +4,6 @@ import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-import rateLimit from 'express-rate-limit';
 import { createDataStore } from './server/services/dataStore.js';
 import { createLogService } from './server/services/logService.js';
 import { createMailerService } from './server/services/mailerService.js';
@@ -15,19 +14,22 @@ import { createBackupService } from './server/services/backupService.js';
 import { createAiService } from './server/services/aiService.js';
 import { startSocketAdapter } from './server/services/socketAdapter.js';
 import { registerSocketHandlers } from './server/services/socketHandlers.js';
-import { createBoundedCache } from './server/services/boundedCache.js';
+import { createBoundedCache, parseSessionCacheMaxBytes } from './server/services/boundedCache.js';
 import { escapeHtml, sanitizeEmailLink, secureCompare, hashResetToken, pruneResetTokens } from './server/services/security.js';
 import { createShutdownHandler } from './server/services/shutdown.js';
 import { createSecurityHeaders } from './server/services/securityHeaders.js';
+import { createJsonCompression } from './server/services/jsonCompression.js';
 import { createRequestContext } from './server/services/logContext.js';
 import { createSecurityEventLog } from './server/services/securityEvents.js';
 import { createLiveSessionPatch, createLiveSessionRename } from './server/services/liveSessionRename.js';
+import { createSessionRevocation } from './server/services/sessionRevocation.js';
 
 import { registerAiRoutes } from './server/routes/aiRoutes.js';
 import { registerCoreRoutes } from './server/routes/coreRoutes.js';
 import { registerFeedbackRoutes } from './server/routes/feedbackRoutes.js';
 import { registerPasswordResetRoutes } from './server/routes/passwordResetRoutes.js';
 import { registerPublicRoutes } from './server/routes/publicRoutes.js';
+import { registerStaticRoutes } from './server/routes/staticRoutes.js';
 import { createPublicOriginResolver } from './server/services/publicOrigin.js';
 import { migrateLegacyPasswords } from './server/services/passwordMigration.js';
 import { healStoredEmails } from './server/services/emailMigration.js';
@@ -91,9 +93,14 @@ const securityEvents = createSecurityEventLog({ dataStore });
 const aiService = createAiService({ dataStore });
 // Bounded so a long-lived pod doesn't accumulate every session it has ever
 // served. Session state is always recoverable from the data store, so the
-// cache only needs the most recently active sessions.
+// cache only needs the most recently active sessions. Two caps: a count, and
+// the total JSON size of the cached sessions — whose sizes come from the
+// store, which remembers the text length of every session it parsed or wrote
+// (no second serialization on the join and write paths).
 const sessionCache = createBoundedCache({
-  max: Number(process.env.SESSION_CACHE_MAX) || 500
+  max: Number(process.env.SESSION_CACHE_MAX) || 500,
+  maxBytes: parseSessionCacheMaxBytes(),
+  sizeHint: dataStore.sessionTextLength
 });
 
 // Incident ISS: a Dashboard rename must reach the live session, not only the
@@ -132,6 +139,16 @@ const shutdown = createShutdownHandler({
 // H50). `/health` renders it; nothing gates traffic on it.
 const serverRuntime = { multiPodAdapter: false, socketAdapter: null };
 
+// Decision D3b: a password rotation revokes the team's session tokens. Every
+// HTTP route refuses them at once (each request reads the team's session
+// epoch); this cuts the live-session sockets, on this pod and — through the
+// adapter, which `serverRuntime` says is up — on the others. Built before the
+// routes that rotate, which receive it, and handed to the socket handlers,
+// which attach the sweep. Every registrar defaults it to a no-op, so this
+// wiring is the load-bearing part — `__tests__/sessionRevocationWiring`
+// asserts it against this file.
+const sessionRevocation = createSessionRevocation({ io, serverRuntime });
+
 logService.attachConsole();
 
 // Audit H44: mounted before every route — including `/health` and the SPA
@@ -147,6 +164,14 @@ app.use(createRequestContext());
 // route added later. Registering it after `registerCoreRoutes` would leave that
 // one uncovered, which is exactly the kind of gap this finding was about.
 app.use(createSecurityHeaders());
+
+// Gzip for JSON answers of 1 KiB and more (synthesis item 9). After the
+// security headers, which are therefore already set when an answer is
+// compressed, and compression never touches them: the CSP reaches every
+// compressed answer. Before the first route, so `/api/version` is covered.
+// It wraps `res.json` only: files, streams, Buffers and Socket.IO are never
+// touched (see the module for why a handler must not throw after answering).
+app.use(createJsonCompression());
 
 registerCoreRoutes({ app, versionService, serverRuntime });
 
@@ -181,6 +206,7 @@ registerTeamRoutes({
   securityEvents,
   liveSessionRename,
   liveSessionPatch,
+  sessionRevocation,
   isShuttingDown: shutdown.isShuttingDown
 });
 
@@ -202,7 +228,8 @@ registerPasswordResetRoutes({
   hashResetToken,
   pruneResetTokens,
   publicOrigin,
-  securityEvents
+  securityEvents,
+  sessionRevocation
 });
 
 registerSuperAdminRoutes({
@@ -218,31 +245,24 @@ registerSuperAdminRoutes({
   backupService,
   aiService,
   serverRuntime,
-  securityEvents
+  securityEvents,
+  sessionRevocation
 });
 
 registerAiRoutes({
   app,
-  dataStore,
   tokenService,
+  teamService,
   aiService
 });
 
-registerSocketHandlers({ io, dataStore, sessionCache, tokenService });
+registerSocketHandlers({ io, dataStore, sessionCache, tokenService, sessionRevocation });
 
-app.use(express.static(join(__dirname, 'dist')));
-
-const staticLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 600,
-  message: { error: 'too_many_requests', retryAfter: '1 minute' },
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
-app.get(/.*/, staticLimiter, (_req, res) => {
-  res.sendFile(join(__dirname, 'dist', 'index.html'));
-});
+// The built frontend, last: the hashed bundle precompressed and cached for a
+// year, everything else revalidated, a missing asset a text 404 that keeps the
+// CSP, and the SPA fallback (synthesis item 9, AGENTS.md → *Compression and
+// caching*). Boots without a build, as the default e2e job runs it.
+registerStaticRoutes({ app, distDir: join(__dirname, 'dist') });
 
 const PORT = process.env.PORT || 3000;
 
@@ -272,6 +292,15 @@ const startServer = async () => {
       console.info(`[Server] Jira team secrets: ${removed} orphaned row(s) removed`);
     } catch (err) {
       console.warn('[Server] Jira team secrets: the orphan sweep could not run; it runs again at the next start', err);
+    }
+    // The same for the session epochs (decision D3b): a deletion whose last
+    // step failed, or one served by a pod from before this release, leaves
+    // the team's `team-auth:` row behind. Never a failed boot either.
+    try {
+      const removed = await dataStore.sweepOrphanedTeamAuthRows();
+      console.info(`[Server] Team session epochs: ${removed} orphaned row(s) removed`);
+    } catch (err) {
+      console.warn('[Server] Team session epochs: the orphan sweep could not run; it runs again at the next start', err);
     }
     // Publishes the adapter state onto `serverRuntime` and, when a configured
     // adapter failed, logs loudly and retries in the background (audit H50).

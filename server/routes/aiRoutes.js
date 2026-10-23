@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 const MAX_RELEASE_ANALYSIS_RETROSPECTIVES = 50;
 const MAX_RELEASE_ANALYSIS_PROMPT_CHARS = 4000;
 
-const registerAiRoutes = ({ app, dataStore, tokenService, aiService }) => {
+const registerAiRoutes = ({ app, tokenService, teamService, aiService }) => {
   // Product decision: authenticated team members are never rate limited on AI
   // actions (a facilitator grouping tickets must not lock up mid-session).
   // The per-IP budget only throttles unauthenticated callers, whose requests
@@ -19,17 +19,19 @@ const registerAiRoutes = ({ app, dataStore, tokenService, aiService }) => {
 
   // AI endpoints are only reachable with a valid team session token whose team
   // still exists, so anonymous network callers cannot drive the internal LLM.
+  // Decision D3b: and whose epoch no password rotation replaced, answered
+  // `session_revoked` so the client can tell its user why. The verdict reads
+  // the team's small auth row (`teamService.verifySessionToken`); the record
+  // itself, which nothing here uses, is never loaded.
+  //
+  // The limiter above still skips on the signature alone: a revoked holder
+  // bypasses it and pays one tiny read and a 401 per call, less than the full
+  // record load every call used to cost.
   const authenticateTeamRequest = async (req, res) => {
     const { sessionToken } = req.body || {};
-    const claims = tokenService.validateSessionToken(sessionToken);
-    if (!claims) {
-      res.status(401).json({ error: 'unauthorized' });
-      return null;
-    }
-
-    const team = await dataStore.loadTeam(claims.teamId);
-    if (!team) {
-      res.status(401).json({ error: 'unauthorized' });
+    const { claims, error } = await teamService.verifySessionToken(sessionToken);
+    if (error) {
+      res.status(401).json({ error: error === 'session_revoked' ? 'session_revoked' : 'unauthorized' });
       return null;
     }
 

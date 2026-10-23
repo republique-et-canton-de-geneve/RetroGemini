@@ -24,6 +24,11 @@ const errors = {
   'errors.deleteTeamFailed': 'The team could not be deleted. Please try again.',
   'errors.recoveryEmailNotSaved': 'The recovery email could not be saved. Please try again.',
   'errors.invalidInviteLink': 'Failed to join team - invalid invite link',
+  // The other ways an invite import fails: the login limiter, an answer worth
+  // retrying (a 5xx, a gateway during a rolling update), and no answer at all.
+  'errors.inviteRateLimited': 'Too many attempts to join this team from this network. Please wait a few minutes, then try again.',
+  'errors.inviteUnavailable': 'The team could not be joined right now. Please try again in a moment.',
+  'errors.serverUnreachable': 'The server could not be reached. Check your connection, then try again.',
   'errors.nameReserved': 'This name is reserved. Please use a different name or contact the team administrator.',
   'errors.invitationRequired': 'An invitation is required to join this team.',
   'errors.invitationNotVerified': 'Invitation could not be verified. Please join manually.',
@@ -46,6 +51,8 @@ const errors = {
   'errors.connectionFailed': 'Connection failed',
   // A team credential the server no longer accepts, and the per-IP limiters.
   'errors.invalidToken': 'Your session has expired. Please sign in to the team again.',
+  // Decision D3b: a token a password change revoked (`session_revoked`).
+  'errors.sessionRevoked': 'The team password was changed. Please sign in to the team again with the new password.',
   'errors.tooManyRequests': 'Too many requests right now. Please wait a moment and try again.',
   // The Jira routes (`/api/team/:teamId/jira/*`, `/api/super-admin/*jira*`)
   // and the codes a `/jira/issues` batch stops with. Jira's own refusal of one
@@ -61,7 +68,9 @@ const errors = {
     'Jira Cloud refused this email and token. Use the email of the token’s account and a classic API token, not one “with scopes”.',
   'errors.jiraForbidden': 'Jira refused: the account of the team’s token is not allowed to do this.',
   'errors.jiraNotFound': 'Jira found no such project or issue, or the account of the team’s token cannot see it.',
-  'errors.jiraParentInvalid': 'This issue cannot hold sub-tasks: choose an issue that is not itself a sub-task.',
+  'errors.jiraParentInvalid': 'This issue cannot hold sub-tasks: choose an issue that is neither a sub-task nor an epic.',
+  'errors.jiraParentRefused':
+    'Jira refused to create a parent issue, so the other actions were not sent: check the type of the parent issue and the labels in Settings → Jira.',
   'errors.jiraRateLimited': 'Jira asks to wait before more requests. Try again in a moment.',
   'errors.jiraUnavailable': 'Jira is not available right now. Try again in a moment.',
   'errors.jiraUnreachable': 'Jira could not be reached. Try again in a moment, or ask your administrator to check the connection.',

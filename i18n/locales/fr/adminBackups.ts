@@ -12,7 +12,6 @@ const adminBackups: Record<keyof typeof en, string> = {
   'adminBackups.config.hours': '{hours}\u00a0h',
   'adminBackups.config.maxCount': 'Nombre maximal conservé\u00a0: {value}',
   'adminBackups.config.onStartup': 'Sauvegarde au démarrage\u00a0: {value}',
-  'adminBackups.config.directory': 'Répertoire\u00a0: {value}',
 
   // Checkpoint
   'adminBackups.checkpoint.create': 'Créer un point de contrôle',
@@ -32,6 +31,7 @@ const adminBackups: Record<keyof typeof en, string> = {
   'adminBackups.type.auto': 'auto',
   'adminBackups.type.manual': 'manuelle',
   'adminBackups.type.startup': 'démarrage',
+  'adminBackups.type.imported': 'importée',
   'adminBackups.label.startup': 'Démarrage du serveur',
   'adminBackups.label.preRestore': 'Instantané avant restauration',
   'adminBackups.label.preDelete': 'Instantané avant suppression',
@@ -62,6 +62,46 @@ const adminBackups: Record<keyof typeof en, string> = {
   'adminBackups.notice.deleted': 'Sauvegarde supprimée',
   'adminBackups.notice.deleteFailed': 'La suppression de la sauvegarde a échoué',
   'adminBackups.notice.updateFailed': 'La mise à jour de la sauvegarde a échoué',
+  'adminBackups.notice.restoreInvalid':
+    'Cette sauvegarde ne peut pas être restaurée\u00a0: son contenu n’est pas une archive valide. Rien n’a été modifié.',
+
+  // Importer un fichier de sauvegarde
+  'adminBackups.import.title': 'Importer un fichier de sauvegarde',
+  'adminBackups.import.description':
+    'Ajoutez à la liste ci-dessous un fichier de sauvegarde téléchargé depuis cette console (.json.gz) ou une archive JSON. L’importation ne restaure rien\u00a0: vous restaurez ensuite une ou plusieurs équipes depuis ce fichier, ou toutes les données. Un fichier importé n’est jamais supprimé automatiquement, pas plus que l’instantané pris avant chaque restauration\u00a0: supprimez-les quand vous n’en avez plus besoin.',
+  'adminBackups.import.fileLabel': 'Fichier de sauvegarde',
+  'adminBackups.import.hint': 'Un fichier .json.gz ou .json de {max}\u00a0Mo au plus.',
+  'adminBackups.import.hintNoLimit': 'Un fichier .json.gz ou .json.',
+  'adminBackups.import.submit': 'Importer le fichier',
+  'adminBackups.import.importing': 'Importation…',
+  'adminBackups.import.status.importing': 'Importation de «\u00a0{name}\u00a0» ({size})…',
+  'adminBackups.import.imported': '«\u00a0{name}\u00a0» a été importé. Équipes dans ce fichier\u00a0: {count}.',
+  'adminBackups.import.error.noFile': 'Choisissez d’abord un fichier de sauvegarde.',
+  'adminBackups.import.error.emptyFile': 'Ce fichier est vide.',
+  'adminBackups.import.error.tooLarge':
+    'Ce fichier dépasse la taille acceptée par le serveur\u00a0: {max}\u00a0Mo au plus.',
+  'adminBackups.import.error.tooLargeUnpacked':
+    'Une fois décompressée, cette archive dépasse la taille acceptée par le serveur\u00a0: {max}\u00a0Mo au plus.',
+  'adminBackups.import.error.proxyTooLarge':
+    'Le réseau en amont du serveur a refusé un fichier de cette taille avant qu’il n’atteigne l’application. Demandez à votre exploitant d’augmenter la limite d’envoi de l’ingress ou du proxy.',
+  'adminBackups.import.error.invalidFormat':
+    'Ce fichier n’est pas une archive de sauvegarde, ou il est incomplet\u00a0: il doit contenir du JSON, compressé avec gzip ou non.',
+  'adminBackups.import.error.invalidData':
+    'Ce fichier ne contient pas de liste d’équipes\u00a0: ce n’est pas une sauvegarde de cette application.',
+  'adminBackups.import.error.teamMalformed':
+    'Certaines entrées de ce fichier ne sont pas des équipes (sans identifiant ou sans nom)\u00a0: {count}. Rien n’a été importé.',
+  'adminBackups.import.error.duplicateTeams':
+    'Ce fichier contient plusieurs fois la même équipe ({ids}). Rien n’a été importé.',
+  'adminBackups.import.error.listMalformed':
+    'Ce fichier est endommagé\u00a0: «\u00a0{field}\u00a0» n’est pas une liste. Rien n’a été importé.',
+  'adminBackups.import.error.inProgress':
+    'Un autre fichier est en cours d’importation. Attendez la fin, puis réessayez.',
+  'adminBackups.import.error.unavailable':
+    'Ce serveur ne peut pas encore importer de fichier, sans doute parce qu’une mise à jour est en cours. Réessayez dans quelques minutes.',
+  'adminBackups.import.error.uncertain':
+    'Aucune réponse n’est revenue du serveur, mais le fichier est peut-être en cours d’importation\u00a0: il peut mettre une minute à apparaître dans la liste ci-dessous. Vérifiez la liste avant d’importer à nouveau le fichier.',
+  'adminBackups.import.error.failed':
+    'Le fichier n’a pas pu être importé. Vérifiez la liste ci-dessous avant de réessayer.',
 
   // Restaurer une seule équipe
   'adminBackups.teamRestore.title': 'Restaurer une équipe',

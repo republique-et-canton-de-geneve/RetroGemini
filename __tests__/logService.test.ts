@@ -9,7 +9,8 @@ describe('logService', () => {
     error: console.error,
     warn: console.warn,
     info: console.info,
-    log: console.log
+    log: console.log,
+    debug: console.debug
   };
 
   afterEach(() => {
@@ -17,6 +18,7 @@ describe('logService', () => {
     console.warn = realConsole.warn;
     console.info = realConsole.info;
     console.log = realConsole.log;
+    console.debug = realConsole.debug;
     vi.restoreAllMocks();
   });
 

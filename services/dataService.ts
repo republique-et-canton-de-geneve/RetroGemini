@@ -1,7 +1,8 @@
 
-import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink } from '../types';
+import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink, JiraParentLink } from '../types';
 import { randomId } from '../utils/randomId';
-import { isJiraIssueKey, isJiraLinked, isJiraUncertain } from '../utils/jira.js';
+import { PARTICIPANT_PALETTE } from '../utils/participantColors';
+import { isJiraIssueKey, isJiraIssueTypeId, isJiraLinked, isJiraParentScope, isJiraUncertain } from '../utils/jira.js';
 import {
   DEFAULT_TIMER_SECONDS,
   createTimerSettings,
@@ -29,6 +30,18 @@ import {
 import { getActiveLanguage, Language, toLanguage } from '../i18n/languages';
 import { getRetroTemplatePresets } from '../i18n/content/retroTemplates';
 import { getDefaultIcebreaker, localizeIcebreaker } from '../i18n/content/icebreakers';
+import {
+  SESSION_REVOKED,
+  clearSessionRevoked,
+  isSessionRevoked,
+  markSessionRevoked,
+  noteRevokedAnswer,
+  notifySessionTokenChanged,
+  registerRevocationResolver,
+  tokenIssuedAt,
+  trackCredentialChange,
+  whenCredentialsSettled
+} from './sessionRevocation';
 
 // ==================== SECURE API CLIENT ====================
 // Uses team-scoped endpoints that require authentication
@@ -43,6 +56,10 @@ let authenticatedTeamId: string | null = null;
 let authenticatedTeamPassword: string | null = null;
 let authenticatedTeam: Team | null = null;
 let authenticatedSessionToken: string | null = null;
+// Bumped by every login and every logout, so the credentials a logout keeps
+// for the writes queued before it are only ever cleared by that logout, never
+// once a later login holds the module (see `logout`).
+let credentialGeneration = 0;
 
 // Invite credential cache (stage 7e). The credential is team-scoped, signed
 // server-side and bound to the team's invite epoch; the short TTL bounds how
@@ -53,6 +70,21 @@ let inviteCredentialCache: { teamId: string; credential: string; fetchedAt: numb
 export const TEAM_DELETE_FAILED = 'The team could not be deleted. Please try again.';
 // Thrown by `updateFacilitatorEmail` when the server did not store the address.
 export const RECOVERY_EMAIL_NOT_SAVED = 'The recovery email could not be saved. Please try again.';
+
+// When the cache last received the whole team from a login, a creation, a
+// restore or an invite join, or `null`. The Dashboard reuses that load once,
+// instead of fetching the same team again a moment later
+// (`refreshFromServer({ maxAgeMs })`). A refresh never stamps it.
+let teamLoadedAt: number | null = null;
+const markTeamLoaded = () => { teamLoadedAt = Date.now(); };
+
+// How long a refresh waits for the writes queued before it. The session exit
+// queues the session's last save and enters the Dashboard in the same tick; a
+// refresh answered before that save landed would replace the cache with a
+// copy that lacks it. Bounded, because the queue has no timeout of its own.
+// Not exported: App suites mock this module with a factory, and vitest throws
+// on an export the factory does not define.
+const REFRESH_PERSIST_WAIT_MS = 3000;
 
 const INVITE_CREDENTIAL_TTL_MS = 60_000;
 // The login picker gives up on the team list after this long and offers a
@@ -84,7 +116,8 @@ const getHex = (twClass: string) => {
     return '#CBD5E1';
 };
 
-const USER_COLORS = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500', 'bg-fuchsia-500', 'bg-lime-500', 'bg-pink-500'];
+// One palette for every place a participant gets a colour (utils/participantColors.ts).
+const USER_COLORS: readonly string[] = PARTICIPANT_PALETTE;
 
 // Member and invite emails are identities: two spellings of one address must
 // find the same person. `cleanEmail` is the server's rule (utils/emailAddress.js)
@@ -286,6 +319,10 @@ export const getTeamSessionToken = (): string | null => authenticatedSessionToke
  * Set authentication credentials for the current session
  */
 const setAuthCredentials = (teamId: string, password: string, team: Team, sessionToken?: string) => {
+  // After a logout, the token it keeps for its queued writes is not this
+  // login's: a login that brings none must not inherit it.
+  if (!authenticatedTeamId) authenticatedSessionToken = null;
+  credentialGeneration += 1;
   authenticatedTeamId = teamId;
   // Normalized so a token-only session (restore without any password copy)
   // stores null and request bodies keep their pre-7c shape.
@@ -294,17 +331,50 @@ const setAuthCredentials = (teamId: string, password: string, team: Team, sessio
   if (sessionToken) {
     authenticatedSessionToken = sessionToken;
   }
+  // A login is a credential the server just accepted (decision D3b).
+  triedAdoptions.clear();
+  clearSessionRevoked();
 };
 
 /**
- * Clear authentication credentials (logout)
+ * Logout, in two steps.
+ *
+ * The team leaves at once, for every reader: `getTeam` answers nothing,
+ * `isAuthenticated` is false, a refresh sends nothing, and an answer that
+ * arrives afterwards is not kept (`keepAnsweredTeam`). App's sign-out used to
+ * leave all of it in place, so a save or a refresh answered after the user
+ * signed out could open the team again.
+ *
+ * The credentials stay until the writes queued before the logout have been
+ * sent: a participant's exit queues the session's last save and the roster
+ * just before it signs out, and every queued write checks the credentials
+ * when it starts, so clearing them at once dropped those writes. They are
+ * cleared once the queue as it stands has settled — unless a login replaced
+ * them in the meantime. A write queued after the logout starts after that,
+ * and finds them gone.
  */
 const clearAuthCredentials = () => {
   authenticatedTeamId = null;
-  authenticatedTeamPassword = null;
   authenticatedTeam = null;
-  authenticatedSessionToken = null;
   inviteCredentialCache = null;
+  triedAdoptions.clear();
+  teamLoadedAt = null;
+  const generation = ++credentialGeneration;
+  void persistQueue.then(() => {
+    if (credentialGeneration !== generation) return;
+    authenticatedTeamPassword = null;
+    authenticatedSessionToken = null;
+  });
+};
+
+/**
+ * Keeps the team a server answer carries, while it is still the team signed
+ * in: an answer that arrives after a logout, or after a login to another
+ * team, belongs to nobody, and keeping it made `getTeam` answer a team no
+ * screen has open.
+ */
+const keepAnsweredTeam = (teamId: string, team: Team | null | undefined) => {
+  if (team && authenticatedTeamId === teamId) authenticatedTeam = team;
 };
 
 /**
@@ -312,17 +382,99 @@ const clearAuthCredentials = () => {
  * feedback routes: the plaintext password or the HMAC session token.
  * Stage 7b — either credential authenticates; the server checks the password
  * first and a valid token rescues a stale password, so sending both is safe.
+ *
+ * Decision D3b: never once the session was revoked by a password change.
+ * Every persist, the queue, the ledger re-sends and the rollout retries stop
+ * at once — no storm of refused writes — while the cached team stays in
+ * memory, so the screens keep rendering until the user logs in again.
  */
 const hasTeamCredentials = (): boolean =>
-  Boolean(authenticatedTeamPassword || authenticatedSessionToken);
+  !isSessionRevoked() && Boolean(authenticatedTeamPassword || authenticatedSessionToken);
+
+// ==================== SESSION REVOCATION (decision D3b) ====================
+
+// Tokens this page already tried to adopt from another tab, so a token that is
+// revoked too is tried once, never in a loop.
+const triedAdoptions = new Set<string>();
+
+const readStoredSessionToken = (): string | null => {
+  try {
+    const raw = localStorage.getItem(OPEN_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as { teamId?: unknown; sessionToken?: unknown } | null;
+    if (!saved || saved.teamId !== authenticatedTeamId || typeof saved.sessionToken !== 'string') return null;
+    return saved.sessionToken || null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Takes the token another tab of this browser stored for the same team, when
+ * it is newer than `refused`: that tab changed the password, or logged in
+ * again, and the token it holds is the current one. App.tsx keeps the newest
+ * token of the team in that key, so a stale tab never writes an older one
+ * over it.
+ */
+const adoptStoredSessionToken = (refused: string | null): boolean => {
+  const stored = readStoredSessionToken();
+  if (!stored || stored === refused || stored === authenticatedSessionToken || triedAdoptions.has(stored)) return false;
+  if (tokenIssuedAt(stored) <= tokenIssuedAt(refused)) return false;
+  triedAdoptions.add(stored);
+  authenticatedSessionToken = stored;
+  clearSessionRevoked();
+  notifySessionTokenChanged();
+  return true;
+};
+
+/**
+ * What a `401 session_revoked` means for this page: `'retry'` when the token
+ * it holds now is not the one that was refused, `'revoked'` otherwise. A
+ * password change in flight finishes first, since its answer — the new token
+ * — can arrive after a refusal its own commit caused.
+ */
+const resolveRevokedCredential = async (sentToken: string | null): Promise<'retry' | 'revoked'> => {
+  await whenCredentialsSettled();
+  // Nobody is signed in any more (a logout while the request was out): there
+  // is nothing to revoke and nothing to retry.
+  if (!authenticatedTeamId) return 'revoked';
+  if (authenticatedSessionToken && authenticatedSessionToken !== sentToken) return 'retry';
+  if (adoptStoredSessionToken(sentToken)) return 'retry';
+  markSessionRevoked();
+  return 'revoked';
+};
+
+registerRevocationResolver(resolveRevokedCredential);
+
+// The other order: the revocation reached this tab before the tab that changed
+// the password stored its new token. Only while revoked: a tab holding a
+// current token must never take one another tab writes back.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('storage', (event: StorageEvent) => {
+    if (event.key !== OPEN_SESSION_STORAGE_KEY || !isSessionRevoked()) return;
+    adoptStoredSessionToken(authenticatedSessionToken);
+  });
+}
 
 /**
  * Make an authenticated API call to the server
  */
 const apiCall = async <T>(
   endpoint: string,
-  body: Record<string, unknown> = {}
+  body: Record<string, unknown> = {},
+  { retryRevoked = true }: { retryRevoked?: boolean } = {}
 ): Promise<{ data: T | null; error: string | null }> => {
+  // The token this request carries, for the revocation decision below. A
+  // caller that sets `sessionToken` itself (the password change sends none)
+  // is answered with that one.
+  const ownsToken = 'sessionToken' in body;
+  const sentToken = ownsToken ? ((body.sessionToken as string | null | undefined) ?? null) : authenticatedSessionToken;
+  // Revoked (decision D3b): the server would refuse the token this page holds,
+  // so nothing is sent until a login or another tab's token replaces it. A
+  // caller that brings its own credential (the password change) still goes.
+  if (isSessionRevoked() && !ownsToken) {
+    return { data: null, error: SESSION_REVOKED };
+  }
   try {
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -338,6 +490,15 @@ const apiCall = async <T>(
 
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({ error: 'unknown_error' }));
+      // Decision D3b: a token a password change revoked. Sent again once when
+      // this page holds another token by now; otherwise the session is marked
+      // revoked and every write stops (`hasTeamCredentials`).
+      if (res.status === 401 && errorData.error === SESSION_REVOKED) {
+        const outcome = await noteRevokedAnswer(res.status, errorData.error, sentToken);
+        if (outcome === 'retry' && retryRevoked && !ownsToken) {
+          return apiCall<T>(endpoint, body, { retryRevoked: false });
+        }
+      }
       return { data: null, error: errorData.error || 'request_failed' };
     }
 
@@ -435,7 +596,8 @@ const postAcrossRollout = async (
 
   const { error } = await apiCall(endpoint, body);
 
-  if (!error || isFinal(error) || attempt >= ROLLOUT_RETRIES) return error;
+  // A revoked token is final: no pod will take it (decision D3b).
+  if (!error || isFinal(error) || error === SESSION_REVOKED || attempt >= ROLLOUT_RETRIES) return error;
 
   await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
   return postAcrossRollout(endpoint, body, isFinal, attempt + 1);
@@ -697,8 +859,8 @@ const persistTeamUpdate = async (teamId: string, updates: TeamUpdatePayload): Pr
 
   if (error) {
     console.warn('[dataService] Failed to persist team update', error);
-  } else if (data?.team) {
-    authenticatedTeam = data.team;
+  } else {
+    keepAnsweredTeam(teamId, data?.team);
   }
 };
 
@@ -807,6 +969,31 @@ const jiraLinkToApply = (current: ActionItem, incoming: unknown): JiraLink | nul
   return null;
 };
 
+// The parent link `applyJiraParents` may put on a scope, or `null` to leave
+// it. A key replaces whatever the scope holds, a key included: it reaches the
+// cache only from the server's answer or its record, which both say what the
+// server stores, and a scope's parent can legitimately change (a parent named
+// for a send with "Also use … for their later actions"). A mark never replaces
+// a key, nor an earlier mark, which says when the doubt began. Anything else
+// is ignored.
+const jiraParentToApply = (current: unknown, incoming: unknown): JiraParentLink | null => {
+  if (!incoming || typeof incoming !== 'object') return null;
+  const link = incoming as { key?: unknown; createdAt?: unknown; subtaskTypeId?: unknown; uncertainSince?: unknown };
+  if (isJiraIssueKey(link.key)) {
+    return {
+      key: link.key as string,
+      createdAt: typeof link.createdAt === 'string' ? link.createdAt : new Date().toISOString(),
+      ...(isJiraIssueTypeId(link.subtaskTypeId) ? { subtaskTypeId: link.subtaskTypeId as string } : {})
+    };
+  }
+  if (typeof link.uncertainSince === 'string' && link.uncertainSince) {
+    const held = current && typeof current === 'object' ? current as { key?: unknown; uncertainSince?: unknown } : null;
+    if (held && (isJiraIssueKey(held.key) || typeof held.uncertainSince === 'string')) return null;
+    return { uncertainSince: link.uncertainSince };
+  }
+  return null;
+};
+
 // A whole-action edit keeps the link the cache holds and takes none from its
 // caller. Only the Jira route writes a link (types.ts, `JiraLink`), and an edit
 // is built from whatever copy a screen holds: a live session's, which may carry
@@ -879,16 +1066,40 @@ const hydrateFromServer = async (): Promise<void> => {
 };
 
 /**
- * Refresh team data from server
+ * Refresh team data from server.
+ *
+ * `maxAgeMs`: serve this call from the whole-team load a login, a creation, a
+ * restore or an invite join has just made, when it is younger than that. One
+ * reuse per load: the entry that follows it is served, any later one (a return
+ * from a session included) fetches.
+ *
+ * The fetch waits first, at most REFRESH_PERSIST_WAIT_MS, for the writes
+ * queued before this call, so its answer holds them.
  */
-const refreshFromServer = async (): Promise<void> => {
+const refreshFromServer = async ({ maxAgeMs = 0 }: { maxAgeMs?: number } = {}): Promise<void> => {
   if (!authenticatedTeamId || !hasTeamCredentials()) return;
 
-  const { data, error } = await apiCall<{ team: Team }>(`/api/team/${authenticatedTeamId}`, {});
-
-  if (!error && data?.team) {
-    authenticatedTeam = data.team;
+  if (maxAgeMs > 0 && teamLoadedAt !== null && Date.now() - teamLoadedAt < maxAgeMs) {
+    teamLoadedAt = null;
+    return;
   }
+
+  // The tail never rejects (see whenPersisted), and the timer is always
+  // cleared, so nothing outlives the call.
+  const teamId = authenticatedTeamId;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    whenPersisted(),
+    new Promise<void>((resolve) => { timer = setTimeout(resolve, REFRESH_PERSIST_WAIT_MS); })
+  ]);
+  clearTimeout(timer);
+  // A logout, or a login to another team, during the wait: this answer would
+  // belong to nobody.
+  if (authenticatedTeamId !== teamId || !hasTeamCredentials()) return;
+
+  const { data, error } = await apiCall<{ team: Team }>(`/api/team/${teamId}`, {});
+
+  if (!error) keepAnsweredTeam(teamId, data?.team);
 };
 
 export const dataService = {
@@ -981,6 +1192,7 @@ export const dataService = {
     const { team, sessionToken } = await res.json();
     // Automatically log in to the new team
     setAuthCredentials(team.id, password, team, sessionToken);
+    markTeamLoaded();
     return team;
   },
 
@@ -1017,6 +1229,7 @@ export const dataService = {
     const { team, sessionToken } = await res.json();
     if (!team.archivedMembers) team.archivedMembers = [];
     setAuthCredentials(team.id, password, team, sessionToken);
+    markTeamLoaded();
     return team;
   },
 
@@ -1029,7 +1242,14 @@ export const dataService = {
    * from a server-derived invite credential, and changing the team password
    * prompts for the current one.
    */
-  restoreSession: async (sessionToken: string): Promise<Team | null> => {
+  //
+  // Answers the team, or why there is none. `rejected` (a 401 or 404) means the
+  // saved session can never be restored, and App deletes it; `transient` (429,
+  // a 5xx, an answer that is not JSON, no answer) means this load could not
+  // tell, and the saved session is kept for the next one. Deleting it on any
+  // failure used to sign a whole office out when the restore meter blocked an
+  // address, or when the database hiccuped.
+  restoreSession: async (sessionToken: string): Promise<{ team: Team } | { failure: 'rejected' | 'transient' }> => {
     try {
       const res = await fetch('/api/team/restore-session', {
         method: 'POST',
@@ -1038,15 +1258,23 @@ export const dataService = {
       });
 
       if (!res.ok) {
-        return null;
+        if (res.status === 401) {
+          const errorData = await res.json().catch(() => null) as { error?: unknown } | null;
+          // Decision D3b: the team's password was changed. Nothing is held
+          // yet that could replace the token, so it is revoked outright, and
+          // the login screen says why.
+          if (errorData?.error === SESSION_REVOKED) markSessionRevoked();
+        }
+        return { failure: res.status === 401 || res.status === 404 ? 'rejected' : 'transient' };
       }
 
       const { team } = await res.json();
       if (!team.archivedMembers) team.archivedMembers = [];
       setAuthCredentials(team.id, '', team, sessionToken);
-      return team;
+      markTeamLoaded();
+      return { team };
     } catch {
-      return null;
+      return { failure: 'transient' };
     }
   },
 
@@ -1450,6 +1678,35 @@ export const dataService = {
   },
 
   /**
+   * Put the parent issues a `/jira/issues` answer (or the team record read
+   * after a lost one) reported on the cached team: the parent issue of each
+   * retrospective, health check, and of the team dashboard's actions
+   * (`backlog`) in `sessionParent` mode. The batch dialog's preview and the
+   * Review step read them. A key replaces what the scope holds; a mark never
+   * replaces a key or an earlier mark (`jiraParentToApply`).
+   *
+   * Local cache only: the server already wrote them, and is the only writer
+   * (types.ts, `Team.jiraParents`). The map is replaced rather than mutated, so
+   * a screen holding the previous object sees the change.
+   */
+  applyJiraParents: (teamId: string, entries: { scope: string; jira: JiraParentLink }[]): void => {
+    const team = getAuthenticatedTeam();
+    if (!team || team.id !== teamId || !Array.isArray(entries)) return;
+
+    const held = team.jiraParents && typeof team.jiraParents === 'object' ? team.jiraParents : {};
+    const next: Record<string, JiraParentLink> = { ...held };
+    let changed = false;
+    for (const entry of entries) {
+      if (!entry || !isJiraParentScope(entry.scope)) continue;
+      const link = jiraParentToApply(next[entry.scope], entry.jira);
+      if (!link) continue;
+      next[entry.scope] = link;
+      changed = true;
+    }
+    if (changed) team.jiraParents = next;
+  },
+
+  /**
    * Turn the impact rating on or off for the whole team.
    *
    * Team-scoped rather than per-user because it changes what the *round* asks,
@@ -1835,18 +2092,36 @@ export const dataService = {
   importTeam: async (inviteData: { id: string; name: string; password?: string; inviteCredential?: string; sessionId?: string; session?: RetroSession; members?: User[]; globalActions?: ActionItem[]; retrospectives?: RetroSession[]; memberId?: string; memberEmail?: string; memberName?: string; inviteToken?: string }): Promise<Team> => {
     // New links (stage 7e) carry a signed invite credential; older links
     // embed the plaintext password and keep joining until stage 7d.
-    const res = await fetch('/api/team/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(
-        inviteData.inviteCredential
-          ? { teamName: inviteData.name, inviteCredential: inviteData.inviteCredential }
-          : { teamName: inviteData.name, password: inviteData.password }
-      )
-    });
+    let res: Response;
+    try {
+      res = await fetch('/api/team/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          inviteData.inviteCredential
+            ? { teamName: inviteData.name, inviteCredential: inviteData.inviteCredential }
+            : { teamName: inviteData.name, password: inviteData.password }
+        )
+      });
+    } catch {
+      // No answer at all: the network, never the link. The browser's own
+      // message ("Failed to fetch") would reach the screen untranslated.
+      throw new Error('The server could not be reached. Check your connection, then try again.');
+    }
 
+    // The join screen offers "Try again", so the message says whether a retry
+    // can help. The route refuses a link with 400 (no credential) or 401 (a
+    // team, password or credential it does not accept); 429 is `loginLimiter`;
+    // anything else — a 5xx, a gateway's answer during a rolling update — is
+    // worth retrying now.
     if (!res.ok) {
-      throw new Error('Failed to join team - invalid invite link');
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        throw new Error('Failed to join team - invalid invite link');
+      }
+      if (res.status === 429) {
+        throw new Error('Too many attempts to join this team from this network. Please wait a few minutes, then try again.');
+      }
+      throw new Error('The team could not be joined right now. Please try again in a moment.');
     }
 
     const { team, sessionToken } = await res.json();
@@ -1854,6 +2129,7 @@ export const dataService = {
     // Credential joins hold no password; the issued session token covers all
     // team calls, including deriving invite credentials of their own.
     setAuthCredentials(team.id, inviteData.password || '', team, sessionToken);
+    markTeamLoaded();
 
     return team;
   },
@@ -2262,7 +2538,7 @@ export const dataService = {
         updates: { facilitatorEmail: parsed.email ?? null }
       });
       if (error) return error;
-      if (data?.team) authenticatedTeam = data.team;
+      keepAnsweredTeam(teamId, data?.team);
       return null;
     }).catch(() => 'network_error');
     if (refusal) throw new Error(refusal === INVALID_EMAIL_ERROR ? INVALID_EMAIL_MESSAGE : RECOVERY_EMAIL_NOT_SAVED);
@@ -2292,23 +2568,40 @@ export const dataService = {
       throw new Error('Current password required');
     }
 
-    const { error } = await apiCall(`/api/team/${teamId}/password`, {
+    // Tracked (decision D3b): the rotation revokes every token minted before,
+    // this page's included, and a refusal its own commit causes can arrive
+    // before this answer. Such a refusal waits for it, and is retried with
+    // the token it hands back instead of signing the facilitator out.
+    const { data, error } = await trackCredentialChange(apiCall<{ success?: boolean; sessionToken?: unknown }>(`/api/team/${teamId}/password`, {
       newPassword,
       password: effectiveCurrentPassword,
       // Changing the credential requires the current credential: without this
       // override a session holding a still-valid token but a rotated-away
       // password could change the team password again (review finding).
       sessionToken: undefined
-    });
+    }));
 
     if (error) {
       throw new Error(error === 'invalid_password' ? 'Current password is incorrect' : 'Failed to change password');
     }
+    // Answered after a logout, or a login to another team: the credentials it
+    // carries belong to nobody signed in here (see `logout`).
+    if (authenticatedTeamId !== teamId) return;
 
     // Update stored password and drop the cached invite credential — the
     // rotation bumped the team's invite epoch, revoking the old credential.
     authenticatedTeamPassword = newPassword;
     inviteCredentialCache = null;
+    // The token minted under the team's new session epoch: this page keeps
+    // working, App stores it for a reload and the other tabs, and the sync
+    // socket re-joins with it. A pod from before decision D3b answers none
+    // and revoked nothing, so the old token stays.
+    if (typeof data?.sessionToken === 'string' && data.sessionToken) {
+      authenticatedSessionToken = data.sessionToken;
+      triedAdoptions.clear();
+      clearSessionRevoked();
+      notifySessionTokenChanged();
+    }
   },
 
   renameTeam: async (teamId: string, newName: string): Promise<void> => {
@@ -2477,7 +2770,8 @@ export const dataService = {
   },
 
   /**
-   * Logout - clear authentication
+   * Logout: the team is gone for every reader at once; the writes queued
+   * before it are still sent (see `clearAuthCredentials`).
    */
   logout: (): void => {
     clearAuthCredentials();

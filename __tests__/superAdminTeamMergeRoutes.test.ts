@@ -355,6 +355,41 @@ describe('super-admin team merge', () => {
     expect(index.get(b.name.toLowerCase())).toBe(b.id);
   });
 
+  // sessionParent mode (F2): the merged team gives every session a new id,
+  // so each session's parent issue is re-keyed to it; the claims on parents
+  // being created belong to the sources' own requests and stay behind.
+  it('gives each merged session the parent issue its source had, and leaves the parent claims behind', async () => {
+    const { a, b } = await seedPair();
+    const parent = (key: string) => ({ key, createdAt: '2026-10-01T00:00:00.000Z', subtaskTypeId: '10005' });
+    await dataStore.atomicTeamUpdate(a.id, (team: Json) => ({
+      ...team,
+      jiraParents: { [`retro:${team.retrospectives[0].id}`]: parent('AAA-1'), backlog: parent('AAA-9') },
+      jiraParentClaims: { backlog: { at: '2026-10-21T08:00:00.000Z', requestId: 'a-live' } }
+    }));
+    await dataStore.atomicTeamUpdate(b.id, (team: Json) => ({
+      ...team,
+      jiraParents: { [`retro:${team.retrospectives[0].id}`]: parent('BBB-1'), backlog: parent('BBB-9') }
+    }));
+    const sourceA = await dataStore.loadTeam(a.id) as Json;
+    const sourceB = await dataStore.loadTeam(b.id) as Json;
+
+    const preview = await server.post('/api/super-admin/merge-teams/preview', admin({ primaryTeamId: a.id, secondaryTeamId: b.id }));
+    expect(preview.body.report.unknownKeys.conflicting).not.toContain('jiraParents');
+    const response = await merge(a, b);
+    expect(response.status).toBe(201);
+
+    const merged = await dataStore.loadTeam(response.body.team.id) as Json;
+    const idOf = (name: string) => merged.retrospectives.find((r: Json) => r.name === name).id;
+    expect(merged.jiraParents).toEqual({
+      [`retro:${idOf(sourceA.retrospectives[0].name)}`]: parent('AAA-1'),
+      [`retro:${idOf(sourceB.retrospectives[0].name)}`]: parent('BBB-1'),
+      backlog: parent('AAA-9')
+    });
+    expect(merged).not.toHaveProperty('jiraParentClaims');
+    // The sources keep theirs, as every promise of the merge says.
+    expect((await dataStore.loadTeam(a.id) as Json).jiraParentClaims).toEqual({ backlog: { at: '2026-10-21T08:00:00.000Z', requestId: 'a-live' } });
+  });
+
   it('opens the merged team with the password the admin chose', async () => {
     const { a, b } = await seedPair();
     const fromB = await merge(a, b, { name: `From B ${suffix}`, passwordSource: 'secondary' });

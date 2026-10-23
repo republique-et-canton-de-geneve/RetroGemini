@@ -1,6 +1,7 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { dismissAnnouncementsIfPresent } from '../e2e/helpers/announcements';
 import { grainyPng } from '../e2e/helpers/images';
+import { watchForViolations } from './helpers';
 
 /**
  * The CSP gate (audit H36, decision D14 — enforcing).
@@ -14,36 +15,6 @@ import { grainyPng } from '../e2e/helpers/images';
  * what production does — see `playwright.prod.config.ts` for why the ordinary
  * e2e suite cannot do this job.
  */
-
-/** Collects CSP violations the browser reports, from both channels. */
-const watchForViolations = (page: Page) => {
-  const violations: string[] = [];
-
-  // The DOM event fires for every blocked resource, with the directive.
-  page.addInitScript(() => {
-    (window as unknown as { __cspViolations: string[] }).__cspViolations = [];
-    document.addEventListener('securitypolicyviolation', (event) => {
-      (window as unknown as { __cspViolations: string[] }).__cspViolations.push(
-        `${event.violatedDirective} blocked ${event.blockedURI || '(inline)'}`,
-      );
-    });
-  });
-
-  // Console errors catch anything reported before the listener attaches.
-  page.on('console', (message) => {
-    const text = message.text();
-    if (/Content Security Policy|Refused to (load|connect|execute|apply)/i.test(text)) {
-      violations.push(text);
-    }
-  });
-
-  return async () => {
-    const fromDom = await page.evaluate(
-      () => (window as unknown as { __cspViolations?: string[] }).__cspViolations ?? [],
-    );
-    return [...violations, ...fromDom];
-  };
-};
 
 test('the served app carries the enforcing policy', async ({ page }) => {
   const response = await page.goto('/');

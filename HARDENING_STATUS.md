@@ -129,6 +129,103 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **D3b — a password change signs out the team's open sessions, on every
+  route and on the socket, without cutting off the facilitator who made it**
+  (Jira plan decision D3b). Team session tokens carry
+  the team's *session epoch* (an additive claim on the unchanged `rg1`/`v: 1`
+  format), kept in a row of its own (`team-auth:{teamId}`, random, never on the
+  record, never archived) and rotated in the password's own transaction by the
+  three password routes; a whole-store or single-team restore that changes
+  which password opens a team rotates it before and after the write. Every team
+  route answers an older token `401 session_revoked` from that row alone, never
+  parsing the record (the 38.1 hot path holds); `restore-session` does not meter
+  revoked tokens. The socket refuses them at join and cuts joined sockets on
+  every pod (`team-sessions-revoked`, re-read on each pod, plus a 60 s sweep).
+  The rotating client keeps working with the token the change hands back, its
+  other tabs adopt it, and every other client stops writing and says why where
+  it is — a banner in a session and on the Dashboard, so a draft can still be
+  copied — with "Log in again" to the login screen and a translated reason. Tests: `sessionEpoch`,
+  `sessionTokens`, `sessionTokenCompatibility` (a frozen 41.0 validator),
+  `sessionTokenMint`, `teamAuthState`, `teamAuthWithoutRecord`,
+  `sessionRevocationRoutes`, `jiraRouteAuth`, `socketSessionRevocation`,
+  `sessionRevocationWiring`, `dataStoreRestore`,
+  `superAdminTeamRestoreRoutes`, `sessionRevocationClient`, `syncService`,
+  `appSessionRevoked`, `appSessionRevokedDashboard`, `teamFeedbackTokenRetry`,
+  `feedbackSubmission`, `restorePasswordMigration`, `sessionRevokedShared`,
+  `e2e/session-revocation`.
+  Residuals are in `SECURITY.md` → *Session Tokens* (the rollout, tokens with
+  no epoch, a request in flight, a lost answer, the login limiter) and in H10.
+  — PR #534, 41.2 (the sign-out follow-ups in 41.3, the review fixes below in
+  41.4; internal `Y` bumps) — 2026-10-22
+- **Final pre-landing review of PR #534 — eight findings, all applied.** The
+  boot sweep of orphaned epoch rows deletes in one conditional statement and
+  never a row younger than ten minutes, so a restore on another pod keeps the
+  epoch it just wrote (`teamAuthState`, both engines). A revocation sweep waits
+  only for the joins in flight to decide, at most 5 s for all of them, the
+  rotating pod broadcasts before it sweeps, and the periodic sweep schedules
+  its next tick before each run, so one stuck join or run no longer stops
+  revocation on its pod; a session creation in flight stays bound to the team
+  its socket joined as when a revoked join lands meanwhile
+  (`socketSessionRevocation`). The console's Live tab names rooms one team at a
+  time when the summary list cannot be read, and says so when a poll gets no
+  list (see H10). A repeated identical invite-import failure is announced
+  again (`teamLoginInviteImport`). The lint header's composition and these
+  entries' references were made true. — PR #534, 41.4 — 2026-10-22
+- **Performance, server side (perf series items 5, 6, 7 and the server half of
+  10).** Four changes, each with its own guard. **Join burst:** a socket join
+  read the full team record for the roster, and on PostgreSQL every join that
+  saw a stale `lastConnectionDate` queued its own team update; joins now read
+  the roster from a single-row team summary (concurrent reads of one stale team
+  share one projection) and share one refresh per team per pod, so a burst
+  costs one team write across the cluster (`socketJoinBurst.test.ts`, gated so
+  SQLite's synchronous reads cannot serialize it into a vacuous pass).
+  **Password pass and strict backups:** the legacy password pass reads two
+  fields per team instead of every record, and counts only the records it
+  wrote; a backup that cannot read every team record (or a malformed
+  `retro-meta`) **fails** instead of storing an empty archive that reported
+  success — which also ran retention, purging a good backup per failed run —
+  so every snapshot fails with it and restores answer `503` until the row is
+  repaired (`backupStrictReads.test.ts`; the two tests that pinned the lenient
+  read are inverted). **Streamed archive:** every backup, snapshot and the
+  download build the archive team by team through async gzip, the same bytes as
+  before, read on PostgreSQL in one `REPEATABLE READ` snapshot
+  (`backupArchiveStream.test.ts`, both engines). **Log ring and cache:** the
+  per-write and redundant reconnect socket lines are `console.debug`, stdout
+  only; the session cache gains a byte cap, `SESSION_CACHE_MAX_MB` (32), sized
+  from the store's own text lengths. **Text jsonb refuses:** on PostgreSQL a
+  team row holding half an emoji or a NUL — valid to Node, refused by
+  `value::jsonb` — used to leave a facilitator unable to change anything
+  facilitator-only (the join's summary read threw, so every write found the
+  role unknown) and failed the legacy password pass whole; the join now falls
+  back to the full record and the pass to one row at a time, and every writer
+  that cut stored text by UTF-16 unit (three session screens, the feedback
+  routes, AI group titles) now cuts through `utils/textCut.js`, never halving
+  a pair. The residuals are under H10. — PR #534, 41.2 (internal `Y` bumps) —
+  2026-10-22
+- **H42 follow-ups — avatar initials, the super-admin console's contrast, and
+  the console in the axe audit.** Two known gaps of `ACCESSIBILITY.md` (6, and
+  the console half of 2). White initials failed WCAG 1.4.3 on seven of the eight
+  participant colours (lime 1.96:1); only the facilitator's indigo passed, which
+  is why ten screens walked by one person never saw it. A participant's colour
+  now reaches the screen through `utils/participantColors.ts` (white where white
+  clears 4.5:1, black elsewhere; an unknown value neutral rather than written
+  into `className`; a departed avatar grey, never faded), pinned by a theme test
+  that measures `theme.css` with axe-core's own colour engine and by an AST guard
+  (`avatarColorSource.test.ts`) that sees every JSX attribute — the dots took
+  their colour through a `colorClass` prop that a `className`-only guard missed —
+  and, since review, every other `.color` read in `App.tsx` and `components/`, so
+  a class built in a local variable no longer slips past it. Two fixes no e2e
+  state reaches got render tests of their own: the score tooltip's digits
+  (`healthRatingTooltipContrast.test.tsx`, hover only) and a member-email invite
+  link's two hints (`teamLoginInviteContrast.test.tsx`).
+  The console (182 nodes on 2026-10-20) was fixed by surface: `text-slate-500`
+  stays on its white cards and went darker only on the grey page and tinted
+  panels. The audit now walks the console once per tab behind an allowlist that
+  aborts any console write it did not mean to make, and every retro screen with
+  two participants of different colours; `BASELINE` holds 33 states, all at 0.
+  A hidden card (reveal off) is recorded as gap 7, not fixed: its text stays in
+  the page under a blur. — PR #534, 41.2 (internal, a `Y` bump) — 2026-10-22
+
 - **H45 — privileged actions now leave a durable, append-only trace.** Every
   super-admin login (**including the failures**), team deletion and rename,
   password change on all three paths, backup create/download/restore/delete,
@@ -530,7 +627,9 @@ below, run the cheap probe that would settle it.
    a save. Timer runtime fields and `participantsPanelCollapsed` must stay
    writable by everyone; `teamId` is immutable for everyone (a hard refusal).
 4. **Restore is a faithful replace**, not a merge, and takes a *protected*
-   pre-restore snapshot first — aborting with `503` if that snapshot fails.
+   pre-restore snapshot first — aborting with `503` if that snapshot fails. A
+   snapshot that could not read every team record is a failed snapshot (`503`),
+   never an archive missing teams.
 5. **Closed actions never silently re-open.** Both `reconcileRetroActionState`
    and the `/retrospective/:retroId` server handler enforce the guard; a
    legitimate re-open goes through the granular `/action` endpoint.
@@ -883,10 +982,11 @@ the first touch tests this repository has had.
 Two rules survive it and belong to whoever touches the UI next:
 
 - **Neither ratchet may be raised.** `BASELINE` in `e2e/helpers/axe.ts` — the
-  one table for `e2e/accessibility-audit.spec.ts` and `e2e/jira.spec.ts`, moved
-  there in the Jira release (40.0) — is **zero on all fifteen screens** (ten in
-  the audit spec, five Jira screens) — a new serious or critical rule fails the
-  pull request. `BUDGET` in
+  one table for every spec that runs an axe audit, moved there in the Jira
+  release (40.0) — is **zero on all 33 audited states** (14 in
+  `accessibility-audit.spec.ts`, 8 in `admin-console-accessibility.spec.ts`,
+  7 Jira screens, and the import card and three console dialogs in the two
+  admin specs) — a new serious or critical rule fails the pull request. `BUDGET` in
   `scripts/lint.mjs` is the executable figure (117 when the administration
   console's untyped error handling went) — read the file rather than this
   line if they ever disagree, since only one of the two is executable. Lower
@@ -1226,10 +1326,181 @@ grave, rien faire"*, which is why it is P2 now rather than P1.
   persist after a rename does not revert it.
 - **Effort:** M. **Regression risk:** high — it is the sync path.
 
+### H53 — [P1, blocked on D24] A password sent to any other team route is not metered as a guess
+
+**Problem.** `loginLimiter` (20 rejected attempts per 15 minutes, keyed on the
+IP and the team name, per pod) is on `/api/team/login` alone. Every other route
+that accepts the team password verifies it too: `POST /api/team/:teamId` and
+its sub-routes (`authenticateTeam(teamId, password)` → `invalid_password`,
+`401`), `/api/feedbacks/*` and the Jira team routes. Those are metered only by
+the general per-IP request limiters — team reads 120/min, team writes 300/min,
+feedback 120 + 60/min, Jira 120 + 60 + 60/min — which are independent
+instances, so their budgets add up, and each is counted per pod. Team ids are
+public (`GET /api/team/list`, anonymous). `SECURITY.md` → *Team Passwords*
+stated the login limiter as "the only brake on guessing", and D18's rationale
+for the 8-character minimum rests on that bound. Found while reviewing D3b,
+which neither widens nor narrows it.
+
+- **Files:** `server/routes/teamRoutes.js` (the limiters, `/api/team/:teamId`
+  and its sub-routes), `server/routes/feedbackRoutes.js`,
+  `server/routes/jiraRoutes.js`, `server/services/teamService.js`
+  (`authenticateTeam`).
+- **Failure scenario:** an anonymous caller who can reach the deployment reads
+  a team id from `/api/team/list` and posts guesses to `POST
+  /api/team/:teamId` and the other routes: hundreds a minute from one address,
+  where the login route allows 20 per quarter hour. Eight random lowercase
+  characters still take centuries; a password from before the minimum (four
+  characters, H39) falls within a day.
+- **Acceptance:** D24 answered. Option 1: a rejected password (`401
+  invalid_password` only, never a refused token, never a success) on any route
+  that verifies one is counted against the same key as the login route (IP and
+  team), so the bound `SECURITY.md` states is the bound the server enforces.
+  Option 2: the general limiters are accepted as the bound, and `SECURITY.md`
+  and D18's rationale say so with the real figures.
+- **Tests:** for option 1, a route suite that sends 20 wrong passwords to
+  `POST /api/team/:teamId` and is then refused on `/api/team/login` for that
+  team (and the reverse), while a valid token and a correct password are never
+  counted. For option 2, none — a documentation change.
+- **Effort:** S (option 1: one shared limiter keyed like `loginLimiter`,
+  scoped to `401 invalid_password`). **Regression risk:** medium — a limiter on
+  every team route must never count what a legitimate user does, which is the
+  lesson of `AUTH_RATE_LIMIT_MAX` (`restore-session` runs on every page load).
+
 ### H10 — [P2] Accepted residuals (documented, not scheduled)
 
 Keep visible so nobody "rediscovers" them as bugs:
 
+- **An invite credential can come back after a rollback followed by a password
+  change (D3b).** A whole-store restore rolls each team's `inviteEpoch` back
+  with the archive, and the invite credential is deterministic from the team
+  and that counter, so a later password change can bring the counter back to a
+  value an outstanding link was minted under, and that link opens the team
+  again. The session epoch (random) does not have this flaw; the invite epoch
+  was left as it was so that this lane changes no invite-link semantics. The
+  fix, for a later change: in the replace, `inviteEpoch = max(archived,
+  current) + (password changed ? 1 : 0)`.
+- **People signed out by a password change can reach the login limiter
+  (D3b).** It is unchanged — 20 rejected attempts per 15 minutes per IP and
+  team name — so a room behind one address all retrying the *old* password can
+  lock that team's login from there for a quarter of an hour. The login screen
+  tells them to use the new password or ask for a new invitation link. Raising
+  the limit or exempting anything would weaken the login brake (the other
+  routes that verify a password are H53, not accepted).
+- **A corrupt team row blocks every backup, and so every restore, until it is
+  repaired by hand.** A backup that cannot read every team record (or a
+  malformed `retro-meta`) fails rather than storing an archive missing teams;
+  every snapshot fails with it, so both whole-store restores, the single-team
+  restore and console deletion answer `503` — including the restore someone
+  might want in order to repair that very row. For a **team** row it is not a
+  new dead end: an unparsable or empty row makes the summary projection throw,
+  so the login picker and the console's Teams tab are already down; a row that
+  parses but is not an object (`null`, an array) gives a summary with no name,
+  which fails the login picker (its sort in `/api/team/list`, or its render)
+  while the Teams tab still loads, with a nameless row that fails only when
+  sorted by name or merged. A **malformed `retro-meta`** is the quiet case: its
+  readers see empty lists, so nothing else visibly breaks, and the only signs
+  are `[Backup] Failed to create backup: Record "retro-meta" cannot be
+  archived (…)` in the pod log and the Logs tab, and no new automatic backups.
+  Only SQL repairs either, by key (`k8s/README.md` → *A backup that cannot
+  read a team fails*: a team row deleted by hand takes its name-index entries
+  with it unless a backup brings it straight back; `retro-meta` is repaired in
+  place, never deleted). The other choice, archiving the readable teams and
+  recording the skipped keys, needs a backups-table column, a console string
+  and a decision. A failed automatic backup runs no retention, so the last
+  good backups are kept. During the rollout, a pod from before this change
+  still stores an empty archive on such a row, and its retention can purge a
+  good backup.
+- **An archive's teams are fixed when its build starts, and `retro-meta` is
+  read at its end.** The set of teams comes from one `REPEATABLE READ`
+  snapshot on PostgreSQL and from the key list on SQLite (which then reads the
+  rows one at a time, interleaved with writes: SQLite has one connection, and a
+  read transaction held across the awaits would swallow every other request's
+  writes). Reading `retro-meta` last covers feedbacks moving *into* it: a team
+  deleting itself mid-backup orphans its feedbacks before its row goes, so they
+  show at worst twice (its copy and the orphaned one), never zero times —
+  `__tests__/backupStrictReads.test.ts` pins that order. It does not cover
+  feedbacks moving *out of* it, nor, on SQLite, between two teams; either can
+  miss that one archive:
+  - a single-team restore of a team deleted since the backup moves its
+    orphaned feedbacks into the recreated record, which an archive already
+    building does not list, then removes them from `retro-meta` before the
+    archive reads it — on both engines;
+  - on SQLite, a console deletion of a merge source moves its feedbacks into
+    the merged team: when the merged team's key sorts first, the archive read
+    it before the move and finds the source gone afterwards.
+
+  Nothing serializes those with a build: the restore gate covers the three
+  restore routes only, a scheduled backup runs on another pod or after the
+  restore's own snapshot, and the `/api/super-admin/backup` download takes no
+  `backupInProgress` flag, so it overlaps a restore even on the same pod. No
+  data leaves the store — the restore's pre-restore snapshot and the next
+  backup both hold the feedbacks; only that one archive misses them.
+- **A team row PostgreSQL's jsonb refuses still breaks the list projections.**
+  A lone half of an emoji (Node writes it `\ud83d`) or a NUL (`\u0000`) is
+  valid JSON to Node and refused by `value::jsonb` (`22P02`, `22P05`). Every
+  writer that cut stored text by UTF-16 unit now cuts through
+  `utils/textCut.js` and never halves a pair — the action-context excerpt of
+  three session screens, feedback titles, descriptions and comments, AI group
+  titles (`__tests__/textCut.test.ts`, `storedTextCuts.test.ts`) — and the two
+  reads this lane made depend on the cast fall back to Node on such a row: the
+  socket join reads the role from the full record once the summary read
+  throws (`socketWriteRefusal.test.ts`, and on a real row
+  `socketJoinUnreadableSummary.test.ts`), and the legacy password pass reads
+  the rows one at a time on `22P02`/`22P05` (`jsonbRefusal.test.ts`, and on a
+  real row `passwordMigrationProjection.test.ts`). The console's Live tab,
+  which the performance series moved onto the summary list, names each
+  room's team one team at a time when that list fails — its summary, else its
+  record parsed in Node, *Unknown* for a record Node cannot parse either — and
+  says so when a poll gets no list instead of calling it safe to deploy (41.4,
+  `activeSessionsUnreadableTeam.test.ts` on a real row, `superAdminRoutes.test.ts`,
+  `i18nSuperAdmin.test.tsx`). The rows stored before, and
+  any a 41.0 client writes during the rollout, still fail the summary list
+  (login picker, console Teams tab, boot email heal, merge and deletion
+  checks) and the feedback projection, as they have since 38.0: those cast
+  every row in one statement. `k8s/README.md` → *A team record PostgreSQL's
+  jsonb refuses* finds and repairs them in SQL. A Node-side fallback for the
+  list projections is not built (the feedback projection is being reworked
+  beside this change); a boot-time heal is not built either, since a live
+  session would write the text back.
+- **The per-write socket lines reach stdout only.** Accepted `update-session`
+  lines and the redundant reconnect lines are `console.debug`: never in the
+  super-admin log ring (they turned it over in seconds), still on stdout with
+  their correlation and session ids, as the trail an investigation reads.
+  There is no `LOG_LEVEL` knob; an aggregator that drops `level: debug` drops
+  that trail.
+- **A snapshot that collides with a running backup answers `503`.** The
+  per-pod `backupInProgress` flag is held for the whole build, which is now
+  asynchronous and team by team: about as long as before, but no longer
+  blocking the event loop meanwhile. A pre-restore or pre-delete snapshot
+  taken while the scheduled backup runs on the same pod answers
+  `503 … snapshot_failed`, and retrying succeeds. Making snapshots wait for the
+  running backup is not built.
+
+- **CodeQL false positives raised by PR #534 (41.x), to be dismissed with
+  this rationale.** Each was traced in a local CodeQL 2.27.3 run (the CI's
+  version and suites); the two real findings of that run were fixed instead
+  (a request-derived team id in a log format string,
+  `superAdminTeamRestoreRoutes.js`; a stat-then-read race in
+  `scripts/precompressAssets.mjs`).
+  - **`js/insufficient-password-hash` at `server/services/sessionTokens.js`
+    (`signPayload`).** The only source is a *test* helper,
+    `__tests__/sessionRevocationRoutes.test.ts` → `login(name, password)`, whose
+    return value — the session token the server answers — CodeQL takes for a
+    password because of the helper's parameter name. What is HMAC-signed is the
+    token's base64url payload, never a password; team passwords are hashed with
+    scrypt (`passwordHashing.js`).
+  - **`js/user-controlled-bypass` at `server/routes/teamRoutes.js`
+    (`/api/team/restore-session`'s `if (!sessionToken)`, `/api/team/create`'s
+    `if (!trimmedName || !password)`).** Both conditions only *refuse* a
+    request with a missing field (`400`); no value of them grants anything.
+    The "sensitive action" they guard is the D3b epoch read
+    (`verifySessionToken`, `loadTeamAuthState`), which authorises nothing on
+    its own.
+  - **`js/superfluous-trailing-arguments` (code quality) at
+    `__tests__/sessionRevocationClient.test.ts`.** `new StorageEvent(type,
+    eventInitDict)` is the standard constructor; CodeQL's extern stub
+    (`externs/web/webstorage.js`) declares none, and the init dictionary is what
+    gives the event the `key` the code under test filters on.
 - **CodeQL `js/request-forgery` on `/api/super-admin/test-jira` — expected, to
   be dismissed as "won't fix" with this rationale (40.0, the Jira
   integration).** `server/routes/jiraRoutes.js` → the `test-jira` handler is
@@ -1304,6 +1575,14 @@ Keep visible so nobody "rediscovers" them as bugs:
   low-risk half and carries most of the gain; decomposing the components is a
   separate, later decision. The `npm run build` warning about the 500 kB
   threshold is expected output, not a regression to chase.
+  **Note (2026-10-22, performance series item 9):** the bundle now crosses the
+  wire compressed — precompressed at build time, 1.24 MB of JS and CSS to
+  312 KB — and its hashed files are cached immutably for a year, so a returning
+  phone downloads it once per release (AGENTS.md → *Compression and caching*).
+  A cross-pod asset miss during a rollout is now a `no-store` text 404 instead
+  of the SPA page served as JavaScript; it is still a blank page until a reload.
+  Code splitting stays an accepted residual, with its reopening condition
+  unchanged.
 - **H19 — the rate limiters are per pod, so the real ceiling is `N ×` the
   documented value.** At `replicas: 2` a load-balanced client gets
   `2 × AUTH_RATE_LIMIT_MAX`. **Accepted (maintainer, 2026-08-04): leave it,
@@ -1485,12 +1764,41 @@ e2e (see D5).
 
 ## 5. Decisions the maintainer must make
 
-**None is open.** D23 was answered on 2026-10-12 (incident ISS); D22 on 2026-08-27; D18 (c), D19 and D20 on
+**One is open: D24.** Jira plan decision D3b was answered on 2026-10-22; D23 on 2026-10-12 (incident ISS); D22 on 2026-08-27; D18 (c), D19 and D20 on
 2026-08-25; D21 on 2026-08-26. Four of those five were answered *not to act*,
 which is a decision rather than a deferral, and is why each is written down
 instead of left implied. The dependent items (H41, H49, H46's network half) are
 closed in §3 with what would reopen them. **D22 is the one that was answered
 *to* act**, so it leaves work behind rather than a boundary: lot L25.
+
+### Open
+
+### D24 — open: how far is guessing a team password bounded on the routes other than login?
+
+Blocks H53. The login route meters rejected passwords (20 per 15 minutes per
+IP and team, per pod); every other route that verifies the team password is
+bounded only by the general per-IP request limiters, whose budgets add up to
+hundreds of attempts a minute from one address. Two options:
+
+1. **Meter rejected passwords everywhere.** A `401 invalid_password` on any
+   `/api/team/:teamId/*`, `/api/feedbacks/*` or Jira team route counts against
+   the login route's key (IP and team), the way `loginLimiter` does. The bound
+   `SECURITY.md` states becomes true. Cost: one limiter, and the care that it
+   counts nothing a legitimate user does.
+2. **Accept the general limiters as the bound.** No code change; `SECURITY.md`
+   and D18's rationale state the real figures (a password of 8 random lowercase
+   characters stays out of reach; one from before the minimum does not).
+
+### Answered 2026-10-22
+
+### Jira plan decision D3b — answered: sessions revoked on a password rotation
+
+Named so it is not confused with D3, the public origin (below). *"A password
+rotation invalidates the open sessions (an epoch in the token), on every route
+and on the socket, without cutting off the facilitator who changes the
+password."* Shipped; see *Recently closed* and `SECURITY.md` → *Session
+Tokens*. It replaces the earlier statement that a token kept a member working
+for up to seven days after a password change.
 
 ### Answered 2026-10-12
 
@@ -1887,6 +2195,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | ~~**L24**~~ | ~~H52 — icon-only buttons named by their ligature~~ — **done 2026-08-27.** **72**, not the 17 recorded: all three earlier counts came from one bad line in the measuring script (`<button[^>]*>` stops at the `>` in `onClick={() => …}`). The guard is a TypeScript AST walk now. It also found a switch with no accessible name at all. 54 icon-plus-text buttons are measured, named as gap 3 in `ACCESSIBILITY.md`, and deliberately not swept | — | done |
 | ~~**L19b**~~ | ~~Roll the manifests to a non-production project~~ — **done 2026-08-26.** The database pod is admitted and runs; the NetworkPolicies proved inert and are now opt-in (decision D21). Nothing is left here except, if anyone wants the isolation, one question to the platform team: *can `expose-all-pod-from-outside` be narrowed on these projects?* | — | done |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
+| **L26** | H53 — meter a rejected password on every route that verifies one, or state the general limiters as the bound | **D24** (open) | `SECURITY.md`'s guessing bound is the one the server enforces, with a route test that counts a wrong password sent to `POST /api/team/:teamId` against the login key |
 | **L25** | H44's remaining half — the four numbers | ~~D22~~ — **answered 2026-08-27: (a), an anonymous `/metrics`.** Nothing blocks it now | `/metrics` answers in Prometheus text with active sessions, socket connections, CAS rejections and heal round-trips, and carries no team, session or user identifier |
 | ~~**L13**~~ | ~~H35's remaining half (a live session's persist still overwrites a rename)~~ — **done 2026-10-12**, forced by incident ISS (see H35). It changes the shared sync path, so §7.4's `npm run test:load` against staging is owed before the release is deployed | — | done |
 
@@ -2049,7 +2358,7 @@ ordering.
 | Inventory of personal data | **decided, not documented — H41** | Names, facilitator and invitee emails, free-text content naming colleagues. The maintainer decided on 2026-08-25 that a data-protection document is not warranted for an internal, non-public deployment. **Say it as a decision, with its boundary** — it is defensible for staff of the institution and stops being defensible the day the application is reachable from outside. The fields themselves are enumerated in `types.ts` and in H41 |
 | Retention and erasure | **decided — H41/D19** | No retention rule, no purge, and team deletion deliberately preserves identified feedbacks **with the author's name** (D19, 2026-08-25). Same reasoning and same boundary as the row above. The cheap change if it is ever challenged is written into H41: anonymise `submittedByName` on deletion — one function, the report survives, the person does not |
 | Data residency / third parties | **documented, deliberately uncontrolled — H49/D20** | Self-hosted by design, no telemetry, no CDN, no third-party analytics — a genuinely strong position. The exception is AI, which exports content to an operator-chosen endpoint. Documented in `SECURITY.md`; the endpoint is **not** restricted, decided 2026-08-25 (D20) on the ground that the admin population is small and trusted. If pressed, the answer is that a warning-and-allow on a non-private host is the change we would make, and why we have not made it yet |
-| Accessibility | **remediated 2026-08-25 — H42 closed** | An audit exists, runs on every pull request, and now reports **zero axe violations at any severity** across nine screens — it was 1-2 serious/critical rules each on the six then audited. The gate is therefore a gate: a new serious or critical rule fails the pull request. Fixed this pass: grouping tickets from the keyboard (WCAG 2.1.1, a core phase that no automated tool could report as broken, because there was no control to find), all thirteen overlays turned into real dialogs with Escape and a focus trap, contrast fixed at the colour-token level, every `<select>` named, a focus indicator on the phase bar, and phase titles turned into headings. **`ACCESSIBILITY.md` is the artefact to hand over**: standard claimed (WCAG 2.1 AA / eCH-0059), method, what was fixed, and — the part that earns credibility — what is *not* done: 29 unassociated form labels, the screens outside the audited nine, and **no test with a real screen reader and no external audit**. **What to say:** we measured, we fixed what we found, the gate is at zero and can only be lowered, and we can name what remains. **Updated 2026-08-26 (L23):** the 29 unassociated labels are gone and the 17 `autoFocus` attributes were judged individually and kept with a written reason each, so the lint budget's accessibility half fell 71 → 25. **Updated 2026-08-27 (L24, H52 closed):** all **72** icon-only buttons now carry an `aria-label`, guarded by a TypeScript AST walk rather than a regex. **H52 is still the thing to say out loud, and now for two reasons.** First, no gate in this repository could report it — a name existed, it was merely the icon font's ligature, so axe and the linter both pass. Second, the *count* was wrong three times (17, then 8, then 72) because one line of the measuring script mis-parsed every button's opening tag: **the automated gate being at zero is a floor, and so is a number in a report nobody re-derived.** The same pass found, by measurement rather than by tool, a switch with **no accessible name at all** on a dialog outside the nine audited screens — which is the concrete cost of gap 2. Gap 3 is new and deliberate: 54 buttons announce their icon before their label, not a conformance failure and not swept blind, because several of those icons carry state |
+| Accessibility | **remediated 2026-08-25 — H42 closed** | An audit exists, runs on every pull request, and now reports **zero axe violations at any severity** across nine screens — it was 1-2 serious/critical rules each on the six then audited. The gate is therefore a gate: a new serious or critical rule fails the pull request. Fixed this pass: grouping tickets from the keyboard (WCAG 2.1.1, a core phase that no automated tool could report as broken, because there was no control to find), all thirteen overlays turned into real dialogs with Escape and a focus trap, contrast fixed at the colour-token level, every `<select>` named, a focus indicator on the phase bar, and phase titles turned into headings. **`ACCESSIBILITY.md` is the artefact to hand over**: standard claimed (WCAG 2.1 AA / eCH-0059), method, what was fixed, and — the part that earns credibility — what is *not* done: 29 unassociated form labels, the screens outside the audited nine, and **no test with a real screen reader and no external audit**. **What to say:** we measured, we fixed what we found, the gate is at zero and can only be lowered, and we can name what remains. **Updated 2026-08-26 (L23):** the 29 unassociated labels are gone and the 17 `autoFocus` attributes were judged individually and kept with a written reason each, so the lint budget's accessibility half fell 71 → 25. **Updated 2026-08-27 (L24, H52 closed):** all **72** icon-only buttons now carry an `aria-label`, guarded by a TypeScript AST walk rather than a regex. **H52 is still the thing to say out loud, and now for two reasons.** First, no gate in this repository could report it — a name existed, it was merely the icon font's ligature, so axe and the linter both pass. Second, the *count* was wrong three times (17, then 8, then 72) because one line of the measuring script mis-parsed every button's opening tag: **the automated gate being at zero is a floor, and so is a number in a report nobody re-derived.** The same pass found, by measurement rather than by tool, a switch with **no accessible name at all** on a dialog outside the nine audited screens — which is the concrete cost of gap 2. Gap 3 is new and deliberate: 54 buttons announce their icon before their label, not a conformance failure and not swept blind, because several of those icons carry state. **Updated 2026-10-22:** the avatar initials (white on seven of eight participant colours) and the super-admin console's contrast (182 nodes) are fixed, and the audit now walks the console once per tab and every retro screen with two participants — 33 states in `BASELINE`, all at 0; a hidden card (reveal off) is named as gap 7 rather than fixed |
 | Traceability of administrative acts | **closed 2026-08-27 — H45** | A durable `security_events` table records every deletion, rename, restore, download, password change and AI reconfiguration, with the source IP and the outcome, surviving the rolling update that used to erase the only record. Read with SQL — `k8s/README.md` → *Reading the audit trail* has the three queries an investigation runs; there is deliberately no viewer, because that would be a user-visible feature. **Raise the IP storage yourself:** it is new persistent personal data, it is what makes a failed-login row worth having, and it has no retention rule — consistent with the row above, and stated rather than discovered |
 | Security documentation | **good, corrected this pass** | `SECURITY.md` described an authentication path removed by H23 and has been corrected; sections added for the LLM credential, the TLS-verification switch, what a backup archive omits, and the password-policy limit |
 | Licensing | **clear** | Unlicense (public domain); dependency licences not enumerated — an SBOM (H47) covers this if asked |

@@ -6,6 +6,7 @@ import { createTokenService } from '../server/services/sessionTokens.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
 import { registerFeedbackRoutes } from '../server/routes/feedbackRoutes.js';
 import { verifyPassword, isHashedPassword } from '../server/services/passwordHashing.js';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * Hardening stage 7a (audit PR-7): every team endpoint accepts a valid team
@@ -27,9 +28,14 @@ const createMockDataStore = () => {
     orphanedFeedbacks: []
   };
 
+  // Decision D3b: the session epoch, rotation included.
+  const authState = createTeamAuthStateDouble((teamId) => teams.has(teamId));
+
   return {
     loadTeam: async (teamId: string) => teams.get(teamId) || null,
     teamExists: async (teamId: string) => teams.has(teamId),
+    loadTeamAuthState: authState.loadTeamAuthState,
+    rotateTeamSessionEpoch: authState.rotateTeamSessionEpoch,
     loadTeamRaw: async (teamId: string) => teams.get(teamId) || null,
     saveTeam: async (teamId: string, teamData: Team) => {
       teams.set(teamId, { ...teamData });
@@ -44,7 +50,7 @@ const createMockDataStore = () => {
     deleteTeamRecord: async (teamId: string) => {
       teams.delete(teamId);
     },
-    atomicTeamUpdate: async (
+    atomicTeamUpdate: authState.withRotation(async (
       teamId: string,
       updater: (team: Team) => Team | null
     ): Promise<{ success: boolean; team?: Team; error?: string }> => {
@@ -54,7 +60,7 @@ const createMockDataStore = () => {
       if (!updated) return { success: true, team: existing };
       teams.set(teamId, { ...updated });
       return { success: true, team: updated };
-    },
+    }),
     loadTeamIndex: async () => new Map(indexMap),
     atomicTeamIndexUpdate: async (
       updater: (index: Map<string, string>) => Map<string, string> | null
@@ -198,6 +204,8 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
         members: [{ id: 'm1', name: 'Alice', color: 'bg-rose-500', role: 'member' }]
       });
       expect(res.status).toBe(200);
+      // No team in the answer: the joiner's client never read it.
+      expect(await res.json()).toEqual({ success: true });
     });
 
     it('rejects a token-only request on /api/team/:teamId/password (stage 7c: rotating the credential requires the current credential)', async () => {
@@ -370,8 +378,11 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
     });
 
     it('accepts a valid token even when an outdated password is also supplied', async () => {
-      // A member whose team password was rotated mid-session keeps working
-      // because the signed token remains a valid credential on its own.
+      // A current token is a credential on its own, whatever password sits
+      // beside it: the case is a tab that adopted the token a rotation handed
+      // out while it still holds the old password. It is no longer a member
+      // surviving a rotation — that token is revoked (decision D3b,
+      // `sessionRevocationRoutes.test.ts`).
       const res = await post(`/api/team/${teamId}`, {
         password: 'stale-password',
         sessionToken: validToken()
@@ -644,10 +655,13 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
     it('ignores inviteEpoch smuggled through the team update route', async () => {
       const { inviteCredential } = await (await mintCredential({ sessionToken: validToken() })).json();
 
-      // Rotate to epoch 1, then try to reset the epoch back through /update.
-      await post(`/api/team/${teamId}/password`, { password: 'secret-passphrase', newPassword: 'rotated-secret' });
+      // Rotate to epoch 1, then try to reset the epoch back through /update,
+      // with the token the rotation hands back (the earlier ones are revoked,
+      // decision D3b).
+      const rotation = await post(`/api/team/${teamId}/password`, { password: 'secret-passphrase', newPassword: 'rotated-secret' });
+      const { sessionToken } = await rotation.json();
       const update = await post(`/api/team/${teamId}/update`, {
-        sessionToken: validToken(),
+        sessionToken,
         updates: { inviteEpoch: 0, facilitatorEmail: 'x@example.com' }
       });
       expect(update.status).toBe(200);
@@ -659,8 +673,9 @@ describe('Stage 7a: team endpoints accept a session token as an alternative cred
     });
 
     it('never exposes inviteEpoch to clients', async () => {
-      await post(`/api/team/${teamId}/password`, { password: 'secret-passphrase', newPassword: 'rotated-secret' });
-      const res = await post(`/api/team/${teamId}`, { sessionToken: validToken() });
+      const rotation = await post(`/api/team/${teamId}/password`, { password: 'secret-passphrase', newPassword: 'rotated-secret' });
+      const { sessionToken } = await rotation.json();
+      const res = await post(`/api/team/${teamId}`, { sessionToken });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.team.inviteEpoch).toBeUndefined();

@@ -29,7 +29,6 @@ const board = (onSubmitFeedback: (f: unknown) => Promise<FeedbackSubmitResult>, 
     sessionToken="token"
     currentUserId="user-1"
     currentUserName="User One"
-    feedbacks={[]}
     onSubmitFeedback={onSubmitFeedback}
     onRefresh={onRefresh}
   />

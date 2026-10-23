@@ -3,6 +3,7 @@ import express from 'express';
 import type { AddressInfo } from 'net';
 import { createTeamService } from '../server/services/teamService.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * Regression test for the "Team not found" bug after a team rename.
@@ -76,6 +77,8 @@ const createMockDataStore = () => {
 
   return {
     loadTeam,
+    // Decision D3b: the session epoch every token check reads.
+    loadTeamAuthState: createTeamAuthStateDouble((teamId) => teams.has(teamId)).loadTeamAuthState,
     loadTeamRaw,
     saveTeam,
     loadAllTeams,

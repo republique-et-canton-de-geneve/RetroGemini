@@ -1,6 +1,47 @@
 import { findProtectedFieldViolations, restoreProtectedFields, isSameSessionState } from './sessionGuard.js';
 import { runWithContext, setContextValue } from './logContext.js';
 import { createRepeatCoalescer } from './logCoalescer.js';
+import { SESSION_REVOKED_ERROR, TeamAuthRowCorruptError, sessionVerdict } from './sessionEpoch.js';
+import { NO_OP_SESSION_REVOCATION, TEAM_SESSIONS_REVOKED_EVENT } from './sessionRevocation.js';
+
+// Decision D3b: how often each pod re-checks its joined sockets against their
+// team's session epoch. The broadcast of a rotation cuts them at once; this
+// covers a pod that missed it (a degraded cross-pod adapter) and the sockets
+// joined unverified during a database outage. A constant, not a setting: one
+// tiny read per team with live sockets per minute is no capacity question.
+const REVOCATION_SWEEP_MS = 60_000;
+
+// How long a revocation sweep waits for the joins in flight on its pod to
+// decide (see sweepRevokedSockets). A join normally decides in milliseconds;
+// one stuck on a query that will not answer must not hold every revocation of
+// the pod hostage, so past this the sweep judges the sockets it can and leaves
+// the undecided ones to the next sweep.
+const JOIN_AUTH_WAIT_MS = 5_000;
+
+// Resolves when `promise` settles or `delayMs` has passed, whichever is first;
+// answers whether it settled. Never rejects, and its timer never holds the
+// process open.
+const settledWithin = (promise, delayMs) => new Promise((resolve) => {
+  const timer = setTimeout(() => resolve(false), delayMs);
+  if (typeof timer.unref === 'function') timer.unref();
+  const done = () => {
+    clearTimeout(timer);
+    resolve(true);
+  };
+  promise.then(done, done);
+});
+
+// A timer that never holds the process open (the adapter's retries do the
+// same, socketAdapter.js).
+const scheduleUnref = (run, delayMs) => {
+  const timer = setTimeout(run, delayMs);
+  if (typeof timer.unref === 'function') timer.unref();
+};
+
+// The id a client gives its join, echoed in a denial so a client can tell the
+// denial of an earlier join from that of its latest one. Anything else is
+// ignored: it reaches a log line and goes back over the wire.
+const JOIN_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 // How long to wait before refreshing a team's `lastConnectionDate` again.
 // Without this, every participant join (and every reconnection after a rolling
@@ -35,6 +76,33 @@ const refreshLastConnectionDate = async (dataStore, teamId) => {
     return team;
   });
   return refreshed;
+};
+
+// One refresh per team in flight on this pod. A burst of joins — a whole
+// session reconnecting after a rolling update — all read the stale date before
+// any of them writes; each would otherwise queue its own update, and every
+// queued updater parses the whole team record under the lock before it can
+// decline. They share the one refresh instead, so a burst costs one parse and
+// one write on this pod (and, through the in-lock decision above, none on the
+// next pod). Only the call that started the refresh can answer true, and only
+// that call sees its rejection: the others answer false, so a failure is
+// logged once.
+const createLastConnectionRefresher = (dataStore, refresh = refreshLastConnectionDate) => {
+  const inFlight = new Map(); // teamId -> Promise<boolean>
+  const run = (teamId) => {
+    const running = inFlight.get(teamId);
+    if (running) return running.then(() => false, () => false);
+    const started = refresh(dataStore, teamId);
+    inFlight.set(teamId, started);
+    const forget = () => {
+      if (inFlight.get(teamId) === started) inFlight.delete(teamId);
+    };
+    // Both handlers attached: the caller awaits `started` itself, and this
+    // branch must not leave a rejection of its own unhandled.
+    started.then(forget, forget);
+    return started;
+  };
+  return { run, pending: () => inFlight.size };
 };
 
 // --- update-session flood protection (audit PR-12) -------------------------
@@ -270,10 +338,25 @@ const registerSocketHandlers = ({
   // Refusal lines are coalesced per socket (logCoalescer.js): a client stuck
   // re-sending a refused write must not be able to flush the 1000-line log
   // ring the super admin investigates from. Injectable for tests.
-  refusalLog = createRepeatCoalescer()
+  refusalLog = createRepeatCoalescer(),
+  // Decision D3b — the routes that rotate a password call its
+  // `revokeTeamSessions`, which runs the sweep attached below. A no-op by
+  // default for the test harnesses; `server.js` is the wiring.
+  sessionRevocation = NO_OP_SESSION_REVOCATION,
+  // The periodic sweep's interval, 0 to turn it off, and its timer: injectable
+  // so a harness can run it fast, or not at all.
+  revocationSweepMs = REVOCATION_SWEEP_MS,
+  schedule = scheduleUnref,
+  // How long a sweep waits for undecided joins, and the periodic sweep's
+  // clock: injectable for the same reason.
+  joinAuthWaitMs = JOIN_AUTH_WAIT_MS,
+  clock = Date.now
 }) => {
   // Per-socket update-session throttle configuration, read once at startup.
   const updateThrottle = parseUpdateThrottleConfig();
+
+  // Shared by every join on this pod (see createLastConnectionRefresher).
+  const lastConnectionRefresher = createLastConnectionRefresher(dataStore);
 
   // Cross-pod session-cache invalidation (audit PR-6 / C-6). A super-admin
   // restore rewrites the shared store, so every pod must drop its in-memory
@@ -284,15 +367,61 @@ const registerSocketHandlers = ({
   // clear theirs. serverSideEmit never loops back to the sender, so this
   // listener only ever fires on the *other* replicas; single-pod deployments
   // (in-memory adapter) never emit it.
+  //
+  // Decision D3b: the restore may also have given teams a new session epoch,
+  // so every socket on this pod is re-checked (`sweepRevokedSockets`, below).
   io.on('sessions-invalidated', () => {
     sessionCache.clear();
     console.info('[Server] Cleared session cache after cross-pod restore invalidation');
+    sweepRevokedSockets(null).catch((err) => console.warn('[Server] Session revocation sweep after a restore failed', err));
   });
 
+  // Decision D3b: another pod changed a team's password. The payload is only
+  // a hint — the decision is always the team's epoch, read again here — so a
+  // forged, late or duplicated event can never cut a socket that is current.
+  io.on(TEAM_SESSIONS_REVOKED_EVENT, (payload) => {
+    if (typeof payload?.teamId !== 'string' || payload.teamId === '') return;
+    sweepRevokedSockets(payload.teamId).catch((err) => console.warn('[Server] Session revocation sweep failed', err));
+  });
+
+  // The team a role is read from: its summary, never the full record, whose
+  // history can weigh megabytes and which a reconnect wave would parse once
+  // per joiner. Except when the summary read THROWS: on PostgreSQL the summary
+  // is a `value::jsonb` projection, and jsonb refuses text Node's JSON.parse
+  // accepts — a lone UTF-16 surrogate escape (an excerpt cut through an emoji)
+  // or `\u0000`. Such a row would otherwise leave every socket of the team
+  // without a role, and every facilitator-only change refused, until someone
+  // repaired the row by hand; the full record still reads, as it did before
+  // the summary was used here. A summary that answers null is an answer (the
+  // team is gone), never a reason to read the record. The warning is
+  // coalesced per team, so a reconnect wave writes one line, not one per
+  // joiner; a full record that cannot be read either throws to the caller.
+  const loadRosterTeam = async (teamId) => {
+    try {
+      return await dataStore.loadTeamSummary(teamId);
+    } catch (summaryErr) {
+      refusalLog.report({
+        group: 'team-summary-fallback',
+        key: String(teamId),
+        message: () => {
+          const code = summaryErr?.code ? `${summaryErr.code} ` : '';
+          return `[Server] Could not read the team summary of ${teamId} (${code}${summaryErr?.message ?? summaryErr}); reading the roster from the full record instead`;
+        },
+        label: `[Server] Team summary of ${teamId} unreadable, roster read from the full record`
+      });
+      return dataStore.loadTeam(teamId);
+    }
+  };
+
+  // The roster's entry for a user. The summary's `members` is always an array;
+  // a full record's is whatever it stores.
+  const findRosterMember = (team, userId) =>
+    (Array.isArray(team?.members) ? team.members.find((m) => m?.id === userId) : undefined);
+
   // Resolve the sender's role from the team roster (the database record, not
-  // anything the client claims about itself). Cached on the socket once known;
-  // reset on every join-session. A user the roster does not name is a
-  // 'participant' — the restrictive default.
+  // anything the client claims about itself; see loadRosterTeam). Cached on the
+  // socket once known; reset on every join-session. A user the roster does not
+  // name is a 'participant' — the restrictive default.
   //
   // A failed lookup is 'unknown', not 'participant', and is not cached, so the
   // next write tries again. The two must stay apart because the guard treats
@@ -304,8 +433,8 @@ const registerSocketHandlers = ({
   const resolveSenderRole = async (socket, teamId) => {
     if (socket.data.sessionRole) return socket.data.sessionRole;
     try {
-      const team = await dataStore.loadTeam(teamId);
-      const member = team?.members?.find((m) => m.id === socket.userId);
+      const team = await loadRosterTeam(teamId);
+      const member = findRosterMember(team, socket.userId);
       const role = member?.role === 'facilitator' ? 'facilitator' : 'participant';
       socket.data.sessionRole = role;
       return role;
@@ -405,8 +534,10 @@ const registerSocketHandlers = ({
     console.log(`[Server] ${socket.userName || 'Unknown'} leaving session ${sessionId}`);
     socket.leave(sessionId);
 
+    // Debug (stdout only, never the log ring): the leave line above already
+    // says who left, and a reconnect wave writes one of each per participant.
     const room = io.sockets.adapter.rooms.get(sessionId);
-    console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
+    console.debug(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
 
     socket.to(sessionId).emit('member-left', {
       userId: socket.userId,
@@ -417,6 +548,113 @@ const registerSocketHandlers = ({
 
     socket.sessionId = null;
   };
+
+  // ---------------------------------------------------------------------------
+  // Decision D3b — cutting the sockets whose token a password rotation revoked
+  // ---------------------------------------------------------------------------
+
+  // Takes a joined socket out of its session for good: it leaves the room
+  // (the others get `member-left` and a roster), and is told why with the
+  // denial its join would get now. It stays *connected*: socket.io clients do
+  // not reconnect on their own after a denial, so there is no reconnect storm,
+  // and every later write is refused 'not-joined' and persists nothing. Cut
+  // once: a second sweep reaching the same socket finds no session and sends
+  // nothing, never a denial naming no session.
+  const revokeSocket = async (socket, cause) => {
+    const sessionId = socket.sessionId;
+    if (!sessionId || !socket.data.authClaims) return;
+    const joinId = socket.data.joinId ?? undefined;
+    socket.data.authClaims = null;
+    socket.data.authTeamId = undefined;
+    socket.data.sessionRole = undefined;
+    socket.data.authUnverified = false;
+    await leaveCurrentSession(socket);
+    socket.emit('join-denied', { sessionId, reason: 'unauthenticated', cause, ...(joinId ? { joinId } : {}) });
+    console.info(`[Server] Signed ${JSON.stringify(socket.userName || 'unknown')} out of session ${sessionId}: ${cause}`);
+  };
+
+  // Re-checks this pod's joined sockets — of one team, or of all teams for a
+  // null `teamId` — against their team's session epoch, one tiny read per
+  // team. A read that fails is "unknown", never "revoked": the socket stays,
+  // and the next sweep tries again. A corrupt epoch row is permanent, and is
+  // treated as revoked (the HTTP routes refuse every token of that team too).
+  const sweepRevokedSockets = async (teamId = null) => {
+    const byTeam = new Map();
+    // A snapshot: the loop awaits, and the live Map changes meanwhile.
+    const sockets = [...(io.sockets?.sockets?.values?.() ?? [])];
+    // A join that read the old epoch decides first, so its socket is judged
+    // on the claims it ends up holding. Only the decision is awaited
+    // (joinAuthInFlight), never the rest of the join: its roster read and its
+    // team write can wait on a row lock for as long as the client that holds
+    // it takes to die. And the wait is bounded, all joins together: a join
+    // stuck before it decides — of any team, since its team is not known yet —
+    // is left to the next sweep (or to its own epoch read, which is all it
+    // has), rather than holding every revocation of this pod.
+    const deciding = sockets.map((socket) => socket.data.joinAuthInFlight).filter(Boolean);
+    if (deciding.length > 0 && !(await settledWithin(Promise.all(deciding), joinAuthWaitMs))) {
+      console.warn(`[Server] Session revocation sweep: a join still had not decided after ${joinAuthWaitMs} ms; its socket is checked by the next sweep`);
+    }
+    for (const socket of sockets) {
+      const claims = socket.data.authClaims;
+      if (!claims || !socket.sessionId || (teamId && claims.teamId !== teamId)) continue;
+      if (!byTeam.has(claims.teamId)) byTeam.set(claims.teamId, []);
+      byTeam.get(claims.teamId).push(socket);
+    }
+    for (const [tid, sockets] of byTeam) {
+      let state;
+      try {
+        state = await dataStore.loadTeamAuthState(tid);
+      } catch (err) {
+        if (!(err instanceof TeamAuthRowCorruptError)) {
+          console.warn(`[Server] Session revocation sweep: the session epoch of team ${JSON.stringify(tid)} could not be read; its sockets are checked again on the next sweep`, err);
+          continue;
+        }
+        console.error(`[Server] Session revocation sweep: ${err.message}`);
+        state = null;
+      }
+      for (const socket of sockets) {
+        // Read after the await: a re-join may have moved it, another sweep
+        // may have cut it.
+        const claims = socket.data.authClaims;
+        if (!claims || !socket.sessionId || claims.teamId !== tid) continue;
+        const verdict = state ? sessionVerdict(claims, state) : 'revoked';
+        if (verdict === 'current') {
+          socket.data.authUnverified = false;
+          continue;
+        }
+        await revokeSocket(socket, verdict === 'team_not_found' ? 'team_not_found' : SESSION_REVOKED_ERROR);
+      }
+    }
+  };
+
+  sessionRevocation.attachLocalSweeper(sweepRevokedSockets);
+
+  if (revocationSweepMs > 0) {
+    // Each tick schedules the next one before it runs anything: chained on
+    // the previous run's end instead, one run that never ended (a query on a
+    // connection that died) stopped the periodic sweep of its pod for good —
+    // the only cover for a degraded adapter and for joins accepted during an
+    // outage. A tick that finds a run younger than one period still going
+    // skips its turn. Ticks come about one period apart, so that skip rarely
+    // fires: while runs hang (a database that stopped answering), a new run
+    // starts roughly every period beside them, each waiting on its own query.
+    // That is accepted — a hung database stalls every route anyway — and it is
+    // what keeps one dead run from ending revocation on this pod.
+    let running = null;
+    const tick = () => {
+      const startedAt = clock();
+      schedule(tick, revocationSweepMs);
+      if (running && startedAt - running.startedAt < revocationSweepMs) return;
+      const run = { startedAt };
+      running = run;
+      sweepRevokedSockets(null)
+        .catch((err) => console.warn('[Server] Periodic session revocation sweep failed', err))
+        .finally(() => {
+          if (running === run) running = null;
+        });
+    };
+    schedule(tick, revocationSweepMs);
+  }
 
   io.on('connection', (socket) => {
     // Audit H44, the socket half of the correlation id. The HTTP middleware
@@ -435,7 +673,9 @@ const registerSocketHandlers = ({
         )
       );
 
-    console.log('[Server] Client connected:', socket.id);
+    // Debug: the join line that follows names the user; the disconnect line
+    // stays at info.
+    console.debug('[Server] Client connected:', socket.id);
 
     // Audit H1: the socket channel used to have no authentication at all — a
     // join was taken at face value and answered with the full session state,
@@ -444,12 +684,19 @@ const registerSocketHandlers = ({
     // already holds after login, and that token must belong to the team that
     // owns the session. Nothing (not the room membership, not one field of
     // state) happens before both checks pass.
-    const handleJoinSession = async ({ sessionId, userId, userName, sessionToken }) => {
+    // `authDecided` is called once the join has decided who this socket is
+    // (its claims are set); a join that is refused, or throws, has decided
+    // when it ends (the caller below). What the revocation sweep waits for.
+    const handleJoinSession = async ({ sessionId, userId, userName, sessionToken, joinId: rawJoinId }, authDecided = () => {}) => {
       console.log(`[Server] User ${userName} (${userId}) joining session ${sessionId}`);
+      // Decision D3b: echoed in a denial, so the client can tell the denial of
+      // an earlier join (made with a token it has since replaced) from that of
+      // its latest one. A client from before it sends none, and is sent none.
+      const joinId = typeof rawJoinId === 'string' && JOIN_ID_PATTERN.test(rawJoinId) ? rawJoinId : null;
 
-      const denyJoin = (reason) => {
-        console.warn(`[Server] Denied join for session ${sessionId} from ${userName || 'unknown'}: ${reason}`);
-        socket.emit('join-denied', { sessionId, reason });
+      const denyJoin = (reason, cause = null) => {
+        console.warn(`[Server] Denied join for session ${sessionId} from ${userName || 'unknown'}: ${reason}${cause ? ` (${cause})` : ''}`);
+        socket.emit('join-denied', { sessionId, reason, ...(cause ? { cause } : {}), ...(joinId ? { joinId } : {}) });
       };
 
       if (!sessionId || typeof sessionId !== 'string') {
@@ -459,6 +706,38 @@ const registerSocketHandlers = ({
       const claims = tokenService.validateSessionToken(sessionToken);
       if (!claims) {
         return denyJoin('unauthenticated');
+      }
+
+      // Decision D3b: a token a password rotation revoked joins nothing, and
+      // neither does one whose team was deleted. A socket presenting such a
+      // credential also leaves the session it is in: its client holds no
+      // other token, so whatever it joined with is gone too.
+      const denyRevokedJoin = async (cause) => {
+        if (socket.sessionId) {
+          socket.data.authClaims = null;
+          socket.data.authTeamId = undefined;
+          socket.data.sessionRole = undefined;
+          await leaveCurrentSession(socket);
+        }
+        denyJoin('unauthenticated', cause);
+      };
+      // A read error is accepted on the signature, flagged, and re-checked by
+      // the periodic sweep once the database answers — continuity over the
+      // guard during an outage, the 2026-10-12 precedent. A corrupt row is no
+      // outage, it is permanent: accepting on it would let every token of the
+      // team join, revoked ones included, for as long as it stays corrupt.
+      let authUnverified = false;
+      try {
+        const verdict = sessionVerdict(claims, await dataStore.loadTeamAuthState(claims.teamId));
+        if (verdict === 'revoked') return await denyRevokedJoin(SESSION_REVOKED_ERROR);
+        if (verdict === 'team_not_found') return await denyRevokedJoin('team_not_found');
+      } catch (err) {
+        if (err instanceof TeamAuthRowCorruptError) {
+          console.error(`[Server] Join refused: ${err.message}`);
+          return await denyRevokedJoin(null);
+        }
+        console.warn(`[Server] The session epoch of team ${JSON.stringify(claims.teamId)} could not be read; the join is accepted on its token's signature and checked again by the next sweep`, err);
+        authUnverified = true;
       }
 
       // Load the persisted session BEFORE joining the room: the credential has
@@ -502,20 +781,29 @@ const registerSocketHandlers = ({
       // The authenticated team, from the signed token — never from the client
       // payload. Bounds every later write on this socket to one team.
       socket.data.authTeamId = claims.teamId;
+      // Decision D3b: what the revocation sweep judges this socket by, and the
+      // join id its denial would echo.
+      socket.data.authClaims = { teamId: claims.teamId, sessionEpoch: claims.sessionEpoch ?? null, createdAt: claims.createdAt };
+      socket.data.joinId = joinId;
+      socket.data.authUnverified = authUnverified;
       // Role is per session and per claimed user; re-resolve after every join.
       socket.data.sessionRole = undefined;
+      authDecided();
 
       rosterBroadcaster.schedule(sessionId);
 
+      // Debug, like the per-write lines: one join used to write four info
+      // lines, and a drained pod's 150 participants reconnecting filled the
+      // whole 1000-line ring. The join line above stays at info.
       const room = io.sockets.adapter.rooms.get(sessionId);
-      console.log(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
+      console.debug(`[Server] Session ${sessionId} now has ${room?.size || 0} connected clients`);
 
       if (sessionData) {
         if (fromDatabase) {
           sessionCache.set(sessionId, sessionData);
-          console.log(`[Server] Sending persisted session state to ${userName}`);
+          console.debug(`[Server] Sending persisted session state to ${userName}`);
         } else {
-          console.log(`[Server] Sending cached session state to ${userName}`);
+          console.debug(`[Server] Sending cached session state to ${userName}`);
         }
         // The in-memory-only store keeps its historical behaviour of seeding
         // the join from cache without an initial emit.
@@ -526,28 +814,34 @@ const registerSocketHandlers = ({
 
       socket.to(sessionId).emit('member-joined', { userId, userName });
 
-      // A failed team read leaves the role unset rather than guessing it:
-      // resolveSenderRole tries again on the first write that needs it, and
-      // answers 'unknown' — never 'participant' — if that read fails too.
+      // The roster comes from the team summary (the full record only when the
+      // summary read throws, see loadRosterTeam): a reconnect wave is one join
+      // per participant, and loading the record parsed the team's whole
+      // history once per joiner. A failed read leaves the role unset rather
+      // than guessing it: resolveSenderRole tries again on the first write that
+      // needs it, and answers 'unknown' — never 'participant' — if that read
+      // fails too.
       try {
         if (sessionData?.teamId) {
-          const team = await dataStore.loadTeam(sessionData.teamId);
+          const team = await loadRosterTeam(sessionData.teamId);
           if (team) {
-            const member = team.members.find((m) => m.id === userId);
+            const member = findRosterMember(team, userId);
             socket.data.sessionRole = member?.role === 'facilitator' ? 'facilitator' : 'participant';
             if (
               member &&
               member.role !== 'facilitator' &&
               shouldRefreshLastConnection(team.lastConnectionDate)
             ) {
-              if (await refreshLastConnectionDate(dataStore, sessionData.teamId)) {
+              // Awaited, so a write sent right behind the join waits for it
+              // (joinInFlight) — and for at most one coalesced team write.
+              if (await lastConnectionRefresher.run(sessionData.teamId)) {
                 console.log(`[Server] Updated lastConnectionDate for team ${team.name} (participant ${userName} joined)`);
               }
             }
           }
         }
       } catch (err) {
-        console.warn('[Server] Failed to update lastConnectionDate on session join', err);
+        console.warn('[Server] Could not read the team roster or refresh lastConnectionDate on session join', err);
       }
     };
 
@@ -561,13 +855,25 @@ const registerSocketHandlers = ({
     // from. Publishing the in-flight join lets those writes wait for it instead
     // of being lost; a write behind a *denied* join still finds no sessionId
     // and is still refused, so H1 is unchanged.
+    //
+    // Two promises are published. `joinInFlight` is the whole join, which a
+    // write waits for (the role and the last-connection refresh included).
+    // `joinAuthInFlight` settles as soon as the join has decided who the
+    // socket is, which is all the revocation sweep needs: waiting for the
+    // whole join let a team write stuck on a row lock stop every revocation
+    // on the pod.
     on('join-session', (payload) => {
-      const pending = handleJoinSession(payload).catch((err) => {
+      let authDecided;
+      const authInFlight = new Promise((resolve) => { authDecided = resolve; });
+      const pending = handleJoinSession(payload, authDecided).catch((err) => {
         console.error('[Server] Failed to handle join-session', err);
       });
       socket.data.joinInFlight = pending;
+      socket.data.joinAuthInFlight = authInFlight;
       pending.finally(() => {
+        authDecided();
         if (socket.data.joinInFlight === pending) socket.data.joinInFlight = null;
+        if (socket.data.joinAuthInFlight === authInFlight) socket.data.joinAuthInFlight = null;
       });
     });
 
@@ -624,8 +930,10 @@ const registerSocketHandlers = ({
     const acceptWrite = (sessionId, savedData, restoredFields) => {
       sessionCache.set(sessionId, savedData);
 
+      // Debug (stdout only): one line per accepted write would turn the log
+      // ring over in seconds during a live retrospective.
       const room = io.sockets.adapter.rooms.get(sessionId);
-      console.log(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
+      console.debug(`[Server] Broadcasting to ${(room?.size || 1) - 1} other clients in session ${sessionId}`);
 
       socket.to(sessionId).emit('session-update', savedData);
       if (restoredFields.length > 0) socket.emit('session-update', savedData);
@@ -636,6 +944,13 @@ const registerSocketHandlers = ({
       await awaitPendingJoin();
 
       const sessionId = socket.sessionId;
+      // The team the socket joined as, read with the session id: a join sets
+      // both, and a revocation or a refused re-join clears both in the same
+      // synchronous step (a leave clears the session id, and the write is then
+      // refused just below). Read live after the awaits below instead, a
+      // revocation landing meanwhile emptied it and the creation check further
+      // down passed for any team (audit H1).
+      const authTeamId = socket.data.authTeamId;
       if (!sessionId) {
         // No session on this socket: a write behind a denied join, or one that
         // outran a join the client believes it made. There is no room and no
@@ -843,10 +1158,10 @@ const registerSocketHandlers = ({
           // nothing to compare against, so bind the new session to the team the
           // socket authenticated as (audit H1): otherwise one team's credential
           // could seed a session claiming another team's id and inherit that
-          // team's roster for role resolution.
+          // team's roster for role resolution. Fails closed: a socket with no
+          // authenticated team seeds no team's session.
           sessionData.teamId &&
-          socket.data.authTeamId &&
-          sessionData.teamId !== socket.data.authTeamId
+          (!authTeamId || sessionData.teamId !== authTeamId)
         ) {
           console.warn(`[Server] Rejected session creation from ${socket.userName} for ${sessionId}: teamId does not match the authenticated team`);
           return;
@@ -854,8 +1169,9 @@ const registerSocketHandlers = ({
 
         // Logged once the write is known to be going ahead: a refused write is
         // reported (and coalesced) above, and logging it here too put one line
-        // per refused write back into the log ring.
-        console.log(`[Server] Session update from ${socket.userName}, phase: ${outgoing.phase}`);
+        // per refused write back into the log ring. Debug: stdout only, the
+        // per-write trail, never the ring (logService.attachConsole).
+        console.debug(`[Server] Session update from ${socket.userName}, phase: ${outgoing.phase}`);
 
         const result = await dataStore.saveSessionState(sessionId, outgoing);
 
@@ -955,6 +1271,7 @@ export {
   registerSocketHandlers,
   shouldRefreshLastConnection,
   refreshLastConnectionDate,
+  createLastConnectionRefresher,
   validateSessionUpdateShape,
   consumeUpdateToken,
   parseUpdateThrottleConfig,

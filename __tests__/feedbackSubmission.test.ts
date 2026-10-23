@@ -1,9 +1,14 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   newFeedbackSubmissionId,
   submitTeamFeedback,
   type FeedbackSubmission
 } from '../services/feedbackSubmission';
+import {
+  clearSessionRevoked,
+  isSessionRevoked,
+  registerRevocationResolver
+} from '../services/sessionRevocation';
 
 /**
  * The form keeps its draft unless the server stored it, so this mapping
@@ -207,5 +212,66 @@ describe('submitTeamFeedback', () => {
     } finally {
       process.off('unhandledRejection', unhandled);
     }
+  });
+});
+
+/**
+ * Decision D3b — the token the form was handed is refused because the
+ * password was changed, but this client holds a newer one by now: another tab
+ * of the browser changed it, and its token was just adopted (the resolver's
+ * 'retry'). The feedback used to be reported "not sent: your session has
+ * expired, log in again" by a tab that was still signed in with a valid
+ * token. It is sent again, once, with the token held now, under the same
+ * submission id, so a first attempt that did land is not stored twice.
+ */
+describe('submitTeamFeedback after a password change elsewhere', () => {
+  const revoked = () => response(401, { error: 'session_revoked' });
+  const createCalls = (calls: Call[]) => calls.filter((call) => call.url === '/api/feedbacks/create');
+
+  beforeEach(() => {
+    clearSessionRevoked();
+    registerRevocationResolver(async () => 'retry');
+  });
+
+  afterEach(() => {
+    clearSessionRevoked();
+    vi.restoreAllMocks();
+  });
+
+  it('sends it again once with the token held now, and notifies with that one', async () => {
+    let answer = 0;
+    const { impl, calls } = fakeFetch(async () => {
+      answer += 1;
+      return answer === 1 ? revoked() : response(200, { success: true, feedback: storedFeedback });
+    });
+
+    await expect(submitTeamFeedback(submission({ getSessionToken: () => 'rg1.adopted-token' }), impl)).resolves.toBe('sent');
+
+    const creates = createCalls(calls);
+    expect(creates).toHaveLength(2);
+    expect(creates[0].body.sessionToken).toBe('rg1.session-token');
+    expect(creates[1].body.sessionToken).toBe('rg1.adopted-token');
+    expect(creates[1].body.feedback).toEqual(creates[0].body.feedback);
+    expect((creates[1].body.feedback as { submissionId: string }).submissionId).toBe('abcdefgh12345678');
+    expect(notifyCalls(calls)[0].body.sessionToken).toBe('rg1.adopted-token');
+    expect(isSessionRevoked()).toBe(false);
+  });
+
+  it('answers session_expired after exactly two attempts when the second is refused too', async () => {
+    const { impl, calls } = fakeFetch(async () => revoked());
+
+    await expect(submitTeamFeedback(submission({ getSessionToken: () => 'rg1.adopted-token' }), impl)).resolves.toBe('session_expired');
+
+    expect(createCalls(calls)).toHaveLength(2);
+    expect(notifyCalls(calls)).toHaveLength(0);
+  });
+
+  it('does not send it again when the session is revoked for good', async () => {
+    registerRevocationResolver(async () => 'revoked');
+    const { impl, calls } = fakeFetch(async () => revoked());
+
+    await expect(submitTeamFeedback(submission({ getSessionToken: () => 'rg1.adopted-token' }), impl)).resolves.toBe('session_expired');
+
+    expect(createCalls(calls)).toHaveLength(1);
   });
 });

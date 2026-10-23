@@ -34,9 +34,9 @@ const createTeam = async (baseUrl, { name, password }) => {
   return { team, sessionToken };
 };
 
+// The route answers `{ success: true }`, never the team (synthesis item 8).
 const setTeamMembers = async (baseUrl, teamId, password, members) => {
-  const { team } = await jsonRequest(baseUrl, `/api/team/${teamId}/members`, { password, members });
-  return team;
+  await jsonRequest(baseUrl, `/api/team/${teamId}/members`, { password, members });
 };
 
 const persistRetrospective = async (baseUrl, teamId, password, retrospective) => {

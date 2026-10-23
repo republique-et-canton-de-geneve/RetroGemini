@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { deferred, installJiraFetch, ok, refused, type RouteAnswer } from './helpers/jiraClientFetch';
 import { orphanLabels } from './helpers/formLabels';
 
@@ -313,6 +313,169 @@ describe('JiraTargetFields', () => {
       fireEvent.click(screen.getByRole('radio', { name: 'Sub-tasks of an issue' }));
       expect(onDraft).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'parent', issueTypeId: '' }));
       expect(screen.getByLabelText('Issue type')).toHaveValue('');
+    });
+  });
+
+  describe('one parent issue per retrospective or health check', () => {
+    // What a 41 pod answers for `{ projectKey }`: every type, sub-task types
+    // included, with Cloud's hierarchy level when Jira gave one.
+    const ALL_TYPES = [
+      { id: '10001', name: 'Task', subtask: false, hierarchyLevel: 0 },
+      { id: '10002', name: 'Story', subtask: false },
+      { id: '10009', name: 'Epic', subtask: false, hierarchyLevel: 1 },
+      { id: '10003', name: 'Sub-task', subtask: true, hierarchyLevel: -1 }
+    ];
+    const answerAll = () => ok({ issueTypes: ALL_TYPES, projectKey: 'TEAM', subtasksIncluded: true });
+    const chooseMode = () => fireEvent.click(screen.getByRole('radio', { name: 'Sub-tasks of a new issue per retrospective or health check' }));
+    const lastDraft = (onDraft: ReturnType<typeof vi.fn>) => onDraft.mock.calls.at(-1)?.[0] as JiraTargetDraft;
+
+    it('offers a third mode, its hint tied to it only while it is chosen', () => {
+      installJiraFetch({});
+      render(<Harness />);
+      const radio = screen.getByRole('radio', { name: 'Sub-tasks of a new issue per retrospective or health check' });
+      expect(radio).not.toBeChecked();
+      expect(radio).not.toHaveAttribute('aria-describedby');
+      expect(screen.queryByText(/RetroGemini creates one issue in this project/)).toBeNull();
+
+      chooseMode();
+      expect(radio).toBeChecked();
+      expect(radio).toHaveAccessibleDescription(/RetroGemini creates one issue in this project for each retrospective or health check/);
+      // The group keeps its name; the project key is asked, not a parent key.
+      expect(screen.getByRole('radiogroup', { name: 'Create as' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Project key')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Parent issue key')).toBeNull();
+    });
+
+    it('fills both lists from one read of the project, keeping epics out of the parent issue\'s types', async () => {
+      const routes = installJiraFetch({ '/jira/issue-types': answerAll });
+      const onDraft = vi.fn();
+      const { container } = render(<Harness onDraft={onDraft} />);
+      chooseMode();
+      const key = screen.getByLabelText('Project key');
+      fireEvent.change(key, { target: { value: 'TEAM' } });
+      fireEvent.blur(key);
+
+      const parentType = screen.getByLabelText('Type of the parent issue');
+      const subtaskType = screen.getByLabelText('Sub-task type');
+      await waitFor(() => expect(within(subtaskType).getByRole('option', { name: 'Sub-task' })).toBeInTheDocument());
+      expect(routes.callsTo('/jira/issue-types')).toHaveLength(1);
+      expect(routes.callsTo('/jira/issue-types')[0].body).toMatchObject({ projectKey: 'TEAM' });
+
+      expect(within(parentType).getByRole('option', { name: 'Task' })).toBeInTheDocument();
+      expect(within(parentType).getByRole('option', { name: 'Story' })).toBeInTheDocument();
+      // Cloud puts no sub-task under an epic: a session would keep a parent it cannot use.
+      expect(within(parentType).queryByRole('option', { name: 'Epic' })).toBeNull();
+      expect(within(parentType).queryByRole('option', { name: 'Sub-task' })).toBeNull();
+      expect(within(subtaskType).queryByRole('option', { name: 'Task' })).toBeNull();
+      // The only sub-task type is chosen; two parent types leave the choice open.
+      expect(subtaskType).toHaveValue('10003');
+      expect(parentType).toHaveValue('');
+      fireEvent.change(parentType, { target: { value: '10001' } });
+      expect(lastDraft(onDraft)).toMatchObject({ mode: 'sessionParent', projectKey: 'TEAM', parentIssueTypeId: '10001', issueTypeId: '10003' });
+      expect(targetFromDraft(lastDraft(onDraft))).toEqual({
+        ok: true,
+        target: { mode: 'sessionParent', projectKey: 'TEAM', parentIssueTypeId: '10001', issueTypeId: '10003', labels: ['retrospective'] }
+      });
+
+      // Each select has its own label and hint, and the shared status line.
+      expect(orphanLabels(container)).toEqual([]);
+      expect(describedBy(parentType)).toContain('Created once per retrospective or health check.');
+      expect(describedBy(subtaskType)).toContain('One sub-task per action.');
+      expect(parentType.getAttribute('aria-describedby')).toContain('target-issue-type-status');
+      expect(subtaskType.getAttribute('aria-describedby')).toContain('target-issue-type-status');
+    });
+
+    it('keeps a stored target\'s two types, each by its id until the list is read', async () => {
+      const answer = deferred<RouteAnswer>();
+      installJiraFetch({ '/jira/issue-types': () => answer.promise });
+      render(<Harness initial={draftFromTarget({ mode: 'sessionParent', projectKey: 'TEAM', parentIssueTypeId: '10002', issueTypeId: '10003', labels: [] })} />);
+
+      expect(screen.getByLabelText('Type of the parent issue')).toHaveValue('10002');
+      expect(screen.getByLabelText('Sub-task type')).toHaveValue('10003');
+      await act(async () => { answer.resolve(answerAll()); });
+      expect(screen.getByLabelText('Type of the parent issue')).toHaveValue('10002');
+      expect(within(screen.getByLabelText('Type of the parent issue')).getByRole('option', { name: 'Story' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Sub-task type')).toHaveValue('10003');
+    });
+
+    it('forgets both types when the key or the mode changes', async () => {
+      installJiraFetch({ '/jira/issue-types': answerAll });
+      const onDraft = vi.fn();
+      render(<Harness initial={draftFromTarget({ mode: 'sessionParent', projectKey: 'TEAM', parentIssueTypeId: '10001', issueTypeId: '10003', labels: [] })} onDraft={onDraft} />);
+      await waitFor(() => expect(within(screen.getByLabelText('Sub-task type')).getByRole('option', { name: 'Sub-task' })).toBeInTheDocument());
+
+      fireEvent.change(screen.getByLabelText('Project key'), { target: { value: 'OPS' } });
+      expect(lastDraft(onDraft)).toMatchObject({ projectKey: 'OPS', issueTypeId: '', parentIssueTypeId: '' });
+
+      fireEvent.change(screen.getByLabelText('Project key'), { target: { value: 'TEAM' } });
+      fireEvent.click(screen.getByRole('radio', { name: 'Project' }));
+      expect(lastDraft(onDraft)).toMatchObject({ mode: 'project', issueTypeId: '', parentIssueTypeId: '' });
+      expect(screen.queryByLabelText('Type of the parent issue')).toBeNull();
+    });
+
+    it('says the sub-task types cannot be read yet when a pod of an older release answers', async () => {
+      let calls = 0;
+      installJiraFetch({
+        // A 40.x pod: standard types only, no `subtasksIncluded`.
+        '/jira/issue-types': () => (++calls === 1
+          ? ok({ issueTypes: TYPES.filter(type => !type.subtask), projectKey: 'TEAM' })
+          : answerAll())
+      });
+      render(<Harness />);
+      chooseMode();
+      const key = screen.getByLabelText('Project key');
+      fireEvent.change(key, { target: { value: 'TEAM' } });
+      fireEvent.blur(key);
+
+      const subtaskType = screen.getByLabelText('Sub-task type');
+      await waitFor(() => expect(describedBy(subtaskType)).toContain('The sub-task types could not be read yet: the server is being updated.'));
+      // The parent issue's types are right in that answer; the sub-task list is not.
+      expect(within(screen.getByLabelText('Type of the parent issue')).getByRole('option', { name: 'Task' })).toBeInTheDocument();
+      expect(within(subtaskType).queryByRole('option', { name: 'Task' })).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Load the issue types' }));
+      await waitFor(() => expect(within(subtaskType).getByRole('option', { name: 'Sub-task' })).toBeInTheDocument());
+      expect(describedBy(subtaskType)).not.toContain('could not be read yet');
+    });
+
+    // An older pod's answer holds no sub-task type at all: a stored one must
+    // not be forgotten because that list is empty.
+    it('keeps a stored sub-task type when a pod of an older release answers', async () => {
+      installJiraFetch({ '/jira/issue-types': () => ok({ issueTypes: TYPES.filter(type => !type.subtask), projectKey: 'TEAM' }) });
+      const onDraft = vi.fn();
+      render(<Harness initial={draftFromTarget({ mode: 'sessionParent', projectKey: 'TEAM', parentIssueTypeId: '10001', issueTypeId: '10003', labels: [] })} onDraft={onDraft} />);
+
+      await waitFor(() => expect(describedBy(screen.getByLabelText('Sub-task type'))).toContain('could not be read yet'));
+      expect(screen.getByLabelText('Sub-task type')).toHaveValue('10003');
+      expect(onDraft.mock.calls.every(([draft]) => (draft as JiraTargetDraft).issueTypeId === '10003')).toBe(true);
+    });
+
+    it('says so when the project offers no sub-task type', async () => {
+      installJiraFetch({
+        '/jira/issue-types': () => ok({ issueTypes: ALL_TYPES.filter(type => !type.subtask), projectKey: 'TEAM', subtasksIncluded: true })
+      });
+      render(<Harness />);
+      chooseMode();
+      const key = screen.getByLabelText('Project key');
+      fireEvent.change(key, { target: { value: 'TEAM' } });
+      fireEvent.blur(key);
+
+      await waitFor(() => expect(describedBy(screen.getByLabelText('Sub-task type'))).toContain('This project offers no sub-task type.'));
+    });
+
+    // [R5] The route now answers every type of a project, sub-task types
+    // included. A project-mode form, here and on a 40.x screen alike, must
+    // still offer only the types a project takes.
+    it('offers a project-mode form no sub-task type from that answer, and keeps a stored standard type', async () => {
+      installJiraFetch({ '/jira/issue-types': answerAll });
+      render(<Harness initial={draftFromTarget({ mode: 'project', projectKey: 'TEAM', issueTypeId: '10002', labels: [] })} />);
+
+      const select = screen.getByLabelText('Issue type');
+      await waitFor(() => expect(within(select).getByRole('option', { name: 'Story' })).toBeInTheDocument());
+      expect(within(select).queryByRole('option', { name: 'Sub-task' })).toBeNull();
+      // Project mode may create epics: only sub-task types are left out.
+      expect(within(select).getByRole('option', { name: 'Epic' })).toBeInTheDocument();
+      expect(select).toHaveValue('10002');
     });
   });
 

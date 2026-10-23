@@ -41,7 +41,14 @@ const buildApp = (max: number, overrides: Record<string, unknown> = {}) => {
     teamService: {
       sanitizeTeamForClient: (team: typeof TEAM) => team,
       authenticateTeam: vi.fn(),
-      atomicUpdateTeam: vi.fn()
+      atomicUpdateTeam: vi.fn(),
+      // Decision D3b: 'good-token' is current, 'revoked-token' was minted
+      // before a password change, anything else is no token at all.
+      verifySessionToken: vi.fn(async (token: string) => {
+        if (token === 'good-token') return { claims: { teamId: TEAM.id }, state: null, error: null };
+        if (token === 'revoked-token') return { claims: { teamId: TEAM.id }, state: null, error: 'session_revoked' };
+        return { claims: null, state: null, error: 'invalid_token' };
+      })
     },
     tokenService: {
       issueTeamToken: vi.fn(() => 'fresh-token'),
@@ -106,6 +113,22 @@ describe('the auth limiter counts rejected credentials only', () => {
         const conflict = await call('/api/team/create', postJson({ name: 'Team One', password: 'hunter2!-longer', facilitatorEmail: 'fac@example.com' }));
         expect(conflict.status, `attempt ${i + 1} was refused by the limiter`).toBe(409);
       }
+    });
+  });
+
+  it('does not spend the budget on a token a password change revoked (decision D3b)', async () => {
+    // An office reloading after a rotation: every browser presents a token
+    // that is signature-valid but revoked. Counting those locked the office
+    // out of every *valid* restore for fifteen minutes.
+    const app = buildApp(2);
+
+    await withServer(app, async (call) => {
+      for (let i = 0; i < 6; i += 1) {
+        const revoked = await call('/api/team/restore-session', postJson({ sessionToken: 'revoked-token' }));
+        expect(revoked.status, `reload ${i + 1} was refused by the limiter`).toBe(401);
+        expect(await revoked.json()).toEqual({ error: 'session_revoked' });
+      }
+      expect((await call('/api/team/restore-session', postJson({ sessionToken: 'good-token' }))).status).toBe(200);
     });
   });
 

@@ -303,6 +303,11 @@ describe('L23 — SuperAdmin names every field', () => {
     expect(screen.getByLabelText('Admin Email Address')).toBeTruthy();
     expect(screen.getByLabelText('API Key')).toBeTruthy();
     expect(screen.getByLabelText('Model')).toBeTruthy();
+    // The whole-store upload above the tabs: named, and not "Backup file",
+    // which is the Backups tab's import field.
+    const restoreFile = screen.getByLabelText('Backup file to restore') as HTMLInputElement;
+    expect(restoreFile.type).toBe('file');
+    expect(restoreFile.accept).toBe('.gz,.json,application/gzip,application/json');
   });
 });
 
@@ -320,7 +325,6 @@ describe('L23 — TeamFeedback names every field', () => {
         sessionToken="token"
         currentUserId="u1"
         currentUserName="Alice"
-        feedbacks={[]}
         onSubmitFeedback={vi.fn()}
         onRefresh={vi.fn()}
       />

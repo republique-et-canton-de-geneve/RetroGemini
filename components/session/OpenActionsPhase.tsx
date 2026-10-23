@@ -4,6 +4,7 @@ import { createTranslator } from '../../i18n/translate';
 import { toLanguage } from '../../i18n/languages';
 import { ActionImpactVote, ActionItem, RetroSession, Team, User } from '../../types';
 import { dataService } from '../../services/dataService';
+import { ticketQuote } from '../../utils/textCut';
 import ClosedActionsRating from './ClosedActionsRating';
 
 interface Props {
@@ -113,9 +114,7 @@ const OpenActionsPhase: React.FC<Props> = ({
                 if (action.linkedTicketId) {
                   const ticket = retro.tickets.find((item) => item.id === action.linkedTicketId);
                   if (ticket) {
-                    contextText = contentT('phases.actions.contextTicket', {
-                      text: `${ticket.text.substring(0, 50)}${ticket.text.length > 50 ? '...' : ''}`
-                    });
+                    contextText = contentT('phases.actions.contextTicket', { text: ticketQuote(ticket.text) });
                     break;
                   }
                   const group = retro.groups.find((item) => item.id === action.linkedTicketId);

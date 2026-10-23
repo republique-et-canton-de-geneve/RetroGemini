@@ -3,6 +3,7 @@ import express from 'express';
 import type { AddressInfo } from 'net';
 import { createTeamService } from '../server/services/teamService.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * Regression test for the server-side "closed-action guard" on the
@@ -77,6 +78,8 @@ const createMockDataStore = () => {
     loadTeam,
     loadTeamRaw,
     teamExists,
+    // Decision D3b: the session epoch every token check reads.
+    loadTeamAuthState: createTeamAuthStateDouble((teamId) => teams.has(teamId)).loadTeamAuthState,
     saveTeam,
     loadAllTeams,
     deleteTeamRecord,

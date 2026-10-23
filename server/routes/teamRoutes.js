@@ -16,6 +16,7 @@ import { getTeamInviteEpoch } from '../services/teamService.js';
 import { cleanRosterEmails } from '../services/emailMigration.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
 import { NO_OP_LIVE_SESSION_PATCH, NO_OP_LIVE_SESSION_RENAME } from '../services/liveSessionRename.js';
+import { NO_OP_SESSION_REVOCATION } from '../services/sessionRevocation.js';
 import {
   claimTeamNameKey,
   nameHeldByAnotherRecord,
@@ -50,7 +51,11 @@ const LEGACY_MERGED_LIST_FIELDS = ['customTemplates', 'customHealthCheckTemplate
 // `jiraTarget` is a team setting written by `/jira/target`, which validates it;
 // `jiraClaims` is the server's record of the issues being created right now,
 // and a client that could clear it could have the same issue created twice.
-const JIRA_TEAM_FIELDS = ['jiraTarget', 'jiraClaims'];
+// `jiraParents` (each session's parent issue in `sessionParent` mode) and
+// `jiraParentClaims` (the parents being created right now) are written by
+// `/jira/issues` alone, for the same two reasons: a stale tab must not put an
+// old parent back, and clearing a claim could create a parent twice.
+const JIRA_TEAM_FIELDS = ['jiraTarget', 'jiraClaims', 'jiraParents', 'jiraParentClaims'];
 
 // The actions of a full-blob persist, as the team record may store them: the
 // closed-action guard first (stored `done`, ratings, deferral and Jira link
@@ -121,6 +126,11 @@ const registerTeamRoutes = ({
   // The same carry for the Jira routes registered below (an issue key stamped
   // on an action reaches the live session). Same default, same source check.
   liveSessionPatch = NO_OP_LIVE_SESSION_PATCH,
+  // Decision D3b — cuts the live-session sockets of a team whose password
+  // changed, on every pod (`sessionRevocation.js`). A no-op by default for the
+  // same reason as `securityEvents`; `__tests__/sessionRevocationWiring`
+  // asserts the wiring in `server.js`.
+  sessionRevocation = NO_OP_SESSION_REVOCATION,
   // True once the pod is draining (`shutdown.isShuttingDown`): the Jira batch
   // starts no new creation then, and answers the rest as not attempted, for
   // the next click to send to a pod that stays. Defaults to "never" for the
@@ -155,6 +165,13 @@ const registerTeamRoutes = ({
   // colliding on an existing team name (409). What remains metered is exactly
   // what the limiter exists for — an anonymous prober guessing session tokens,
   // each guess costing a data-store read (CodeQL `js/missing-rate-limiting`).
+  //
+  // A token revoked by a password rotation (decision D3b) is not counted
+  // either: it is signature-valid, so it is no guess, and its refusal costs
+  // one tiny read. Counting it made a rotation an office-wide lockout: six
+  // people reloading spent the per-IP budget, every *valid* restore from that
+  // address then got 429 for fifteen minutes, and the client deleted each
+  // saved session.
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: authLimiterMax,
@@ -162,7 +179,7 @@ const registerTeamRoutes = ({
     standardHeaders: true,
     legacyHeaders: false,
     skipSuccessfulRequests: true,
-    requestWasSuccessful: (_req, res) => res.statusCode !== 401
+    requestWasSuccessful: (_req, res) => res.statusCode !== 401 || res.locals.sessionRevoked === true
   });
 
   const loginLimiter = rateLimit({
@@ -233,6 +250,13 @@ const registerTeamRoutes = ({
         return res.status(401).json({ error: 'team_not_found' });
       }
 
+      // Decision D3b: the epoch the token is minted with is read *before* the
+      // record whose password is verified. Read after it, a rotation committed
+      // between the two would hand out a token under the new epoch for a
+      // password that is no longer the team's. This way the worst a login
+      // racing a rotation gets is a token refused at once, and a second login.
+      const authState = await dataStore.loadTeamAuthState(teamId);
+
       const team = await dataStore.loadTeam(teamId);
 
       if (!team) {
@@ -271,7 +295,7 @@ const registerTeamRoutes = ({
         });
       }
 
-      const sessionToken = tokenService.createSessionToken(team.id, null);
+      const sessionToken = tokenService.createSessionToken(team.id, null, { sessionEpoch: authState.sessionEpoch });
 
       res.json({
         team: sanitizeTeamForClient(team),
@@ -291,12 +315,19 @@ const registerTeamRoutes = ({
         return res.status(400).json({ error: 'missing_token' });
       }
 
-      const session = tokenService.validateSessionToken(sessionToken);
-      if (!session) {
+      // Decision D3b: a token a password rotation revoked is answered
+      // `session_revoked`, and is not counted by the meter above (see
+      // `authLimiter`).
+      const { claims, error } = await teamService.verifySessionToken(sessionToken);
+      if (error === 'invalid_token') {
         return res.status(401).json({ error: 'invalid_or_expired_token' });
       }
+      if (error === 'session_revoked') {
+        res.locals.sessionRevoked = true;
+        return res.status(401).json({ error: 'session_revoked' });
+      }
 
-      const team = await dataStore.loadTeam(session.teamId);
+      const team = error ? null : await dataStore.loadTeam(claims.teamId);
 
       if (!team) {
         tokenService.invalidateSessionToken(sessionToken);
@@ -396,7 +427,18 @@ const registerTeamRoutes = ({
         return res.status(409).json({ error: 'team_name_exists' });
       }
 
+      // Decision D3b: the epoch the creator's token is minted with. It is '0'
+      // for a new team, except for an auth row left behind under a recycled
+      // random id: reading it is what keeps that token from being refused on
+      // its first use. Read before the record, inside the block that releases
+      // the claim, so that a failed read leaves no team behind — read after
+      // the save, it answered 500 for a team that existed, and the retry the
+      // screen invites was refused with 409 team_name_exists. Nothing writes
+      // the auth row of an id that has no record yet, so the order changes
+      // nothing about the value.
+      let authState;
       try {
+        authState = await dataStore.loadTeamAuthState(newTeam.id);
         await dataStore.saveTeam(newTeam.id, newTeam);
       } catch (saveErr) {
         // Compensating release, in the spirit of the rename rollback below.
@@ -453,7 +495,7 @@ const registerTeamRoutes = ({
 
       return res.status(201).json({
         team: sanitizeTeamForClient(newTeam),
-        sessionToken: tokenService.createSessionToken(newTeam.id, null)
+        sessionToken: tokenService.createSessionToken(newTeam.id, null, { sessionEpoch: authState.sessionEpoch })
       });
     } catch (err) {
       console.error('[Server] Failed to create team', err);
@@ -1347,9 +1389,11 @@ const registerTeamRoutes = ({
         return res.status(500).json({ error: result.error });
       }
 
-      res.json({
-        team: sanitizeTeamForClient(result.team)
-      });
+      // Every join writes the roster, and the joiner's client never read the
+      // answer (`persistMembers` reads only `error`, in every release since
+      // the route exists): sending the whole team back cost each new
+      // participant a second copy of the history.
+      res.json({ success: true });
     } catch (err) {
       console.error('[Server] Failed to update members', err);
       res.status(500).json({ error: 'failed_to_update' });
@@ -1380,6 +1424,9 @@ const registerTeamRoutes = ({
       }
 
       const newPasswordHash = await hashPassword(newPassword);
+      // Decision D3b: the same transaction gives the team a new session
+      // epoch, so every session token minted before — on every device, in
+      // every live session — stops working at once.
       const result = await atomicUpdateTeam(teamId, (currentTeam) => {
         currentTeam.passwordHash = newPasswordHash;
         // Rotating the password revokes every outstanding invite link by
@@ -1387,7 +1434,7 @@ const registerTeamRoutes = ({
         // where rotation broke links because they embedded the old password.
         currentTeam.inviteEpoch = getTeamInviteEpoch(currentTeam) + 1;
         return currentTeam;
-      });
+      }, { rotateSessionEpoch: true });
 
       if (!result.success) {
         return res.status(500).json({ error: result.error });
@@ -1397,9 +1444,22 @@ const registerTeamRoutes = ({
         action: SECURITY_ACTIONS.TEAM_PASSWORD_CHANGE,
         actor: `team:${teamId}`,
         outcome: 'success',
-        target: teamId
+        target: teamId,
+        detail: { sessionsRevoked: true }
       });
-      res.json({ success: true });
+      // The caller proved it holds the current credential and set the new
+      // one, so it alone is handed a token under the new epoch: the
+      // facilitator who changed the password keeps working, and their client
+      // shares it with its other tabs. A 41.0 client ignores the field and
+      // keeps authenticating by the new password it holds.
+      const sessionToken = tokenService.createSessionToken(teamId, null, { sessionEpoch: result.sessionEpoch });
+      res.json({ success: true, sessionToken });
+      // After the answer and best-effort, like the live-session rename: HTTP
+      // is revoked already (every request reads the epoch); this cuts the live
+      // sockets, here and on the other pods.
+      sessionRevocation.revokeTeamSessions(teamId).catch((err) => {
+        console.warn('[Server] Session revocation after a password change failed', err);
+      });
     } catch (err) {
       console.error('[Server] Failed to change password', err);
       res.status(500).json({ error: 'failed_to_update' });

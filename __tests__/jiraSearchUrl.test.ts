@@ -32,6 +32,34 @@ describe('jiraSearchUrl', () => {
     expect(jqlOf(url)).toBe('parent = "TEAM-7" AND summary ~ "fix it" ORDER BY created DESC');
   });
 
+  it('searches the project in session-parent mode', () => {
+    const url = jiraSearchUrl('https://jira.example.org', {
+      text: 'Fix it',
+      target: { mode: 'sessionParent', projectKey: 'TEAM', parentIssueTypeId: '1', issueTypeId: '3', labels: [] }
+    });
+    expect(jqlOf(url)).toBe('project = "TEAM" AND summary ~ "fix it" ORDER BY created DESC');
+  });
+
+  // A parent issue that may already exist is searched by its title words.
+  it('finds a parent issue by its title', () => {
+    const url = jiraSearchUrl('https://jira.example.org', {
+      text: 'Retrospective actions: Sprint 12 (21.10.2026)',
+      target: { mode: 'sessionParent', projectKey: 'TEAM', parentIssueTypeId: '1', issueTypeId: '3', labels: [] }
+    });
+    expect(jqlOf(url)).toBe('project = "TEAM" AND summary ~ "retrospective actions sprint 12 21 10 2026" ORDER BY created DESC');
+  });
+
+  // [R10] An action in doubt in session-parent mode is under its session's
+  // parent, which may be in another project (a parent named for a send).
+  it('searches under the parent issue it is given, in place of the target\'s clause', () => {
+    const target = { mode: 'sessionParent' as const, projectKey: 'TEAM', parentIssueTypeId: '1', issueTypeId: '3', labels: [] };
+    expect(jqlOf(jiraSearchUrl('https://jira.example.org', { text: 'Fix it', target, parentKey: 'OPS-5' })))
+      .toBe('parent = "OPS-5" AND summary ~ "fix it" ORDER BY created DESC');
+    // Not a key: the target's own clause.
+    expect(jqlOf(jiraSearchUrl('https://jira.example.org', { text: 'Fix it', target, parentKey: 'OPS-5" OR x' })))
+      .toBe('project = "TEAM" AND summary ~ "fix it" ORDER BY created DESC');
+  });
+
   // A valid project key can be a JQL reserved word (INT, SET, USER, DATE…) or
   // an operator (OR, IN): unquoted, Jira answers "'int' is a reserved JQL
   // word" instead of the search, exactly when the facilitator has to decide

@@ -5,6 +5,10 @@ import type en from '../en/login';
 const login: Record<keyof typeof en, string> = {
   'login.brand.tagline': 'Des rétrospectives collaboratives qui aident votre équipe à grandir, à s’améliorer et à célébrer ses réussites ensemble.',
   'login.genericError': 'Une erreur est survenue',
+  'login.notice.sessionRevoked':
+    'Le mot de passe de l’équipe a été changé et votre session a été fermée. Connectez-vous avec le nouveau mot de passe ou demandez un nouveau lien d’invitation au facilitateur.',
+  'login.notice.nothingToJoin':
+    'Il n’y a encore rien à rejoindre dans {teamName}\u00a0: aucune rétrospective ni aucun bilan de santé n’est en cours. Rouvrez le lien d’invitation lorsque le facilitateur aura lancé une rétrospective ou un bilan de santé.',
   'login.emailPlaceholder': 'votre@email.com',
 
   // Team picker
@@ -67,6 +71,7 @@ const login: Record<keyof typeof en, string> = {
 
   // Guest join (invite link)
   'login.join.title': 'Rejoindre {teamName}',
+  'login.join.retrying': 'Nouvel essai…',
   'login.join.subtitleSelect': 'Sélectionnez votre nom dans la liste ou ajoutez-en un nouveau',
   'login.join.subtitleNew': 'Saisissez votre nom pour rejoindre l’équipe',
   'login.join.pickerLabelNoEmail': 'Sélectionnez un membre sans adresse e-mail',

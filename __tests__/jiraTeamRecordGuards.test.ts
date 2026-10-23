@@ -4,6 +4,7 @@ import type { AddressInfo } from 'net';
 import { createTeamService } from '../server/services/teamService.js';
 import { createTokenService } from '../server/services/sessionTokens.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * The Jira fields of a team record, as the existing team routes must treat
@@ -29,6 +30,10 @@ const UNCERTAIN = { uncertainSince: '2026-10-20T09:30:00.000Z' };
 const PLANTED = { key: 'EVIL-1', createdAt: '2026-10-20T09:00:00.000Z' };
 const TARGET = { mode: 'project', projectKey: 'RETRO', issueTypeId: '10001', labels: ['retrospective'] };
 const CLAIMS = { a1: { at: '2026-10-20T09:00:00.000Z', requestId: 'req-1' } };
+// sessionParent mode (F2): each session's parent issue, and the claims on
+// parents being created. Written by `/jira/issues` alone.
+const PARENTS = { 'retro:r1': { key: 'RETRO-5', createdAt: '2026-10-20T08:00:00.000Z', subtaskTypeId: '10005' }, backlog: { uncertainSince: '2026-10-20T08:30:00.000Z' } };
+const PARENT_CLAIMS = { 'healthcheck:h1': { at: '2026-10-20T09:00:00.000Z', requestId: 'req-parent-1' } };
 
 const createMockDataStore = () => {
   const teams = new Map<string, Team>();
@@ -38,6 +43,8 @@ const createMockDataStore = () => {
     loadTeam: async (teamId: string) => structuredClone(teams.get(teamId) ?? null),
     loadTeamRaw: async (teamId: string) => structuredClone(teams.get(teamId) ?? null),
     teamExists: async (teamId: string) => teams.has(teamId),
+    // Decision D3b: the session epoch every token check reads.
+    loadTeamAuthState: createTeamAuthStateDouble((teamId) => teams.has(teamId)).loadTeamAuthState,
     saveTeam: async (teamId: string, teamData: Team) => {
       teams.set(teamId, structuredClone(teamData));
     },
@@ -142,6 +149,8 @@ describe('Jira fields on the team record, through the existing team routes', () 
     stored().healthChecks = [{ id: 'h1', teamId, name: 'Health', _rev: 2, actions: [action('a1', { jira: LINK }), action('a3')] }];
     stored().jiraTarget = structuredClone(TARGET);
     stored().jiraClaims = structuredClone(CLAIMS);
+    stored().jiraParents = structuredClone(PARENTS);
+    stored().jiraParentClaims = structuredClone(PARENT_CLAIMS);
   });
 
   afterEach(async () => {
@@ -279,6 +288,28 @@ describe('Jira fields on the team record, through the existing team routes', () 
     });
   });
 
+  // A session's parent lives on the team record, never on the session entry
+  // or row: a persist carries a whole session blob from any participant, and
+  // must not be a way to re-point, drop or plant a parent.
+  describe('the session parents', () => {
+    it('cannot be changed by a retrospective or health-check persist, whatever the blob says', async () => {
+      await post(`/api/team/${teamId}/retrospective/r1`, {
+        sessionToken,
+        retrospective: { id: 'r1', _rev: 4, actions: [action('a1'), action('a2')], jiraParents: {}, jiraParent: { key: 'EVIL-1' } }
+      });
+      await post(`/api/team/${teamId}/healthcheck/h1`, {
+        sessionToken,
+        healthCheck: { id: 'h1', _rev: 3, actions: [action('a1'), action('a3')], jiraParentClaims: {} }
+      });
+      await post(`/api/team/${teamId}/retrospective/r-new`, {
+        sessionToken,
+        retrospective: { id: 'r-new', _rev: 1, actions: [], jiraParents: { 'retro:r-new': { key: 'EVIL-2', createdAt: 'now' } } }
+      });
+      expect(stored().jiraParents).toEqual(PARENTS);
+      expect(stored().jiraParentClaims).toEqual(PARENT_CLAIMS);
+    });
+  });
+
   describe('/update', () => {
     // `jiraTarget` belongs to `/jira/target`, which validates it; `jiraClaims`
     // is the server's record of issues being created, and a client that could
@@ -299,6 +330,26 @@ describe('Jira fields on the team record, through the existing team routes', () 
       const line = warn.mock.calls.map((call) => String(call[0])).find((text) => text.includes('/api/team/:teamId/update'));
       expect(line).toContain('jiraTarget');
       expect(line).toContain('jiraClaims');
+    });
+
+    // A stale tab must not put a session's parent back, and a client that
+    // could clear the claims on parents could have one created twice.
+    it('ignores jiraParents and jiraParentClaims, keeps the stored ones, and says so', async () => {
+      const warn = vi.mocked(console.warn);
+      warn.mockClear();
+
+      const res = await post(`/api/team/${teamId}/update`, {
+        sessionToken,
+        updates: { jiraParents: { 'retro:r1': { key: 'EVIL-1', createdAt: 'now' } }, jiraParentClaims: null, actionImpactRatingEnabled: false }
+      });
+
+      expect(res.status).toBe(200);
+      expect(stored().jiraParents).toEqual(PARENTS);
+      expect(stored().jiraParentClaims).toEqual(PARENT_CLAIMS);
+      expect(stored().actionImpactRatingEnabled).toBe(false);
+      const line = warn.mock.calls.map((call) => String(call[0])).find((text) => text.includes('/api/team/:teamId/update'));
+      expect(line).toContain('jiraParents');
+      expect(line).toContain('jiraParentClaims');
     });
 
     // `null` is how `/update` clears a field (`facilitatorEmail`), so it is
@@ -362,8 +413,7 @@ describe('Jira fields on the team record, through the existing team routes', () 
         await post('/api/team/login', { teamName: 'Alpha', password: 'secret-passphrase' }),
         await post('/api/team/restore-session', { sessionToken }),
         await post(`/api/team/${teamId}`, { sessionToken }),
-        await post(`/api/team/${teamId}/update`, { sessionToken, updates: { actionImpactRatingEnabled: true } }),
-        await post(`/api/team/${teamId}/members`, { sessionToken, members: [] })
+        await post(`/api/team/${teamId}/update`, { sessionToken, updates: { actionImpactRatingEnabled: true } })
       ];
 
       for (const res of responses) {
@@ -372,7 +422,20 @@ describe('Jira fields on the team record, through the existing team routes', () 
         expect(res.body.team).not.toHaveProperty('jiraClaims');
         expect(res.body.team.jiraTarget).toEqual(TARGET);
         expect(JSON.stringify(res.body)).not.toContain('req-1');
+        // The parents are keys the screens show; the claims on them are not.
+        expect(res.body.team.jiraParents).toEqual(PARENTS);
+        expect(res.body.team).not.toHaveProperty('jiraParentClaims');
+        expect(JSON.stringify(res.body)).not.toContain('req-parent-1');
       }
+    });
+
+    // A roster write answers no team at all (synthesis item 8): nothing on
+    // it can leak, claims included.
+    it('answers a roster write with { success: true } and no team', async () => {
+      const res = await post(`/api/team/${teamId}/members`, { sessionToken, members: [] });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true });
     });
   });
 });

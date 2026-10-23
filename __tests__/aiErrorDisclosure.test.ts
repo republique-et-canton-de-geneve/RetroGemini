@@ -1,6 +1,7 @@
 import express from 'express';
 import { describe, expect, it, vi } from 'vitest';
 import { registerAiRoutes } from '../server/routes/aiRoutes.js';
+import { createTeamService } from '../server/services/teamService.js';
 
 /**
  * Audit H21: the four team-facing AI routes caught an upstream failure and put
@@ -65,12 +66,17 @@ const createApp = (failure: Error) => {
   });
   const app = express();
   app.use(express.json({ limit: '2mb' }));
+  const tokenService = {
+    validateSessionToken: vi.fn(() => ({ teamId: 'team-1', visitorId: null, createdAt: 0, sessionEpoch: '0' }))
+  };
+  const dataStore = {
+    loadTeam: vi.fn(async () => ({ id: 'team-1', name: 'Team One' })),
+    loadTeamAuthState: vi.fn(async () => ({ exists: true, sessionEpoch: '0', revokedAt: null }))
+  };
   registerAiRoutes({
     app,
-    dataStore: { loadTeam: vi.fn(async () => ({ id: 'team-1', name: 'Team One' })) },
-    tokenService: {
-      validateSessionToken: vi.fn(() => ({ teamId: 'team-1', visitorId: null, createdAt: 0 }))
-    },
+    tokenService,
+    teamService: createTeamService({ dataStore, tokenService }),
     aiService: {
       suggestGroupTitle: rejects,
       suggestTicketGroups: rejects,

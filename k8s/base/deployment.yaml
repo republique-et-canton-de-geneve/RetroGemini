@@ -32,7 +32,7 @@ spec:
           # an image predating many user-visible releases;
           # __tests__/deploymentManifestParity.test.ts now fails when the majors
           # diverge again. Overlays may retag (see k8s/overlays/dev).
-          image: jpfroud/retrogemini:40.0
+          image: jpfroud/retrogemini:41.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -134,8 +134,9 @@ spec:
               value: "7"
             - name: BACKUP_ON_STARTUP
               value: "true"
-            # Restore archive limits (MB). RESTORE_MAX_BODY_MB caps the uploaded
-            # compressed body; RESTORE_MAX_DECOMPRESSED_MB caps expanded JSON.
+            # Restore and import archive limits (MB). RESTORE_MAX_BODY_MB caps the
+            # uploaded compressed body (the uploaded restore and the Backups tab's
+            # file import); RESTORE_MAX_DECOMPRESSED_MB caps the expanded JSON.
             - name: RESTORE_MAX_BODY_MB
               value: "128"
             - name: RESTORE_MAX_DECOMPRESSED_MB
@@ -184,6 +185,10 @@ spec:
             # session state is always recoverable from the database).
             - name: SESSION_CACHE_MAX
               value: "500"
+            # Max total size, in MB of session JSON, of that cache (bounds
+            # memory only; the session just written is never evicted).
+            - name: SESSION_CACHE_MAX_MB
+              value: "32"
             # Max Socket.IO message size in bytes (1 MB) - caps one session update.
             - name: SOCKET_MAX_BUFFER_SIZE
               value: "1000000"

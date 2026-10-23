@@ -3,6 +3,7 @@ import express from 'express';
 import type { AddressInfo } from 'net';
 import { createTeamService } from '../server/services/teamService.js';
 import { registerTeamRoutes } from '../server/routes/teamRoutes.js';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * Incident ISS (2026-10-12), the HTTP half: how a live retro disappeared from
@@ -48,6 +49,8 @@ const createMockDataStore = () => {
     control,
     loadTeam: async (teamId: string) => teams.get(teamId) || null,
     teamExists: async (teamId: string) => teams.has(teamId),
+    // Decision D3b: the session epoch every token check reads.
+    loadTeamAuthState: createTeamAuthStateDouble((teamId) => teams.has(teamId)).loadTeamAuthState,
     saveTeam: async (teamId: string, teamData: Team) => {
       teams.set(teamId, { ...teamData });
     },

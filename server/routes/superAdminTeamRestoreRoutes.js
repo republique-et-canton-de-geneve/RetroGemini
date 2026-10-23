@@ -12,6 +12,7 @@ import {
 } from '../services/teamRestore.js';
 import { SECURITY_ACTIONS } from '../services/securityEvents.js';
 import { createRestoreGate, RESTORE_IN_PROGRESS_ERROR } from '../services/restoreGate.js';
+import { NO_OP_SESSION_REVOCATION } from '../services/sessionRevocation.js';
 
 /**
  * Restoring one team from a stored backup (DESIGN: AGENTS.md → *Restoring one
@@ -56,6 +57,9 @@ const registerSuperAdminTeamRestoreRoutes = ({
   sessionCache,
   backupService,
   securityEvents,
+  // Decision D3b — passed on by `registerSuperAdminRoutes`: a team brought
+  // back from a backup signs out every token from before its deletion.
+  sessionRevocation = NO_OP_SESSION_REVOCATION,
   // The whole-store restore's two follow-up passes, shared rather than copied:
   // a deleted team comes back with the archive's password record and addresses,
   // which may predate hashing or the email rule.
@@ -82,6 +86,24 @@ const registerSuperAdminTeamRestoreRoutes = ({
     skip: skipRateLimit
   });
   const unauthorized = (res) => res.status(401).json({ error: 'unauthorized' });
+
+  // Before and after the record is written, for the reason the whole-store
+  // replace gives (dataStore.savePersistedData): after alone leaves the old
+  // tokens alive when the write lands and the rotation does not, and before
+  // alone lets a login in between mint under the new epoch. A booting pod's
+  // orphan sweep removes neither: it never touches a row younger than ten
+  // minutes (dataStore.sweepOrphanedTeamAuthRows), and it checks the record
+  // and deletes in one statement. Best-effort: a restore that happened must
+  // not answer 500.
+  const rotateRecreatedTeamEpoch = async (teamId, when) => {
+    try {
+      await dataStore.rotateTeamSessionEpoch(teamId);
+    } catch (err) {
+      // The id came from the request: an argument, never part of the format
+      // string, so a `%s` in it cannot shift the line's other arguments.
+      console.warn('[Server] Team restore: the session epoch of %s could not be rotated %s the record was written', JSON.stringify(teamId), when, err);
+    }
+  };
 
   const readArchive = async (backupId) => {
     if (typeof backupId !== 'string' || !backupId) return { status: 400, error: 'missing_backup_id' };
@@ -369,7 +391,7 @@ const registerSuperAdminTeamRestoreRoutes = ({
       snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
       if (!snapshot) return refuse(503, 'pre_restore_snapshot_failed');
 
-      // Read *after* the snapshot, which dumps the whole store and can take
+      // Read *after* the snapshot, which reads the whole store and can take
       // seconds: a live session moves on meanwhile, and a revision read before it
       // could end up at or below the row's, which the record's rev guard accepts.
       let sessionRevs;
@@ -410,10 +432,19 @@ const registerSuperAdminTeamRestoreRoutes = ({
           console.warn('[Server] Team restore: the Jira secret left by the deletion could not be removed', err);
           return refuse(503, 'team_secret_delete_failed');
         }
+        // Decision D3b: the archived password comes back, and a token minted
+        // before the deletion was opened under whatever the password was then,
+        // so the team gets a new session epoch — before the record exists and
+        // again once it does, each best-effort (see `rotateRecreatedTeamEpoch`).
+        // No live session can exist for a deleted team, so this signs out only
+        // tokens that outlived it. An existing team keeps its password
+        // (`KEPT_FROM_CURRENT`), and its sessions.
+        await rotateRecreatedTeamEpoch(teamId, 'before');
         // Revision 0 means "only while there is still no record": a team that
         // reappeared meanwhile is not overwritten.
         const saved = await dataStore.atomicTeamSave(teamId, plan.team, 0);
         if (!saved.success) return refuse(409, 'team_changed');
+        await rotateRecreatedTeamEpoch(teamId, 'after');
         claimedKey = null;
         // Re-asserted after the save: a concurrent restore of the same team that
         // failed before this save could have released the claim both shared.
@@ -434,6 +465,13 @@ const registerSuperAdminTeamRestoreRoutes = ({
       // list so the board does not show them twice. After the record write, so a
       // failure here duplicates a feedback rather than loses one.
       const feedbacksStillOrphaned = await unorphanFeedbacks(teamId, plan.unorphanedFeedbacks);
+
+      // Cuts any socket a token from before the deletion still holds open.
+      if (!current) {
+        sessionRevocation.revokeTeamSessions(teamId).catch((err) => {
+          console.warn('[Server] Team restore: the session revocation failed', err);
+        });
+      }
 
       const sessions = await writeSessionRows(teamId, plan.team, sessionRevs, plan.targets);
       await restampRecord(teamId, plan.team, sessions.lifted);

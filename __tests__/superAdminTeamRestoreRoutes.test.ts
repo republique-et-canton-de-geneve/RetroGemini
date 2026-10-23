@@ -5,6 +5,7 @@ import type { AddressInfo } from 'net';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { gunzipSync, gzipSync } from 'zlib';
 import { createDataStore } from '../server/services/dataStore.js';
 import { createBackupService } from '../server/services/backupService.js';
 import { createTeamService } from '../server/services/teamService.js';
@@ -120,7 +121,9 @@ const seedTeams = async () => {
   return { target, other };
 };
 
-const buildApp = () => {
+// `store` is a second connection to the same SQLite file when a case plays two
+// pods: two connections share nothing in memory, as two pods do not.
+const buildApp = (store: ReturnType<typeof createDataStore> = dataStore) => {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
   const tokenService = createTokenService({
@@ -129,7 +132,7 @@ const buildApp = () => {
     tokenSecret: 'team-restore-route-test-secret'
   });
   const logService = { addServerLog: () => {}, getServerLogs: () => [], clearServerLogs: () => {} };
-  const backupService = createBackupService({ dataStore, logService });
+  const backupService = createBackupService({ dataStore: store, logService });
   const recorded: Json[] = [];
   const broadcasts: { room: string; event: string; data: Json }[] = [];
   const cache = new Map<string, Json>();
@@ -137,8 +140,8 @@ const buildApp = () => {
 
   registerTeamRoutes({
     app,
-    dataStore,
-    teamService: createTeamService({ dataStore, tokenService }),
+    dataStore: store,
+    teamService: createTeamService({ dataStore: store, tokenService }),
     tokenService,
     mailerService: { smtpEnabled: false, mailer: null },
     logService,
@@ -153,7 +156,7 @@ const buildApp = () => {
       fetchSockets: async () => [],
       to: (room: string) => ({ emit: (event: string, data: Json) => { broadcasts.push({ room, event, data }); } })
     },
-    dataStore,
+    dataStore: store,
     tokenService,
     mailerService: { smtpEnabled: false, mailer: null },
     logService,
@@ -168,6 +171,7 @@ const buildApp = () => {
 
   return new Promise<{
     post: (path: string, body: Json) => Promise<{ status: number; body: Json }>;
+    raw: (path: string, init: Parameters<typeof fetch>[1]) => Promise<Response>;
     close: () => Promise<void>;
     recorded: Json[];
     broadcasts: typeof broadcasts;
@@ -186,6 +190,7 @@ const buildApp = () => {
           const text = await response.text();
           return { status: response.status, body: text ? JSON.parse(text) : {} };
         },
+        raw: (path, init) => fetch(`http://127.0.0.1:${port}${path}`, init),
         close: () => new Promise((done) => server.close(() => done())),
         recorded,
         broadcasts,
@@ -347,6 +352,27 @@ describe('super-admin single-team restore', () => {
     expect(restored.teamFeedbacks).toHaveLength(1);
     expect(restored.teamFeedbacks[0].comments).toEqual([{ id: 'reply', content: 'Fixed' }]);
     expect((await dataStore.loadMetaData()).orphanedFeedbacks.map((f: Json) => f.id)).not.toContain(`f1-${suffix}`);
+  });
+
+  it('keeps the sessions of a team that still exists, and signs out the tokens a team deleted since outlived (decision D3b)', async () => {
+    const { target } = await seedTeams();
+    const backupId = await takeBackup();
+    const login = await server.post('/api/team/login', { teamName: target.name, password: OLD_PASSWORD });
+    const token = login.body.sessionToken as string;
+
+    // The team still exists: its password is kept, and so are its sessions.
+    expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    expect((await server.post(`/api/team/${target.id}`, { sessionToken: token })).status).toBe(200);
+
+    // Deleted since: the archived password comes back, and a token minted
+    // before the deletion must not come back to life with it.
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+    expect((await restoreTeam(backupId, target.id)).body).toMatchObject({ recreated: true });
+
+    const refused = await server.post(`/api/team/${target.id}`, { sessionToken: token });
+    expect(refused).toEqual({ status: 401, body: { error: 'session_revoked' } });
+    const relogin = await server.post('/api/team/login', { teamName: target.name, password: OLD_PASSWORD });
+    expect((await server.post(`/api/team/${target.id}`, { sessionToken: relogin.body.sessionToken })).status).toBe(200);
   });
 
   it('refuses a deleted team whose name was taken since, writing nothing, then restores it under another name', async () => {
@@ -674,6 +700,61 @@ describe('super-admin single-team restore', () => {
     expect(record.actions.find((a: Json) => a.id === actionId).jira).toEqual(key);
   });
 
+  // sessionParent mode (F2): a session's parent issue exists in Jira and the
+  // team's token stays, so a parent rolled back would have the session's next
+  // actions create a second one; a parent re-pointed since must not be
+  // undone. The plan is made inside the final write, so a parent created
+  // while the snapshot ran is carried too.
+  it('keeps the session parents as they are now, a parent created while the restore ran included', async () => {
+    const { target } = await seedTeams();
+    const parent = (key: string) => ({ key, createdAt: '2026-10-21T08:00:00.000Z', subtaskTypeId: '10005' });
+    await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({
+      ...team,
+      jiraParents: { [`retro:r1-${suffix}`]: parent('OLD-1'), backlog: { uncertainSince: '2026-10-01T00:00:00.000Z' } },
+      jiraParentClaims: { [`retro:r2-${suffix}`]: { at: '2026-10-01T00:00:00.000Z', requestId: 'archived-claim' } }
+    }));
+    const backupId = await takeBackup();
+    await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({
+      ...team,
+      jiraParents: { [`retro:r1-${suffix}`]: parent('NOW-1'), backlog: parent('NOW-9') },
+      jiraParentClaims: { 'healthcheck:h9': { at: '2026-10-21T08:00:00.000Z', requestId: 'live-claim' } }
+    }));
+
+    const undo = patchOnce(server.backupService as unknown as Record<string, any>, 'createBackup', (original) => async (...args: unknown[]) => {
+      const entry = await original(...args);
+      // A batch creates Sprint 2's parent while the store is dumped.
+      await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({
+        ...team,
+        jiraParents: { ...team.jiraParents, [`retro:r2-${suffix}`]: parent('NOW-2') }
+      }));
+      return entry;
+    });
+    try {
+      expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    } finally {
+      undo();
+    }
+
+    const restored = await dataStore.loadTeam(target.id);
+    expect(restored.jiraParents).toEqual({
+      [`retro:r1-${suffix}`]: parent('NOW-1'),
+      backlog: parent('NOW-9'),
+      [`retro:r2-${suffix}`]: parent('NOW-2')
+    });
+    expect(restored.jiraParentClaims).toEqual({ 'healthcheck:h9': { at: '2026-10-21T08:00:00.000Z', requestId: 'live-claim' } });
+  });
+
+  it('gives a team deleted since the backup the parents the archive holds', async () => {
+    const { target } = await seedTeams();
+    const parents = { [`retro:r1-${suffix}`]: { key: 'OLD-1', createdAt: '2026-10-01T00:00:00.000Z' } };
+    await dataStore.atomicTeamUpdate(target.id, (team: Json) => ({ ...team, jiraParents: parents }));
+    const backupId = await takeBackup();
+    expect((await server.post(`/api/team/${target.id}/delete`, { password: OLD_PASSWORD })).status).toBe(200);
+
+    expect((await restoreTeam(backupId, target.id)).status).toBe(200);
+    expect((await dataStore.loadTeam(target.id)).jiraParents).toEqual(parents);
+  });
+
   it('finishes a restore that recreated the team even when re-asserting its name fails', async () => {
     const { target } = await seedTeams();
     const backupId = await takeBackup();
@@ -787,5 +868,190 @@ describe('super-admin single-team restore', () => {
     const byId = new Map(response.body.teams.map((team: Json) => [team.id, team]));
     expect(byId.get(target.id)).toMatchObject({ name: target.name, status: 'deleted', nameTaken: false, counts: { retrospectives: 2 } });
     expect(byId.get(other.id)).toMatchObject({ name: other.name, status: 'renamed', currentName: `${other.name} v2` });
+  });
+});
+
+/**
+ * A backup file is restored by importing it first: the upload becomes one row
+ * of the shared `backups` table, and every backup route reads it unchanged.
+ *
+ * Played on two pods: P1 over the suite's store, P2 over a **second connection**
+ * to the same SQLite file, as a second pod is. One shared object would let a
+ * cache living inside the data store pass; two connections cannot share one,
+ * so a row that only existed in P1's memory would not be listed on P2.
+ */
+describe('importing a backup file', () => {
+  let p1: Awaited<ReturnType<typeof buildApp>>;
+  let consoleSpies: ReturnType<typeof vi.spyOn>[];
+
+  beforeEach(async () => {
+    consoleSpies = [
+      vi.spyOn(console, 'error').mockImplementation(() => undefined),
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined),
+      vi.spyOn(console, 'info').mockImplementation(() => undefined)
+    ];
+    p1 = await buildApp();
+  });
+
+  afterEach(async () => {
+    await p1.close();
+    for (const spy of consoleSpies) spy.mockRestore();
+  });
+
+  const openSecondPod = async () => {
+    const store = createDataStore({ rootDir: dir });
+    await store.initDatabase();
+    const pod = await buildApp(store);
+    return {
+      pod,
+      close: async () => {
+        await pod.close();
+        await store.closeDatabase?.();
+      }
+    };
+  };
+
+  const importBytes = (pod: typeof p1, bytes: Buffer, label = 'retro.json.gz') =>
+    pod.raw('/api/super-admin/backups/import', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-super-admin-password': SUPER_ADMIN_PASSWORD,
+        'x-backup-label': encodeURIComponent(label)
+      },
+      body: new Uint8Array(bytes)
+    });
+
+  /** A backup of the store as it is now, as the console downloads it, and no row left for it. */
+  const downloadedBackup = async () => {
+    const backup = await p1.backupService.createBackup('manual', 'To be downloaded');
+    const { data } = (await dataStore.getBackupData(backup!.id))!;
+    await dataStore.deleteBackup(backup!.id);
+    return Buffer.from(data);
+  };
+
+  const deleteFromConsole = async (pod: typeof p1, team: Json) => {
+    const response = await pod.post('/api/super-admin/delete-team', admin({ teamId: team.id, confirmName: team.name }));
+    expect(response.status).toBe(200);
+    expect(await dataStore.loadTeam(team.id)).toBeNull();
+  };
+
+  const teamSecretKeys = () =>
+    (dataStore.getSqliteDb().prepare("SELECT key FROM kv_store WHERE key LIKE 'team-secret:%'").all() as { key: string }[])
+      .map((row) => row.key)
+      .sort();
+
+  it('imports on one pod, then lists, restores two teams, downloads, restores everything and deletes from either', async () => {
+    const { target: teamA, other: teamB } = await seedTeams();
+    const bytes = await downloadedBackup();
+    const archive = JSON.parse(gunzipSync(bytes).toString('utf8'));
+    await deleteFromConsole(p1, teamA);
+    await deleteFromConsole(p1, teamB);
+
+    const second = await openSecondPod();
+    try {
+      const p2 = second.pod;
+
+      // Imported on P1.
+      const imported = await importBytes(p1, bytes);
+      expect(imported.status).toBe(200);
+      const { backup } = await imported.json();
+      expect(backup).toMatchObject({ type: 'imported', label: 'retro.json.gz', teamCount: archive.teams.length, protected: false });
+
+      // Listed on P2, from the shared table.
+      const list = await p2.post('/api/super-admin/backups/list', admin({}));
+      expect(list.body.backups).toContainEqual(expect.objectContaining({ id: backup.id, type: 'imported', teamCount: archive.teams.length }));
+
+      // Its teams, read on P2: both deleted since.
+      const teams = await p2.post('/api/super-admin/backups/teams', admin({ backupId: backup.id }));
+      expect(teams.status).toBe(200);
+      const byId = new Map(teams.body.teams.map((team: Json) => [team.id, team]));
+      expect(byId.get(teamA.id)).toMatchObject({ status: 'deleted' });
+      expect(byId.get(teamB.id)).toMatchObject({ status: 'deleted' });
+
+      // Several teams from one import, on two pods.
+      const restoredA = await p1.post('/api/super-admin/backups/restore-team', admin({ backupId: backup.id, teamId: teamA.id, expected: 'deleted' }));
+      expect(restoredA.status).toBe(200);
+      const restoredB = await p2.post('/api/super-admin/backups/restore-team', admin({ backupId: backup.id, teamId: teamB.id, expected: 'deleted' }));
+      expect(restoredB.status).toBe(200);
+      expect((await p2.post('/api/team/login', { teamName: teamA.name, password: OLD_PASSWORD })).status).toBe(200);
+      expect((await p1.post('/api/team/login', { teamName: teamB.name, password: OTHER_PASSWORD })).status).toBe(200);
+      const restoreEvent = p1.recorded.find((event) => event.action === SECURITY_ACTIONS.TEAM_RESTORE);
+      expect(restoreEvent?.detail).toMatchObject({ backupId: backup.id, backup: expect.stringMatching(/^retrogemini-import-.*\.json\.gz$/) });
+
+      // The download is the very file that was imported.
+      const download = await p2.raw('/api/super-admin/backups/download', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(admin({ backupId: backup.id }))
+      });
+      expect(download.status).toBe(200);
+      expect(Buffer.compare(Buffer.from(await download.arrayBuffer()), bytes)).toBe(0);
+
+      // The whole store, from the imported row: the teams are the archive's.
+      const whole = await p1.post('/api/super-admin/backups/restore', admin({ backupId: backup.id }));
+      expect(whole.status).toBe(200);
+      const ids = (await dataStore.loadPersistedData()).teams.map((team: Json) => team.id).sort();
+      expect(ids).toEqual(archive.teams.map((team: Json) => team.id).sort());
+
+      // A restore never touches the backups table: the imported row is still there.
+      const after = await p2.post('/api/super-admin/backups/list', admin({}));
+      expect(after.body.backups.map((entry: Json) => entry.id)).toContain(backup.id);
+
+      // Deleted when done, from the other pod.
+      expect((await p2.post('/api/super-admin/backups/delete', admin({ backupId: backup.id }))).status).toBe(200);
+      const gone = await p1.post('/api/super-admin/backups/teams', admin({ backupId: backup.id }));
+      expect([gone.status, gone.body]).toEqual([404, { error: 'backup_not_found' }]);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('imports a plain JSON archive too, and restores a team from it', async () => {
+    const { target } = await seedTeams();
+    const archive = JSON.parse(gunzipSync(await downloadedBackup()).toString('utf8'));
+    await deleteFromConsole(p1, target);
+
+    const imported = await importBytes(p1, Buffer.from(JSON.stringify(archive), 'utf8'), 'retro.json');
+    expect(imported.status).toBe(200);
+    const { backup } = await imported.json();
+
+    const teams = await p1.post('/api/super-admin/backups/teams', admin({ backupId: backup.id }));
+    expect(teams.body.teams.find((team: Json) => team.id === target.id)).toMatchObject({ status: 'deleted' });
+    const restored = await p1.post('/api/super-admin/backups/restore-team', admin({ backupId: backup.id, teamId: target.id }));
+    expect(restored.status).toBe(200);
+    expect((await p1.post('/api/team/login', { teamName: target.name, password: OLD_PASSWORD })).status).toBe(200);
+    await dataStore.deleteBackup(backup.id);
+  });
+
+  it('keeps extra keys of a file inert: settings, the Jira connection and team secrets are never taken from it', async () => {
+    await seedTeams();
+    await dataStore.updateGlobalSettings((settings: Json) => ({ ...settings, adminEmail: 'ops@example.ch' }));
+    const settingsBefore = await dataStore.loadGlobalSettings();
+    const jiraBefore = await dataStore.loadJiraSettings();
+    const secretsBefore = teamSecretKeys();
+
+    const archive = JSON.parse(gunzipSync(await downloadedBackup()).toString('utf8'));
+    const someTeam = archive.teams[0];
+    const tampered = {
+      ...archive,
+      globalSettings: { adminEmail: 'x@evil.example' },
+      jiraSettings: { enabled: true, baseUrl: 'https://jira.evil.example', allowSelfSignedCerts: true },
+      teamSecrets: [{ teamId: someTeam.id, jira: { v: 1, iv: 'aXY', tag: 'dGFn', ct: 'planted' } }]
+    };
+    const imported = await importBytes(p1, gzipSync(Buffer.from(JSON.stringify(tampered), 'utf8')), 'tampered.json.gz');
+    expect(imported.status).toBe(200);
+    const { backup } = await imported.json();
+
+    expect((await p1.post('/api/super-admin/backups/restore', admin({ backupId: backup.id }))).status).toBe(200);
+
+    expect(await dataStore.loadGlobalSettings()).toEqual(settingsBefore);
+    expect(await dataStore.loadJiraSettings()).toEqual(jiraBefore);
+    // Nothing added: a replace may remove the secret of a team absent from the
+    // archive, but it never writes one, and never the file's.
+    const secretsAfter = teamSecretKeys();
+    expect(secretsAfter.filter((key) => !secretsBefore.includes(key))).toEqual([]);
+    expect(await dataStore.loadTeamSecret(someTeam.id)).not.toMatchObject({ jira: { ct: 'planted' } });
+    await dataStore.deleteBackup(backup.id);
   });
 });

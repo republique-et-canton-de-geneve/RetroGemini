@@ -17,11 +17,17 @@ import type { AddressInfo, Socket } from 'node:net';
  *    the second only, so a client that reads one page never finds it;
  *  - creating an issue is validated like Jira validates it — project, issue
  *    type valid in that project, sub-task rules, summary length counted as
- *    Java counts it, fields that are not on the create screen — and refused
- *    with Jira's `{ errorMessages, errors }` shape;
+ *    Java counts it, a description over Data Center's default 32,767
+ *    characters, fields that are not on the create screen — and refused with
+ *    Jira's `{ errorMessages, errors }` shape;
  *  - every failure the integration must survive is a knob (`setBehaviour`):
  *    a slow, silent or trickling Jira, a rate limit, a revoked token, a
- *    gateway error, and a connection dropped after the issue was created.
+ *    gateway error, and a connection dropped after the issue was created —
+ *    every time, or for the N-th create only (a session's parent issue is
+ *    create #1 of its send, its first sub-task create #2);
+ *  - an issue type may carry Jira Cloud's `hierarchyLevel` (an epic is 1),
+ *    passed on in the type list and in an issue read, as Cloud does. The
+ *    default projects carry none, as Data Center sends none.
  *
  * Nothing here imports vitest, so the e2e suite can start it too.
  */
@@ -29,7 +35,13 @@ import type { AddressInfo, Socket } from 'node:net';
 export type JiraMockDeployment = 'Server' | 'Cloud';
 export type JiraMockEndpoint = 'serverInfo' | 'myself' | 'issueTypes' | 'issue' | 'create';
 
-export interface JiraMockIssueType { id: string; name: string; subtask: boolean }
+export interface JiraMockIssueType {
+  id: string;
+  name: string;
+  subtask: boolean;
+  /** Jira Cloud's level (−1 sub-task, 0 standard, 1 epic), passed on when set; Data Center sends none. */
+  hierarchyLevel?: number;
+}
 export interface JiraMockProject { id: string; key: string; name: string; issueTypes: JiraMockIssueType[] }
 
 export interface JiraMockAuth {
@@ -90,6 +102,8 @@ export interface JiraMockBehaviour {
   retryAfter: string | null;
   /** A create records the issue, then destroys the connection without answering. */
   dropAfterCreate: boolean;
+  /** The N-th create since the last reset (1-based) records the issue, then destroys the connection: that one only. */
+  dropAfterNthCreate: number | null;
   /** `serverInfo` answers 302 to this Location. */
   redirectServerInfo: string | null;
   /** A create that sets `labels` is refused, as when the field is not on the create screen. */
@@ -111,7 +125,8 @@ export interface JiraMockOptions {
 export interface JiraMock {
   /** The base URL a super admin would configure, context path included, no trailing slash. */
   url: string;
-  issues(filter?: { label?: string }): JiraMockIssue[];
+  /** The issues created, oldest first: with a label, under a parent (`null`: with no parent). */
+  issues(filter?: { label?: string; parentKey?: string | null }): JiraMockIssue[];
   /** Every request received since the last reset, oldest first. */
   requests(): JiraMockRequest[];
   /**
@@ -170,6 +185,7 @@ const defaultBehaviour = (): JiraMockBehaviour => ({
   refuseNthCreateErrors: null,
   retryAfter: null,
   dropAfterCreate: false,
+  dropAfterNthCreate: null,
   redirectServerInfo: null,
   refuseLabels: false,
   issueTypesPageSize: 3
@@ -312,7 +328,8 @@ export const startJiraMock = async ({
     description: '',
     iconUrl: `${baseUrl}/images/icons/issuetypes/${type.subtask ? 'subtask' : 'task'}.svg`,
     name: type.name,
-    subtask: type.subtask
+    subtask: type.subtask,
+    ...(type.hierarchyLevel === undefined ? {} : { hierarchyLevel: type.hierarchyLevel })
   });
 
   const nextKey = (project: JiraMockProject) => {
@@ -507,6 +524,11 @@ export const startJiraMock = async ({
 
     if (fields.description !== undefined && fields.description !== null && typeof fields.description !== 'string') {
       errors.set('description', 'Operation value must be a string');
+    } else if (typeof fields.description === 'string' && fields.description.length > 32767) {
+      // Data Center's default `jira.text.field.character.limit`. A literal on
+      // purpose, never the builder's constant: a wrong constant must not hide
+      // behind the mock that tests it.
+      errors.set('description', 'The entered text is too long. It exceeds the allowed limit of 32,767 characters.');
     }
 
     if (fields.labels !== undefined) {
@@ -528,7 +550,7 @@ export const startJiraMock = async ({
     }
 
     const issue = recordIssue(project as JiraMockProject, type as JiraMockIssueType, fields, parent ? parent.key : null);
-    if (behaviour.dropAfterCreate) {
+    if (behaviour.dropAfterCreate || behaviour.dropAfterNthCreate === createAttempts) {
       // Jira created the issue; the answer never reaches the caller.
       req.socket.destroy();
       return;
@@ -589,8 +611,9 @@ export const startJiraMock = async ({
 
   return {
     url: baseUrl,
-    issues: ({ label } = {}) => issues
+    issues: ({ label, parentKey } = {}) => issues
       .filter((issue) => label === undefined || issue.labels.includes(label))
+      .filter((issue) => parentKey === undefined || issue.parentKey === parentKey)
       .map((issue) => ({ ...issue, labels: [...issue.labels], fields: JSON.parse(JSON.stringify(issue.fields)) })),
     requests: () => log.map((entry) => ({ ...entry })),
     addIssue: ({ projectKey, issueTypeId, summary = 'Seeded issue', parentKey, key }) => {

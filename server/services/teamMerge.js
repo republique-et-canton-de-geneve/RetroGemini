@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { withoutUnstoredJiraLinks } from '../../utils/actionImpact.js';
 import { parseEmailInput } from '../../utils/emailAddress.js';
+import { isJiraLinked, isJiraUncertain } from '../../utils/jira.js';
 import { valuesEqual } from './sessionGuard.js';
 
 /**
@@ -767,6 +768,12 @@ const KNOWN_TEAM_KEYS = new Set([
   // Jira token yet. `jiraTarget` is deliberately not listed: it is a setting,
   // and the unknown-key rule gives the merged team the main team's.
   'jiraClaims',
+  // The same for the parent issues of `sessionParent` mode being created.
+  'jiraParentClaims',
+  // Known so the unknown-key rule does not carry it as it is: each session's
+  // parent issue is keyed by the session's id, and the merged team gives every
+  // session a new one (`mergedJiraParents`).
+  'jiraParents',
   '_rev',
   '_updatedAt'
 ]);
@@ -790,6 +797,42 @@ const carryUnknownKeys = (primary, secondary) => {
     }
   }
   return { extras: Object.fromEntries(entries), keys: entries.map(([key]) => key), conflicts };
+};
+
+// A session parent as the Jira route writes it: a key, or a mark.
+const isParentLink = (value) => isJiraLinked({ jira: value }) || isJiraUncertain({ jira: value });
+const SESSION_SCOPE = /^(retro|healthcheck):(.+)$/su;
+
+/**
+ * Both sources' session parents (`sessionParent` mode), re-keyed to the
+ * merged team's session ids through each source's id maps, so every merged
+ * retro and health check keeps the parent its source had and its later
+ * actions go under it. A parent whose session is not in the source any more
+ * (deleted since) names no merged session and is dropped. The team
+ * dashboard's parent (`backlog`) is the main team's, else the second's. Only
+ * keys and marks are carried; the claims on parents being created never are.
+ *
+ * @returns {Record<string, object> | null}
+ */
+const mergedJiraParents = (sources) => {
+  const entries = [];
+  let backlog;
+  for (const source of sources) {
+    const parents = isPlainObject(source.team.jiraParents) ? source.team.jiraParents : {};
+    for (const [scope, value] of Object.entries(parents)) {
+      if (!isParentLink(value)) continue;
+      if (scope === 'backlog') {
+        if (backlog === undefined) backlog = value;
+        continue;
+      }
+      const match = SESSION_SCOPE.exec(scope);
+      if (!match) continue;
+      const newId = (match[1] === 'retro' ? source.retroIds : source.checkIds).get(match[2]);
+      if (newId !== undefined) entries.push([`${match[1]}:${newId}`, structuredClone(value)]);
+    }
+  }
+  if (backlog !== undefined) entries.push(['backlog', structuredClone(backlog)]);
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
 };
 
 const laterDate = (a, b) => {
@@ -974,6 +1017,8 @@ const planTeamMerge = ({
     });
     return {
       ...source,
+      retroIds: retros.idMap,
+      checkIds: checks.idMap,
       retrospectives: retros.entries.map((entry, index) => rewriter.rewriteRetro(entry, `retrospectives[${index}]`)),
       healthChecks: checks.entries.map((entry, index) => rewriter.rewriteHealthCheck(entry, `healthChecks[${index}]`)),
       globalActions: rewriter.rewriteActions(structuredClone(asArray(source.team.globalActions)), 'globalActions'),
@@ -983,6 +1028,7 @@ const planTeamMerge = ({
   const [a, b] = sources;
 
   const unknown = carryUnknownKeys(primary, secondary);
+  const jiraParents = mergedJiraParents(sources);
   const lastConnectionDate = laterDate(primary.lastConnectionDate, secondary.lastConnectionDate);
   const noticeDismissedAt = earlierDate(primary.actionImpactNoticeDismissedAt, secondary.actionImpactNoticeDismissedAt);
   const ratingDisabled = primary.actionImpactRatingEnabled === false || secondary.actionImpactRatingEnabled === false;
@@ -1022,6 +1068,7 @@ const planTeamMerge = ({
     ...(lastConnectionDate ? { lastConnectionDate } : {}),
     ...(ratingDisabled ? { actionImpactRatingEnabled: false } : {}),
     ...(noticeDismissedAt ? { actionImpactNoticeDismissedAt: noticeDismissedAt } : {}),
+    ...(jiraParents ? { jiraParents } : {}),
     mergedFrom: [provenance(a), provenance(b)]
   });
 

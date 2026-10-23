@@ -49,7 +49,8 @@ const realConsole = {
   error: console.error,
   warn: console.warn,
   info: console.info,
-  log: console.log
+  log: console.log,
+  debug: console.debug
 };
 
 afterEach(() => {
@@ -57,6 +58,7 @@ afterEach(() => {
   console.warn = realConsole.warn;
   console.info = realConsole.info;
   console.log = realConsole.log;
+  console.debug = realConsole.debug;
   vi.restoreAllMocks();
 });
 
@@ -394,6 +396,55 @@ describe('H44 — logService in json mode', () => {
     expect(written).toHaveLength(1);
     expect(String(written[0][0])).toContain('cycle');
     expect(svc.getServerLogs()).toHaveLength(1);
+  });
+});
+
+// The per-write socket lines are debug: one accepted write wrote two info
+// lines into the 1000-entry ring, so ten live retrospectives turned it over in
+// about 25 seconds and a reconnect wave filled it on its own. They still reach
+// stdout, as the per-write trail an investigation reads.
+describe('debug lines: stdout only, never the ring', () => {
+  it('writes one JSON line with level debug in json mode, and nothing to the ring', () => {
+    const written: unknown[][] = [];
+    console.debug = ((...args: unknown[]) => { written.push(args); }) as typeof console.debug;
+    const svc = createLogService({ format: 'json' });
+    svc.attachConsole();
+
+    runWithContext({ correlationId: 'sock-1', sessionId: 'retro-9' }, () => console.debug('[Server] Session update from Ann, phase: GROUP'));
+
+    expect(written).toHaveLength(1);
+    expect(written[0]).toHaveLength(1);
+    expect(JSON.parse(String(written[0][0]))).toMatchObject({
+      level: 'debug',
+      source: 'server',
+      message: '[Server] Session update from Ann, phase: GROUP',
+      correlationId: 'sock-1',
+      sessionId: 'retro-9'
+    });
+    expect(svc.getServerLogs()).toEqual([]);
+  });
+
+  it('writes the raw arguments in text mode, and nothing to the ring', () => {
+    const written: unknown[][] = [];
+    console.debug = ((...args: unknown[]) => { written.push(args); }) as typeof console.debug;
+    const svc = createLogService({ format: 'text' });
+    svc.attachConsole();
+
+    console.debug('[Server] Client connected:', 'sock-2');
+
+    expect(written).toEqual([['[Server] Client connected:', 'sock-2']]);
+    expect(svc.getServerLogs()).toEqual([]);
+  });
+
+  it('redacts a secret in a debug line too', () => {
+    const written: unknown[][] = [];
+    console.debug = ((...args: unknown[]) => { written.push(args); }) as typeof console.debug;
+    const svc = createLogService({ format: 'json', secrets: ['top-secret-value'] });
+    svc.attachConsole();
+
+    console.debug('signed with top-secret-value');
+
+    expect(String(written[0][0])).not.toContain('top-secret-value');
   });
 });
 

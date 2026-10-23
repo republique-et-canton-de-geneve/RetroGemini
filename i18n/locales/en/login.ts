@@ -4,6 +4,14 @@
 const login = {
   'login.brand.tagline': 'Collaborative retrospectives that help your team grow, improve, and celebrate together.',
   'login.genericError': 'An error occurred',
+  // Why the login screen came up by itself: the team's password was changed
+  // and every session opened before was signed out (decision D3b).
+  'login.notice.sessionRevoked':
+    'The team password was changed, so you were signed out. Log in with the new password, or ask the facilitator for a new invitation link.',
+  // A participant joined (or came back to) a team where there is nothing to
+  // join: no health check in progress and no retrospective at all.
+  'login.notice.nothingToJoin':
+    'There is nothing to join in {teamName} yet: no retrospective or health check is in progress. Open the invitation link again once the facilitator has started one.',
   'login.emailPlaceholder': 'your@email.com',
 
   // Team picker
@@ -68,6 +76,9 @@ const login = {
 
   // Guest join (invite link)
   'login.join.title': 'Join {teamName}',
+  // The invite import failed, and its "Try again" button (login.list.retry)
+  // is running a new attempt.
+  'login.join.retrying': 'Trying again...',
   'login.join.subtitleSelect': 'Select your name from the list or add a new one',
   'login.join.subtitleNew': 'Enter your name to join',
   'login.join.pickerLabelNoEmail': 'Select a member without an email',

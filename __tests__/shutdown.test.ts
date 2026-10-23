@@ -3,6 +3,7 @@ import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { createShutdownHandler, DEFAULT_SHUTDOWN_TIMEOUT_MS } from '../server/services/shutdown.js';
 import { JIRA_CALL_DEADLINE_MS } from '../server/services/jiraClient.js';
+import { JIRA_CLAIM_TTL_MS } from '../utils/jira.js';
 
 // A draining pod finishes the Jira creation it is in (one call, up to the
 // client's deadline) and writes the key; exiting in the middle of it leaves
@@ -11,6 +12,13 @@ import { JIRA_CALL_DEADLINE_MS } from '../server/services/jiraClient.js';
 // must therefore wait one Jira call plus the key's write, and still come
 // before Kubernetes kills the container: `terminationGracePeriodSeconds`
 // counts from the start of the `preStop` hook, and SIGTERM arrives after it.
+//
+// A session's parent issue (`sessionParent` mode) changes none of this: it is
+// one Jira call like any other, its key is written by one write, and the
+// batch reads the drain flag again after that write, so a SIGTERM during it
+// starts no sub-task (`jiraIssues.test.ts` → "starts no sub-task when the pod
+// starts draining during the parent’s write"). At most one call and its write
+// still run after SIGTERM.
 describe('the shutdown budget', () => {
   const manifest = readFileSync(join(__dirname, '..', 'k8s/base/deployment.yaml'), 'utf8');
   const seconds = (pattern: RegExp, what: string) => {
@@ -26,6 +34,14 @@ describe('the shutdown budget', () => {
 
   it('outlasts one Jira call and the write of its key', () => {
     expect(DEFAULT_SHUTDOWN_TIMEOUT_MS).toBeGreaterThanOrEqual(JIRA_CALL_DEADLINE_MS + LINK_WRITE_MARGIN_MS);
+  });
+
+  // Each claim — an action's or a session parent's — spans exactly one Jira
+  // call and the write that follows it. A claim that expired while its own
+  // request still worked would be read as a request that died, and its
+  // action or parent marked "may already be in Jira" for nothing.
+  it('lets a claim outlive the one Jira call and the write it spans', () => {
+    expect(JIRA_CLAIM_TTL_MS).toBeGreaterThanOrEqual(JIRA_CALL_DEADLINE_MS + LINK_WRITE_MARGIN_MS);
   });
 
   it('ends before Kubernetes kills the container', () => {

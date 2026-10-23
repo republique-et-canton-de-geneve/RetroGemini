@@ -58,8 +58,7 @@ const team: Team = {
   members: [facilitator],
   customTemplates: [],
   retrospectives: [],
-  globalActions: [],
-  teamFeedbacks: []
+  globalActions: []
 };
 
 type FetchCall = { url: string; body: Record<string, unknown> };

@@ -27,6 +27,7 @@ const NAMES_THE_SETTINGS_CARD: MessageKey[] = [
   'errors.jiraTokenRefused',
   'errors.jiraTargetMissing',
   'errors.jiraTargetRefused',
+  'errors.jiraParentRefused',
   'jira.action.labelsRefused'
 ];
 

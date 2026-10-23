@@ -2,10 +2,12 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Team, User, RetroSession, Ticket, ActionItem, ActionImpactVote, Group, ParticipantActivity, JiraLink } from '../types';
 import { dataService } from '../services/dataService';
+import { noteRevokedResponse } from '../services/sessionRevocation';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
 import { bestTextColorOn, readableTextColor } from '../utils/colorUtils';
 import { randomId } from '../utils/randomId';
+import { ticketQuote } from '../utils/textCut';
 import {
   addTicketToGroup,
   applySuggestedClusters,
@@ -15,7 +17,8 @@ import {
 } from '../utils/retroGrouping';
 import TicketOriginBadge from './session/TicketOriginBadge';
 import { getAssignableMembers } from './session/assignableMembers';
-import { SessionConnectionBanner } from './session/SessionConnectionStatus';
+import { JOIN_DENIED_REVOKED, SessionConnectionBanner } from './session/SessionConnectionStatus';
+import { isSessionLive, useSessionRevoked } from './session/useSessionRevoked';
 import TicketGroupingBanner from './session/TicketGroupingBanner';
 import { getTicketCardClassName, getTicketCardStyle } from './session/ticketCardAppearance';
 import {
@@ -87,6 +90,7 @@ import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessi
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import SyncStalledBanner from './session/SyncStalledBanner';
 import { jiraLinkFields, sameJiraLink, withJiraLinkFrom } from './jira/jiraLinkMerge';
+import { avatarColorClasses } from '../utils/participantColors';
 
 const generateLocalId = () => randomId();
 
@@ -201,6 +205,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // read differently in the UI: the socket is connected, the credential is not.
   const [joinDeniedReason, setJoinDeniedReason] = useState<string | null>(null);
   const joinDeniedRef = useRef<string | null>(null);
+  // Decision D3b: the team's password was changed under this session. Editing
+  // pauses and the banner says why, in the hook shared with the health check.
+  const sessionRevoked = useSessionRevoked({ isLiveRef, setIsLive, joinDeniedRef });
+  const deniedReason = sessionRevoked ? JOIN_DENIED_REVOKED : joinDeniedReason;
 
   // Live "is typing" signals from other participants (userId -> activity kind).
   // Ephemeral and never persisted: each entry auto-expires so a missed stop
@@ -516,9 +524,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     for (const r of teamData.retrospectives) {
       const t = r.tickets.find(x => x.id === action.linkedTicketId);
       if (t) {
-        return contentT('session.actionContext.ticket', {
-          text: `${t.text.substring(0, 50)}${t.text.length > 50 ? '...' : ''}`
-        });
+        // Never half of an emoji: the quote is stored (see ticketQuote).
+        return contentT('session.actionContext.ticket', { text: ticketQuote(t.text) });
       }
       const g = r.groups.find(x => x.id === action.linkedTicketId);
       if (g) {
@@ -773,7 +780,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         extendOwnChanges(ownChangesRef.current, Date.now() - offlineSinceRef.current);
         offlineSinceRef.current = null;
       }
-      const live = connected && joinDeniedRef.current === null;
+      const live = isSessionLive(connected, joinDeniedRef.current);
       isLiveRef.current = live;
       setIsLive(live);
     });
@@ -1192,11 +1199,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     if (!hasTickets) return;
     reviewSummaryGeneratedRef.current = true;
 
+    const sentToken = dataService.getSessionToken();
     fetch('/api/ai/generate-retro-summary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sessionToken: dataService.getSessionToken(),
+        sessionToken: sentToken,
         sessionData: {
           name: session.name,
           columns: session.columns,
@@ -1208,7 +1216,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         }
       })
     })
-      .then(r => r.ok ? r.json() : null)
+      // Decision D3b: a refusal because the team's password was changed is
+      // reported, so the session says so instead of only lacking a summary.
+      .then(r => {
+        if (r.ok) return r.json();
+        void noteRevokedResponse(r, sentToken);
+        return null;
+      })
       .then(data => {
         if (data?.summary) {
           updateSession(s => {
@@ -1479,12 +1493,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     if (ticketTexts.length < 2) return;
 
     setAiSuggestingGroupId(groupId);
+    const sentToken = dataService.getSessionToken();
     fetch('/api/ai/suggest-group-title', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionToken: dataService.getSessionToken(), ticketTexts })
+      body: JSON.stringify({ sessionToken: sentToken, ticketTexts })
     })
-      .then(r => r.ok ? r.json() : null)
+      .then(r => {
+        if (r.ok) return r.json();
+        void noteRevokedResponse(r, sentToken);
+        return null;
+      })
       .then(data => {
         if (data?.title) {
           updateSession(s => {
@@ -1532,6 +1551,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     })
       .then(async r => {
         if (!r.ok) {
+          void noteRevokedResponse(r, payload.sessionToken);
           const detail = await r.json().catch(() => null);
           throw new Error(detail?.message || tr('session.aiGroups.analyzeFailed'));
         }
@@ -2255,7 +2275,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
             {visible && !session.settings.isAnonymous && author && (
                 <div className="absolute top-2 right-2">
-                    <div className={`w-6 h-6 rounded-full ${author.color} text-white flex items-center justify-center text-[10px] font-bold shadow-xs ring-1 ring-white`}>
+                    <div className={`w-6 h-6 rounded-full ${avatarColorClasses(author.color)} flex items-center justify-center text-[10px] font-bold shadow-xs ring-1 ring-white`}>
                         {author.name.substring(0,2).toUpperCase()}
                     </div>
                 </div>
@@ -2990,7 +3010,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         } as React.CSSProperties : undefined}
                                     >
                                         <textarea
-                                            placeholder={isLive ? tr('session.column.addIdeaPlaceholder') : tr('session.column.reconnectingPlaceholder')}
+                                            placeholder={isLive
+                                                ? tr('session.column.addIdeaPlaceholder')
+                                                // Refused (a revoked token, a denied join): no reconnection is coming.
+                                                : deniedReason ? tr('session.column.pausedPlaceholder') : tr('session.column.reconnectingPlaceholder')}
                                             disabled={!isLive}
                                             className="w-full text-sm resize-none outline-hidden bg-transparent text-slate-900 auto-textarea disabled:opacity-60 disabled:cursor-not-allowed"
                                             data-brainstorm-input={col.id}
@@ -3140,11 +3163,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           isRetroTipsOpen={isRetroTipsOpen}
           onToggleRetroTips={() => setIsRetroTipsOpen((open) => !open)}
           isLive={isLive}
-          joinDeniedReason={joinDeniedReason}
+          joinDeniedReason={deniedReason}
         />
         <SessionConnectionBanner
           isLive={isLive}
-          joinDeniedReason={joinDeniedReason}
+          joinDeniedReason={deniedReason}
           onReturnToLogin={onSessionExpired ?? onExit}
         />
         <SyncStalledBanner />

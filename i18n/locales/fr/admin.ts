@@ -121,15 +121,16 @@ const admin: Record<keyof typeof en, string> = {
   // Full data archive (download and upload)
   'admin.data.title': 'Sauvegarde des données',
   'admin.data.description':
-    'Téléchargez une archive complète du dossier {folder} pour une récupération locale ou une migration.',
+    'Téléchargez une archive complète de toutes les équipes et de leurs données, pour une récupération locale ou une migration.',
   'admin.data.preparing': 'Préparation de la sauvegarde…',
   'admin.data.download': 'Télécharger la sauvegarde',
-  'admin.data.directoryNotFound': 'Répertoire des données à sauvegarder introuvable.',
+  'admin.data.downloadUnavailable': 'Ce serveur ne peut pas produire le téléchargement de la sauvegarde.',
   'admin.data.generateFailed': 'La génération de la sauvegarde a échoué.',
   'admin.data.downloaded': 'Sauvegarde téléchargée',
   'admin.data.restoreTitle': 'Restauration des données',
   'admin.data.restoreDescription':
-    'Importez une archive de sauvegarde {extension} téléchargée précédemment pour restaurer le dossier {folder}.',
+    'Importez une archive de sauvegarde {extension} téléchargée précédemment pour restaurer toutes les données. Pour ne restaurer que certaines équipes, importez plutôt le fichier dans l’onglet Sauvegardes.',
+  'admin.data.fileLabel': 'Fichier de sauvegarde à restaurer',
   'admin.data.restoreWarningLabel': 'Attention\u00a0:',
   'admin.data.restoreWarning':
     '{warning} la restauration d’une sauvegarde écrase les données actuelles. Téléchargez d’abord une sauvegarde si vous risquez de devoir revenir en arrière.',

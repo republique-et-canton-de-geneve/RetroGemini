@@ -122,5 +122,6 @@ export {
   RestoreArchiveTooLargeError,
   getRestoreMaxBodyBytes,
   getRestoreMaxDecompressedBytes,
+  hasGzipMagic,
   parseRestoreArchiveBody
 };

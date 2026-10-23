@@ -69,14 +69,64 @@
  * it is the team's — is patched once, through the session compare-and-swap.
  * Once and not once per issue: each patch moves the session's revision, and a
  * facilitator typing the review summary meanwhile has every keystroke built on
- * the previous revision refused (finding A-4).
+ * the previous revision refused (finding A-4). A parent issue is never put on a
+ * session row, so a request that created only a parent patches nothing.
+ *
+ * ## One parent per session (`sessionParent` mode)
+ *
+ * In `sessionParent` mode each action is a sub-task of its session's parent
+ * issue: one per retrospective, one per health check, and one for the team
+ * dashboard's actions (`jiraParentScope`: `retro:<id>`, `healthcheck:<id>`,
+ * `backlog`). The parent is created the first time one of its actions is sent
+ * and its key is stored on the team record, in `team.jiraParents[scope]` —
+ * with the sub-task type to use under it, so a parent in another project than
+ * the target's keeps a type valid there — and every later send of that scope's
+ * actions reuses it: the Review batch, one action sent alone, the Dashboard.
+ *
+ * A parent is claimed exactly like an action, and for the same reason: never
+ * twice. Under the row lock, in `team.jiraParentClaims[scope]` (server-only,
+ * a map of its own so an action id cannot collide with a scope):
+ *
+ *  - a parent is only ever claimed for an action that is about to be sent —
+ *    every reason to skip or refuse the action is decided first;
+ *  - a live claim of another request answers the action `parent_in_progress`;
+ *    an expired one marks the *scope* `{ uncertainSince }`, dated by the
+ *    claim, and the action `parent_uncertain`: nothing was sent for it;
+ *  - a scope marked uncertain is skipped unless the facilitator confirmed
+ *    that very scope (`forceParentScopes`, which lifts that skip and nothing
+ *    else, as `force` lifts an action's). A confirmation is for the doubt the
+ *    dialog showed, never for one this request finds — an expired claim, which
+ *    no screen can see: that scope is skipped for the rest of the request
+ *    whatever was confirmed. A forced parent keeps the mark until its key
+ *    lands, so a lost answer keeps the earlier date and a refusal the earlier
+ *    doubt.
+ *
+ * Each claim spans exactly one Jira call. The parent's 201 is written by one
+ * write that stores its key, drops the parent claim and claims the action
+ * under that key; a key another request stored meanwhile wins (`kept`), and
+ * this request's parent is logged as a duplicate. A lost answer marks the
+ * scope, never the action, and stops the batch; a refusal stops it too
+ * (`jira_parent_refused`), since the same type, project and labels go on every
+ * parent. A parent counts as one creation for the time budget, and nothing
+ * new starts after its write once the caller has gone or the pod drains.
+ *
+ * ## Naming the parent at send time
+ *
+ * A `parent`-mode one-time target names the parent this send goes under. With
+ * `adoptParent`, it also becomes the stored parent of each scope the send
+ * touches that has no key (or only a mark, or only an expired claim; with
+ * `replaceParents`, even one with a key) — but only in the write that lands
+ * the key of a sub-task Jira created under it (`adoptParent`), even when that
+ * action's copy no longer takes the key (deleted, or a rival key kept). A
+ * parent Jira refuses sub-tasks under, a lost answer, a key that cannot be
+ * saved: none of them changes any scope.
  */
 
 import { randomUUID } from 'crypto';
 import { isDeepStrictEqual } from 'util';
-import { isJiraLinked, isJiraUncertain, JIRA_CLAIM_TTL_MS } from '../../utils/jira.js';
-import { issueFields, issueSource } from '../../utils/jiraIssueContent.js';
-import { JiraError, logUnreachable } from './jiraClient.js';
+import { isJiraIssueTypeId, isJiraLinked, isJiraUncertain, jiraProjectKeyOf, JIRA_CLAIM_TTL_MS } from '../../utils/jira.js';
+import { issueFields, issueSource, jiraParentScope, parentIssueFields } from '../../utils/jiraIssueContent.js';
+import { cannotHoldSubtasks, JiraError, logUnreachable } from './jiraClient.js';
 import { NO_OP_LIVE_SESSION_PATCH } from './liveSessionRename.js';
 
 /** The session lists that can show an action, all of them stamped by the patch. */
@@ -125,6 +175,91 @@ const isLiveClaim = (claim, nowMs, ttl) => {
   if (!Number.isFinite(at)) return false;
   const age = nowMs - at;
   return age < ttl && age > -ttl;
+};
+
+// The mark an expired claim leaves: dated by the claim, never by a date that
+// is unreadable or to come.
+const markOfExpiredClaim = (claim, nowMs, nowIso) => {
+  const claimedAt = typeof claim?.at === 'string' ? Date.parse(claim.at) : NaN;
+  return { uncertainSince: Number.isFinite(claimedAt) && claimedAt <= nowMs ? claim.at : nowIso };
+};
+
+// The parents of a record (`sessionParent` mode) and the claims on parents
+// being created, each like `claimsOf`: keyed by scope (`retro:<id>`,
+// `healthcheck:<id>`, `backlog`), with no prototype, written back as a plain
+// object and removed when empty. The claims are a map of their own: an action
+// id is a client's string, and one could be called `retro:x`.
+const parentsOf = (team) => Object.assign(Object.create(null), isPlainObject(team.jiraParents) ? team.jiraParents : {});
+const storeParents = (team, parents) => {
+  if (Object.keys(parents).length === 0) delete team.jiraParents;
+  else team.jiraParents = { ...parents };
+};
+const parentClaimsOf = (team) => Object.assign(Object.create(null), isPlainObject(team.jiraParentClaims) ? team.jiraParentClaims : {});
+const storeParentClaims = (team, claims) => {
+  if (Object.keys(claims).length === 0) delete team.jiraParentClaims;
+  else team.jiraParentClaims = { ...claims };
+};
+
+// Drops the claim on a scope's parent if this request made it.
+const releaseOwnParentClaim = (team, scope, requestId) => {
+  const claims = parentClaimsOf(team);
+  if (claims[scope]?.requestId !== requestId) return false;
+  delete claims[scope];
+  storeParentClaims(team, claims);
+  return true;
+};
+
+/**
+ * Writes a created parent's key for its scope and drops this request's claim
+ * on it. A key already there wins, as for an action (`writeLink`): `kept`
+ * names it, and the caller logs the parent this request created as a
+ * duplicate to delete in Jira. A key replaces a mark. Idempotent: a retried
+ * write that finds its own key changes nothing.
+ *
+ * @returns {{ changed: boolean, kept: { key: string, createdAt: string } | null }}
+ */
+const writeParentLink = (team, scope, link, requestId) => {
+  const parents = parentsOf(team);
+  const held = parents[scope];
+  let kept = null;
+  let stored = false;
+  if (isJiraLinked({ jira: held })) {
+    if (held.key !== link.key) kept = { ...held };
+  } else {
+    parents[scope] = { ...link };
+    storeParents(team, parents);
+    stored = true;
+  }
+  const released = releaseOwnParentClaim(team, scope, requestId);
+  return { changed: stored || released, kept };
+};
+
+/**
+ * The parent named for a send becoming a scope's parent (`adoptParent`). Run
+ * only in the write that lands the key of a sub-task created under it, so a
+ * scope never adopts an issue Jira has not accepted a sub-task under. It
+ * writes when the scope has no key, only a mark, or only an expired parent
+ * claim — or a key, with `replace` — and drops that expired claim; it writes
+ * nothing beside a live parent claim, which another request is acting on.
+ * Idempotent, so the retried landing write may run it twice: `holds` says the
+ * scope's parent is that key afterwards, written now or before.
+ *
+ * @returns {{ changed: boolean, holds: boolean }}
+ */
+const adoptParent = (team, { scope, key, subtaskTypeId, replace }, { nowMs, nowIso, claimTtlMs }) => {
+  const parents = parentsOf(team);
+  const claims = parentClaimsOf(team);
+  const held = parents[scope];
+  const holdsKey = isJiraLinked({ jira: held }) && held.key === key;
+  if (claims[scope] !== undefined && isLiveClaim(claims[scope], nowMs, claimTtlMs)) return { changed: false, holds: holdsKey };
+  if (holdsKey || (isJiraLinked({ jira: held }) && !replace)) return { changed: false, holds: holdsKey };
+  parents[scope] = { key, createdAt: nowIso, ...(isJiraIssueTypeId(subtaskTypeId) ? { subtaskTypeId } : {}) };
+  storeParents(team, parents);
+  if (claims[scope] !== undefined) {
+    delete claims[scope];
+    storeParentClaims(team, claims);
+  }
+  return { changed: true, holds: true };
 };
 
 // Puts `jira` on every copy that has no key. A key is never replaced — not by
@@ -178,8 +313,39 @@ const writeLink = (team, { actionId, key, createdAt }, requestId) => {
  * What the claim step decides for one action, on the record as the row lock
  * holds it. Mutates `team` when it claims, or when it turns an expired claim
  * into an uncertain mark, and says so with `wrote`.
+ *
+ * The order is the point: `not_found`, `closed`, `already_linked`, the
+ * action's own mark (unless `force`), the action's claim, no text — and only
+ * then, for an action about to be sent, its parent. So a parent is never
+ * created for an action that would be refused or skipped.
+ *
+ *  - `adoption` (a `parent`-mode send naming its parent with `adoptParent`):
+ *    the action is claimed, and `adopt` says which scope may adopt the parent
+ *    once a sub-task of it has landed there. Nothing about the scope is
+ *    written here.
+ *  - `sessionParent` mode: under the scope's stored key (`parentLink`), the
+ *    action is claimed. Otherwise the scope's parent is claimed instead
+ *    (`claimedParent`, with its content) and the action is not: the write
+ *    that stores the parent's key claims it. A live claim of another request
+ *    answers `parent_in_progress`, an expired one marks the scope
+ *    (`doubtFound`), and a marked scope is skipped unless `isParentForced`
+ *    says the facilitator confirmed it; none of them sends the action
+ *    (`parentStatus` says what the scope's parent is).
  */
-const decideClaim = (team, { actionId, force, nowMs, nowIso, claimTtlMs, requestId, requestedBy, language, sessionId }) => {
+const decideClaim = (team, {
+  actionId,
+  force,
+  isParentForced,
+  target,
+  adoption,
+  nowMs,
+  nowIso,
+  claimTtlMs,
+  requestId,
+  requestedBy,
+  language,
+  sessionId
+}) => {
   const copies = actionCopies(team, actionId);
   if (copies.length === 0) return { wrote: false, result: { status: 'not_found' } };
 
@@ -204,8 +370,7 @@ const decideClaim = (team, { actionId, force, nowMs, nowIso, claimTtlMs, request
     if (isLiveClaim(claim, nowMs, claimTtlMs)) return { wrote: false, homes, result: { status: 'in_progress' } };
     // The request that made it never finished: its issue may exist. The mark
     // is dated by the claim, never by a date that is unreadable or to come.
-    const claimedAt = typeof claim?.at === 'string' ? Date.parse(claim.at) : NaN;
-    const jira = { uncertainSince: Number.isFinite(claimedAt) && claimedAt <= nowMs ? claim.at : nowIso };
+    const jira = markOfExpiredClaim(claim, nowMs, nowIso);
     stampCopies(copies, jira);
     delete claims[actionId];
     storeClaims(team, claims);
@@ -237,9 +402,71 @@ const decideClaim = (team, { actionId, force, nowMs, nowIso, claimTtlMs, request
     return { wrote: ownClaim, homes, result: { status: 'refused', reason: 'no_text', jiraMessages: [] } };
   }
 
-  claims[actionId] = { at: nowIso, requestId };
-  storeClaims(team, claims);
-  return { wrote: true, homes, claimed: true, content: { summary: fields.summary, description: fields.description } };
+  const content = { summary: fields.summary, description: fields.description };
+  const claimAction = (extra) => {
+    claims[actionId] = { at: nowIso, requestId };
+    storeClaims(team, claims);
+    return { wrote: true, homes, claimed: true, content, ...extra };
+  };
+  if (adoption) {
+    const scope = jiraParentScope(source).key;
+    return claimAction({ adopt: { scope, key: adoption.key, subtaskTypeId: adoption.subtaskTypeId, replace: adoption.replace === true } });
+  }
+  if (target?.mode !== 'sessionParent') return claimAction({});
+
+  // The parent the action goes under, from the very `issueSource` its
+  // content was written from: an earlier action sent from a later retro's
+  // Review goes under its own retro's parent.
+  const scope = jiraParentScope(source);
+  const parents = parentsOf(team);
+  const held = parents[scope.key];
+  if (isJiraLinked({ jira: held })) return claimAction({ scope: scope.key, parentLink: { ...held } });
+
+  // Not sent in this write: this request's own claim on the action, if a
+  // lost answer left one, is dropped, as for an action with no text.
+  const notSent = (decision) => {
+    if (ownClaim) {
+      delete claims[actionId];
+      storeClaims(team, claims);
+    }
+    return { ...decision, wrote: decision.wrote === true || ownClaim, homes, scope: scope.key };
+  };
+
+  const parentClaims = parentClaimsOf(team);
+  const parentClaim = parentClaims[scope.key];
+  // This request's own claim, from an attempt of this very write that landed
+  // although it was reported as failed: the claim to proceed with.
+  const ownParentClaim = parentClaim?.requestId === requestId;
+  if (parentClaim !== undefined && !ownParentClaim) {
+    if (isLiveClaim(parentClaim, nowMs, claimTtlMs)) {
+      return notSent({ result: { status: 'parent_in_progress' }, parentStatus: { status: 'in_progress' } });
+    }
+    // The request that claimed it died mid-creation: the parent may exist.
+    // An earlier mark is kept, since it dates when the doubt began.
+    const mark = isJiraUncertain({ jira: held }) ? { ...held } : markOfExpiredClaim(parentClaim, nowMs, nowIso);
+    parents[scope.key] = mark;
+    storeParents(team, parents);
+    delete parentClaims[scope.key];
+    storeParentClaims(team, parentClaims);
+    return notSent({
+      wrote: true,
+      doubtFound: true,
+      result: { status: 'parent_uncertain' },
+      parentStatus: { status: 'uncertain', uncertainSince: mark.uncertainSince }
+    });
+  }
+  if (isJiraUncertain({ jira: held }) && !isParentForced(scope.key) && !ownParentClaim) {
+    return notSent({ result: { status: 'parent_uncertain' }, parentStatus: { status: 'uncertain', uncertainSince: held.uncertainSince } });
+  }
+  if (!ownParentClaim) {
+    parentClaims[scope.key] = { at: nowIso, requestId };
+    storeParentClaims(team, parentClaims);
+  }
+  return notSent({
+    wrote: !ownParentClaim,
+    claimedParent: true,
+    parentContent: parentIssueFields({ scope, team, requestedBy, language })
+  });
 };
 
 /**
@@ -332,16 +559,32 @@ export const createJiraIssues = ({
   /**
    * @param {object} input
    * @param {string} input.teamId
-   * @param {{ actionIds: string[], sessionId: string | null, requestedBy: string, language: string | null, force: boolean }} input.request
-   * @param {{ mode: 'project' | 'parent', projectKey?: string, parentKey?: string, issueTypeId: string, labels: string[] }} input.target
+   * @param {{
+   *   actionIds: string[], sessionId: string | null, requestedBy: string, language: string | null, force: boolean,
+   *   adoptParent?: boolean, replaceParents?: boolean, forceParentScopes?: string[]
+   * }} input.request
+   * @param {{
+   *   mode: 'project' | 'parent' | 'sessionParent', projectKey?: string, parentKey?: string,
+   *   parentIssueTypeId?: string, issueTypeId: string, labels: string[]
+   * }} input.target
    * @param {object} input.client The Jira client, built with the team's token.
    * @param {object} input.envelope The stored token envelope the client was built from.
    * @param {() => boolean} [input.isClientGone]
-   * @returns {Promise<{ results: object[], remaining: string[], stopped?: string, retryAfterSeconds?: number }>}
+   * @returns {Promise<{ results: object[], remaining: string[], stopped?: string, retryAfterSeconds?: number, parents?: object[] }>}
    */
   const createIssues = async ({ teamId, request, target, client, envelope, isClientGone = () => false }) => {
     const { actionIds, sessionId, requestedBy, language, force } = request;
     const requestId = createRequestId();
+    // [review F2-1] The scopes whose parent the facilitator saw in doubt and
+    // confirmed — a confirmation of those doubts, not of the request. A scope
+    // this request finds a doubt on (an expired claim, which the dialog could
+    // not show) is never forced by it afterwards, confirmed or not: the doubt
+    // the facilitator checked is not the one the server just found. Noted as
+    // each decision is made, a write that failed included: the doubt is on the
+    // record either way.
+    const confirmedParents = new Set(Array.isArray(request.forceParentScopes) ? request.forceParentScopes : []);
+    const doubtsFound = new Set();
+    const isParentForced = (scope) => confirmedParents.has(scope) && !doubtsFound.has(scope);
     const startedAt = now().getTime();
 
     const results = [];
@@ -355,6 +598,41 @@ export const createJiraIssues = ({
     const touch = (actionId, jira, homes) => {
       links.set(actionId, jira);
       for (const id of homes) sessions.add(id);
+    };
+    // What became of each scope's parent, one entry per scope met: the first
+    // status wins, except that a parent created or adopted after the scope
+    // was seen in progress or in doubt is what the scope has now — the screen
+    // caches what this says, and a doubt kept over a stored key would ask the
+    // facilitator to check a parent the team already has [review F2-1].
+    const parentResults = new Map();
+    const SUPERSEDED_PARENT_STATUSES = new Set(['in_progress', 'uncertain']);
+    const noteParent = (entry) => {
+      const known = parentResults.get(entry.scope);
+      if (!known || (SUPERSEDED_PARENT_STATUSES.has(known.status) && (entry.status === 'created' || entry.status === 'adopted'))) {
+        parentResults.set(entry.scope, entry);
+      }
+    };
+    // Set once the parent of a `parent`-mode send is read: what a scope may
+    // adopt when `adoptParent` asks for it.
+    let adoption = null;
+
+    const decide = (team, actionId, nowDate) => {
+      const decision = decideClaim(team, {
+        actionId,
+        force,
+        isParentForced,
+        target,
+        adoption,
+        nowMs: nowDate.getTime(),
+        nowIso: nowDate.toISOString(),
+        claimTtlMs,
+        requestId,
+        requestedBy,
+        language,
+        sessionId
+      });
+      if (decision.doubtFound) doubtsFound.add(decision.scope);
+      return decision;
     };
 
     // A write after Jira answered (dropping a claim, marking an action) that
@@ -373,6 +651,33 @@ export const createJiraIssues = ({
       (team) => (releaseOwnClaim(team, actionId, requestId) ? team : null),
       `release the claim on action ${JSON.stringify(actionId)}`
     );
+    const releaseParentClaim = (scope) => bestEffortWrite(
+      (team) => (releaseOwnParentClaim(team, scope, requestId) ? team : null),
+      `release the claim on the parent issue of ${JSON.stringify(scope)}`
+    );
+
+    /**
+     * Lands a created key in the write under way (`writeLink`), and adopts its
+     * parent when the send named one with `adoptParent` (`adoptParent`), in
+     * that same write: a scope adopts the parent in the write that lands the
+     * key of a sub-task Jira created under that parent, even when that
+     * action's copy no longer takes the key (the action was deleted meanwhile,
+     * or a rival key was kept), since the sub-task exists under that parent
+     * either way. A retried write cannot tell its own landed adoption from one
+     * made before; it reports the scope as adopted when the scope holds that
+     * key.
+     */
+    const landPending = (team, landing, nowDate, attempt) => {
+      const link = writeLink(team, landing, requestId);
+      const adopted = landing.adopt
+        ? adoptParent(team, landing.adopt, { nowMs: nowDate.getTime(), nowIso: nowDate.toISOString(), claimTtlMs })
+        : null;
+      return {
+        changed: link.changed || adopted?.changed === true,
+        kept: link.kept,
+        adopted: adopted !== null && (adopted.changed || (attempt > 0 && adopted.holds))
+      };
+    };
 
     /**
      * The claim step for `actionId`, carrying the key of the action created
@@ -385,26 +690,16 @@ export const createJiraIssues = ({
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         const nowDate = now();
         let decision = null;
-        let link = null;
+        let landing = null;
         try {
           const result = await atomicUpdateTeam(teamId, (team) => {
-            link = pending ? writeLink(team, pending, requestId) : null;
-            decision = decideClaim(team, {
-              actionId,
-              force,
-              nowMs: nowDate.getTime(),
-              nowIso: nowDate.toISOString(),
-              claimTtlMs,
-              requestId,
-              requestedBy,
-              language,
-              sessionId
-            });
-            return link?.changed || decision.wrote ? team : null;
+            landing = pending ? landPending(team, pending, nowDate, attempt) : null;
+            decision = decide(team, actionId, nowDate);
+            return landing?.changed || decision.wrote ? team : null;
           });
           // The team is gone: nothing of it can be claimed, nor hold a key.
           if (!result.success) return pending ? { linkFailed: true, error: result.error } : { decision: { result: { status: 'not_found' } } };
-          return { decision, kept: link?.kept ?? null };
+          return { decision, kept: landing?.kept ?? null, adopted: landing?.adopted === true };
         } catch (err) {
           if (!pending) throw err;
           lastError = err;
@@ -413,13 +708,44 @@ export const createJiraIssues = ({
       return { linkFailed: true, error: lastError };
     };
 
+    /**
+     * Stores a created parent's key (`writeParentLink`), and — while a new
+     * creation may still start (`mayContinue`) — claims the action under the
+     * key the scope now holds, in the same write: the parent's claim and the
+     * action's never overlap, and each spans one Jira call. Retried, since the
+     * parent exists; `{ failed: true }` when it never lands.
+     */
+    const parentWrite = async (scope, link, actionId, mayContinue) => {
+      let cause;
+      for (let attempt = 0; attempt <= linkWriteRetries; attempt += 1) {
+        const nowDate = now();
+        let written = null;
+        let decision = null;
+        try {
+          const result = await atomicUpdateTeam(teamId, (team) => {
+            written = writeParentLink(team, scope, link, requestId);
+            decision = mayContinue ? decide(team, actionId, nowDate) : null;
+            return written.changed || decision?.wrote ? team : null;
+          });
+          // The team is gone; retrying cannot bring it back.
+          if (!result.success) return { failed: true, cause: result.error };
+          return { kept: written.kept, decision };
+        } catch (err) {
+          cause = err;
+        }
+      }
+      return { failed: true, cause };
+    };
+
     // The last created key, written by the claim of the next action or by
     // `flush` at the end: one team write per action.
     let pending = null;
     // `kept`: the key another request had written meanwhile, which the record
     // keeps (see `writeLink`). The issue this request created is a duplicate
     // nothing points to, so the line names everything needed to delete it.
-    const landed = ({ actionId, key, createdAt, homes }, kept) => {
+    const landed = (landing, kept, adopted) => {
+      const { actionId, key, createdAt, homes, parentKey } = landing;
+      if (adopted) noteParent({ scope: landing.adopt.scope, status: 'adopted', key: landing.adopt.key });
       if (kept) {
         console.error(
           `[Server] Jira issue ${key} was created for action ${JSON.stringify(actionId)} of team ${JSON.stringify(teamId)}, `
@@ -430,18 +756,18 @@ export const createJiraIssues = ({
         touch(actionId, kept, homes);
         return;
       }
-      results.push({ actionId, status: 'created', key });
+      results.push({ actionId, status: 'created', key, ...(parentKey ? { parentKey } : {}) });
       touch(actionId, { key, createdAt }, homes);
     };
     // The issue exists and the team record does not say so: the one outcome
     // an operator may have to repair by hand, so the line names all three.
-    const notSaved = ({ actionId, key }, cause) => {
+    const notSaved = ({ actionId, key, parentKey }, cause) => {
       console.error(
         `[Server] Jira issue ${key} was created for action ${JSON.stringify(actionId)} of team ${JSON.stringify(teamId)}, `
           + 'but its key could not be saved',
         cause
       );
-      results.push({ actionId, status: 'created_not_saved', key });
+      results.push({ actionId, status: 'created_not_saved', key, ...(parentKey ? { parentKey } : {}) });
       stopped = 'link_not_saved';
     };
     const flush = async () => {
@@ -451,13 +777,14 @@ export const createJiraIssues = ({
       let cause;
       for (let attempt = 0; attempt <= linkWriteRetries; attempt += 1) {
         try {
-          let link = null;
+          let written = null;
+          const nowDate = now();
           const result = await atomicUpdateTeam(teamId, (team) => {
-            link = writeLink(team, landing, requestId);
-            return link.changed ? team : null;
+            written = landPending(team, landing, nowDate, attempt);
+            return written.changed ? team : null;
           });
           if (result.success) {
-            landed(landing, link?.kept ?? null);
+            landed(landing, written?.kept ?? null, written?.adopted === true);
             return;
           }
           // The team is gone; retrying cannot bring it back.
@@ -468,6 +795,124 @@ export const createJiraIssues = ({
         }
       }
       notSaved(landing, cause);
+    };
+
+    /**
+     * Creates the parent issue `decision` claimed for its scope, then stores
+     * its key and claims the action under it. Answers `{ halt: true }` when
+     * the request ends here (the stop, the results and `next` already set),
+     * or `{ decision }`: the action decided again under the key now stored.
+     */
+    const createParent = async (actionId, decision) => {
+      const { scope } = decision;
+      const fields = {
+        project: { key: target.projectKey },
+        issuetype: { id: target.parentIssueTypeId },
+        summary: decision.parentContent.summary,
+        description: decision.parentContent.description,
+        // On the parent too, so a label filter in Jira finds a session's
+        // parent and its sub-tasks together.
+        ...(target.labels.length > 0 ? { labels: [...target.labels] } : {})
+      };
+
+      let issue;
+      try {
+        issue = await client.createIssue(fields);
+      } catch (err) {
+        if (!(err instanceof JiraError)) throw err;
+        logUnreachable('creating a parent issue', teamId, err);
+        if (err.outcome === 'unknown') {
+          // The parent may exist: the scope is marked, never the action,
+          // which was not sent. A key already there wins, and an earlier
+          // mark is kept: it dates when the doubt began.
+          const markedAt = now().toISOString();
+          let held = null;
+          const marked = await bestEffortWrite((team) => {
+            const parents = parentsOf(team);
+            const current = parents[scope];
+            let changed = false;
+            if (isJiraLinked({ jira: current }) || isJiraUncertain({ jira: current })) {
+              held = { ...current };
+            } else {
+              held = { uncertainSince: markedAt };
+              parents[scope] = held;
+              storeParents(team, parents);
+              changed = true;
+            }
+            return releaseOwnParentClaim(team, scope, requestId) || changed ? team : null;
+          }, `mark the parent issue of ${JSON.stringify(scope)} uncertain`);
+          stopped = err.code === 'jira_unreachable' ? 'jira_unreachable' : 'jira_unavailable';
+          if (marked && isJiraLinked({ jira: held })) {
+            console.error(
+              `[Server] Jira did not answer the creation of a parent issue for ${JSON.stringify(scope)} of team ${JSON.stringify(teamId)}, `
+                + `which another request had created as ${held.key} meanwhile: the scope keeps ${held.key}, `
+                + 'and a duplicate parent issue may exist in Jira'
+            );
+            noteParent({ scope, status: 'created', key: held.key });
+            // The action was not sent: it goes under that key next time.
+            return { halt: true };
+          }
+          noteParent({ scope, status: 'uncertain', ...(marked ? { uncertainSince: held.uncertainSince } : {}) });
+          results.push({ actionId, status: 'parent_uncertain' });
+          next += 1;
+          return { halt: true };
+        }
+
+        // Jira refused, or never received the request: nothing was created.
+        await releaseParentClaim(scope);
+        if (err.code === 'jira_refused') {
+          // The same type, project and labels go on every parent: every other
+          // scope's parent would be refused the same way (Data Center's Epic
+          // Name, a required field the integration never sets).
+          const words = { jiraMessages: [...err.jiraMessages], ...(err.jiraFields.length > 0 ? { jiraFields: [...err.jiraFields] } : {}) };
+          noteParent({ scope, status: 'refused', ...words });
+          results.push({ actionId, status: 'parent_refused', ...words });
+          next += 1;
+          stopped = 'jira_parent_refused';
+          return { halt: true };
+        }
+        stopped = refusalStop(err);
+        if (err.code === 'jira_auth_failed') await markRefused(teamId, envelope);
+        if (err.code === 'jira_rate_limited' && err.retryAfterSeconds !== null) retryAfterSeconds = err.retryAfterSeconds;
+        return { halt: true };
+      }
+
+      // Read before the write, as the top of the loop reads them before a
+      // claim: what may still start once the parent's key is stored.
+      const mayContinue = !isClientGone() && !isShuttingDown() && now().getTime() - startedAt < timeBudgetMs;
+      const link = { key: issue.key, createdAt: now().toISOString(), subtaskTypeId: target.issueTypeId };
+      const written = await parentWrite(scope, link, actionId, mayContinue);
+      if (written.failed) {
+        // The parent exists and the record does not say so. Its claim stays
+        // and expires into an uncertain parent, so nothing is created twice;
+        // the key is answered, for the facilitator to name it next time.
+        console.error(
+          `[Server] Jira parent issue ${issue.key} was created for ${JSON.stringify(scope)} of team ${JSON.stringify(teamId)}, `
+            + 'but its key could not be saved',
+          written.cause
+        );
+        noteParent({ scope, status: 'not_saved', key: issue.key });
+        stopped = 'link_not_saved';
+        return { halt: true };
+      }
+      if (written.kept) {
+        console.error(
+          `[Server] Jira parent issue ${issue.key} was created for ${JSON.stringify(scope)} of team ${JSON.stringify(teamId)}, `
+            + `which another request had created as ${written.kept.key} meanwhile: the scope keeps ${written.kept.key}, `
+            + `and ${issue.key} is a duplicate to delete in Jira`
+        );
+        noteParent({ scope, status: 'created', key: written.kept.key });
+      } else {
+        noteParent({ scope, status: 'created', key: issue.key });
+      }
+      if (!mayContinue) {
+        // The parent is saved and the action waits in `remaining`: the next
+        // request finds the key. The time budget alone is no stop.
+        if (isClientGone()) stopped = 'client_gone';
+        else if (isShuttingDown()) stopped = 'server_restarting';
+        return { halt: true };
+      }
+      return { decision: written.decision };
     };
 
     const patchSessions = async () => {
@@ -484,7 +929,9 @@ export const createJiraIssues = ({
       if (target.mode === 'parent') {
         try {
           parent = await client.parentIssue(target.parentKey);
-          if (parent.subtask) stopped = 'jira_parent_invalid';
+          // A sub-task, or an epic on Cloud: refused once, before anything is
+          // claimed, rather than once per action [R1].
+          if (cannotHoldSubtasks(parent)) stopped = 'jira_parent_invalid';
         } catch (err) {
           if (!(err instanceof JiraError)) throw err;
           logUnreachable('reading the parent issue', teamId, err);
@@ -493,11 +940,31 @@ export const createJiraIssues = ({
           if (err.code === 'jira_rate_limited' && err.retryAfterSeconds !== null) retryAfterSeconds = err.retryAfterSeconds;
         }
         if (stopped) return { results, remaining: [...actionIds], stopped, ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }) };
+        // The key Jira answered with is the parent's current one, even for an
+        // issue moved since: that is the key a scope adopts.
+        if (request.adoptParent === true) {
+          adoption = { key: parent.key, subtaskTypeId: target.issueTypeId, replace: request.replaceParents === true };
+        }
       }
 
-      const destination = parent
-        ? { project: { id: parent.projectId }, parent: { key: parent.key } }
-        : { project: { key: target.projectKey } };
+      // Where an action's issue goes, and the parent it is created under.
+      const destinationOf = (decision) => {
+        if (decision.parentLink) {
+          // Under a session's parent, in the parent's project. A parent in the
+          // target's project takes the type the settings say now; one in
+          // another project (adopted from it, or the target moved since) the
+          // type recorded with it, valid in its own project.
+          const parentKey = decision.parentLink.key;
+          const parentProject = jiraProjectKeyOf(parentKey);
+          const recorded = decision.parentLink.subtaskTypeId;
+          const subtaskType = parentProject !== target.projectKey && isJiraIssueTypeId(recorded) ? recorded : target.issueTypeId;
+          return { fields: { project: { key: parentProject }, parent: { key: parentKey }, issuetype: { id: subtaskType } }, parentKey };
+        }
+        if (parent) {
+          return { fields: { project: { id: parent.projectId }, parent: { key: parent.key }, issuetype: { id: target.issueTypeId } }, parentKey: parent.key };
+        }
+        return { fields: { project: { key: target.projectKey }, issuetype: { id: target.issueTypeId } }, parentKey: null };
+      };
 
       while (next < actionIds.length) {
         if (isClientGone()) {
@@ -518,21 +985,53 @@ export const createJiraIssues = ({
           break;
         }
         if (pending) {
-          landed(pending, claim.kept);
+          landed(pending, claim.kept, claim.adopted);
           pending = null;
         }
 
-        const { decision } = claim;
+        let { decision } = claim;
+        let halted = false;
+        // A parent to create first. Once its key is stored the action is
+        // decided again under it; the loop only goes round twice for an
+        // action whose home changed between those two writes.
+        while (decision.claimedParent) {
+          const step = await createParent(actionId, decision);
+          if (step.halt) {
+            halted = true;
+            break;
+          }
+          decision = step.decision;
+          // [R6] `mayContinue` was read before the parent's write: a caller
+          // gone or a SIGTERM during that write must not start a Jira call.
+          // The claim just made is released: kept, it would expire into a
+          // mark saying "may already be in Jira" for something never sent.
+          if ((decision.claimed || decision.claimedParent) && (isClientGone() || isShuttingDown())) {
+            if (decision.claimed) await releaseClaim(actionId);
+            else await releaseParentClaim(decision.scope);
+            stopped = isClientGone() ? 'client_gone' : 'server_restarting';
+            halted = true;
+            break;
+          }
+        }
+        if (halted) break;
+
+        // Under a parent another request stored after this one saw the scope
+        // in progress or in doubt: that parent is what the scope has now.
+        if (decision.claimed && decision.parentLink && parentResults.has(decision.scope)) {
+          noteParent({ scope: decision.scope, status: 'created', key: decision.parentLink.key });
+        }
+
         if (!decision.claimed) {
           results.push({ actionId, ...decision.result });
+          if (decision.parentStatus) noteParent({ scope: decision.scope, ...decision.parentStatus });
           if (decision.jira) touch(actionId, decision.jira, decision.homes);
           next += 1;
           continue;
         }
 
+        const destination = destinationOf(decision);
         const fields = {
-          ...destination,
-          issuetype: { id: target.issueTypeId },
+          ...destination.fields,
           summary: decision.content.summary,
           description: decision.content.description,
           // Optional, and refused by a project whose create screen lacks
@@ -588,6 +1087,8 @@ export const createJiraIssues = ({
               ...(err.jiraFields.length > 0 ? { jiraFields: [...err.jiraFields] } : {})
             });
             next += 1;
+            // A refusal naming `parent` is one too: a stored parent deleted
+            // in Jira refuses every action of its scope.
             if (refusesTheTarget(err)) {
               stopped = 'jira_target_refused';
               break;
@@ -602,7 +1103,14 @@ export const createJiraIssues = ({
           break;
         }
 
-        pending = { actionId, key: issue.key, createdAt: now().toISOString(), homes: decision.homes };
+        pending = {
+          actionId,
+          key: issue.key,
+          createdAt: now().toISOString(),
+          homes: decision.homes,
+          ...(destination.parentKey ? { parentKey: destination.parentKey } : {}),
+          ...(decision.adopt ? { adopt: decision.adopt } : {})
+        };
         next += 1;
       }
 
@@ -616,7 +1124,8 @@ export const createJiraIssues = ({
       results,
       remaining: actionIds.slice(next),
       ...(stopped ? { stopped } : {}),
-      ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds })
+      ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+      ...(parentResults.size > 0 ? { parents: [...parentResults.values()] } : {})
     };
   };
 

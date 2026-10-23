@@ -16,9 +16,11 @@ import type { Team } from '../types';
  *     commit that shows the screen. A tap on "I'm not in the list" in between
  *     was queued before the reset and undone by it.
  *  2. **Too often.** It was keyed on the team *object*, and the invite effect
- *     re-imports the team whenever it re-runs — StrictMode's double mount, or any
+ *     re-imported the team whenever it re-ran — StrictMode's double mount, or any
  *     App re-render, since App hands down fresh `onJoin`/`onLogin` functions each
  *     time. Every import is a new object, so every re-import reset the screen.
+ *     The effect now imports once per link (`teamLoginInviteImport.test.tsx`);
+ *     a new link still re-imports, and the screen must still keep the choice.
  *
  * Each fix alone still loses the click in a real browser;
  * `e2e/invite-join-early-click.spec.ts` is the proof, and these are the cheap,
@@ -98,14 +100,15 @@ describe('TeamLogin — the invite-join screen keeps the user\'s choice', () => 
     fireEvent.click(await screen.findByText(/I'm not in the list/));
     await waitFor(() => expect(screen.getByLabelText('Your Name')).toBeTruthy());
 
-    // App re-renders with new callbacks, which re-runs the invite effect. Hold
-    // the re-import open so the assertion below is made after it has landed,
-    // not before it.
+    // A new link object re-imports the team (an App re-render with new
+    // callbacks no longer does: `teamLoginInviteImport.test.tsx`). Hold the
+    // re-import open so the assertion below is made after it has landed, not
+    // before it.
     let resolveReimport: (team: Team) => void = () => {};
     vi.mocked(dataService.importTeam).mockImplementationOnce(
       () => new Promise<Team>((resolve) => { resolveReimport = resolve; })
     );
-    rerender(<TeamLogin onLogin={vi.fn()} onJoin={vi.fn()} inviteData={inviteData} />);
+    rerender(<TeamLogin onLogin={vi.fn()} onJoin={vi.fn()} inviteData={{ ...(inviteData as object) } as never} />);
     await waitFor(() => expect(dataService.importTeam).toHaveBeenCalledTimes(2));
     await act(async () => {
       resolveReimport({ ...fullTeam });

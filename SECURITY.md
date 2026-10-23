@@ -29,6 +29,7 @@ If you discover a security vulnerability, please report it responsibly:
 - **Security headers**: X-Frame-Options, X-Content-Type-Options, etc.
 - **Health endpoints**: `/health` and `/ready` for monitoring. Both are anonymous by necessity (the kubelet carries no credential). `/health` reports the cross-pod Socket.IO adapter's strategy and whether it is active, which is deployment configuration rather than a secret — the environment variables that select it are documented publicly. It deliberately does **not** return the underlying error text, which names internal hosts, ports and database grants; that detail goes to the pod log and the super-admin log ring
 - **Rate limiting**: Per-IP limits on authentication, password-reset and feedback-notification endpoints; unauthenticated calls to AI endpoints are also throttled per IP (authenticated team requests are not limited)
+- **Response compression**: JSON answers of 1 KiB and more are gzipped by the application (`server/services/jsonCompression.js`), and the bundle is precompressed at build time. BREACH-style attacks do not apply, and the decisive reason is that **no credential is ambient**: the server sets no cookie, and team and super-admin tokens travel in the JSON body, read from `localStorage` by the app's own script. A cross-site page therefore cannot make a victim's browser send an authenticated request, which is exactly what the attack needs (many requests reflecting attacker input next to the victim's secret, whose sizes it measures). In depth: the session token in the login and create answers is minted fresh on every call; `/invite-credential` and `/wifi-config` answer under 1 KiB, so they are never compressed, and carry no caller input; super-admin answers carry no team-controlled secret; and on a plain-HTTP deployment an observer reads the bodies directly, so compression reveals nothing more. If a cookie-borne credential is ever introduced, revisit this before anything else
 
 ### Session Tokens
 
@@ -36,7 +37,15 @@ If you discover a security vulnerability, please report it responsibly:
 - Set `SESSION_TOKEN_SECRET` to the same value on every pod so tokens survive restarts and non-sticky routing; without it, a process-local random secret is used and sessions do not survive restarts
 - Tampered tokens, tokens signed with another secret, and expired tokens are rejected
 - All team and feedback endpoints accept a valid team session token as an **alternative credential** to the team password; the token must be minted for the exact team being addressed, so a token for one team never authorizes requests against another. Rotating `SESSION_TOKEN_SECRET` therefore also invalidates the token path into team data until clients log in again
-- The web client sends its session token alongside the password on all routine team and feedback calls; the server checks the token first (it is cheap to validate) and falls back to password verification, so rotating `SESSION_TOKEN_SECRET` never locks out a client that still holds a valid password, and a valid token keeps a member working after a mid-session password change
+- The web client sends its session token alongside the password on all routine team and feedback calls; the server checks the token first (it is cheap to validate) and falls back to password verification, so rotating `SESSION_TOKEN_SECRET` never locks out a client that still holds a valid password. A token revoked by a password change (below) is refused even when the old password is sent beside it; beside the *current* password the request authenticates through the password, as with any stale token
+- **Changing the team password signs out every session opened before** (decision D3b). Each team session token carries the team's *session epoch*, a random value kept in a row of its own (`team-auth:{teamId}`), and a token is valid only while its epoch is the team's current one. Changing the password from the dashboard, through an emailed reset or from the super-admin console gives the team a new epoch in the same transaction as the new password, so every token minted before stops working at once: on every team, feedback, Jira and AI route (`401 session_revoked`), and on the live-session socket, where a revoked token cannot join and a socket already joined with one is cut — on its own pod at once, on the others through the cross-pod adapter, and within a minute by each pod's periodic sweep when the adapter is down. The client that changed the password receives a token under the new epoch and stays signed in, and so do its other tabs in the same browser, which take the new token over. A restore that changes which password opens a team (a whole-store restore that rolls a password back, or a team brought back after its deletion) does the same for that team; one that keeps a team's password signs nobody out
+- The epoch never travels: it is not on the team record, not sent to any client, not in any backup archive, and no restore or merge rolls it back. It is random rather than a counter, so a database rollback followed by a new rotation can never reuse an earlier value and revive the tokens minted under it
+- **Residuals of the session epoch, stated on purpose:**
+  - **During the rolling update that ships it, and after a rollback to 41.0**, an older pod neither writes nor checks the epoch: a password change it serves revokes no session, and a token revoked elsewhere still works on it, until the last older pod is replaced. A 41.0 pod accepts the tokens this release mints (the claim is additive on the unchanged token format), so the rollout signs nobody out
+  - **Tokens minted before the release, or by an older pod during the rollout, carry no epoch.** They keep working until they expire, unless the team's password is changed after they were issued; that decision compares issue times across pods, so a token issued within the clock skew between two pods of a change can survive it, or be refused once
+  - **A request already past authentication finishes**: a Jira batch chunk in flight completes, and its next chunk is refused
+  - **When the answer to a password change is lost** (the network), the rotating browser keeps its old token, which is revoked: it signs in again with the new password
+  - **The login limiter is unchanged** (20 rejected attempts per 15 minutes per IP and team name): a room of people retrying the *old* password after being signed out can reach it from one address. The login screen tells them to use the new password or ask for a new invitation link
 
 ### Invite Credentials
 
@@ -59,11 +68,11 @@ Team passwords are **hashed at rest** (scrypt via Node's crypto module — memor
 
 **The minimum length is 8 characters, and it is the whole policy.** Every path that *sets* a password — team creation, the team's own password change, the emailed password reset and the super-admin override — enforces the same rule from a single module (`utils/passwordPolicy.js`), which the React forms read too, so the screens and the routes cannot drift apart. There is still **no complexity, dictionary or reuse check, and no account lockout**: character-class rules are no longer recommended by either NIST SP 800-63B or OWASP ASVS, and a breached-password check would need an external service that is out of scope for an air-gapped deployment.
 
-**Why 8 and not ASVS 2.1.1's 12.** A deliberate choice, not an oversight. The team password is a *shared* secret — read aloud or written on a whiteboard, then typed by a dozen people on phone keyboards — whereas ASVS's 12 assumes a personal password held in a password manager. The security difference on the reachable axis is nil: with `loginLimiter` allowing 20 failed attempts per 15 minutes per IP and team name (~3 800 guesses a day at two replicas), four lowercase characters fall in about two months while eight take on the order of 10⁴ years. Online guessing is already out of reach at 8 — the limiter binds, not the entropy — and the remaining gap to 12 only matters against an *offline* attack on stolen scrypt hashes, which implies a compromise with worse consequences than a guessed team password. The defect this closes was never the search space: four characters force `1234`, the team name or the sprint number, which are guessed on the first attempt and which no rate limiter can defend against.
+**Why 8 and not ASVS 2.1.1's 12.** A deliberate choice, not an oversight. The team password is a *shared* secret — read aloud or written on a whiteboard, then typed by a dozen people on phone keyboards — whereas ASVS's 12 assumes a personal password held in a password manager. The security difference on the reachable axis is nil: with `loginLimiter` allowing 20 failed attempts per 15 minutes per IP and team name (~3 800 guesses a day at two replicas), four lowercase characters fall in about two months while eight take on the order of 10⁴ years. Those figures are the login route's; the other routes that verify the password are bounded more loosely (below, pending decision D24), where eight random lowercase characters still take centuries but four fall within a day. Online guessing is already out of reach at 8 — the limiter binds, not the entropy — and the remaining gap to 12 only matters against an *offline* attack on stolen scrypt hashes, which implies a compromise with worse consequences than a guessed team password. The defect this closes was never the search space: four characters force `1234`, the team name or the sprint number, which are guessed on the first attempt and which no rate limiter can defend against.
 
 **The rule binds on write, never on verification.** A team whose password predates it keeps logging in with the short one indefinitely; it becomes compliant the next time the password is changed. This is deliberate — refusing to verify would lock every existing team out of its own history, and an availability cost is a security property too. The consequence to state plainly: **raising the minimum does not retroactively strengthen the passwords already in use**, so an operator who wants the floor to apply everywhere has to ask teams to rotate.
 
-The only brake on guessing is the rate limiter on `/api/team/login`: **20 rejected attempts per fifteen minutes, keyed on the client IP together with the team name, and counted per pod** — so a two-replica deployment admits roughly 3 800 guesses a day from one address against one team. (`AUTH_RATE_LIMIT_MAX`, documented elsewhere as 5, governs team creation and session restore, neither of which verifies a guessed password.) A team password is a *shared* secret protecting that team's entire history.
+Guessing is braked differently depending on the route. `/api/team/login` meters it: **20 rejected attempts per fifteen minutes, keyed on the client IP together with the team name, and counted per pod** — so a two-replica deployment admits roughly 3 800 guesses a day there from one address against one team. (`AUTH_RATE_LIMIT_MAX`, documented elsewhere as 5, governs team creation and session restore, neither of which verifies a guessed password.) **Every other team route that accepts the password does not** — `POST /api/team/:teamId` and its sub-routes, `/api/feedbacks/*` and the Jira team routes are bounded only by general per-IP request limiters, counted per pod (team reads 120 a minute, team writes 300, feedback 120 + 60, Jira 120 + 60 + 60). Those are independent instances whose budgets add up, and team ids are public (`/api/team/list`), so a guesser gets hundreds of attempts a minute from one address against one team. Whether to meter a rejected password on those routes the way the login route does is open as decision D24 (`HARDENING_STATUS.md` → H53). A team password is a *shared* secret protecting that team's entire history.
 
 What the browser and invite links hold:
 
@@ -94,6 +103,8 @@ Server-side backups and downloaded backup archives contain each team's stored cr
 
 - Restrict access to the backup volume/table and to `/api/super-admin/backups/download`
 - Store downloaded archives in an encrypted location and delete them when no longer needed
+
+**An imported file has the power of a backup.** The console's Backups tab can import a backup file (`/api/super-admin/backups/import`), which then sits in the list like any other backup: a whole-store restore from it sets every team's password, and a single-team restore of a team deleted since sets that team's. Import only files this deployment, or one you operate, produced. The import itself writes nothing but the backup row — no team, setting or secret — and it is recorded with the file's SHA-256 (`backup.import`, below), so the trail names the file a later restore came from. Imported rows are never removed automatically, nor are the protected snapshots each restore takes first: delete them once they are no longer needed.
 
 **What an archive does and does not contain.** It carries teams (with their members, retrospectives, health checks, actions and feedbacks), the team-name index, password-reset tokens and orphaned feedbacks. It does **not** carry `global-settings` — AI configuration, admin email, the info banner — nor live session state, nor anything of Jira: neither the connection (`jira-settings`) nor any team's token (`team-secret:{teamId}`, see *Jira tokens* below). Restoring into a fresh, empty database therefore restores the data but not the deployment's global configuration, which has to be re-entered from the super-admin panel.
 
@@ -174,17 +185,27 @@ Residuals, stated rather than discovered:
   verifies), and look up through the issue-type lookup whether a project or an
   issue key exists, an issue's project and a project's issue types — metadata
   of anything the account can see, never issue content, bounded by the routes'
-  per-IP limiter. Changing the stored target moves where the facilitator's next
-  issues go, quoted ticket context included: the per-action "Create in Jira"
-  sends to the stored target without showing it (the batch dialog shows the
-  target it sends). Use a technical account restricted to the team's projects.
-- **A team session token minted before a password rotation keeps working for
-  up to 7 days**, on the Jira routes as on every other (see *Session Tokens*).
-  Revoking sessions on a rotation is planned as separate work for every route.
+  per-IP limiter. Changing the stored target changes where the facilitator's
+  issues go, quoted card and group context included, once their screen reads the
+  team's Jira settings again (on entering Review, on a reconnect): every
+  creation, the per-action one included, sends the target the screen last
+  read, never one saved behind its back (the batch dialog shows it). In the mode that gives each retrospective or health check
+  a parent issue, the same credential can also create one parent issue per
+  session (and one for the team dashboard), send a batch under a parent of its
+  choosing anywhere the account reaches, and re-point a session's later
+  actions to it. Use a technical account restricted to the team's projects.
+- **Changing the team password revokes every session token**, the Jira routes
+  included (see *Session Tokens*). A batch chunk already past authentication
+  finishes; its next chunk is refused.
 - **Enabling Jira exports retrospective content to it**: each issue carries the
-  action's text and context — up to 50 characters of the ticket it came from,
-  quoted in anonymous sessions too (maintainer decision, 2026-10-20) — the
-  retrospective's or health check's name and date, and the requester's name.
+  action's text and context — the full text of the card it came from or, for
+  an action on a group, the group's title and the full text of every card in
+  the group (never their authors), quoted in anonymous sessions too
+  (maintainer decision, 2026-10-20; full cards and group cards since
+  2026-10-22) — the retrospective's or health check's name and date, and the
+  requester's name. An issue's readers in Jira may be wider than the team.
+  A session's parent issue carries the session's name and date (or the team's
+  name, for the dashboard's parent) and the requester's name.
   The batch dialog previews exactly what is sent. Record Jira as a recipient in
   the deployment's data-processing documentation.
 - **"Allow self-signed certificates" turns certificate checking off** for every
@@ -290,7 +311,9 @@ merge (`team.merge`), a change to a team's recovery email (`team.recovery-email-
 from the Dashboard or the console — that address is where a password-reset
 link is mailed), password changes (all three paths: the team's own rotation, a
 super-admin reset, and a reset-token confirmation), backup creation, download, restore and deletion —
-including the uploaded-archive restore and the whole-store download — the restore of a single team
+including the uploaded-archive restore and the whole-store download — a backup file imported into the
+Backups list (`backup.import`, with the file's SHA-256 and the new backup's id, which later
+`backup.restore` / `team.restore` rows carry), the restore of a single team
 from a backup (`team.restore`), AI
 reconfiguration, the console's Jira connection (`jira-settings.update`: the
 address every team's token is sent to, and whether certificates are checked), a

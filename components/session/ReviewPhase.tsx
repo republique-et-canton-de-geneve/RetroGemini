@@ -4,12 +4,15 @@ import { createTranslator } from '../../i18n/translate';
 import { Language, toLanguage } from '../../i18n/languages';
 import { ActionItem, JiraLink, JiraStatus, RetroSession, Team, Ticket, User } from '../../types';
 import { dataService } from '../../services/dataService';
+import { noteRevokedResponse } from '../../services/sessionRevocation';
 import { getTicketOriginColumn } from '../../utils/retroGrouping';
+import { ticketQuote } from '../../utils/textCut';
 import { ROTI_FOLLOW_UP_LINK_ID } from './retroConstants';
 import TicketOriginBadge from './TicketOriginBadge';
 import JiraActionControl from '../jira/JiraActionControl';
 import JiraBatchButton from '../jira/JiraBatchButton';
 import JiraDiscoveryNote from '../jira/JiraDiscoveryNote';
+import JiraParentLine from '../jira/JiraParentLine';
 import { mergeJiraLink, withJiraLinkFrom } from '../jira/jiraLinkMerge';
 import { useJiraStatus } from '../jira/useJiraStatus';
 
@@ -35,6 +38,8 @@ interface ActionRowProps {
   jiraStatus: JiraStatus | null;
   /** The live session, which the server patches with the link too (finding A-5). */
   sessionId: string;
+  /** The retrospective on screen, for the dialog the sub-task modes open. */
+  session: RetroSession;
   /** Who clicked, named in the issue's description. */
   requestedBy: string;
   onJiraStatusStale: () => void;
@@ -54,6 +59,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
   contentLanguage,
   jiraStatus,
   sessionId,
+  session,
   requestedBy,
   onJiraStatusStale
 }) => {
@@ -107,9 +113,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
       if (action.linkedTicketId) {
         const ticket = retro.tickets.find((item) => item.id === action.linkedTicketId);
         if (ticket) {
-          contextText = contentT('phases.actions.contextTicket', {
-            text: `${ticket.text.substring(0, 50)}${ticket.text.length > 50 ? '...' : ''}`
-          });
+          contextText = contentT('phases.actions.contextTicket', { text: ticketQuote(ticket.text) });
           break;
         }
         const group = retro.groups.find((item) => item.id === action.linkedTicketId);
@@ -186,6 +190,8 @@ const ActionRow: React.FC<ActionRowProps> = ({
               sessionId={sessionId}
               kind="retro"
               requestedBy={requestedBy}
+              team={currentTeam}
+              session={session}
               onCreated={() => setRefreshTick((tick) => tick + 1)}
               onStatusStale={onJiraStatusStale}
             />
@@ -274,11 +280,12 @@ const ReviewPhase: React.FC<Props> = ({
   const handleGenerateSummary = async () => {
     setAiGenerating(true);
     try {
+      const sentToken = dataService.getSessionToken();
       const response = await fetch('/api/ai/generate-retro-summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sessionToken: dataService.getSessionToken(),
+          sessionToken: sentToken,
           sessionData: {
             name: session.name,
             columns: session.columns,
@@ -298,6 +305,10 @@ const ReviewPhase: React.FC<Props> = ({
             draft.reviewSummary = data.summary;
           });
         }
+      } else {
+        // Decision D3b: a password change signs the session out, which the
+        // session screen then says.
+        await noteRevokedResponse(response, sentToken);
       }
     } catch (err) {
       console.error('Failed to generate AI summary', err);
@@ -426,6 +437,7 @@ const ReviewPhase: React.FC<Props> = ({
     contentLanguage: toLanguage(session.templateLanguage, 'en'),
     jiraStatus,
     sessionId: session.id,
+    session,
     requestedBy: currentUser.name,
     onJiraStatusStale: () => { void refreshJiraStatus(); }
   };
@@ -501,6 +513,17 @@ const ReviewPhase: React.FC<Props> = ({
               requestedBy={currentUser.name}
               onDone={() => setRefreshTick((tick) => tick + 1)}
               onStatusStale={() => { void refreshJiraStatus(); }}
+            />
+          </div>
+          {/* The retro's parent issue (sessionParent mode), for the facilitator. */}
+          <div className="mb-4 empty:hidden">
+            <JiraParentLine
+              link={currentTeam.jiraParents?.[`retro:${session.id}`]}
+              status={jiraStatus}
+              isFacilitator={isFacilitator}
+              kind="retro"
+              session={session}
+              team={currentTeam}
             />
           </div>
           <div className="space-y-4">

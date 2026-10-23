@@ -45,7 +45,11 @@ const phases = {
     'This session belongs to another team. Nothing you do here is being saved — log in with that team to join it.',
   'phases.sync.deniedExpired':
     'Your session has expired, so nothing you do here is being saved. Log in again to rejoin the session.',
+  // Decision D3b: the team's password was changed (useSessionRevoked).
+  'phases.sync.deniedRevoked':
+    'The team password was changed, so nothing you do here is being saved any more. Log in again with the new password or a new invitation link to rejoin the session.',
   'phases.sync.signedOutTitle': 'Session expired — log in again to rejoin',
+  'phases.sync.signedOutRevokedTitle': 'Password changed — log in again to rejoin',
   'phases.sync.signedOut': 'Signed out',
   'phases.sync.reconnectingTitle': 'Disconnected — reconnecting',
   'phases.sync.reconnecting': 'Reconnecting…',

@@ -11,7 +11,6 @@ const adminBackups = {
   'adminBackups.config.hours': '{hours}h',
   'adminBackups.config.maxCount': 'Max kept: {value}',
   'adminBackups.config.onStartup': 'Startup backup: {value}',
-  'adminBackups.config.directory': 'Directory: {value}',
 
   // Checkpoint
   'adminBackups.checkpoint.create': 'Create Checkpoint',
@@ -32,6 +31,7 @@ const adminBackups = {
   'adminBackups.type.auto': 'auto',
   'adminBackups.type.manual': 'manual',
   'adminBackups.type.startup': 'startup',
+  'adminBackups.type.imported': 'imported',
   // The two labels the server writes itself. A manual checkpoint's label is
   // whatever the operator typed and is never translated.
   'adminBackups.label.startup': 'Server startup',
@@ -64,6 +64,40 @@ const adminBackups = {
   'adminBackups.notice.deleted': 'Backup deleted',
   'adminBackups.notice.deleteFailed': 'Failed to delete backup',
   'adminBackups.notice.updateFailed': 'Failed to update backup',
+  'adminBackups.notice.restoreInvalid':
+    'This backup cannot be restored: its content is not a valid archive. Nothing was changed.',
+
+  // Importing a backup file
+  'adminBackups.import.title': 'Import a backup file',
+  'adminBackups.import.description':
+    'Add a backup file downloaded from this console (.json.gz), or a JSON archive, to the list below. Importing restores nothing: afterwards, restore one or more teams from it, or all data. An imported file is never removed automatically, and neither is the snapshot each restore takes first: delete them when you no longer need them.',
+  'adminBackups.import.fileLabel': 'Backup file',
+  'adminBackups.import.hint': 'A .json.gz or .json file of {max} MB at most.',
+  'adminBackups.import.hintNoLimit': 'A .json.gz or .json file.',
+  'adminBackups.import.submit': 'Import the file',
+  'adminBackups.import.importing': 'Importing...',
+  'adminBackups.import.status.importing': 'Importing "{name}" ({size})...',
+  'adminBackups.import.imported': '"{name}" was imported. Teams in this file: {count}.',
+  'adminBackups.import.error.noFile': 'Choose a backup file first.',
+  'adminBackups.import.error.emptyFile': 'This file is empty.',
+  'adminBackups.import.error.tooLarge': 'This file is larger than the server accepts: {max} MB at most.',
+  'adminBackups.import.error.tooLargeUnpacked':
+    'Once unpacked, this archive is larger than the server accepts: {max} MB at most.',
+  'adminBackups.import.error.proxyTooLarge':
+    'The network in front of the server refused a file this large before it reached the application. Ask your operator to raise the upload limit of the ingress or proxy.',
+  'adminBackups.import.error.invalidFormat':
+    'This file is not a backup archive, or it is incomplete: it must hold JSON, compressed with gzip or not.',
+  'adminBackups.import.error.invalidData': 'This file holds no list of teams, so it is not a backup of this application.',
+  'adminBackups.import.error.teamMalformed':
+    'Some entries of this file are not teams (no id or no name): {count}. Nothing was imported.',
+  'adminBackups.import.error.duplicateTeams': 'This file holds the same team more than once ({ids}). Nothing was imported.',
+  'adminBackups.import.error.listMalformed': 'This file is damaged: "{field}" is not a list. Nothing was imported.',
+  'adminBackups.import.error.inProgress': 'Another file is being imported. Wait for it to finish, then try again.',
+  'adminBackups.import.error.unavailable':
+    'This server cannot import files yet, probably because an update is in progress. Try again in a few minutes.',
+  'adminBackups.import.error.uncertain':
+    'No answer came back from the server, but the file may still be imported: it can take a minute to appear in the list below. Check the list before importing the file again.',
+  'adminBackups.import.error.failed': 'The file could not be imported. Check the list below before trying again.',
 
   // Restoring one team
   'adminBackups.teamRestore.title': 'Restore one team',

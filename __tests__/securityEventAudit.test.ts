@@ -13,6 +13,7 @@ import { registerSuperAdminRoutes } from '../server/routes/superAdminRoutes.js';
 import { registerPasswordResetRoutes } from '../server/routes/passwordResetRoutes.js';
 import { SECURITY_ACTIONS } from '../server/services/securityEvents.js';
 import { JIRA_MOCK_CLOUD_EMAIL, JIRA_MOCK_CLOUD_TOKEN, startJiraMock, type JiraMock } from './helpers/jiraMock';
+import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 /**
  * Audit H45, the wiring half — **every privileged route records what it did.**
@@ -57,6 +58,7 @@ const createMockDataStore = () => {
   // The Jira connection and the teams' sealed tokens live in rows of their own.
   let jiraSettings: Record<string, unknown> | null = null;
   const secrets = new Map<string, Record<string, unknown>>();
+  const authState = createTeamAuthStateDouble((teamId) => teams.has(teamId));
 
   return {
     seed: (team: Team) => {
@@ -77,6 +79,10 @@ const createMockDataStore = () => {
       return team ? clone(team) : null;
     },
     loadAllTeams: async () => [...teams.values()].map(clone),
+    // What the post-restore password pass reads: two fields per team.
+    loadTeamPasswordHashes: async () => [...teams.values()].map((t) => ({
+      id: t.id, passwordHash: typeof t.passwordHash === 'string' ? t.passwordHash : null
+    })),
     loadAllTeamFeedbacks: async () => [],
     loadTeamSummaries: async () => [...teams.values()].map((t) => ({
       id: t.id, name: t.name, members: [], mergedFrom: (t.mergedFrom as unknown[]) || []
@@ -95,14 +101,14 @@ const createMockDataStore = () => {
     deleteTeamRecord: async (teamId: string) => {
       teams.delete(teamId);
     },
-    atomicTeamUpdate: async (teamId: string, updater: (team: Team) => Team | null) => {
+    atomicTeamUpdate: authState.withRotation(async (teamId: string, updater: (team: Team) => Team | null) => {
       const existing = teams.get(teamId);
       if (!existing) return { success: false, error: 'team_not_found' };
       const updated = updater(clone(existing));
       if (!updated) return { success: true, team: clone(existing) };
       teams.set(teamId, clone(updated));
       return { success: true, team: clone(updated) };
-    },
+    }),
     loadTeamIndex: async () => new Map(indexMap),
     atomicTeamIndexUpdate: async (updater: (index: Map<string, string>) => Map<string, string> | null) => {
       const next = updater(new Map(indexMap));
@@ -125,6 +131,10 @@ const createMockDataStore = () => {
     },
     loadSessionState: async () => null,
     teamExists: async (teamId: string) => teams.has(teamId),
+    // Decision D3b: the session epoch every token check reads, rotated by the
+    // password routes through `atomicTeamUpdate` below.
+    loadTeamAuthState: authState.loadTeamAuthState,
+    rotateTeamSessionEpoch: authState.rotateTeamSessionEpoch,
     loadTeamSummary: async (teamId: string) => {
       const team = teams.get(teamId);
       return team ? { id: team.id, name: team.name, members: [], jiraTarget: clone(team.jiraTarget ?? null) } : null;
@@ -150,7 +160,10 @@ const createMockDataStore = () => {
 };
 
 const createBackupService = () => ({
+  // The download's archive (the real one is built from the store).
+  buildArchive: vi.fn(async () => ({ data: Buffer.from('gz'), teamCount: 2, unrestorable: [] })),
   createBackup: vi.fn(async () => ({ id: 'backup-1', type: 'manual', teamCount: 2 })),
+  createBackupOutcome: vi.fn(async () => ({ entry: { id: 'backup-1', type: 'manual', teamCount: 2 }, reason: null })),
   listBackups: vi.fn(async () => [{ id: 'backup-1' }]),
   getBackupConfig: vi.fn(() => ({ enabled: true, maxCount: 7 })),
   getBackupData: vi.fn(async () => ({ filename: 'backup-1.json.gz', data: Buffer.from('gz') })),
@@ -158,6 +171,11 @@ const createBackupService = () => ({
   readBackupArchive: vi.fn(async () => ({
     filename: 'backup-1.json.gz',
     data: { teams: [{ id: TEAM_ID, name: 'Archived name', passwordHash: 'archived', members: [], retrospectives: [] }] }
+  })),
+  importBackup: vi.fn(async (body: Buffer) => ({
+    entry: { id: 'backup-imported', type: 'imported', teamCount: 1, sizeBytes: body.length },
+    sha256: 'f'.repeat(64),
+    compressed: false
   })),
   deleteBackup: vi.fn(async () => true),
   updateBackup: vi.fn(async (id: string) => ({ id }))
@@ -272,6 +290,19 @@ describe('H45 — every privileged route records a security event', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
       ...init
+    });
+
+  // The backup import takes a raw body behind header auth, like the uploaded
+  // restore.
+  const importFile = () =>
+    fetch(`${baseUrl}/api/super-admin/backups/import`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        'x-super-admin-password': SUPER_ADMIN_PASSWORD,
+        'x-backup-label': encodeURIComponent('archive.json')
+      },
+      body: Buffer.from(JSON.stringify({ teams: [{ id: 'imported', name: 'Imported' }] }), 'utf8')
     });
 
   const events = () => harness.recorded;
@@ -428,6 +459,18 @@ describe('H45 — every privileged route records a security event', () => {
     expect(eventFor(SECURITY_ACTIONS.BACKUP_RESTORE)).toMatchObject({
       actor: 'super-admin',
       outcome: 'success'
+    });
+  });
+
+  it('records an imported backup file, naming the new backup and the file by its digest', async () => {
+    const response = await importFile();
+    expect(response.status).toBe(200);
+
+    expect(eventFor(SECURITY_ACTIONS.BACKUP_IMPORT)).toMatchObject({
+      actor: 'super-admin',
+      outcome: 'success',
+      target: 'backup-imported',
+      detail: { teamCount: 1, compressed: false, sha256: 'f'.repeat(64), label: 'archive.json' }
     });
   });
 
@@ -606,6 +649,11 @@ describe('H45 — every privileged route records a security event', () => {
     await post('/api/super-admin/update-password', {
       password: SUPER_ADMIN_PASSWORD, teamId: TEAM_ID, newPassword: NEW_PASSWORD
     });
+    // The console's password change revoked every session token of the team
+    // (decision D3b): the team routes below need one minted since.
+    teamToken = harness.tokenService.createSessionToken(TEAM_ID, null, {
+      sessionEpoch: (await harness.dataStore.loadTeamAuthState(TEAM_ID)).sessionEpoch
+    });
     for (const [path, body] of [
       ['/api/super-admin/backups/create', {}],
       ['/api/super-admin/backups/download', { backupId: 'backup-1' }],
@@ -617,6 +665,7 @@ describe('H45 — every privileged route records a security event', () => {
     ] as [string, Record<string, unknown>][]) {
       await post(path, { password: SUPER_ADMIN_PASSWORD, ...body });
     }
+    expect((await importFile()).status).toBe(200);
     expect((await mergeTeams({ name: 'Merged', passwordSource: 'primary' })).status).toBe(201);
     await post('/api/super-admin/update-email', {
       password: SUPER_ADMIN_PASSWORD, teamId: TEAM_ID, facilitatorEmail: 'audit@example.org'
@@ -633,6 +682,7 @@ describe('H45 — every privileged route records a security event', () => {
     // "Reading the audit trail"), and the Jira routes emit them through the
     // constants, so nothing else would notice a renamed value.
     expect(SECURITY_ACTIONS).toMatchObject({
+      BACKUP_IMPORT: 'backup.import',
       JIRA_SETTINGS_UPDATE: 'jira-settings.update',
       TEAM_JIRA_TOKEN_CHANGE: 'team.jira-token-change'
     });

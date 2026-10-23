@@ -59,6 +59,8 @@ const STOP_CODES = [
   'jira_parent_invalid',
   // Jira refused a field of the target (labels, issue type, project, parent).
   'jira_target_refused',
+  // Jira refused to create a session's parent issue (sessionParent mode).
+  'jira_parent_refused',
   // jiraService's own: an answer that was lost.
   'outcome_unknown'
 ];
@@ -98,6 +100,7 @@ const EXPECTED_KEY: Record<string, MessageKey> = {
   server_restarting: 'errors.jiraServerRestarting',
   client_gone: 'errors.jiraClientGone',
   jira_target_refused: 'errors.jiraTargetRefused',
+  jira_parent_refused: 'errors.jiraParentRefused',
   outcome_unknown: 'errors.jiraOutcomeUnknown'
 };
 
@@ -130,7 +133,8 @@ describe('Jira error codes on screen', () => {
     'jira_token_missing',
     'jira_token_unusable',
     'token_refused',
-    'jira_target_missing'
+    'jira_target_missing',
+    'jira_parent_refused'
   ])('names where the team settings are, as the screens do, for %s', (code) => {
     // Each of these is fixed in the team's Jira settings, so its sentence says
     // where they are. The path is built from the Dashboard's own labels;

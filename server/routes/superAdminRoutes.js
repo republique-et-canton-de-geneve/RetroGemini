@@ -1,6 +1,5 @@
 import express from 'express';
 import { randomBytes } from 'crypto';
-import { gzipSync } from 'zlib';
 import rateLimit from 'express-rate-limit';
 import {
   getRestoreMaxBodyBytes,
@@ -9,16 +8,24 @@ import {
 } from '../services/restoreArchive.js';
 import { hashPassword } from '../services/passwordHashing.js';
 import { isPasswordLongEnough, PASSWORD_TOO_SHORT_ERROR } from '../../utils/passwordPolicy.js';
+// Stored text is cut without ever halving an emoji (utils/textCut.js).
+import { cutCodeUnits } from '../../utils/textCut.js';
 import { migrateLegacyPasswords } from '../services/passwordMigration.js';
 import { healStoredEmails } from '../services/emailMigration.js';
 import { INVALID_EMAIL_ERROR, parseEmailInput } from '../../utils/emailAddress.js';
 import { getTeamInviteEpoch } from '../services/teamService.js';
 import { claimTeamNameKey, nameHeldByAnotherRecord, releaseTeamNameKey, releaseTeamNameKeys } from '../services/teamNameIndex.js';
 import { SECURITY_ACTIONS, NO_OP_SECURITY_EVENTS } from '../services/securityEvents.js';
+import { NO_OP_SESSION_REVOCATION } from '../services/sessionRevocation.js';
 import { registerSuperAdminTeamMergeRoutes } from './superAdminTeamMergeRoutes.js';
 import { registerSuperAdminTeamRestoreRoutes } from './superAdminTeamRestoreRoutes.js';
+import { registerSuperAdminBackupImportRoutes } from './superAdminBackupImportRoutes.js';
+import { createSuperAdminHeaderAuth } from './superAdminHeaderAuth.js';
+import { createArchiveBodyErrorHandler } from './archiveBodyErrors.js';
+import { archiveShapeProblem } from '../services/archiveShape.js';
 import { registerJiraAdminRoutes } from './jiraRoutes.js';
 import { createRestoreGate, RESTORE_IN_PROGRESS_ERROR } from '../services/restoreGate.js';
+import { createRepeatCoalescer } from '../services/logCoalescer.js';
 
 const registerSuperAdminRoutes = ({
   app,
@@ -34,16 +41,24 @@ const registerSuperAdminRoutes = ({
   aiService,
   serverRuntime = { multiPodAdapter: false },
   restoreMaxDecompressedBytes = undefined,
+  // Tests only, like the one above: the upload cap of the raw-archive routes
+  // (`/restore` and `/backups/import`), otherwise RESTORE_MAX_BODY_MB.
+  restoreMaxBodyBytes = undefined,
   // Audit H45. Defaulted to a no-op so the route suites that build their own
   // app need no change — which is exactly why forgetting to wire it in
   // `server.js` would leave every test green and record nothing in production.
   // `__tests__/securityEventAudit` asserts the real wiring against `server.js`
   // itself; that check is the price of this default.
   securityEvents = NO_OP_SECURITY_EVENTS,
+  // Decision D3b — cuts the live-session sockets of a team whose password
+  // changed (update-password, the single-team restore of a deleted team) and
+  // re-checks every socket after a whole-store restore. A no-op by default for
+  // the reason given for `securityEvents`; `server.js` is the wiring.
+  sessionRevocation = NO_OP_SESSION_REVOCATION,
   // What the Jira route tests inject into the Jira client (short timeouts).
   jiraClientOptions = {}
 }) => {
-  const maxRestoreArchiveBytes = getRestoreMaxBodyBytes();
+  const maxRestoreArchiveBytes = restoreMaxBodyBytes ?? getRestoreMaxBodyBytes();
   // Shared by the three restore routes (two here, one in
   // `superAdminTeamRestoreRoutes.js`): see `server/services/restoreGate.js`.
   const restoreGate = createRestoreGate();
@@ -56,6 +71,11 @@ const registerSuperAdminRoutes = ({
   // state. This pod clears its own cache directly; the cross-pod broadcast
   // reaches the others via the Socket.IO adapter (skipped on single-pod
   // deployments, whose in-memory adapter does not support serverSideEmit).
+  //
+  // Decision D3b: the replace may also have given teams a new session epoch
+  // (a password rolled back, a team brought back or deleted), so this pod
+  // re-checks every live socket against its team's epoch, and the other pods
+  // do the same on `sessions-invalidated` (socketHandlers.js).
   const invalidateSessionCaches = () => {
     if (sessionCache && typeof sessionCache.clear === 'function') {
       sessionCache.clear();
@@ -67,6 +87,9 @@ const registerSuperAdminRoutes = ({
         console.warn('[Server] Failed to broadcast cross-pod session invalidation', err);
       }
     }
+    sessionRevocation.sweepAllLocal().catch((err) => {
+      console.warn('[Server] Session revocation sweep after a restore failed', err);
+    });
   };
 
   // Decision D1 / H23 prerequisite 2 — a restore is the one operation that can
@@ -178,11 +201,24 @@ const registerSuperAdminRoutes = ({
     sessionCache,
     backupService,
     securityEvents,
+    sessionRevocation,
     afterRestore: async () => {
       await rehashRestoredPasswords();
       await healRestoredEmails();
     },
     restoreGate,
+    skipRateLimit: shouldSkipSuperAdminLimit
+  });
+  // Importing a backup file as a backup row (`superAdminBackupImportRoutes.js`),
+  // registered here for the same reasons. It takes its own per-pod gate, not
+  // `restoreGate`: it writes one `backups` row and nothing a restore writes.
+  registerSuperAdminBackupImportRoutes({
+    app,
+    tokenService,
+    backupService,
+    securityEvents,
+    maxBodyBytes: maxRestoreArchiveBytes,
+    maxDecompressedBytes: maxRestoreDecompressedBytes,
     skipRateLimit: shouldSkipSuperAdminLimit
   });
   // The deployment's Jira connection (`jiraRoutes.js`), beside the AI
@@ -631,7 +667,7 @@ This notification was sent from RetroGemini.
         teamName: 'Super Admin',
         authorId: 'super-admin',
         authorName: 'Super Admin',
-        content: content.trim().slice(0, 1000),
+        content: cutCodeUnits(content.trim(), 1000),
         createdAt: new Date().toISOString(),
         isAdmin: true
       };
@@ -699,7 +735,7 @@ This notification was sent from RetroGemini.
         const typeLabel = feedbackType === 'bug' ? 'Bug Report' : 'Feature Request';
         const safeFeedbackTitle = escapeHtml(feedbackTitle);
         const safeTeamName = escapeHtml(teamName);
-        const safeContent = escapeHtml(content.trim().slice(0, 1000));
+        const safeContent = escapeHtml(newComment.content);
 
         try {
           await mailerService.mailer.sendMail({
@@ -710,7 +746,7 @@ This notification was sent from RetroGemini.
 
 The administrator has added a comment on your ${typeLabel} "${feedbackTitle}":
 
-"${content.trim().slice(0, 1000)}"
+"${newComment.content}"
 
 ---
 This notification was sent from RetroGemini.
@@ -764,12 +800,15 @@ This notification was sent from RetroGemini.
 
     try {
       const newPasswordHash = await hashPassword(newPassword);
+      // Decision D3b: and every session token of the team, in the same
+      // transaction. The super admin is no team member, so no token comes
+      // back. Writing the epoch blindly also repairs a corrupt one.
       const result = await dataStore.atomicTeamUpdate(teamId, (team) => {
         team.passwordHash = newPasswordHash;
         // Password rotation revokes outstanding invite links (stage 7e).
         team.inviteEpoch = getTeamInviteEpoch(team) + 1;
         return team;
-      });
+      }, { rotateSessionEpoch: true });
       if (!result.success) {
         return res.status(404).json({ error: 'team_not_found' });
       }
@@ -777,9 +816,13 @@ This notification was sent from RetroGemini.
         action: SECURITY_ACTIONS.TEAM_PASSWORD_CHANGE,
         actor: 'super-admin',
         outcome: 'success',
-        target: teamId
+        target: teamId,
+        detail: { sessionsRevoked: true }
       });
       res.json({ success: true });
+      sessionRevocation.revokeTeamSessions(teamId).catch((err) => {
+        console.warn('[Server] Session revocation after a console password change failed', err);
+      });
     } catch (err) {
       console.error('[Server] Failed to update password', err);
       res.status(500).json({ error: 'failed_to_save' });
@@ -887,16 +930,58 @@ This notification was sent from RetroGemini.
     }
   });
 
-  const requireSuperAdminRestoreAuth = (req, res, next) => {
-    const password = req.header('x-super-admin-password');
-    const sessionToken = req.header('x-super-admin-session-token');
-
-    if (!tokenService.validateSuperAdminAuth({ password, sessionToken })) {
-      return res.status(401).json({ error: 'unauthorized' });
+  // Parses, checks and applies an uploaded archive, and answers only what the
+  // route needs afterwards — a refusal, or the snapshot and the team count —
+  // never the parsed archive, for the reason `applyStoredArchive` gives: an
+  // archive declared in the route itself stays reachable through the
+  // post-restore passes, which parse the whole store again. `enterGate` is the
+  // route's, so the gate stays held until the passes are done.
+  const applyUploadedArchive = async (body, contentType, enterGate) => {
+    let data;
+    try {
+      data = await parseRestoreArchiveBody(body, contentType, maxRestoreDecompressedBytes);
+    } catch (err) {
+      if (err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') {
+        return { refusal: { status: 413, body: { error: 'restore_archive_too_large' } } };
+      }
+      return { refusal: { status: 400, body: { error: 'invalid_backup_format' } } };
     }
 
-    return next();
+    // The rule the import and the stored-backup restore apply too
+    // (`archiveShape.js`), before the gate and the snapshot. Restore is a
+    // destructive faithful replace: a malformed upload (`{}`,
+    // `{ "teams": {} }`, a truncated file) silently coerced to `teams: []`
+    // would wipe every team and live session, and a nameless team would
+    // crash the replace after the earlier teams were written. A
+    // legitimate "restore to empty" is still an explicit `teams: []`.
+    const problem = archiveShapeProblem(data);
+    if (problem) {
+      return { refusal: { status: 400, body: { error: 'invalid_backup_data', ...problem } } };
+    }
+
+    if (!enterGate()) {
+      return { refusal: { status: 409, body: { error: RESTORE_IN_PROGRESS_ERROR } } };
+    }
+
+    // Snapshot the current state before the destructive replace, so a
+    // faithful restore is recoverable if it drops the wrong data. The
+    // snapshot is protected from retention purge because it may be the only
+    // copy of the pre-restore state. Abort if it cannot be created
+    // (createBackup returns null when another backup is in progress or the
+    // snapshot write fails): proceeding would run the destructive replace
+    // with no recovery point.
+    const snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
+    if (!snapshot) {
+      return { refusal: { status: 503, body: { error: 'pre_restore_snapshot_failed' } } };
+    }
+
+    await dataStore.savePersistedData(data, { mode: 'replace' });
+    return { snapshot, teamCount: data.teams.length };
   };
+
+  // Shared with the import route (`superAdminHeaderAuth.js`): the raw body
+  // carries no JSON credential, and the header is checked before it is read.
+  const requireSuperAdminRestoreAuth = createSuperAdminHeaderAuth(tokenService);
 
   app.post(
     '/api/super-admin/restore',
@@ -923,52 +1008,22 @@ This notification was sent from RetroGemini.
 
       let gateHeld = false;
       try {
-        let data;
-        try {
-          data = await parseRestoreArchiveBody(req.body, req.header('content-type'), maxRestoreDecompressedBytes);
-        } catch (err) {
-          if (err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') {
-            return res.status(413).json({ error: 'restore_archive_too_large' });
-          }
-          return res.status(400).json({ error: 'invalid_backup_format' });
+        // Only the outcome is in scope from here on, never the parsed archive:
+        // the passes below load the whole store again (see
+        // `applyUploadedArchive`). The raw upload stays on the request.
+        const outcome = await applyUploadedArchive(req.body, req.header('content-type'), () => {
+          gateHeld = restoreGate.tryEnter();
+          return gateHeld;
+        });
+        if (outcome.refusal) {
+          return res.status(outcome.refusal.status).json(outcome.refusal.body);
         }
 
-        if (!data || typeof data !== 'object') {
-          return res.status(400).json({ error: 'invalid_backup_data' });
-        }
-
-        // Reject a payload without a real `teams` array. Restore is now a
-        // destructive faithful replace, so silently coercing a malformed upload
-        // (`{}`, `{ "teams": {} }`, a truncated file) to `teams: []` would wipe
-        // every team and live session. A legitimate "restore to empty" is still
-        // possible via an explicit `teams: []`.
-        if (!Array.isArray(data.teams)) {
-          return res.status(400).json({ error: 'invalid_backup_data' });
-        }
-
-        if (!restoreGate.tryEnter()) {
-          return res.status(409).json({ error: RESTORE_IN_PROGRESS_ERROR });
-        }
-        gateHeld = true;
-
-        // Snapshot the current state before the destructive replace, so a
-        // faithful restore is recoverable if it drops the wrong data. The
-        // snapshot is protected from retention purge because it may be the only
-        // copy of the pre-restore state. Abort if it cannot be created
-        // (createBackup returns null when another backup is in progress or the
-        // snapshot write fails): proceeding would run the destructive replace
-        // with no recovery point.
-        const snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
-        if (!snapshot) {
-          return res.status(503).json({ error: 'pre_restore_snapshot_failed' });
-        }
-
-        await dataStore.savePersistedData(data, { mode: 'replace' });
         invalidateSessionCaches();
         await rehashRestoredPasswords();
         await healRestoredEmails();
 
-        const teamCount = data.teams.length;
+        const { teamCount, snapshot } = outcome;
         console.info('[Server] Restored backup');
 
         await securityEvents.record(req, {
@@ -985,7 +1040,14 @@ This notification was sent from RetroGemini.
       } finally {
         if (gateHeld) restoreGate.leave();
       }
-    }
+    },
+    // JSON answers for a body the parser refused, so the console tells the
+    // server's own size limit from a proxy's (`archiveBodyErrors.js`).
+    createArchiveBodyErrorHandler({
+      maxBytes: maxRestoreArchiveBytes,
+      failedError: 'restore_failed',
+      logMessage: '[Server] Failed to restore backup'
+    })
   );
 
   app.post('/api/super-admin/backup', superAdminActionLimiter, async (_req, res) => {
@@ -994,14 +1056,13 @@ This notification was sent from RetroGemini.
     }
 
     try {
-      const currentData = await dataStore.loadPersistedData();
+      // The builder every stored backup uses, so a download is the same bytes
+      // a backup row holds (compact JSON, team by team through gzip). Buffered
+      // before anything is sent: piping gzip into the response would save a
+      // truncated file as "downloaded" when a read fails after the headers.
+      const { data: compressed, teamCount } = await backupService.buildArchive();
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const filename = `retrogemini-backup-${timestamp}.json.gz`;
-
-      const jsonData = JSON.stringify(currentData, null, 2);
-      const compressed = gzipSync(Buffer.from(jsonData, 'utf8'));
-
-      const teamCount = currentData.teams?.length || 0;
       console.info(`[Server] Creating backup: ${teamCount} team(s)`);
 
       // Every team's data leaves the deployment in this response, so the
@@ -1037,7 +1098,10 @@ This notification was sent from RetroGemini.
     try {
       const backups = await backupService.listBackups();
       const config = backupService.getBackupConfig();
-      res.json({ backups, config });
+      // What the console checks a file against before uploading it, and the
+      // numbers its messages quote. Additive: an older console ignores it.
+      const limits = { maxArchiveBytes: maxRestoreArchiveBytes, maxUnpackedBytes: maxRestoreDecompressedBytes };
+      res.json({ backups, config, limits });
     } catch (err) {
       console.error('[Server] Failed to list backups', err);
       res.status(500).json({ error: 'list_failed' });
@@ -1051,9 +1115,15 @@ This notification was sent from RetroGemini.
 
     try {
       const { label } = req.body || {};
-      const entry = await backupService.createBackup('manual', label || undefined);
+      // Two different refusals: another backup is running (retry later), or
+      // the store could not be read whole (a corrupt row: the pod log and the
+      // Logs tab name it). Answering 409 for both read "a backup is already in
+      // progress" for as long as the row stayed corrupt.
+      const { entry, reason } = await backupService.createBackupOutcome('manual', label || undefined);
       if (!entry) {
-        return res.status(409).json({ error: 'backup_in_progress' });
+        return reason === 'in_progress'
+          ? res.status(409).json({ error: 'backup_in_progress' })
+          : res.status(500).json({ error: 'create_failed' });
       }
       await securityEvents.record(req, {
         action: SECURITY_ACTIONS.BACKUP_CREATE,
@@ -1102,16 +1172,73 @@ This notification was sent from RetroGemini.
     }
   });
 
+  // Reads, checks and applies a stored archive, and answers only what the
+  // route needs afterwards — a refusal, or the restored entry — never the
+  // archive. It runs in a function of its own on purpose: an async function's
+  // suspended frame keeps every local it declared, so an `archive` declared in
+  // the route itself stays reachable through the post-restore passes. Those
+  // read projections (the password pass two fields per team, the email heal
+  // the summaries), but the parsed archive is the largest object a restore
+  // builds, and nothing after the replace needs it.
+  // `__tests__/restoreArchiveRetention.test.ts` observes that with `gc()`.
+  const applyStoredArchive = async (backupId) => {
+    // Read and checked *after* the snapshot, never before: the snapshot reads
+    // the whole store (one team at a time, through gzip), and a parsed
+    // whole-store archive held across those reads would be held for nothing.
+    // Rows imported since 41.0 were checked when written; this check is for
+    // rows written before, or by hand.
+    let archive;
+    try {
+      archive = await backupService.readBackupArchive(backupId);
+    } catch (err) {
+      if (err?.code === 'RESTORE_ARCHIVE_TOO_LARGE') {
+        return { refusal: { status: 413, body: { error: 'restore_archive_too_large' } } };
+      }
+      // `parseRestoreArchiveBody` rethrows zlib's own errors (Z_DATA_ERROR,
+      // Z_BUF_ERROR…) for a corrupt or truncated gzip.
+      if (err?.code === 'INVALID_RESTORE_ARCHIVE' || (typeof err?.code === 'string' && err.code.startsWith('Z_'))) {
+        return { refusal: { status: 422, body: { error: 'invalid_backup_data', reason: 'unreadable' } } };
+      }
+      console.error('[Server] Failed to read a backup before restoring it', err);
+      return { refusal: { status: 500, body: { error: 'restore_failed' } } };
+    }
+    if (!archive) {
+      // Deleted between the existence check and the read.
+      return { refusal: { status: 404, body: { error: 'backup_not_found' } } };
+    }
+    const problem = archiveShapeProblem(archive.data);
+    if (problem) {
+      return { refusal: { status: 422, body: { error: 'invalid_backup_data', ...problem } } };
+    }
+    // An error thrown here is the route's to handle: the replace may have
+    // started, so its snapshot is kept.
+    return { entry: await backupService.restoreFromBackup(backupId, { archive }) };
+  };
+
   app.post('/api/super-admin/backups/restore', superAdminActionLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
 
     let gateHeld = false;
+    let snapshot = null;
+    // A refusal after the snapshot removes the snapshot it took: nothing was
+    // written, and a protected snapshot is never pruned by retention.
+    const refuse = async (status, body) => {
+      if (snapshot) await backupService.deleteBackup(snapshot.id).catch(() => {});
+      return res.status(status).json(body);
+    };
     try {
       const { backupId } = req.body || {};
       if (!backupId) {
         return res.status(400).json({ error: 'missing_backup_id' });
+      }
+      // Does the backup exist? Answered from the metadata alone (no archive
+      // column is read), before the gate and the snapshot: an unknown id used
+      // to leave a protected snapshot behind and answer 500.
+      const known = (await backupService.listBackups()).some((backup) => backup.id === backupId);
+      if (!known) {
+        return res.status(404).json({ error: 'backup_not_found' });
       }
       if (!restoreGate.tryEnter()) {
         return res.status(409).json({ error: RESTORE_IN_PROGRESS_ERROR });
@@ -1124,12 +1251,18 @@ This notification was sent from RetroGemini.
       // cannot be created (createBackup returns null when another backup is in
       // progress or the snapshot write fails): proceeding would run the
       // destructive replace with no recovery point.
-      const snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
+      snapshot = await backupService.createBackup('auto', 'Pre-restore snapshot', { protected: true });
       if (!snapshot) {
         return res.status(503).json({ error: 'pre_restore_snapshot_failed' });
       }
 
-      const entry = await backupService.restoreFromBackup(backupId);
+      // Only the outcome is in scope from here on, never the archive: the
+      // passes below load the whole store again (see `applyStoredArchive`).
+      const outcome = await applyStoredArchive(backupId);
+      if (outcome.refusal) {
+        return refuse(outcome.refusal.status, outcome.refusal.body);
+      }
+
       invalidateSessionCaches();
       await rehashRestoredPasswords();
       await healRestoredEmails();
@@ -1140,8 +1273,10 @@ This notification was sent from RetroGemini.
         target: backupId,
         detail: { preRestoreSnapshot: snapshot.id }
       });
-      res.json({ success: true, restored: entry });
+      res.json({ success: true, restored: outcome.entry });
     } catch (err) {
+      // An unexpected error keeps the snapshot: the replace it guards may have
+      // started before the error was raised.
       console.error('[Server] Failed to restore from backup', err);
       res.status(500).json({ error: 'restore_failed' });
     } finally {
@@ -1362,6 +1497,11 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
     }
   });
 
+  // The Live tab polls every 5 s: a row the team summaries cannot read is
+  // reported once, then summarised every ten minutes (logCoalescer.js), so a
+  // tab left open does not fill the log ring the admin reads.
+  const liveTabLog = createRepeatCoalescer({ windowMs: 10 * 60 * 1000 });
+
   app.post('/api/super-admin/active-sessions', superAdminPollingLimiter, async (req, res) => {
     if (!tokenService.validateSuperAdminAuth(req.body)) {
       return res.status(401).json({ error: 'unauthorized' });
@@ -1382,6 +1522,59 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
         }
       }
 
+      // Names only: one read of the summaries (cached per pod, see
+      // dataStore.loadTeamSummaries) for the whole poll, made when the first
+      // room needs it. Each room used to load its team's whole record, once
+      // per room, every 5 s the Live tab stays open.
+      //
+      // That read is one statement over every team row, and one row it cannot
+      // read fails it whole: a record PostgreSQL's jsonb refuses (a lone
+      // surrogate or NUL escape), a truncated one on either engine. The poll
+      // then names each room's team on its own, once per team — its summary,
+      // else its record parsed in Node, as 41.0 did — so one broken row of any
+      // team cannot take the tab down: the repair runbook relies on it to see
+      // whether a session is open. A team whose record Node cannot parse
+      // either reads as 'Unknown'; any other failure (the database is down)
+      // is still a 500.
+      let teamNames = null;
+      let listUnreadable = false;
+      const namesOneByOne = new Map();
+      const readTeamNameAlone = async (teamId) => {
+        try {
+          return (await dataStore.loadTeamSummary(teamId))?.name;
+        } catch {
+          try {
+            return (await dataStore.loadTeam(teamId))?.name;
+          } catch (err) {
+            if (!(err instanceof SyntaxError)) throw err;
+            liveTabLog.report({
+              group: 'active-sessions',
+              key: `unparsable:${teamId}`,
+              message: `[Server] Live sessions: the record of team ${JSON.stringify(String(teamId))} cannot be parsed; its rooms read as Unknown`
+            });
+            return undefined;
+          }
+        }
+      };
+      const teamNameOf = async (teamId) => {
+        if (!teamNames && !listUnreadable) {
+          try {
+            teamNames = new Map((await dataStore.loadTeamSummaries()).map((team) => [team.id, team.name]));
+          } catch (err) {
+            listUnreadable = true;
+            liveTabLog.report({
+              group: 'active-sessions',
+              key: 'summaries',
+              message: () => `[Server] Live sessions: the team summaries could not be read (${err?.code ? `${err.code} ` : ''}${err?.message ?? err}); naming each room's team on its own`,
+              label: '[Server] Live sessions: team summaries unreadable, rooms named one team at a time'
+            });
+          }
+        }
+        if (teamNames) return teamNames.get(teamId);
+        if (!namesOneByOne.has(teamId)) namesOneByOne.set(teamId, readTeamNameAlone(teamId));
+        return namesOneByOne.get(teamId);
+      };
+
       for (const [roomId, participants] of sessionRooms.entries()) {
         let sessionData = sessionCache.get(roomId);
         if (!sessionData) {
@@ -1392,10 +1585,7 @@ Log in to the Super Admin Dashboard to review and respond to this feedback.
         let teamName = 'Unknown';
 
         if (sessionData?.teamId) {
-          const team = await dataStore.loadTeam(sessionData.teamId);
-          if (team) {
-            teamName = team.name;
-          }
+          teamName = (await teamNameOf(sessionData.teamId)) ?? 'Unknown';
         }
 
         const sessionInfo = {
