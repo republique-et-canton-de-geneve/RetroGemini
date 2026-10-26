@@ -1357,7 +1357,10 @@ dependency tree, not the diff. An advisory published against a package `main`
 already ships turns `main` red without a commit — and with it every open PR,
 each failing on a package its own diff never touched. Fixing the Dependabot branches one by one cannot work;
 the fix is one lockfile update on `main` (`npm update <pkg>` inside the existing
-range — engine.io 6.6.9 → 6.6.11 on 2026-10-02). Two details that bite:
+range — engine.io 6.6.9 → 6.6.11 on 2026-10-02; body-parser 2.3.0 →
+2.4.0 on 2026-10-26). A clean production audit alone is not the finish line:
+validate the rebuilt runtime image with Trivy too, since its advisory database
+can require a newer fixed version. Two details that bite:
 
 - **Regenerate the lockfile with npm 11** (`npx npm@11 …`), the npm Dependabot
   writes with. npm 10 strips the `"libc"` fields npm 11 wrote on the optional
