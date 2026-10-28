@@ -8,6 +8,7 @@ import SessionTimer from './SessionTimer';
 import { getRetroPhaseDefaultTimerSeconds } from './retroTips';
 import { DEFAULT_TIMER_SECONDS } from '../../utils/sessionTimer';
 import { avatarColorClasses } from '../../utils/participantColors';
+import { isOpenBoard } from '../../utils/openBoard';
 
 interface Props {
   session: RetroSession;
@@ -79,6 +80,9 @@ const SessionHeader: React.FC<Props> = ({
   const activeCount = (record: Record<string, number> | undefined) =>
     Object.keys(record || {}).filter((id) => !leftSet.has(id)).length;
   const activeFinishedCount = (session.finishedUsers || []).filter((id) => !leftSet.has(id)).length;
+  // An open board has no phases to walk and nobody to wait for: its header
+  // names the board where the phase bar would be, and counts the people on it.
+  const board = isOpenBoard(session);
 
   return (
   <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-2 sm:px-4 shrink-0 z-50">
@@ -92,6 +96,11 @@ const SessionHeader: React.FC<Props> = ({
       <button onClick={handleExit} aria-label={t('phases.header.leave')} className="shrink-0 mr-2 sm:mr-3 text-slate-500 hover:text-slate-700">
         <span className="material-symbols-outlined">arrow_back</span>
       </button>
+      {board ? (
+        <div className="hidden lg:flex h-full items-center min-w-0">
+          <span className="truncate text-sm font-bold text-slate-700" title={session.name}>{session.name}</span>
+        </div>
+      ) : (
       <div ref={phaseBarRef} className="hidden lg:flex h-full items-center space-x-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
         {phases.map((phase) => (
           <button
@@ -107,6 +116,7 @@ const SessionHeader: React.FC<Props> = ({
           </button>
         ))}
       </div>
+      )}
     </div>
     <SessionTimer
       settings={session.settings}
@@ -150,7 +160,9 @@ const SessionHeader: React.FC<Props> = ({
         >
           <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
           <span className="text-xs font-bold text-slate-700">
-            {session.phase === 'WELCOME'
+            {board
+              ? participantsCount
+              : session.phase === 'WELCOME'
               ? `${activeCount(session.happiness)}/${participantsCount}`
               : session.phase === 'CLOSE'
               ? `${activeCount(session.roti)}/${participantsCount}`
@@ -160,7 +172,9 @@ const SessionHeader: React.FC<Props> = ({
               label and then the phase bar need the room ("ont terminé" is the
               widest of them), and the count alone keeps the chip legible. */}
           <span className="text-[10px] text-slate-500 ml-1 hidden 2xl:inline">
-            {session.phase === 'CLOSE' ? t('phases.header.progressVoted') : t('phases.header.progressFinished')}
+            {board
+              ? t('phases.header.progressConnected')
+              : session.phase === 'CLOSE' ? t('phases.header.progressVoted') : t('phases.header.progressFinished')}
           </span>
         </div>
       )}

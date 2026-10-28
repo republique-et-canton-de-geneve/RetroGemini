@@ -11,10 +11,22 @@ import { ticketQuote } from '../utils/textCut';
 import {
   addTicketToGroup,
   applySuggestedClusters,
+  deleteTicket,
   getTicketOriginColumn,
   groupTicketsTogether,
   removeTicketFromGroup,
 } from '../utils/retroGrouping';
+import {
+  GUIDED_RETRO_PHASES,
+  OPEN_BOARD_PHASE,
+  allowsRegrouping,
+  canSwitchBoardType,
+  cardsVisibleToEveryone,
+  guidedResumePhase,
+  isOpenBoard,
+  recordBoardTypeChange
+} from '../utils/openBoard';
+import ShowAuthorsDialog from './session/ShowAuthorsDialog';
 import TicketOriginBadge from './session/TicketOriginBadge';
 import { getAssignableMembers } from './session/assignableMembers';
 import { JOIN_DENIED_REVOKED, SessionConnectionBanner } from './session/SessionConnectionStatus';
@@ -123,7 +135,13 @@ interface Props {
   onSessionExpired?: () => void;
 }
 
-const PHASES = ['ICEBREAKER', 'WELCOME', 'OPEN_ACTIONS', 'BRAINSTORM', 'GROUP', 'VOTE', 'DISCUSS', 'REVIEW', 'CLOSE'];
+// The guided phases the header walks. An open board (utils/openBoard.ts) is
+// none of them, and its header shows no phase bar.
+const PHASES: string[] = [...GUIDED_RETRO_PHASES];
+
+// What the column board is drawn for: one of the three guided phases that show
+// it, or the open board, which carries all three activities at once.
+type BoardMode = 'BRAINSTORM' | 'GROUP' | 'VOTE' | 'BOARD';
 const EMOJIS = ['👍', '👎', '❤️', '🎉', '👏', '😄', '😮', '🤔', '😡', '😢'];
 
 // Map Tailwind color classes to hex values
@@ -146,7 +164,7 @@ const isRetroSession = (session: unknown): session is RetroSession => {
 
 const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
   // Named `tr`, not `t`: `t` is the ticket variable throughout this file.
-  const { t: tr } = useTranslation();
+  const { t: tr, tp } = useTranslation();
   const [session, setSession] = useState<RetroSession | undefined>(() => {
     const retro = team.retrospectives.find(r => r.id === sessionId);
     if (!retro) return undefined;
@@ -347,7 +365,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   useDragAutoScroll({
     active:
       (!!draggedTicket && session?.phase === 'GROUP') ||
-      (!!movingItem && session?.phase === 'BRAINSTORM'),
+      (!!movingItem && session?.phase === 'BRAINSTORM') ||
+      ((!!draggedTicket || !!movingItem) && session?.phase === OPEN_BOARD_PHASE),
     verticalScroller: getColumnsScroller,
     horizontalScroller: getColumnsScroller,
   });
@@ -360,6 +379,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     setMovingItem(null);
   }, [session?.phase, sessionId, isLive]);
 
+  // The card held for grouping too, once its phase is gone: the open board
+  // holds cards the way the Group phase does, and switching the board to a
+  // guided retro (or back) must not leave one armed on the next screen.
+  useEffect(() => {
+    setDraggedTicket(null);
+    setIsSelectThenDrop(false);
+    setDragTarget(null);
+  }, [session?.phase, sessionId]);
+
   // A hold that loses its permission is dropped, not left armed. The
   // facilitator can hide the cards again while someone is mid-move, and the
   // column targets must not go on offering a move the rule no longer allows —
@@ -370,7 +398,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       selection: movingItem,
       tickets: session.tickets,
       currentUserId: currentUser.id,
-      revealBrainstorm: session.settings.revealBrainstorm
+      revealBrainstorm: cardsVisibleToEveryone(session)
     });
     if (stillAllowed) return;
     setMovingItem(null);
@@ -462,12 +490,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     boardScrollerRef,
     `${session?.phase}|${isEditingColumns}|${(session?.columns ?? []).map((col) => col.id).join(',')}`
   );
-  // Edit Layout belongs to Brainstorm. setPhase closes it for this tab; a phase
-  // changed from another facilitator tab must close it too, or the move,
-  // remove and title controls stay on the Group and Vote boards.
+  // Edit Layout belongs to Brainstorm and to the open board, the two screens
+  // where cards are written. setPhase closes it for this tab; a phase changed
+  // from another facilitator tab must close it too, or the move, remove and
+  // title controls stay on the Group and Vote boards.
   useEffect(() => {
-    if (session?.phase !== 'BRAINSTORM') setIsEditingColumns(false);
+    if (session?.phase !== 'BRAINSTORM' && session?.phase !== OPEN_BOARD_PHASE) setIsEditingColumns(false);
   }, [session?.phase]);
+  // Asking before an open board stops being anonymous (ShowAuthorsDialog).
+  const [confirmingShowAuthors, setConfirmingShowAuthors] = useState(false);
   const [maxVotesInput, setMaxVotesInput] = useState(session?.settings.maxVotes.toString() ?? '5');
   // Local participants panel state (not synced across users)
   const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
@@ -1240,6 +1271,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // from every "waiting for X" counter so the session never waits on them.
   const leftUserIds = new Set(session.leftUsers ?? []);
   const activeParticipants = participants.filter(p => !leftUserIds.has(p.id));
+  // An open board lists who is on it right now, and no one else.
+  const connectedParticipants = participants.filter(p => connectedUsers.has(p.id));
   const assignableMembers = getAssignableMembers(team);
 
   // --- Logic ---
@@ -1352,7 +1385,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       });
   };
 
+  // The one phase change, and the one way between a guided retro and an open
+  // board (utils/openBoard.ts): the board is a phase of its own, so switching
+  // the type stops the timer, clears "finished" and closes the editors exactly
+  // as moving to the next phase does.
   const setPhase = (p: string) => updateSession(s => {
+      recordBoardTypeChange(s, p);
       s.phase = p;
       // Shared with the health check (utils/sessionTimer.ts): entering a phase
       // stops the timer at that phase's timebox. An open timer editor closes
@@ -1381,6 +1419,28 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         }
       }
   });
+
+  // Facilitator-only, and only while the retro is going: one that reached
+  // Close stays as it is (canSwitchBoardType).
+  const maySwitchBoardType = isFacilitator && canSwitchBoardType(session);
+  const switchToOpenBoard = () => setPhase(OPEN_BOARD_PHASE);
+  const switchToGuidedRetro = () => setPhase(guidedResumePhase(session));
+
+  // A board kept open for weeks may have to change its anonymity on the way.
+  // Hiding asks nothing; showing the authors again shows them on every card,
+  // the ones written while the board was anonymous too, so it asks first.
+  const handleToggleAnonymous = (anonymous: boolean) => {
+      if (!anonymous) {
+          setConfirmingShowAuthors(true);
+          return;
+      }
+      updateSession(s => { s.settings.isAnonymous = true; });
+  };
+
+  const showAuthors = () => {
+      setConfirmingShowAuthors(false);
+      updateSession(s => { s.settings.isAnonymous = false; });
+  };
 
   const applyActionUpdate = (actionId: string, updater: (a: ActionItem) => void, fallback?: ActionItem) => {
       updateSession(s => {
@@ -1575,7 +1635,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const applyAiSuggestedGroups = (suggestions: AiSuggestedGroup[]) => {
     if (!suggestions || suggestions.length === 0) return;
     updateSession(s => {
-      applySuggestedClusters(s, suggestions);
+      // An open board votes while it groups: the cards' votes go with them.
+      applySuggestedClusters(s, suggestions, undefined, { keepVotes: isOpenBoard(s) });
     });
   };
 
@@ -1658,10 +1719,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
    */
   const handleGroupingActivate = (
       target: GroupingTarget,
-      mode: 'BRAINSTORM' | 'GROUP' | 'VOTE'
+      mode: BoardMode
   ) => {
       const action = resolveGroupingActivation({
-          isGroupPhase: mode === 'GROUP' && session.phase === 'GROUP',
+          // The open board regroups cards exactly as the Group phase does.
+          isGroupPhase: (mode === 'GROUP' && session.phase === 'GROUP')
+              || (mode === 'BOARD' && isOpenBoard(session)),
           hasSelection: !!draggedTicket,
           isSelected: target.kind === 'ticket' && draggedTicket?.id === target.ticket.id,
           canPickUp: target.kind === 'ticket'
@@ -1707,10 +1770,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const performDropOnColumn = (colId: string) => {
       setDragTarget(null);
       if(!draggedTicket) return;
-      if(session.phase !== 'GROUP') return;
+      if (!allowsRegrouping(session)) return;
+      // On a board a card goes back to its own column as often as anywhere:
+      // when that changes nothing (ungrouped, already there, no "from" chip),
+      // write nothing — every client would pay a broadcast for it.
+      const held = session.tickets.find(t => t.id === draggedTicket.id);
+      if (held && !held.groupId && held.colId === colId && !held.originColId) {
+          resetDragState();
+          return;
+      }
 
       updateSession(s => {
-          removeTicketFromGroup(s, draggedTicket.id, colId);
+          removeTicketFromGroup(s, draggedTicket.id, colId, { keepVotes: isOpenBoard(s) });
       });
       resetDragState();
   };
@@ -1727,12 +1798,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           resetDragState();
           return;
       }
-      if(session.phase !== 'GROUP') return;
+      if (!allowsRegrouping(session)) return;
 
       let createdGroupId: string | null = null;
       let mergedIntoUntitledGroupId: string | null = null;
       updateSession(s => {
-          const result = groupTicketsTogether(s, draggedTicket.id, targetTicket.id);
+          // An open board votes while it groups: the cards' votes go with them.
+          const result = groupTicketsTogether(s, draggedTicket.id, targetTicket.id, undefined, { keepVotes: isOpenBoard(s) });
           if (result.noOp) return;
           if (result.newGroupId) {
               createdGroupId = result.newGroupId;
@@ -1765,11 +1837,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const performDropOnGroup = (targetGroup: Group) => {
       setDragTarget(null);
       if(!draggedTicket) return;
-      if(session.phase !== 'GROUP') return;
+      if (!allowsRegrouping(session)) return;
 
       let didMove = false;
       updateSession(s => {
-          didMove = addTicketToGroup(s, draggedTicket.id, targetGroup.id);
+          didMove = addTicketToGroup(s, draggedTicket.id, targetGroup.id, { keepVotes: isOpenBoard(s) });
       });
 
       // AI: re-suggest title when adding to a group that has no title
@@ -1788,6 +1860,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // --- Brainstorm: move a card (or a whole group) between columns ---
   // No grouping happens here. `brainstormMove.ts` holds the rules, this
   // performs them, and `brainstormColumnMove.ts` applies them to the session.
+  // The open board moves its groups the same way (a card there is held for
+  // grouping instead, see renderTicketCard), and every card on it is readable.
 
   const resetBrainstormMove = () => {
       setMovingItem(null);
@@ -1811,12 +1885,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       });
 
   const canMoveGroup = (g: Group) =>
-      session.phase === 'BRAINSTORM'
+      (session.phase === 'BRAINSTORM' || isOpenBoard(session))
       && isLive
       && canMoveGroupInBrainstorm({
           members: session.tickets.filter(t => t.groupId === g.id),
           currentUserId: currentUser.id,
-          revealBrainstorm: session.settings.revealBrainstorm
+          revealBrainstorm: cardsVisibleToEveryone(session)
       });
 
   const handleBrainstormDragStart = (e: React.DragEvent, item: BrainstormSelection) => {
@@ -1829,7 +1903,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const performBrainstormMove = (colId: string) => {
       setDragTarget(null);
       if (!movingItem) return;
-      if (session.phase !== 'BRAINSTORM') return;
+      if (session.phase !== 'BRAINSTORM' && !isOpenBoard(session)) return;
       // Nothing to do when the item is already there (a drop on its own
       // column, or on a card inside it) or has been removed under us. Writing
       // anyway would cost every client a broadcast that changes nothing.
@@ -1843,7 +1917,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           selection: held,
           tickets: s.tickets,
           currentUserId: currentUser.id,
-          revealBrainstorm: s.settings.revealBrainstorm
+          revealBrainstorm: cardsVisibleToEveryone(s)
       });
       // Asked twice on purpose: here against what is on screen, so a refused
       // move costs no write, and again inside the updater against the state
@@ -1880,7 +1954,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           && movingItem.id === target.item.id;
 
       const action = resolveBrainstormMoveActivation({
-          isBrainstormPhase: session.phase === 'BRAINSTORM',
+          isBrainstormPhase: session.phase === 'BRAINSTORM' || isOpenBoard(session),
           hasSelection: !!movingItem,
           isSelected,
           target: target.kind === 'item' ? 'item' : 'column',
@@ -2113,29 +2187,59 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // --- RENDERERS ---
 
-  const renderTicketCard = (t: Ticket, mode: 'BRAINSTORM'|'GROUP'|'VOTE', canVote: boolean, myVotesOnThis: number, isGrouped: boolean = false) => {
+  // What a card or a group received from everyone, on the open board. The
+  // number is drawn for the eye and the sentence beside it is what a screen
+  // reader announces, so it is never read as a bare "3". A white pill, because
+  // a card can take its column's colour, dark ones included.
+  const renderVoteTotal = (count: number) => (
+      <span data-testid="vote-total" className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs font-bold text-slate-700 shadow-xs">
+          <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">how_to_vote</span>
+          <span aria-hidden="true">{count}</span>
+          <span className="sr-only">{tp('session.ticket.voteTotal', count)}</span>
+      </span>
+  );
+
+  const renderTicketCard = (t: Ticket, mode: BoardMode, canVote: boolean, myVotesOnThis: number, isGrouped: boolean = false) => {
+      const isBoard = mode === 'BOARD';
+      // The open board regroups cards the way the Group phase does: a card is
+      // held to be grouped with another, put in a group, or taken to a column.
+      const regroupsCards = mode === 'GROUP' || isBoard;
       const isMine = t.authorId === currentUser.id;
       const author = participants.find(m => m.id === t.authorId);
       const showContent = isMine || session.settings.revealBrainstorm;
-      const visible = (mode === 'GROUP' || mode === 'VOTE') ? true : showContent;
+      const visible = (mode === 'GROUP' || mode === 'VOTE' || isBoard) ? true : showContent;
       const isPickerOpen = emojiPickerOpenId === t.id;
       const isEditing = editingTicketId === t.id;
 
       // explicit drag styling
-      const isDragTarget = mode === 'GROUP' && dragTarget?.type === 'ITEM' && dragTarget.id === t.id && draggedTicket?.id !== t.id;
+      const isDragTarget = regroupsCards && dragTarget?.type === 'ITEM' && dragTarget.id === t.id && draggedTicket?.id !== t.id;
       // Brainstorm moves a card between columns without grouping it, so a card
       // is never a drop target there — only a column is. A card open for
       // editing is not draggable either: a draggable element competes with the
       // text selection its own textarea needs.
       const isMovableCard = mode === 'BRAINSTORM' && !isGrouped && !isEditing && canMoveTicket(t);
-      const isSelected = mode === 'GROUP'
+      // On a board, never while a group is held: the column a card is dropped
+      // on would take the group instead.
+      const isBoardCard = isBoard && !isEditing && isLive && !movingItem;
+      const isSelected = regroupsCards
           ? draggedTicket?.id === t.id
           : mode === 'BRAINSTORM' && movingItem?.kind === 'ticket' && movingItem.id === t.id;
       // Tap-to-pick-up is live in both phases. A grouped card in Brainstorm is
       // deliberately inert: the gesture belongs to its group container, which
       // moves the group as a unit — and a card that ended the gesture here
       // would take it away from the container that bubbling reaches next.
-      const tapEnabled = mode === 'GROUP' || isMovableCard;
+      const tapEnabled = mode === 'GROUP' || isMovableCard || isBoardCard;
+      const isDraggableCard = mode === 'GROUP' || isMovableCard || isBoardCard;
+      // Brainstorm deletes a card of its own (or any, for the facilitator)
+      // that is not grouped; a board, any of them, grouped or not.
+      const canDeleteCard = (isMine || isFacilitator) && ((mode === 'BRAINSTORM' && !isGrouped) || isBoard);
+      const deleteCard = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          updateSession(s => {
+              if (isOpenBoard(s)) deleteTicket(s, t.id, { keepVotes: true });
+              else s.tickets = s.tickets.filter(x => x.id !== t.id);
+          });
+      };
 
       // Color by author or topic
       const colorBy = session.settings.colorBy || 'topic';
@@ -2170,13 +2274,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         isDragTarget,
         isSelected,
         cardBgHex,
-        isDraggable: mode === 'GROUP' || isMovableCard
+        isDraggable: isDraggableCard
       };
 
       return (
         <div
             key={t.id}
-            draggable={mode === 'GROUP' || isMovableCard}
+            draggable={isDraggableCard}
             onDragStart={(e) => {
                 if (isMovableCard) {
                     handleBrainstormDragStart(e, { kind: 'ticket', id: t.id });
@@ -2185,12 +2289,19 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 handleDragStart(e, t);
             }}
             onDragEnd={() => { resetDragState(); resetBrainstormMove(); }}
-            onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, t.id) : undefined}
+            // A group held on a board is not dropped on a card: the event goes
+            // on to the column, which moves the group there.
+            onDragOver={(e) => (regroupsCards && !movingItem) ? handleDragOverItem(e, t.id) : undefined}
             // Dropping on a card in Brainstorm means "put it in this card's
             // column" — never "group the two", which is the Group phase's job.
-            onDrop={(e) => mode === 'BRAINSTORM'
-                ? handleBrainstormDrop(e, t.colId)
-                : handleDropOnTicket(e, t)}
+            onDrop={(e) => {
+                if (mode === 'BRAINSTORM') {
+                    handleBrainstormDrop(e, t.colId);
+                    return;
+                }
+                if (isBoard && movingItem) return;
+                handleDropOnTicket(e, t);
+            }}
             // Tap-to-group, unchanged for the people who already use it. It is
             // bound to touch events rather than to `onClick` on purpose: a click
             // handler on a plain `div` is an interactive element with no keyboard
@@ -2220,7 +2331,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 const isMine = !onOwnControl && claimGesture(gesture);
                 endGesture(gesture);
                 if (!isMine) return;
-                if (mode === 'GROUP') handleGroupingActivate({ kind: 'ticket', ticket: t }, mode);
+                if (regroupsCards) handleGroupingActivate({ kind: 'ticket', ticket: t }, mode);
                 else handleBrainstormActivate({ kind: 'item', item: { kind: 'ticket', id: t.id }, canPickUp: true });
             }}
             className={getTicketCardClassName(cardAppearance)}
@@ -2254,7 +2365,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     <div className={`text-sm w-full whitespace-pre-wrap wrap-break-word ${!visible ? 'ticket-blur' : cardTextColor} ${visible && !session.settings.isAnonymous && author ? 'pr-8' : ''}`}>
                         {t.text}
                     </div>
-                    {visible && mode === 'BRAINSTORM' && (isMine || isFacilitator) && (
+                    {visible && (mode === 'BRAINSTORM' || isBoard) && (isMine || isFacilitator) && (
                         <button
                             onClick={(e) => { e.stopPropagation(); setEditingTicketId(t.id); }}
                             className="absolute top-0 right-8 text-slate-300 hover:text-indigo-500 opacity-0 group-hover:opacity-100 transition"
@@ -2350,9 +2461,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 </div>
             )}
 
-            {(isMine || isFacilitator) && mode === 'BRAINSTORM' && !isGrouped && (
+            {/* On a board a grouped card can be deleted too: the group it
+                leaves with one card is dissolved, its votes going to that card.
+                An ungrouped board card carries its delete control in its vote
+                row instead (below): in this corner it would lie over the vote
+                button, and an invisible control still takes the click. */}
+            {canDeleteCard && !(isBoard && !isGrouped) && (
                 <button
-                    onClick={(e) => { e.stopPropagation(); updateSession(s => s.tickets = s.tickets.filter(x => x.id !== t.id)); }}
+                    onClick={deleteCard}
                     className="absolute bottom-2 right-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"
                     aria-label={tr('session.ticket.delete')}
                 >
@@ -2392,8 +2508,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 holds reaction buttons and an edit control, and a `role="button"`
                 around those is `nested-interactive` — a control containing
                 controls, which screen readers do not reliably announce. axe
-                caught exactly that on the first shape of this fix (H42). */}
-            {mode === 'GROUP' && (
+                caught exactly that on the first shape of this fix (H42).
+                On a board, not while a group is held: only a column receives a
+                group, so the card would offer an action that does not exist. */}
+            {(mode === 'GROUP' || isBoardCard) && (
                 <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleGroupingActivate({ kind: 'ticket', ticket: t }, mode); }}
@@ -2446,8 +2564,25 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 </button>
             )}
 
-            {mode === 'VOTE' && !isGrouped && (
-                <div className="mt-2 pt-2 border-t border-slate-100 flex justify-end">
+            {(mode === 'VOTE' || isBoard) && !isGrouped && (
+                <div className={`mt-2 pt-2 border-t border-slate-100 flex items-center ${isBoard ? 'justify-between' : 'justify-end'}`}>
+                    {/* The Vote phase keeps its votes to itself; a board is
+                        voted on while it is read, so it shows what each card
+                        received from everyone. */}
+                    {isBoard && (
+                        <div className="flex items-center gap-1">
+                            {renderVoteTotal(t.votes.length)}
+                            {canDeleteCard && (
+                                <button
+                                    onClick={deleteCard}
+                                    className="w-6 h-6 flex items-center justify-center rounded-sm bg-white/90 text-slate-500 hover:text-red-600 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                                    aria-label={tr('session.ticket.delete')}
+                                >
+                                    <span className="material-symbols-outlined text-sm">delete</span>
+                                </button>
+                            )}
+                        </div>
+                    )}
                     <div className="flex items-center bg-indigo-50 rounded-lg p-1 shadow-xs">
                         <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) { const idx = tick.votes.indexOf(currentUser.id); if(idx>-1) tick.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm disabled:opacity-30" aria-label={tr('session.ticket.removeVote')}><span className="material-symbols-outlined text-sm">remove</span></button>
                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
@@ -2459,10 +2594,177 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       );
   };
 
-  const renderColumns = (mode: 'BRAINSTORM'|'GROUP'|'VOTE') => {
+  const renderColumns = (mode: BoardMode) => {
       const isFinished = session.finishedUsers?.includes(currentUser.id);
+      const isBoard = mode === 'BOARD';
 
-      const renderPhaseActionBar = () => (
+      // The controls a guided phase bar and the open board's bar share.
+      const renderSuggestGroupsButton = () => (
+          <button
+              type="button"
+              onClick={openAiGroupSuggestions}
+              disabled={aiGroupSuggestionsLoading}
+              title={tr('session.board.suggestGroupsHint')}
+              className="flex items-center gap-1 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-3 py-1.5 rounded-full transition disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+              <span className={`material-symbols-outlined text-sm ${aiGroupSuggestionsLoading ? 'animate-spin' : ''}`}>
+                  {aiGroupSuggestionsLoading ? 'progress_activity' : 'auto_awesome'}
+              </span>
+              <span>{tr('session.board.suggestGroups')}</span>
+          </button>
+      );
+
+      const renderVotesRemaining = () => (
+          <div className="text-sm font-medium bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-200 whitespace-nowrap">
+              {tr('session.board.votesRemaining', { count: Math.max(0, votesLeft) })}
+          </div>
+      );
+
+      const renderColorBySelect = () => (
+          <div className="flex items-center space-x-2 border-l border-slate-200 pl-4">
+            <span className="text-xs text-slate-500 font-medium whitespace-nowrap">{tr('session.board.colorBy')}</span>
+            <select
+              aria-label={tr('session.board.colorByAria')}
+              value={session.settings.colorBy || 'topic'}
+              onChange={(e) => updateSession(s => s.settings.colorBy = e.target.value as 'author' | 'topic')}
+              className="text-xs bg-white border border-slate-300 rounded-sm px-2 py-1 text-slate-700 font-medium cursor-pointer hover:border-slate-400"
+            >
+              <option value="topic">{tr('session.board.colorByTopic')}</option>
+              <option value="author">{tr('session.board.colorByAuthor')}</option>
+            </select>
+          </div>
+      );
+
+      const renderEditLayoutButton = () => (
+          <button
+               onClick={() => setIsEditingColumns(!isEditingColumns)}
+               className={`flex items-center space-x-1 px-3 py-1 rounded-sm text-sm font-bold transition ${isEditingColumns ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}
+          >
+              <span className="material-symbols-outlined text-sm">view_column</span>
+              <span>{isEditingColumns ? tr('session.board.doneEditingLayout') : tr('session.board.editLayout')}</span>
+          </button>
+      );
+
+      const renderVoteSettings = () => (
+           <div className="flex items-center space-x-2 text-sm text-slate-600 border-l border-slate-200 pl-4">
+                <label className="flex items-center space-x-1 cursor-pointer">
+                    <input type="checkbox" checked={session.settings.oneVotePerTicket} onChange={(e) => handleToggleOneVote(e.target.checked)} />
+                    <span>{tr('session.board.oneVotePerItem')}</span>
+                </label>
+                <div className="flex items-center bg-slate-100 rounded-sm overflow-hidden">
+                    <span className="px-2">{tr('session.board.maxVotes')}</span>
+                    <button
+                        onClick={() => handleMaxVotesChange(session.settings.maxVotes - 1)}
+                        className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center"
+                        title={tr('session.board.decreaseMaxVotes')}
+                        aria-label={tr('session.board.decreaseMaxVotes')}
+                    >
+                        <span className="material-symbols-outlined text-sm">keyboard_arrow_down</span>
+                    </button>
+                    <input
+                        type="text"
+                        inputMode="numeric"
+                        // The visible "Max:" beside it is a plain span, so the
+                        // field had no name at all (axe `label`, critical).
+                        aria-label={tr('session.board.maxVotesInput')}
+                        className="w-12 bg-transparent text-center font-bold outline-hidden text-slate-900"
+                        value={maxVotesInput}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            // Allow empty or numeric values
+                            if (val === '' || /^\d+$/.test(val)) {
+                                setMaxVotesInput(val);
+                                // Only update session if valid number >= 1
+                                const num = parseInt(val);
+                                if (!isNaN(num) && num >= 1) {
+                                    handleMaxVotesChange(num);
+                                }
+                            }
+                        }}
+                        onBlur={() => {
+                            // On blur, ensure we have a valid value
+                            const val = parseInt(maxVotesInput);
+                            if (isNaN(val) || val < 1) {
+                                // Revert to current session value or default to 1
+                                const currentVal = session.settings.maxVotes || 1;
+                                setMaxVotesInput(currentVal.toString());
+                                if (currentVal !== session.settings.maxVotes) {
+                                    handleMaxVotesChange(currentVal);
+                                }
+                            }
+                        }}
+                    />
+                    <button
+                        onClick={() => handleMaxVotesChange(session.settings.maxVotes + 1)}
+                        className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center"
+                        title={tr('session.board.increaseMaxVotes')}
+                        aria-label={tr('session.board.increaseMaxVotes')}
+                    >
+                        <span className="material-symbols-outlined text-sm">keyboard_arrow_up</span>
+                    </button>
+                </div>
+           </div>
+      );
+
+      // The guided board phases offer the open board; a retro that reached
+      // Close offers nothing (canSwitchBoardType).
+      const renderSwitchToBoardButton = () => (
+          <button
+              type="button"
+              onClick={switchToOpenBoard}
+              disabled={!isLive}
+              title={tr('session.openBoard.switchToBoardHint')}
+              className="flex items-center gap-1 px-3 py-2 rounded-sm border border-slate-200 text-sm font-bold text-slate-600 whitespace-nowrap hover:bg-slate-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+              <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">view_column</span>
+              <span>{tr('session.openBoard.switchToBoard')}</span>
+          </button>
+      );
+
+      // One bar for everything an open board does. It wraps rather than
+      // scrolls: the facilitator's settings are many, and none may hide.
+      const renderBoardActionBar = () => (
+          <div className="bg-white border-b px-6 py-3 flex flex-wrap justify-between items-center gap-x-4 gap-y-2 shrink-0 shadow-xs z-30 sticky top-0">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <h2 className="font-bold text-slate-700 text-lg">{tr('session.openBoard.title')}</h2>
+                  {renderVotesRemaining()}
+                  {isFacilitator && (
+                      <>
+                          <label className="flex items-center space-x-2 text-sm text-slate-600 cursor-pointer border-l border-slate-200 pl-4">
+                              <input
+                                  type="checkbox"
+                                  checked={session.settings.isAnonymous}
+                                  disabled={!isLive}
+                                  onChange={(e) => handleToggleAnonymous(e.target.checked)}
+                              />
+                              <span className="whitespace-nowrap">{tr('session.openBoard.anonymous')}</span>
+                          </label>
+                          {renderColorBySelect()}
+                          {renderVoteSettings()}
+                          {renderEditLayoutButton()}
+                          {aiEnabled && renderSuggestGroupsButton()}
+                      </>
+                  )}
+              </div>
+              {maySwitchBoardType && (
+                  <button
+                      type="button"
+                      onClick={switchToGuidedRetro}
+                      disabled={!isLive}
+                      title={tr('session.openBoard.switchToGuidedHint')}
+                      // `ml-auto`: on a line of its own once the settings wrap,
+                      // it stays at the right, where a guided bar keeps its
+                      // phase controls.
+                      className="ml-auto flex items-center gap-1 px-3 py-2 rounded-sm border border-slate-200 text-sm font-bold text-slate-600 whitespace-nowrap hover:bg-slate-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                      <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">event_note</span>
+                      <span>{tr('session.openBoard.switchToGuided')}</span>
+                  </button>
+              )}
+          </div>
+      );
+
+      const renderPhaseActionBar = () => isBoard ? renderBoardActionBar() : (
           <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 shadow-xs z-30 sticky top-0">
                <div className="flex items-center space-x-4">
                    {mode === 'BRAINSTORM' && (
@@ -2471,28 +2773,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                    {mode === 'GROUP' && (
                        <div className="flex items-center gap-3">
                            <h2 className="font-bold text-slate-700 text-lg">{tr('session.board.groupTitle')}</h2>
-                           {isFacilitator && aiEnabled && (
-                               <button
-                                   type="button"
-                                   onClick={openAiGroupSuggestions}
-                                   disabled={aiGroupSuggestionsLoading}
-                                   title={tr('session.board.suggestGroupsHint')}
-                                   className="flex items-center gap-1 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-3 py-1.5 rounded-full transition disabled:opacity-60 disabled:cursor-not-allowed"
-                               >
-                                   <span className={`material-symbols-outlined text-sm ${aiGroupSuggestionsLoading ? 'animate-spin' : ''}`}>
-                                       {aiGroupSuggestionsLoading ? 'progress_activity' : 'auto_awesome'}
-                                   </span>
-                                   <span>{tr('session.board.suggestGroups')}</span>
-                               </button>
-                           )}
+                           {isFacilitator && aiEnabled && renderSuggestGroupsButton()}
                        </div>
                    )}
                    {mode === 'VOTE' && (
                        <div className="flex items-center">
                            <h2 className="font-bold text-slate-700 text-lg mr-4">{tr('session.board.voteTitle')}</h2>
-                           <div className="text-sm font-medium bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-200">
-                               {tr('session.board.votesRemaining', { count: Math.max(0, votesLeft) })}
-                           </div>
+                           {renderVotesRemaining()}
                        </div>
                    )}
 
@@ -2502,85 +2789,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                <input type="checkbox" checked={session.settings.revealBrainstorm} onChange={(e) => updateSession(s => s.settings.revealBrainstorm = e.target.checked)} />
                                <span className="whitespace-nowrap">{tr('session.board.revealCards')}</span>
                            </label>
-                           <div className="flex items-center space-x-2 border-l border-slate-200 pl-4">
-                             <span className="text-xs text-slate-500 font-medium whitespace-nowrap">{tr('session.board.colorBy')}</span>
-                             <select
-                               aria-label={tr('session.board.colorByAria')}
-                               value={session.settings.colorBy || 'topic'}
-                               onChange={(e) => updateSession(s => s.settings.colorBy = e.target.value as 'author' | 'topic')}
-                               className="text-xs bg-white border border-slate-300 rounded-sm px-2 py-1 text-slate-700 font-medium cursor-pointer hover:border-slate-400"
-                             >
-                               <option value="topic">{tr('session.board.colorByTopic')}</option>
-                               <option value="author">{tr('session.board.colorByAuthor')}</option>
-                             </select>
-                           </div>
-                           <button
-                                onClick={() => setIsEditingColumns(!isEditingColumns)}
-                                className={`flex items-center space-x-1 px-3 py-1 rounded-sm text-sm font-bold transition ${isEditingColumns ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}
-                           >
-                               <span className="material-symbols-outlined text-sm">view_column</span>
-                               <span>{isEditingColumns ? tr('session.board.doneEditingLayout') : tr('session.board.editLayout')}</span>
-                           </button>
+                           {renderColorBySelect()}
+                           {renderEditLayoutButton()}
                        </>
                    )}
 
-                   {mode === 'VOTE' && isFacilitator && (
-                        <div className="flex items-center space-x-2 text-sm text-slate-600 border-l border-slate-200 pl-4">
-                             <label className="flex items-center space-x-1 cursor-pointer">
-                                 <input type="checkbox" checked={session.settings.oneVotePerTicket} onChange={(e) => handleToggleOneVote(e.target.checked)} />
-                                 <span>{tr('session.board.oneVotePerItem')}</span>
-                             </label>
-                             <div className="flex items-center bg-slate-100 rounded-sm overflow-hidden">
-                                 <span className="px-2">{tr('session.board.maxVotes')}</span>
-                                 <button
-                                     onClick={() => handleMaxVotesChange(session.settings.maxVotes - 1)}
-                                     className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center"
-                                     title={tr('session.board.decreaseMaxVotes')}
-                                     aria-label={tr('session.board.decreaseMaxVotes')}
-                                 >
-                                     <span className="material-symbols-outlined text-sm">keyboard_arrow_down</span>
-                                 </button>
-                                 <input
-                                     type="text"
-                                     inputMode="numeric"
-                                     className="w-12 bg-transparent text-center font-bold outline-hidden text-slate-900"
-                                     value={maxVotesInput}
-                                     onChange={(e) => {
-                                         const val = e.target.value;
-                                         // Allow empty or numeric values
-                                         if (val === '' || /^\d+$/.test(val)) {
-                                             setMaxVotesInput(val);
-                                             // Only update session if valid number >= 1
-                                             const num = parseInt(val);
-                                             if (!isNaN(num) && num >= 1) {
-                                                 handleMaxVotesChange(num);
-                                             }
-                                         }
-                                     }}
-                                     onBlur={() => {
-                                         // On blur, ensure we have a valid value
-                                         const val = parseInt(maxVotesInput);
-                                         if (isNaN(val) || val < 1) {
-                                             // Revert to current session value or default to 1
-                                             const currentVal = session.settings.maxVotes || 1;
-                                             setMaxVotesInput(currentVal.toString());
-                                             if (currentVal !== session.settings.maxVotes) {
-                                                 handleMaxVotesChange(currentVal);
-                                             }
-                                         }
-                                     }}
-                                 />
-                                 <button
-                                     onClick={() => handleMaxVotesChange(session.settings.maxVotes + 1)}
-                                     className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center"
-                                     title={tr('session.board.increaseMaxVotes')}
-                                     aria-label={tr('session.board.increaseMaxVotes')}
-                                 >
-                                     <span className="material-symbols-outlined text-sm">keyboard_arrow_up</span>
-                                 </button>
-                             </div>
-                        </div>
-                   )}
+                   {mode === 'VOTE' && isFacilitator && renderVoteSettings()}
                </div>
 
                <div className="flex items-center space-x-3">
@@ -2610,6 +2824,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                        </div>
                    )}
 
+                   {maySwitchBoardType && renderSwitchToBoardButton()}
+
                    {isFacilitator && (
                        <button 
                             onClick={() => {
@@ -2626,21 +2842,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           </div>
       );
 
-      const selectThenDropActive = mode === 'GROUP' && isSelectThenDrop && !!draggedTicket;
+      const selectThenDropActive = (mode === 'GROUP' || isBoard) && isSelectThenDrop && !!draggedTicket;
 
       const renderGroupContainer = (g: Group) => {
           const myVotesOnThis = g.votes.filter(v => v === currentUser.id).length;
           const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
-          const isGroupDragTarget = mode === 'GROUP' && dragTarget?.type === 'ITEM' && dragTarget.id === g.id;
+          // On a board the group receives a held card, as in the Group phase.
+          const receivesCards = mode === 'GROUP' || (isBoard && !!draggedTicket);
+          const isGroupDragTarget = receivesCards && dragTarget?.type === 'ITEM' && dragTarget.id === g.id;
           // Brainstorm: the group travels as one, so the container itself is
           // what the pointer picks up — the cards inside it are inert there.
           // It stands down while one of those cards is open for editing, so
-          // the draggable container never competes with a textarea.
+          // the draggable container never competes with a textarea. On a board
+          // the cards inside are held for grouping, and the group itself is
+          // picked up to move it whole — never while a card is held.
           const editingInsideGroup = editingTicketId !== null
               && session.tickets.some(t => t.groupId === g.id && t.id === editingTicketId);
-          const isMovableGroup = mode === 'BRAINSTORM' && !editingInsideGroup && canMoveGroup(g);
-          const isGroupSelected = mode === 'BRAINSTORM' && movingItem?.kind === 'group' && movingItem.id === g.id;
-          const groupTapEnabled = mode === 'GROUP' || isMovableGroup;
+          const isMovableGroup = (mode === 'BRAINSTORM' || (isBoard && !draggedTicket))
+              && !editingInsideGroup && canMoveGroup(g);
+          const isGroupSelected = (mode === 'BRAINSTORM' || isBoard) && movingItem?.kind === 'group' && movingItem.id === g.id;
+          const groupTapEnabled = mode === 'GROUP' || isMovableGroup || (isBoard && selectThenDropActive);
 
           return (
                                         <div
@@ -2650,7 +2871,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 if (!isMovableGroup) return;
                                                 handleBrainstormDragStart(e, { kind: 'group', id: g.id });
                                             }}
-                                            onDragEnd={() => { if (mode === 'BRAINSTORM') resetBrainstormMove(); }}
+                                            onDragEnd={() => { if (mode === 'BRAINSTORM' || isBoard) resetBrainstormMove(); }}
                                             // The whole row of the column's grid: a group grows
                                             // with every card put in it, and beside one short
                                             // card it would leave a hole the height of the group.
@@ -2658,10 +2879,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 ${isGroupDragTarget ? 'border-indigo-500 ring-4 ring-indigo-200 z-20 scale-105' : isGroupSelected ? 'border-blue-500 ring-4 ring-blue-200 z-10' : 'border-dashed border-indigo-300'}
                                                 ${isMovableGroup ? 'cursor-grab active:cursor-grabbing' : ''}
                                             `}
-                                            onDragOver={(e) => mode === 'GROUP' ? handleDragOverItem(e, g.id) : undefined}
-                                            onDrop={(e) => mode === 'BRAINSTORM'
-                                                ? handleBrainstormDrop(e, g.colId)
-                                                : handleDropOnGroup(e, g)}
+                                            onDragOver={(e) => receivesCards ? handleDragOverItem(e, g.id) : undefined}
+                                            // A group held on a board is dropped on its column, not
+                                            // on another group: the event goes on to the column.
+                                            onDrop={(e) => {
+                                                if (mode === 'BRAINSTORM') {
+                                                    handleBrainstormDrop(e, g.colId);
+                                                    return;
+                                                }
+                                                if (isBoard && movingItem) return;
+                                                handleDropOnGroup(e, g);
+                                            }}
                                             // Tap-to-drop, on touch events rather than `onClick` for
                                             // the same reason as the card above. It carries the full
                                             // gesture, not just the end: this used to be a bare
@@ -2687,7 +2915,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 if (!groupTapEnabled) return;
                                                 const gesture = groupingGestureRef.current;
                                                 const onOwnControl = !!(e.target as HTMLElement).closest('button, textarea, input');
-                                                if (mode === 'BRAINSTORM') {
+                                                // A board drops a held card into the group, and
+                                                // otherwise picks the group up, as Brainstorm does.
+                                                if (mode === 'BRAINSTORM' || (isBoard && !selectThenDropActive)) {
                                                     const claimed = !onOwnControl && claimGesture(gesture);
                                                     endGesture(gesture);
                                                     if (claimed) handleBrainstormActivate({ kind: 'item', item: { kind: 'group', id: g.id }, canPickUp: true });
@@ -2709,7 +2939,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                     <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-1 flex items-center">
                                                         <span className="material-symbols-outlined text-sm mr-1">layers</span> {tr('session.group.label')}
                                                     </div>
-                                                    {mode === 'GROUP' ? (
+                                                    {(mode === 'GROUP' || isBoard) ? (
                                                         <div className="flex items-center gap-1">
                                                           <input
                                                             value={g.title}
@@ -2735,7 +2965,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         <div className="font-bold text-slate-800 text-sm">{g.title || tr('session.group.untitled')}</div>
                                                     )}
                                                 </div>
-                                                {mode === 'GROUP' && isFacilitator && (
+                                                {(mode === 'GROUP' || isBoard) && isFacilitator && (
                                                     <button onClick={() => updateSession(s => {
                                                         s.groups = s.groups.filter(x => x.id !== g.id);
                                                         s.tickets.filter(t => t.groupId === g.id).forEach(t => t.groupId = null);
@@ -2795,8 +3025,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 </button>
                                             )}
 
-                                            {mode === 'VOTE' && (
-                                                <div className="mt-2 pt-2 border-t border-indigo-100 flex justify-end">
+                                            {(mode === 'VOTE' || isBoard) && (
+                                                <div className={`mt-2 pt-2 border-t border-indigo-100 flex items-center ${isBoard ? 'justify-between' : 'justify-end'}`}>
+                                                    {isBoard && renderVoteTotal(g.votes.length)}
                                                     <div className="flex items-center bg-white rounded-lg p-1 shadow-xs border border-indigo-100">
                                                         <button disabled={myVotesOnThis === 0} onClick={() => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) { const idx = grp.votes.indexOf(currentUser.id); if(idx>-1) grp.votes.splice(idx,1); } })} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30" aria-label={tr('session.group.removeVote')}><span className="material-symbols-outlined text-sm">remove</span></button>
                                                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
@@ -2838,6 +3069,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     </div>
                 </div>
             )}
+            {isBoard && (
+                // The board holds both: a card for grouping (the Group phase's
+                // hint), a group to move whole (Brainstorm's), and says which.
+                <div className="px-6 pt-3 md:hidden">
+                    <div
+                        role="status"
+                        className={`text-xs rounded-lg border p-3 shadow-xs ${selectThenDropActive || movingItem ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}
+                    >
+                        {selectThenDropActive
+                            ? tr('session.hint.groupSelected')
+                            : movingItem
+                                ? tr('session.hint.moveSelected')
+                                : tr('session.hint.boardIdle')}
+                    </div>
+                </div>
+            )}
             {mode === 'BRAINSTORM' && (
                 // Same affordance, same reason as the Group phase's hint above:
                 // on a phone nothing else says a card can travel. `md:hidden`
@@ -2863,7 +3110,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     // Allow mouse wheel scrolling during drag — including a
                     // Brainstorm move, whose whole point is reaching a column
                     // that may be off screen.
-                    if ((mode === 'GROUP' && draggedTicket) || (mode === 'BRAINSTORM' && movingItem)) {
+                    if ((mode === 'GROUP' && draggedTicket) || (mode === 'BRAINSTORM' && movingItem)
+                        || (isBoard && (draggedTicket || movingItem))) {
                         e.currentTarget.scrollLeft += e.deltaY;
                     }
                 }}
@@ -2889,9 +3137,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     const groups = session.groups.filter(g => g.colId === col.id);
 
                     // In Brainstorm the column is the *only* drop target: a card
-                    // dropped anywhere in it lands in that column, ungrouped.
-                    const isMoveDropTarget = mode === 'BRAINSTORM' && isLive && !!movingItem && col.id !== movingItemColId;
-                    const isColumnDragTarget = (mode === 'GROUP' || isMoveDropTarget)
+                    // dropped anywhere in it lands in that column, ungrouped. A
+                    // board moves a held group the same way, and takes a held
+                    // card out of its group into the column, as the Group phase.
+                    const isMoveDropTarget = (mode === 'BRAINSTORM' || isBoard) && isLive && !!movingItem && col.id !== movingItemColId;
+                    const receivesCard = mode === 'GROUP' || (isBoard && !!draggedTicket);
+                    const isColumnDragTarget = (receivesCard || isMoveDropTarget)
                         && dragTarget?.type === 'COLUMN' && dragTarget.id === col.id;
 
                     return (
@@ -2908,20 +3159,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 ${isColumnDragTarget ? 'border-indigo-500 bg-indigo-50 border-2' : 'border-slate-200'}
                             `}
                             onDragOver={(e) => {
-                                if (mode === 'GROUP' || isMoveDropTarget) {
+                                if (receivesCard || isMoveDropTarget) {
                                     handleDragOverColumn(e, col.id);
                                     return;
                                 }
                                 e.preventDefault();
                             }}
                             onDragLeave={(e) => {
-                                if (mode !== 'GROUP' && !isMoveDropTarget) return;
+                                if (!receivesCard && !isMoveDropTarget) return;
                                 const nextTarget = e.relatedTarget as Node | null;
                                 if (!nextTarget || !e.currentTarget.contains(nextTarget)) {
                                     setDragTarget(null);
                                 }
                             }}
-                            onDrop={(e) => mode === 'BRAINSTORM'
+                            onDrop={(e) => (mode === 'BRAINSTORM' || (isBoard && movingItem))
                                 ? handleBrainstormDrop(e, col.id)
                                 : handleDropOnColumn(e, col.id)}
                         >
@@ -3001,7 +3252,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 Cards in a row stretch to its height and a group takes
                                 the whole row, so a row never leaves a hole. */}
                             <div className="p-3 grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3 bg-slate-50/50 relative">
-                                {mode === 'BRAINSTORM' && (
+                                {(mode === 'BRAINSTORM' || isBoard) && (
                                     <div
                                         className={`col-span-full bg-white p-3 rounded-sm border shadow-xs focus-within:ring-2 transition ${!col.customColor ? 'border-slate-200 ' + col.ring : ''}`}
                                         style={col.customColor ? {
@@ -3079,7 +3330,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     return renderTicketCard(t, mode, canVote, myVotesOnThis, false);
                                 })}
 
-                                {mode === 'GROUP' && isSelectThenDrop && draggedTicket && (
+                                {(mode === 'GROUP' || isBoard) && isSelectThenDrop && draggedTicket && (
                                     <button
                                         type="button"
                                         onClick={(e) => { e.stopPropagation(); handleGroupingActivate({ kind: 'column', colId: col.id }, mode); }}
@@ -3119,7 +3370,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     );
                 })}
                 
-                {mode === 'BRAINSTORM' && isFacilitator && isEditingColumns && (
+                {(mode === 'BRAINSTORM' || isBoard) && isFacilitator && isEditingColumns && (
                     <div className="flex flex-col w-80 shrink-0 h-full">
                         <button
                             onClick={() => {
@@ -3157,7 +3408,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           updateSession={updateSession}
           localParticipantsPanelCollapsed={localParticipantsPanelCollapsed}
           setLocalParticipantsPanelCollapsed={setLocalParticipantsPanelCollapsed}
-          participantsCount={activeParticipants.length}
+          // A board counts the people on it right now; a guided retro, the
+          // people it is waiting for.
+          participantsCount={isOpenBoard(session) ? connectedParticipants.length : activeParticipants.length}
           currentUser={currentUser}
           onInvite={() => setShowInvite(true)}
           isRetroTipsOpen={isRetroTipsOpen}
@@ -3182,13 +3435,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             team={team}
             activeSession={session}
             onClose={() => setShowInvite(false)}
-            onInvitesSent={(invitees) => {
-              // Remember who was invited on the session itself so the
-              // participants panel can show who is still expected to join.
+            // Remember who was invited on the session itself so the
+            // participants panel can show who is still expected to join. A
+            // board stays open for weeks and lists who is on it now, so it
+            // keeps no waiting list that would only ever grow.
+            onInvitesSent={isOpenBoard(session) ? undefined : (invitees) => {
               updateSession(s => {
                 s.invitedUsers = recordInvitees(s.invitedUsers, invitees, new Date().toISOString());
               });
             }}
+          />
+        )}
+        {confirmingShowAuthors && (
+          <ShowAuthorsDialog
+            onKeepAnonymous={() => setConfirmingShowAuthors(false)}
+            onShowAuthors={showAuthors}
           />
         )}
         <AiGroupSuggestionsModal
@@ -3214,6 +3475,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   onQuestionChange={handleIcebreakerChange}
                   onRandom={handleRandomIcebreaker}
                   onStart={() => setPhase('WELCOME')}
+                  // Where a facilitator who chose the wrong type lands first.
+                  onSwitchToOpenBoard={maySwitchBoardType ? switchToOpenBoard : undefined}
+                  isLive={isLive}
                 />
               )}
               {session.phase === 'WELCOME' && (
@@ -3261,6 +3525,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   </div>
               )}
               {session.phase === 'VOTE' && renderVote()}
+              {isOpenBoard(session) && (
+                  <div className="flex flex-col h-full">
+                       {renderColumns('BOARD')}
+                  </div>
+              )}
               {session.phase === 'DISCUSS' && (
                 <DiscussPhase
                   session={session}

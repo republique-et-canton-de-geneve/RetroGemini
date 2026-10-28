@@ -19,6 +19,9 @@
 // differ.
 const PROTECTED_SESSION_FIELDS = [
   'phase',
+  // The guided phase an open board resumes at when the facilitator turns it
+  // back (utils/openBoard.ts). Written with `phase`, by the same gesture.
+  'guidedPhase',
   'status',
   'name',
   'date',

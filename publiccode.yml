@@ -2,7 +2,7 @@ publiccodeYmlVersion: 0.5.0
 name: RetroGemini
 url: https://github.com/republique-et-canton-de-geneve/RetroGemini
 landingURL: https://github.com/republique-et-canton-de-geneve/RetroGemini#readme
-softwareVersion: "41.8"
+softwareVersion: "42.0"
 platforms:
   - web
 categories:
@@ -47,6 +47,8 @@ description:
     features:
       - Real-time shared retrospective boards with grouping, voting and
         discussion
+      - Open boards kept open, with every card activity on one screen
+        (Lean Coffee)
       - Action items with assignees, carry-over and impact follow-up
       - Optional creation of actions as Jira issues (Jira Data Center or Jira
         Cloud)
@@ -89,6 +91,8 @@ description:
     features:
       - Tableaux de rétrospective partagés en temps réel avec regroupement, vote
         et discussion
+      - Tableaux ouverts en continu, toutes les activités sur les cartes sur un
+        seul écran (Lean Coffee)
       - Actions avec responsables, report entre séances et suivi de leur impact
       - Création facultative des actions en tickets Jira (Jira Data Center ou
         Jira Cloud)

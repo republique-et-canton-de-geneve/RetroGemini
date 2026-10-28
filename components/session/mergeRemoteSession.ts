@@ -298,6 +298,19 @@ const ownVoteCount = (votes: string[] | undefined, userId: string) =>
 
 const hasOwnEntry = (list: string[] | undefined, userId: string) => (list ?? []).includes(userId);
 
+// Group id -> its cards' ids, as one string: what tells a regrouping apart
+// from a vote on the group (registerOwnRetroChanges).
+const groupMembers = (session: Pick<RetroSession, 'tickets'>): Map<string, string> => {
+  const members = new Map<string, string[]>();
+  for (const ticket of session.tickets ?? []) {
+    if (!ticket.groupId) continue;
+    const ids = members.get(ticket.groupId) ?? [];
+    ids.push(ticket.id);
+    members.set(ticket.groupId, ids);
+  }
+  return new Map([...members].map(([groupId, ids]) => [groupId, ids.sort().join('\u0000')]));
+};
+
 // Claim every own-data slice the local update just changed. Called from the
 // single `updateSession` choke point of each session component with the state
 // before and after the updater ran, so no call site can forget to declare its
@@ -321,19 +334,41 @@ const registerOwnRetroChanges = (
     claim(ownKey.finished);
   }
 
+  // Votes a regrouping moved are not the user voting. On an open board,
+  // grouping carries the cards' votes into the group (retroGrouping.ts →
+  // `keepVotes`), and grouping is shared content where the server wins: a
+  // regrouping that loses its race is healed away and redone by hand. A card
+  // whose group changed in this write, or a group whose cards changed, gets no
+  // vote claim, and one still outstanding on it is dropped — read as an own
+  // vote, the moved vote was re-asserted as "no vote" on the card the heal put
+  // back, and lost for good. A single write never both regroups and votes.
+  const beforeTickets = new Map((before.tickets ?? []).map(t => [t.id, t]));
   for (const ticket of after.tickets ?? []) {
-    const prevTicket = (before.tickets ?? []).find(t => t.id === ticket.id);
+    const prevTicket = beforeTickets.get(ticket.id);
     if (!prevTicket) continue; // a creation: pendingCreations covers it whole
+    const key = ownKey.ticketVotes(ticket.id);
+    if ((prevTicket.groupId ?? null) !== (ticket.groupId ?? null)) {
+      ledger.delete(key);
+      continue;
+    }
     if (ownVoteCount(prevTicket.votes, userId) !== ownVoteCount(ticket.votes, userId)) {
-      claim(ownKey.ticketVotes(ticket.id));
+      claim(key);
     }
   }
 
+  const beforeMembers = groupMembers(before);
+  const afterMembers = groupMembers(after);
+  const beforeGroups = new Map((before.groups ?? []).map(g => [g.id, g]));
   for (const group of after.groups ?? []) {
-    const prevGroup = (before.groups ?? []).find(g => g.id === group.id);
+    const prevGroup = beforeGroups.get(group.id);
     if (!prevGroup) continue;
+    const key = ownKey.groupVotes(group.id);
+    if (beforeMembers.get(group.id) !== afterMembers.get(group.id)) {
+      ledger.delete(key);
+      continue;
+    }
     if (ownVoteCount(prevGroup.votes, userId) !== ownVoteCount(group.votes, userId)) {
-      claim(ownKey.groupVotes(group.id));
+      claim(key);
     }
   }
 
@@ -539,9 +574,12 @@ const mergeRemoteRetroSession = (
     let next = ticket;
     const key = ownKey.ticketVotes(ticket.id);
 
-    if (!preserveVotes) {
-      // The server state is the vote-model cleanup result and wins outright,
-      // so any outstanding claim on this ticket is moot.
+    if (!preserveVotes || ticket.groupId) {
+      // The server state wins outright, so any outstanding claim on this
+      // ticket is moot: it is the vote-model cleanup result, or the ticket is
+      // grouped. A grouped card takes no vote of its own — its group does —
+      // and a vote that raced the grouping, re-asserted on it, would count
+      // against the voter's budget with no control left to take it back.
       ledger.delete(key);
     } else {
       const matches = ownVoteCount(ticket.votes, userId) === ownVoteCount(prevTicket.votes, userId);

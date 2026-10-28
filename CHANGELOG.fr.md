@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [42.0] - 2026-10-28
+
+### Added
+- Démarrez un tableau ouvert, une rétrospective sans phases où chacun ajoute, regroupe, déplace et vote sur les cartes depuis un seul écran qui reste ouvert, idéal pour un Lean Coffee ; il peut être anonyme ou non, son panneau des participants n'affiche que les personnes connectées en ce moment, et le facilitateur peut passer une rétrospective en cours de guidée à tableau ouvert et inversement sans perdre une carte
+
 ## [41.0] - 2026-10-21
 
 ### Added

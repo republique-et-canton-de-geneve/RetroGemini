@@ -182,7 +182,7 @@ test.describe('headers fit in both languages', () => {
 
   const assertEveryWidth = async (
     page: Page,
-    screen: 'dashboard' | 'retro' | 'health check',
+    screen: 'dashboard' | 'retro' | 'open board' | 'health check',
     state: 'live' | 'chip shown' = 'live'
   ) => {
     for (const width of WIDTHS) {
@@ -262,6 +262,15 @@ test.describe('headers fit in both languages', () => {
 
     await assertEveryWidth(page, 'retro');
     await assertEveryWidthWithChipShown(page, 'retro');
+
+    // The open board's header (42.0): no phase bar, the board's name in its
+    // place. Switching is a phase change, so the timer is set to its widest
+    // again.
+    await page.getByRole('button', { name: 'BRAINSTORM', exact: true }).click();
+    await page.getByRole('button', { name: 'Switch to an open board' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 10_000 });
+    await setTimerToItsWidest(page);
+    await assertEveryWidth(page, 'open board');
 
     await page.getByRole('button', { name: 'Leave the retrospective' }).click();
     await page.getByRole('button', { name: 'Health Checks' }).click();

@@ -1351,3 +1351,101 @@ describe('the review summary is claimed by the facilitator who typed it', () => 
     expect(ownChanges.size).toBe(0);
   });
 });
+
+/**
+ * Votes that move because cards were regrouped are not the user voting.
+ *
+ * An open board votes while it groups, and grouping there carries the cards'
+ * votes into the group (utils/retroGrouping.ts → `keepVotes`). Grouping is
+ * shared content where the server wins, like a card's column: a regrouping
+ * that loses a race is healed away and redone by hand. Read as own votes, the
+ * moved votes did two kinds of damage. The grouper's own vote, claimed on the
+ * card it left, was re-asserted as "no vote" on the card the heal put back,
+ * and the vote was gone for good. And a participant whose vote on a card raced
+ * the regrouping re-asserted it on a card the server had grouped, where it
+ * counts against their budget with no control to take it back.
+ */
+describe('votes moved by a regrouping are not own votes', () => {
+  const group = (id: string, votes: string[] = []) => ({ id, title: '', colId: 'col-1', votes });
+
+  it('claims no vote slice for a card or a group the write regrouped', () => {
+    const before = makeSession({
+      tickets: [makeTicket('A', { votes: [ME] }), makeTicket('B', { votes: [OTHER] })]
+    });
+    const after = makeSession({
+      tickets: [makeTicket('A', { groupId: 'g1' }), makeTicket('B', { groupId: 'g1' })],
+      groups: [group('g1', [ME, OTHER])]
+    });
+
+    const ledger = claiming(before, after);
+
+    expect([...ledger.keys()]).toEqual([]);
+  });
+
+  it('claims none for an existing group whose cards changed either', () => {
+    const before = makeSession({
+      tickets: [
+        makeTicket('A', { groupId: 'g1' }),
+        makeTicket('B', { groupId: 'g1' }),
+        makeTicket('C', { votes: [ME] })
+      ],
+      groups: [group('g1', [ME])]
+    });
+    const after = makeSession({
+      tickets: [
+        makeTicket('A', { groupId: 'g1' }),
+        makeTicket('B', { groupId: 'g1' }),
+        makeTicket('C', { groupId: 'g1' })
+      ],
+      groups: [group('g1', [ME, ME])]
+    });
+
+    expect([...claiming(before, after).keys()]).toEqual([]);
+  });
+
+  it('drops a vote claim still outstanding on a card the user then regrouped', () => {
+    const ledger: OwnChangeLedger = new Map();
+    const fresh = makeSession({ tickets: [makeTicket('A'), makeTicket('B')] });
+    const voted = makeSession({ tickets: [makeTicket('A', { votes: [ME] }), makeTicket('B')] });
+    registerOwnRetroChanges(ledger, fresh, voted, ME, NOW);
+    expect([...ledger.keys()]).toEqual(['ticketVotes:A']);
+
+    const grouped = makeSession({
+      tickets: [makeTicket('A', { groupId: 'g1' }), makeTicket('B', { groupId: 'g1' })],
+      groups: [group('g1', [ME])]
+    });
+    registerOwnRetroChanges(ledger, voted, grouped, ME, NOW + 10);
+
+    // The regrouping lost its race: the heal has the vote on A, ungrouped.
+    const heal = makeSession({ tickets: [makeTicket('A', { votes: [ME] }), makeTicket('B')] });
+    const { merged, divergent } = mergeRemoteRetroSession(heal, grouped, ctx({ ownChanges: ledger }), noPending());
+
+    expect(merged.tickets.find((t) => t.id === 'A')?.votes).toEqual([ME]);
+    expect(divergent).toBe(false);
+  });
+
+  it('still claims a vote cast on a card that stays where it is', () => {
+    const before = makeSession({ tickets: [makeTicket('A', { groupId: 'g1' }), makeTicket('B', { groupId: 'g1' })], groups: [group('g1')] });
+    const after = makeSession({ tickets: [makeTicket('A', { groupId: 'g1' }), makeTicket('B', { groupId: 'g1' })], groups: [group('g1', [ME])] });
+
+    expect([...claiming(before, after).keys()]).toEqual(['groupVotes:g1']);
+  });
+
+  it('never re-asserts an own vote on a card the incoming state has grouped', () => {
+    // My vote on A was refused while someone grouped A with B: the heal moved
+    // whatever A held into the group, and A itself takes no vote any more.
+    const before = makeSession({ tickets: [makeTicket('A'), makeTicket('B')] });
+    const prev = makeSession({ tickets: [makeTicket('A', { votes: [ME] }), makeTicket('B')] });
+    const ownChanges = claiming(before, prev);
+    const incoming = makeSession({
+      tickets: [makeTicket('A', { groupId: 'g1' }), makeTicket('B', { groupId: 'g1' })],
+      groups: [group('g1')]
+    });
+
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx({ ownChanges }), noPending());
+
+    expect(merged.tickets.find((t) => t.id === 'A')?.votes).toEqual([]);
+    expect(divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
+  });
+});

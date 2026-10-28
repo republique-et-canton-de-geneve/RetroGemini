@@ -380,6 +380,11 @@ other.
 | Result | the card changes column and stays itself | a group is created, joined or left |
 | Grouped card | travels with its group, never alone | freely regrouped |
 
+The open board (see *The open board* below) carries both on one screen without
+mixing them: a **card** is held the Group phase's way (`draggedTicket`), a
+**group** the Brainstorm way (`movingItem`), never both at once, and a held
+group is received by a column only.
+
 Four rules:
 
 - **A card is only movable by someone who can read it.** With "Reveal cards"
@@ -478,6 +483,75 @@ Three rules:
 - **The arrows are off while the session reconnects**, like the other inputs:
   `updateSession` drops edits offline, and a click that does nothing silently
   is worse than a disabled control.
+
+## The open board — a retrospective on one screen (42.0)
+
+An open board is a retrospective whose every card activity — writing, voting,
+grouping, moving — happens on one screen, with no phases to go through, and
+which stays open for as long as the team keeps it (a Lean Coffee, a board kept
+for weeks). The facilitator chooses it in *Start New Retrospective* (board type:
+guided or open; an open board starts anonymous, and the toggle stays free), and
+can turn a retro in progress into a board and back from the session. The rules
+are pure and coverage-gated in `utils/openBoard.ts`; `renderColumns('BOARD')` in
+`Session.tsx` draws it. Seven rules:
+
+- **The board is a phase, not a flag and not a session type.** Its phase is
+  `OPEN_BOARD`, which is none of the guided phases, so no guided phase rule (the
+  Vote phase's auto-finish, the Review step's snapshots, Close ending the
+  session) can fire on a board by accident, and every `phase === 'X'` check keeps
+  meaning what it meant. Same record, same cards, groups and votes, same sync.
+- **Switching is a phase change, and only `setPhase` makes it.**
+  `recordBoardTypeChange` remembers the guided phase in `guidedPhase` on the way
+  to the board and forgets it on the way back; `guidedResumePhase` resumes there,
+  at Icebreaker for a board created open, and **never at Close** (reaching Close
+  ends the session, and switching must not end it as a side effect). The timer
+  stops at the target's timebox like any phase change (the board's is
+  `OPEN_BOARD` in `retroTips.ts`: 5 minutes per topic). `phase` and `guidedPhase`
+  are facilitator-only in `sessionGuard.js`, and a merge reads both as
+  navigation (`teamMerge.js` → `NAVIGATION_KEYS`). A closed retro is not switched
+  (`canSwitchBoardType`). The switch is offered on the board's bar, the
+  Icebreaker screen and the Brainstorm, Group and Vote bars — never in the
+  session header, which the header-fit e2e already measures to the pixel.
+- **Nothing is lost either way.** What only the guided phases show (actions,
+  happiness, ROTI, invitees, the discussion focus) stays stored on the board and
+  is there again on the way back; the board shows every card, group and vote the
+  guided phases left.
+- **Every card is readable** (`cardsVisibleToEveryone`): a card is written to be
+  voted on, so "Reveal cards" does not apply on a board.
+- **On a board the votes travel with the cards.** Grouping there runs with
+  `keepVotes` (`utils/retroGrouping.ts`): a group gets the votes of the cards put
+  in it, a group left with one card hands its votes to that card, and a person
+  who voted for two cards that become one keeps one vote when only one per item
+  is allowed. The guided Group phase runs before the vote and keeps clearing
+  them. The board's vote control shows the total each card or group received
+  (the Vote phase keeps its totals to itself).
+- **Votes moved by a regrouping are not own votes.** `registerOwnRetroChanges`
+  claims no vote slice for a card whose group changed, or a group whose cards
+  changed, in the same write, and drops a claim still outstanding on one; the
+  merge never re-asserts an own vote on a card the incoming state has grouped.
+  Read as own votes, a regrouping that lost its race took the grouper's vote
+  with it, and a vote racing a regrouping was re-asserted on a grouped card,
+  where it counts against the budget with no control to take it back
+  (`__tests__/mergeRemoteSession.test.ts` → *votes moved by a regrouping*).
+- **Its participants panel lists who is connected right now, and no one
+  else.** `ParticipantsPanel` filters the roster by presence on a board: no
+  waiting list (the invite modal records no invitee there), no "has left"
+  marking, no progress line. The session roster is still kept as in a guided
+  retro, which is what keeps an anonymous participant's number stable from one
+  visit to the next. A board's facilitator can change its anonymity from the
+  board; turning it off asks first (`ShowAuthorsDialog`), because it names the
+  author of every card, the ones written while the board was anonymous too.
+
+Residuals, stated on purpose: a client from before 42.0 that opens a board
+during the rolling update draws nothing for the `OPEN_BOARD` phase until it
+reloads, and a pod from before 42.0 does not protect `guidedPhase`. A board is
+in progress for good, so a participant who joins without a link lands on it when
+it is the team's newest retro in progress (`App.tsx` routing is unchanged). The
+guards: `__tests__/openBoard.test.ts`, the `keepVotes` cases of
+`retroGrouping.test.ts`, `sessionOpenBoard.test.tsx` (the screen, the keyboard
+paths, the switch and the panel), `dashboardOpenBoard.test.tsx`, and
+`e2e/retro-open-board.spec.ts` (two browsers, the presence panel, a round trip
+through the guided retro, and the axe audit of the board).
 
 ## Retrospectives and health checks — one behaviour for what they share
 

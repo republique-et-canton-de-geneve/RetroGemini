@@ -29,6 +29,8 @@ const session = {
   'session.board.editLayout': 'Edit Layout',
   'session.board.oneVotePerItem': '1 vote/item',
   'session.board.maxVotes': 'Max:',
+  // The number field beside "Max:". Its name carries that visible word (WCAG 2.5.3).
+  'session.board.maxVotesInput': 'Max votes per person',
   'session.board.decreaseMaxVotes': 'Decrease max votes',
   'session.board.increaseMaxVotes': 'Increase max votes',
   'session.board.finished': 'Finished!',
@@ -40,6 +42,22 @@ const session = {
   'session.board.columnOffScreen': '(off screen)',
   'session.board.columnsInView': 'Columns in view: {shown} of {total}',
 
+  // Open board (utils/openBoard.ts): every card activity on one screen, no phases
+  'session.openBoard.title': 'Open board',
+  'session.openBoard.anonymous': 'Anonymous',
+  // ShowAuthorsDialog.tsx: turning anonymity off reveals the earlier cards too.
+  'session.openBoard.showAuthorsTitle': 'Show who wrote each card?',
+  'session.openBoard.showAuthorsBody':
+    'The cards written while the board was anonymous will show their author too, for everyone on the board.',
+  'session.openBoard.keepAnonymous': 'Keep it anonymous',
+  'session.openBoard.showAuthors': 'Show the authors',
+  'session.openBoard.switchToGuided': 'Switch to a guided retrospective',
+  'session.openBoard.switchToGuidedHint':
+    'Go through the phases one by one. Every card, group and vote stays on the board.',
+  'session.openBoard.switchToBoard': 'Switch to an open board',
+  'session.openBoard.switchToBoardHint':
+    'Everything on one screen, with no phases: add, group, move and vote on cards at any time. Every card, group and vote is kept.',
+
   // Touch hints (role="status", phone layout only)
   'session.hint.groupSelected':
     'Card selected. Tap another card, a group, or a column to move it there. Tap the selected card again, or press Escape, to cancel.',
@@ -49,6 +67,8 @@ const session = {
   'session.hint.moveIdleRevealed': 'Touch hint: tap a card to select it, then choose the column to move it to.',
   'session.hint.moveIdleOwnCards':
     'Touch hint: tap one of your own cards to select it, then choose the column to move it to.',
+  'session.hint.boardIdle':
+    'Touch hint: tap a card, then another card, a group or a column to move it there. Tap a group to move it to another column.',
 
   // Columns
   'session.column.moveTo': 'Move to {title}',
@@ -75,6 +95,9 @@ const session = {
   'session.ticket.comments': 'Comments',
   'session.ticket.removeVote': 'Remove a vote from this ticket',
   'session.ticket.addVote': 'Add a vote to this ticket',
+  // Open board: the votes a card or a group holds from everyone.
+  'session.ticket.voteTotal_one': '{count} vote in total',
+  'session.ticket.voteTotal_other': '{count} votes in total',
 
   // Group container
   'session.group.label': 'Group',

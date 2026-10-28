@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [42.0] - 2026-10-28
+
+### Added
+- Start an open board, a retrospective with no phases where everyone adds, groups, moves and votes on cards from one screen that stays open, ideal for a Lean Coffee; it can be anonymous or not, its participants panel shows only the people connected right now, and the facilitator can switch a retrospective in progress between guided and open board without losing a card
+
 ## [41.0] - 2026-10-21
 
 ### Added

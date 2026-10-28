@@ -1,6 +1,7 @@
 
 import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink, JiraParentLink } from '../types';
 import { randomId } from '../utils/randomId';
+import { OPEN_BOARD_PHASE } from '../utils/openBoard';
 import { PARTICIPANT_PALETTE } from '../utils/participantColors';
 import { isJiraIssueKey, isJiraIssueTypeId, isJiraLinked, isJiraParentScope, isJiraUncertain } from '../utils/jira.js';
 import {
@@ -1369,7 +1370,8 @@ export const dataService = {
     teamId: string,
     name: string,
     templateCols: Column[],
-    options?: { isAnonymous?: boolean; templateLanguage?: Language }
+    // `openBoard`: every card activity on one screen, no phases (utils/openBoard.ts).
+    options?: { isAnonymous?: boolean; templateLanguage?: Language; openBoard?: boolean }
   ): RetroSession => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');
@@ -1391,7 +1393,7 @@ export const dataService = {
       name,
       date: new Date().toLocaleDateString(),
       status: 'IN_PROGRESS',
-      phase: 'ICEBREAKER', // Skipped SETUP
+      phase: options?.openBoard ? OPEN_BOARD_PHASE : 'ICEBREAKER', // Skipped SETUP
       participants: [],
       discussionFocusId: null,
       icebreakerQuestion: icebreakerQuestion,

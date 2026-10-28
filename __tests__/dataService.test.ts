@@ -860,6 +860,20 @@ describe('dataService', () => {
       expect(session.settings.isAnonymous).toBe(true);
     });
 
+    it('creates an open board straight on its board, with no guided phase to resume', async () => {
+      // utils/openBoard.ts: the board is the phase; turning it into a guided
+      // retro later starts at the beginning.
+      const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
+      const board = dataService.createSession(team.id, 'Lean Coffee', columns, { openBoard: true, isAnonymous: true });
+
+      expect(board.phase).toBe('OPEN_BOARD');
+      expect(board.status).toBe('IN_PROGRESS');
+      expect(board).not.toHaveProperty('guidedPhase');
+      expect(board.settings.isAnonymous).toBe(true);
+      // Without the option, the guided retrospective it always was.
+      expect(dataService.createSession(team.id, 'Retro', columns).phase).toBe('ICEBREAKER');
+    });
+
     it('creates a retrospective with its timer stopped at five minutes', async () => {
       // Guards: the shared timer helpers (createTimerSettings) changing the
       // retrospective's stored default while health checks gained theirs.

@@ -876,6 +876,14 @@ describe('fingerprintTeamContent', () => {
     expect(fingerprintTeamContent(browsed)).toBe(fingerprintTeamContent(team));
   });
 
+  it('reads turning a retro into an open board and back as a phase change, not as work', () => {
+    const open = primaryTeam();
+    Object.assign(open.retrospectives[0], { status: 'IN_PROGRESS', phase: 'GROUP' });
+    const board = primaryTeam();
+    Object.assign(board.retrospectives[0], { status: 'IN_PROGRESS', phase: 'OPEN_BOARD', guidedPhase: 'GROUP' });
+    expect(fingerprintTeamContent(board)).toBe(fingerprintTeamContent(open));
+  });
+
   it('counts reaching Close as a change, but not the phase bar', () => {
     const open = primaryTeam();
     Object.assign(open.retrospectives[0], { status: 'IN_PROGRESS', phase: 'DISCUSS' });
