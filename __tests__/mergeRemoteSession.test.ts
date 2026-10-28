@@ -254,6 +254,38 @@ describe('mergeRemoteRetroSession', () => {
     expect(second.divergent).toBe(false);
   });
 
+  it('puts a pending ticket written in a column removed meanwhile beside it, never under nothing', () => {
+    const column = (id: string) => ({
+      id, title: id, color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200'
+    });
+    const pending = () => new Map<string, PendingCreation>([['t-new', { kind: 'ticket', expiresAt: 2_000_000 }]]);
+    const written = (colId: string) => makeSession({
+      phase: 'BRAINSTORM',
+      columns: [column('start'), column('stop'), column('continue')],
+      tickets: [makeTicket('t-new', { colId })],
+    });
+    // The facilitator removed a column while I wrote a card in it
+    // (retroGrouping.ts → removeColumn), and the heal does not hold my card.
+    const without = (...ids: string[]) =>
+      makeSession({ phase: 'BRAINSTORM', columns: ['start', 'stop', 'continue'].filter((id) => !ids.includes(id)).map(column) });
+
+    const middle = mergeRemoteRetroSession(without('stop'), written('stop'), ctx(), pending());
+    expect(middle.merged.tickets.find((t) => t.id === 't-new')?.colId).toBe('start');
+    expect(middle.divergent).toBe(true);
+
+    // The first column has none before it: the one after it.
+    const first = mergeRemoteRetroSession(without('start'), written('start'), ctx(), pending());
+    expect(first.merged.tickets.find((t) => t.id === 't-new')?.colId).toBe('stop');
+
+    // Two removed at once: the nearest one left.
+    const two = mergeRemoteRetroSession(without('start', 'stop'), written('stop'), ctx(), pending());
+    expect(two.merged.tickets.find((t) => t.id === 't-new')?.colId).toBe('continue');
+
+    // A column that still exists keeps its card.
+    const kept = mergeRemoteRetroSession(without('stop'), written('continue'), ctx(), pending());
+    expect(kept.merged.tickets.find((t) => t.id === 't-new')?.colId).toBe('continue');
+  });
+
   it('re-injects a pending action proposal', () => {
     const myProposal = makeAction('a-new');
     const pending = new Map<string, PendingCreation>([
@@ -1355,8 +1387,8 @@ describe('the review summary is claimed by the facilitator who typed it', () => 
 /**
  * Votes that move because cards were regrouped are not the user voting.
  *
- * An open board votes while it groups, and grouping there carries the cards'
- * votes into the group (utils/retroGrouping.ts → `keepVotes`). Grouping is
+ * Grouping carries the cards' votes into the group (utils/retroGrouping.ts →
+ * `combineVotes`), and an open board votes while it groups. Grouping is
  * shared content where the server wins, like a card's column: a regrouping
  * that loses a race is healed away and redone by hand. Read as own votes, the
  * moved votes did two kinds of damage. The grouper's own vote, claimed on the
@@ -1451,8 +1483,8 @@ describe('votes moved by a regrouping are not own votes', () => {
 });
 
 /**
- * On an open board a regrouping carries a card's votes into its group, so a
- * group's count is no longer only what its voters did to it. A claim on a group
+ * A regrouping carries a card's votes into its group, so a group's count is
+ * no longer only what its voters did to it. A claim on a group
  * made before someone else's regrouping moved cards into it has to count the
  * votes those cards brought, or re-asserting it deletes them: taking one vote
  * off a group took the vote the moved card carried too (Codex review on PR
@@ -1511,17 +1543,17 @@ describe('votes a regrouping moves into a group', () => {
     expect(merged.groups[0].votes).toContain(OTHER);
   });
 
-  it('counts nothing moved in a guided retro, whose grouping drops a card’s votes', () => {
+  it('counts them in a guided retro too, back from a board with votes on its cards', () => {
     const guided = { phase: 'GROUP' };
     const start = makeSession({ ...guided, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [ME] })], groups: [group('g1', [ME])] });
     const removed = makeSession({ ...guided, tickets: start.tickets, groups: [group('g1')] });
     const ownChanges = claiming(start, removed);
-    // The guided Group phase dropped C's vote: g1 still holds only my old one.
-    const incoming = makeSession({ ...guided, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [ME])] });
+    // The Group phase carries C's vote into g1, as the board does.
+    const incoming = makeSession({ ...guided, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [ME, ME])] });
 
     const { merged } = mergeRemoteRetroSession(incoming, removed, ctx({ ownChanges }), noPending());
 
-    expect(mine(merged.groups[0].votes)).toBe(0);
+    expect(mine(merged.groups[0].votes)).toBe(1);
   });
 
   it('drops a group claim when the user then drops one of their voted cards into the group', () => {

@@ -1,5 +1,4 @@
 import { RetroSession, HealthCheckSession, ActionItem, ActionImpactVote } from '../../types';
-import { isOpenBoard } from '../../utils/openBoard';
 import { restoreLostInvitees } from './sessionInvitees';
 
 // Pure merge of an incoming authoritative session state with the local state.
@@ -73,6 +72,27 @@ const restorePendingCreations = <T extends { id: string }>(
     if (mine) restored = [...current, { ...mine }];
   }
   return restored;
+};
+
+/**
+ * A card written in a column the facilitator removed meanwhile goes where
+ * `removeColumn` (utils/retroGrouping.ts) put the column's other cards: the
+ * nearest column before it, or after it. Restored as written, it would be
+ * stored under a column no one sees, its author included.
+ */
+const inExistingColumn = (
+  ticket: RetroSession['tickets'][number],
+  columnsBefore: RetroSession['columns'],
+  columns: RetroSession['columns'],
+): RetroSession['tickets'][number] => {
+  if (columns.length === 0 || columns.some(c => c.id === ticket.colId)) return ticket;
+  const kept = new Set(columns.map(c => c.id));
+  const index = columnsBefore.findIndex(c => c.id === ticket.colId);
+  const heir = index === -1
+    ? undefined
+    : [...columnsBefore.slice(0, index)].reverse().find(c => kept.has(c.id))
+      ?? columnsBefore.slice(index + 1).find(c => kept.has(c.id));
+  return { ...ticket, colId: (heir ?? columns[0]).id };
 };
 
 // --- Own-change ledger -----------------------------------------------------
@@ -335,9 +355,9 @@ const registerOwnRetroChanges = (
     claim(ownKey.finished);
   }
 
-  // Votes a regrouping moved are not the user voting. On an open board,
-  // grouping carries the cards' votes into the group (retroGrouping.ts →
-  // `keepVotes`), and grouping is shared content where the server wins: a
+  // Votes a regrouping moved are not the user voting. Grouping carries the
+  // cards' votes into the group (retroGrouping.ts → `combineVotes`), and
+  // grouping is shared content where the server wins: a
   // regrouping that loses its race is healed away and redone by hand. A card
   // whose group changed in this write, or a group whose cards changed, gets no
   // vote claim, and one still outstanding on it is dropped — read as an own
@@ -603,18 +623,18 @@ const mergeRemoteRetroSession = (
     return next;
   });
 
-  // Votes another client's regrouping moved into a group. On an open board,
-  // grouping carries a card's votes into its group (retroGrouping.ts →
-  // `keepVotes`), so when the incoming state put into a group cards this client
-  // still holds outside it, the group's count there includes this user's votes
-  // on those cards. A claim made before the move counts them in: the user's
-  // count alone would delete the votes the cards carried (a vote taken off the
-  // group would take them all), and would read a vote the server lost as
-  // confirmed. The guided Group phase drops a card's votes instead, so there
-  // nothing moved.
+  // Votes another client's regrouping moved into a group. Grouping carries a
+  // card's votes into its group (retroGrouping.ts → `combineVotes`), so when
+  // the incoming state put into a group cards this client still holds outside
+  // it, the group's count there includes this user's votes on those cards. A
+  // claim made before the move counts them in: the user's count alone would
+  // delete the votes the cards carried (a vote taken off the group would take
+  // them all), and would read a vote the server lost as confirmed. It counts
+  // the votes the cards held here: a vote that reached one of them on the
+  // server since, and moved in with it, is not counted (AGENTS.md → the open
+  // board's residuals).
   const prevTickets = new Map(prev.tickets.map(t => [t.id, t]));
   const ownVotesMovedInto = (groupId: string): number => {
-    if (!isOpenBoard(incoming)) return 0;
     let moved = 0;
     for (const ticket of incoming.tickets) {
       if (ticket.groupId !== groupId) continue;
@@ -663,7 +683,10 @@ const mergeRemoteRetroSession = (
   // snapshot cannot make a just-written post-it or proposal vanish.
   const restoredTickets = restorePendingCreations(pending, 'ticket', merged.tickets, prev.tickets);
   if (restoredTickets) {
-    merged.tickets = restoredTickets;
+    const received = new Set(merged.tickets.map(t => t.id));
+    merged.tickets = restoredTickets.map(t =>
+      received.has(t.id) ? t : inExistingColumn(t, prev.columns, merged.columns)
+    );
     divergent = true;
   }
   const restoredActions = restorePendingCreations(pending, 'action', merged.actions, prev.actions);

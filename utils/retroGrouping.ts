@@ -33,20 +33,18 @@ export const getTicketOriginColumn = (
 };
 
 /**
- * What grouping does with the votes already on the cards.
- *
- * The guided Group phase runs before the vote, so its cards carry none and
- * grouping clears whatever they hold. An open board (`utils/openBoard.ts`)
- * votes while it groups, so there `keepVotes` makes the votes travel with the
- * cards: a group gets the votes of every card put in it, and a group left with
+ * What grouping does with the votes already on the cards: they travel with
+ * them. A group gets the votes of every card put in it, and a group left with
  * one card hands its votes to that card. Nobody's count ever grows, so the vote
  * budget holds — and with one vote per item allowed, a person who voted for two
  * cards that become one keeps one vote on it and gets the other back.
+ *
+ * An open board (`utils/openBoard.ts`) votes while it groups. The guided Group
+ * phase runs before the vote, so there is usually nothing to carry — but a
+ * retro turned back from a board, or browsed back from the Vote phase, has
+ * votes on its cards, and grouping cleared them until 42.0: silently, since
+ * the Group phase shows no vote.
  */
-export interface GroupingOptions {
-  keepVotes?: boolean;
-}
-
 const combineVotes = (session: RetroSession, into: string[] | undefined, added: string[] | undefined): string[] => {
   const all = [...(into ?? []), ...(added ?? [])];
   return session.settings?.oneVotePerTicket ? [...new Set(all)] : all;
@@ -55,7 +53,7 @@ const combineVotes = (session: RetroSession, into: string[] | undefined, added: 
 /**
  * Removes a group when it would have one or zero remaining members.
  * The remaining sibling (if any) is returned to the ungrouped state, with the
- * group's votes when they are kept (see `GroupingOptions`).
+ * group's votes (see `combineVotes`).
  *
  * Mutates `session` in place to match the existing update patterns.
  */
@@ -63,7 +61,6 @@ export const dissolveGroupIfTooSmall = (
   session: RetroSession,
   groupId: string | null | undefined,
   ticketIdToIgnore: string,
-  options: GroupingOptions = {},
 ): void => {
   if (!groupId) return;
   const siblings = session.tickets.filter(
@@ -72,10 +69,8 @@ export const dissolveGroupIfTooSmall = (
   if (siblings.length <= 1) {
     if (siblings.length === 1) {
       const lastCard = siblings[0];
-      if (options.keepVotes) {
-        const group = session.groups.find((g) => g.id === groupId);
-        lastCard.votes = combineVotes(session, lastCard.votes, group?.votes);
-      }
+      const group = session.groups.find((g) => g.id === groupId);
+      lastCard.votes = combineVotes(session, lastCard.votes, group?.votes);
       lastCard.groupId = null;
     }
     session.groups = session.groups.filter((g) => g.id !== groupId);
@@ -104,7 +99,6 @@ export const groupTicketsTogether = (
   draggedTicketId: string,
   targetTicketId: string,
   generateId: () => string = defaultIdGenerator,
-  options: GroupingOptions = {},
 ): GroupTicketsResult => {
   if (draggedTicketId === targetTicketId) {
     return { newGroupId: null, noOp: true };
@@ -127,11 +121,9 @@ export const groupTicketsTogether = (
     if (!targetGroupExists) {
       return { newGroupId: null, noOp: true };
     }
-    dissolveGroupIfTooSmall(session, draggedT.groupId, draggedT.id, options);
-    if (options.keepVotes) {
-      const targetGroup = session.groups.find((g) => g.id === targetT.groupId);
-      if (targetGroup) targetGroup.votes = combineVotes(session, targetGroup.votes, draggedT.votes);
-    }
+    dissolveGroupIfTooSmall(session, draggedT.groupId, draggedT.id);
+    const targetGroup = session.groups.find((g) => g.id === targetT.groupId);
+    if (targetGroup) targetGroup.votes = combineVotes(session, targetGroup.votes, draggedT.votes);
     draggedT.votes = [];
     draggedT.groupId = targetT.groupId;
     stampOriginColumn(draggedT, targetT.colId);
@@ -139,8 +131,8 @@ export const groupTicketsTogether = (
     return { newGroupId: null, noOp: false };
   }
 
-  dissolveGroupIfTooSmall(session, draggedT.groupId, draggedT.id, options);
-  const groupVotes = options.keepVotes ? combineVotes(session, targetT.votes, draggedT.votes) : [];
+  dissolveGroupIfTooSmall(session, draggedT.groupId, draggedT.id);
+  const groupVotes = combineVotes(session, targetT.votes, draggedT.votes);
   draggedT.votes = [];
 
   const newGroupId = generateId();
@@ -172,7 +164,6 @@ export const addTicketToGroup = (
   session: RetroSession,
   ticketId: string,
   targetGroupId: string,
-  options: GroupingOptions = {},
 ): boolean => {
   const t = session.tickets.find((x) => x.id === ticketId);
   if (!t) return false;
@@ -182,8 +173,8 @@ export const addTicketToGroup = (
 
   if (t.groupId === targetGroupId) return false;
 
-  dissolveGroupIfTooSmall(session, t.groupId, t.id, options);
-  if (options.keepVotes) targetGroup.votes = combineVotes(session, targetGroup.votes, t.votes);
+  dissolveGroupIfTooSmall(session, t.groupId, t.id);
+  targetGroup.votes = combineVotes(session, targetGroup.votes, t.votes);
   t.groupId = targetGroup.id;
   stampOriginColumn(t, targetGroup.colId);
   t.colId = targetGroup.colId;
@@ -198,11 +189,10 @@ export const removeTicketFromGroup = (
   session: RetroSession,
   ticketId: string,
   colId: string,
-  options: GroupingOptions = {},
 ): void => {
   const t = session.tickets.find((x) => x.id === ticketId);
   if (!t) return;
-  dissolveGroupIfTooSmall(session, t.groupId, t.id, options);
+  dissolveGroupIfTooSmall(session, t.groupId, t.id);
   t.colId = colId;
   t.groupId = null;
   // Dropping straight onto a column is an explicit re-homing: the ticket now
@@ -218,32 +208,29 @@ export const removeTicketFromGroup = (
 export const deleteTicket = (
   session: RetroSession,
   ticketId: string,
-  options: GroupingOptions = {},
 ): boolean => {
   const t = session.tickets.find((x) => x.id === ticketId);
   if (!t) return false;
-  dissolveGroupIfTooSmall(session, t.groupId, t.id, options);
+  dissolveGroupIfTooSmall(session, t.groupId, t.id);
   session.tickets = session.tickets.filter((x) => x.id !== ticketId);
   return true;
 };
 
 /**
- * Deletes a group: its cards stay, ungrouped, where they are. With `keepVotes`
- * (an open board) the group's votes go to the card it was anchored to (the
- * card it was made on), or to its first card when that one has left it: a
- * deletion that only meant to separate the cards never takes the votes the
- * topic received. The guided Group phase runs before the vote, so it has none
- * to keep. Answers false when the group is already gone.
+ * Deletes a group: its cards stay, ungrouped, where they are, and its votes go
+ * to the card it was anchored to (the card it was made on), or to its first
+ * card when that one has left it: a deletion that only meant to separate the
+ * cards never takes the votes the topic received. Answers false when the group
+ * is already gone.
  */
 export const deleteGroup = (
   session: RetroSession,
   groupId: string,
-  options: GroupingOptions = {},
 ): boolean => {
   const group = session.groups.find((g) => g.id === groupId);
   if (!group) return false;
   const members = session.tickets.filter((t) => t.groupId === groupId);
-  if (options.keepVotes && members.length > 0) {
+  if (members.length > 0) {
     const heir = members.find((t) => t.id === group.anchorTicketId) ?? members[0];
     heir.votes = combineVotes(session, heir.votes, group.votes);
   }
@@ -300,7 +287,6 @@ export const applySuggestedClusters = (
   session: RetroSession,
   suggestions: SuggestedCluster[],
   generateId: () => string = defaultIdGenerator,
-  options: GroupingOptions = {},
 ): void => {
   const usedIds = new Set<string>();
   for (const suggestion of suggestions) {
@@ -320,9 +306,7 @@ export const applySuggestedClusters = (
       // Never half an emoji: the title is stored (utils/textCut.js).
       title: cutCodeUnits((suggestion.title || '').trim(), 80),
       colId,
-      votes: options.keepVotes
-        ? validTickets.reduce<string[]>((votes, t) => combineVotes(session, votes, t.votes), [])
-        : [],
+      votes: validTickets.reduce<string[]>((votes, t) => combineVotes(session, votes, t.votes), []),
     });
     for (const t of validTickets) {
       t.groupId = newGroupId;

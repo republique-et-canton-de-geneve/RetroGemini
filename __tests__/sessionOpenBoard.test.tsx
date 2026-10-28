@@ -523,6 +523,12 @@ describe('Open board — every hold and every drop', () => {
     global.fetch = vi.fn(() =>
       Promise.resolve({ json: () => Promise.resolve({ enabled: false }) }),
     ) as unknown as typeof fetch;
+    // Discuss scrolls the topic under discussion into view, 50ms after it
+    // renders; jsdom has no scrollIntoView.
+    Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn()
+    });
   });
 
   const ticket = (id: string, text: string, overrides: Partial<RetroSession['tickets'][number]> = {}) => ({
@@ -865,6 +871,58 @@ describe('Open board — every hold and every drop', () => {
     const select = screen.getByRole('combobox', { name: /colou?r/i }) as HTMLSelectElement;
     expect(select.value).toBe('topic');
     expect((within(select).getByRole('option', { name: 'Author' }) as HTMLOptionElement).disabled).toBe(true);
+  });
+
+  // Back from a board the guided Group phase has votes on its cards, and it
+  // shows none of them: grouping there must carry them as the board does.
+  it('keeps the votes when the guided Group phase groups cards a board voted on', async () => {
+    renderBoard(createBoard({ phase: 'GROUP' }));
+    await screen.findByText('Flaky deploys');
+
+    drag(cardElement('Flaky deploys'), cardElement('Slow rollbacks'));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.groups).toHaveLength(1);
+      expect([...persisted!.groups[0].votes].sort()).toEqual(['alice', 'bob', 'fac']);
+      expect(persisted?.tickets.flatMap((t) => t.votes)).toEqual([]);
+    });
+  });
+
+  it('keeps them when the guided Group phase deletes a group', async () => {
+    const user = userEvent.setup();
+    renderBoard(groupedBoard({ phase: 'GROUP' }));
+    await screen.findByText('Flaky deploys');
+
+    await user.click(screen.getByRole('button', { name: 'Delete group' }));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.groups).toEqual([]);
+      expect(persisted?.tickets.find((t) => t.id === 't-a')?.votes).toEqual(['bob']);
+    });
+  });
+
+  it('expands the most voted topic instead when the board grouped the one under discussion', async () => {
+    const user = userEvent.setup();
+    // The discussion was on Flaky deploys, which the board then put in a group.
+    renderBoard(groupedBoard({
+      guidedPhase: 'DISCUSS',
+      discussionFocusId: 't-a',
+      tickets: [
+        ticket('t-a', 'Flaky deploys', { groupId: 'g1' }),
+        ticket('t-b', 'Slow rollbacks', { groupId: 'g1' }),
+        ticket('t-c', 'Too many meetings', { votes: ['alice', 'bob'] }),
+      ],
+    }));
+
+    await user.click(await screen.findByRole('button', { name: 'Switch to a guided retrospective' }));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.phase).toBe('DISCUSS');
+      expect(persisted?.discussionFocusId).toBe('t-c');
+    });
   });
 
   it('turning a board back into the Discuss phase keeps the topic under discussion', async () => {

@@ -1420,16 +1420,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       s.status = effectiveSessionStatus(s);
 
       // Auto-expand the first topic when entering the Discuss phase. Not on
-      // the way back from an open board: the topic the discussion was on is
-      // still stored, and turning the retro back must not move it.
-      if (p === 'DISCUSS' && !fromBoard) {
-        const items: {id: string, votes: number}[] = [];
-        s.tickets.filter(t => !t.groupId).forEach(t => {
-          items.push({ id: t.id, votes: t.votes.length });
-        });
-        s.groups.forEach(g => {
-          items.push({ id: g.id, votes: g.votes.length });
-        });
+      // the way back from an open board while the topic the discussion was on
+      // is still one: turning the retro back must not move it. The board may
+      // have grouped or deleted it, and a focus on nothing expands nothing.
+      const items: {id: string, votes: number}[] = [];
+      s.tickets.filter(t => !t.groupId).forEach(t => {
+        items.push({ id: t.id, votes: t.votes.length });
+      });
+      s.groups.forEach(g => {
+        items.push({ id: g.id, votes: g.votes.length });
+      });
+      const keepsFocus = fromBoard && items.some(item => item.id === s.discussionFocusId);
+      if (p === 'DISCUSS' && !keepsFocus) {
         items.sort((a, b) => b.votes - a.votes);
         if (items.length > 0) {
           s.discussionFocusId = items[0].id;
@@ -1652,8 +1654,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const applyAiSuggestedGroups = (suggestions: AiSuggestedGroup[]) => {
     if (!suggestions || suggestions.length === 0) return;
     updateSession(s => {
-      // An open board votes while it groups: the cards' votes go with them.
-      applySuggestedClusters(s, suggestions, undefined, { keepVotes: isOpenBoard(s) });
+      // The cards' votes go with them (retroGrouping.ts → combineVotes).
+      applySuggestedClusters(s, suggestions);
     });
   };
 
@@ -1798,7 +1800,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       }
 
       updateSession(s => {
-          removeTicketFromGroup(s, draggedTicket.id, colId, { keepVotes: isOpenBoard(s) });
+          removeTicketFromGroup(s, draggedTicket.id, colId);
       });
       resetDragState();
   };
@@ -1820,8 +1822,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       let createdGroupId: string | null = null;
       let mergedIntoUntitledGroupId: string | null = null;
       updateSession(s => {
-          // An open board votes while it groups: the cards' votes go with them.
-          const result = groupTicketsTogether(s, draggedTicket.id, targetTicket.id, undefined, { keepVotes: isOpenBoard(s) });
+          // The cards' votes go with them (retroGrouping.ts → combineVotes).
+          const result = groupTicketsTogether(s, draggedTicket.id, targetTicket.id);
           if (result.noOp) return;
           if (result.newGroupId) {
               createdGroupId = result.newGroupId;
@@ -1858,7 +1860,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
       let didMove = false;
       updateSession(s => {
-          didMove = addTicketToGroup(s, draggedTicket.id, targetGroup.id, { keepVotes: isOpenBoard(s) });
+          didMove = addTicketToGroup(s, draggedTicket.id, targetGroup.id);
       });
 
       // AI: re-suggest title when adding to a group that has no title
@@ -2260,8 +2262,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const deleteCard = (e: React.MouseEvent) => {
           e.stopPropagation();
           updateSession(s => {
-              if (isOpenBoard(s)) deleteTicket(s, t.id, { keepVotes: true });
-              else s.tickets = s.tickets.filter(x => x.id !== t.id);
+              deleteTicket(s, t.id);
           });
       };
 
@@ -3013,11 +3014,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         <div className="font-bold text-slate-800 text-sm">{g.title || tr('session.group.untitled')}</div>
                                                     )}
                                                 </div>
-                                                {/* The cards stay; on a board the votes go to the
-                                                    group's anchor card (retroGrouping.ts → deleteGroup). */}
+                                                {/* The cards stay, and the votes go to the group's
+                                                    anchor card (retroGrouping.ts → deleteGroup). */}
                                                 {(mode === 'GROUP' || isBoard) && isFacilitator && (
                                                     <button onClick={() => updateSession(s => {
-                                                        deleteGroup(s, g.id, { keepVotes: isOpenBoard(s) });
+                                                        deleteGroup(s, g.id);
                                                     })} className="text-slate-500 hover:text-red-500 p-1"
                                                     aria-label={tr('session.group.delete')}><span className="material-symbols-outlined text-lg">delete</span></button>
                                                 )}

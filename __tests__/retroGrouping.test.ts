@@ -505,15 +505,16 @@ describe('retroGrouping helpers', () => {
 });
 
 /**
- * The open board votes while it groups (utils/openBoard.ts), so there the votes
- * travel with the cards instead of being cleared: a group gets the votes of the
- * cards put in it, and a group left with one card hands its votes to that card.
- * Nobody's vote count ever grows — a person who voted for two cards that become
- * one group keeps both votes, or one when the facilitator allows one vote per
- * item. The guided Group phase runs before the vote and keeps clearing them.
+ * The votes travel with the cards instead of being cleared: a group gets the
+ * votes of the cards put in it, and a group left with one card hands its votes
+ * to that card. Nobody's vote count ever grows — a person who voted for two
+ * cards that become one group keeps both votes, or one when the facilitator
+ * allows one vote per item. The open board votes while it groups
+ * (utils/openBoard.ts); the guided Group phase usually has nothing to carry,
+ * but a retro turned back from a board, or browsed back from the Vote phase,
+ * does — and grouping there used to clear the votes without a word.
  */
-describe('grouping on an open board keeps the votes', () => {
-  const KEEP = { keepVotes: true };
+describe('grouping keeps the votes', () => {
   const votesOf = (session: RetroSession, id: string) =>
     session.groups.find((g) => g.id === id)?.votes ?? session.tickets.find((t) => t.id === id)?.votes;
   const sorted = (votes: string[] | undefined) => [...(votes ?? [])].sort();
@@ -523,7 +524,7 @@ describe('grouping on an open board keeps the votes', () => {
       tickets: [makeTicket({ id: 'A', votes: ['u1', 'u2'] }), makeTicket({ id: 'B', votes: ['u3'] })],
     });
 
-    groupTicketsTogether(session, 'B', 'A', () => 'g-new', KEEP);
+    groupTicketsTogether(session, 'B', 'A', () => 'g-new');
 
     expect(sorted(votesOf(session, 'g-new'))).toEqual(['u1', 'u2', 'u3']);
     expect(votesOf(session, 'A')).toEqual([]);
@@ -540,7 +541,7 @@ describe('grouping on an open board keeps the votes', () => {
       groups: [makeGroup({ id: 'g1', votes: ['u1'] })],
     });
 
-    groupTicketsTogether(session, 'B', 'A', undefined, KEEP);
+    groupTicketsTogether(session, 'B', 'A', undefined);
 
     expect(sorted(votesOf(session, 'g1'))).toEqual(['u1', 'u2', 'u2']);
     expect(votesOf(session, 'B')).toEqual([]);
@@ -556,7 +557,7 @@ describe('grouping on an open board keeps the votes', () => {
       groups: [makeGroup({ id: 'g1', votes: ['u1'] })],
     });
 
-    expect(addTicketToGroup(session, 'B', 'g1', KEEP)).toBe(true);
+    expect(addTicketToGroup(session, 'B', 'g1')).toBe(true);
 
     expect(sorted(votesOf(session, 'g1'))).toEqual(['u1', 'u3']);
     expect(votesOf(session, 'B')).toEqual([]);
@@ -568,7 +569,7 @@ describe('grouping on an open board keeps the votes', () => {
     });
     session.settings.oneVotePerTicket = true;
 
-    groupTicketsTogether(session, 'B', 'A', () => 'g-new', KEEP);
+    groupTicketsTogether(session, 'B', 'A', () => 'g-new');
 
     // u1 voted for both cards: one item now, so one vote, and one vote back
     // to spend elsewhere.
@@ -585,7 +586,7 @@ describe('grouping on an open board keeps the votes', () => {
       groups: [makeGroup({ id: 'gOld', votes: ['u1', 'u4'] })],
     });
 
-    groupTicketsTogether(session, 'B', 'A', () => 'g-new', KEEP);
+    groupTicketsTogether(session, 'B', 'A', () => 'g-new');
 
     expect(session.groups.find((g) => g.id === 'gOld')).toBeUndefined();
     // C is what is left of the old group: the topic people voted for.
@@ -598,7 +599,7 @@ describe('grouping on an open board keeps the votes', () => {
       tickets: [makeTicket({ id: 'A', groupId: 'g1' }), makeTicket({ id: 'B', groupId: 'g1' })],
       groups: [makeGroup({ id: 'g1', votes: ['u1'] })],
     });
-    removeTicketFromGroup(moved, 'B', 'col1', KEEP);
+    removeTicketFromGroup(moved, 'B', 'col1');
     expect(votesOf(moved, 'A')).toEqual(['u1']);
     expect(votesOf(moved, 'B')).toEqual([]);
 
@@ -606,7 +607,7 @@ describe('grouping on an open board keeps the votes', () => {
       tickets: [makeTicket({ id: 'A', groupId: 'g1' }), makeTicket({ id: 'B', groupId: 'g1' })],
       groups: [makeGroup({ id: 'g1', votes: ['u2'] })],
     });
-    expect(deleteTicket(deleted, 'B', KEEP)).toBe(true);
+    expect(deleteTicket(deleted, 'B')).toBe(true);
     expect(deleted.tickets.map((t) => t.id)).toEqual(['A']);
     expect(deleted.groups).toEqual([]);
     expect(votesOf(deleted, 'A')).toEqual(['u2']);
@@ -617,22 +618,21 @@ describe('grouping on an open board keeps the votes', () => {
       tickets: [makeTicket({ id: 't1', votes: ['u1'] }), makeTicket({ id: 't2', votes: ['u2'] })],
     });
 
-    applySuggestedClusters(session, [{ title: 'Deploys', ticketIds: ['t1', 't2'] }], () => 'g-ai', KEEP);
+    applySuggestedClusters(session, [{ title: 'Deploys', ticketIds: ['t1', 't2'] }], () => 'g-ai');
 
     expect(sorted(votesOf(session, 'g-ai'))).toEqual(['u1', 'u2']);
     expect(votesOf(session, 't1')).toEqual([]);
   });
 
-  it('still clears them in the guided Group phase, which runs before the vote', () => {
+  it('keeps them in the guided Group phase too, where a board or the Vote phase left them', () => {
     const session = makeSession({
+      phase: 'GROUP',
       tickets: [makeTicket({ id: 'A', votes: ['u1'] }), makeTicket({ id: 'B', votes: ['u2'] })],
     });
 
     groupTicketsTogether(session, 'B', 'A', () => 'g-new');
 
-    expect(votesOf(session, 'g-new')).toEqual([]);
-    expect(votesOf(session, 'A')).toEqual([]);
-    expect(votesOf(session, 'B')).toEqual([]);
+    expect(sorted(votesOf(session, 'g-new'))).toEqual(['u1', 'u2']);
   });
 });
 
@@ -657,7 +657,7 @@ describe('deleteTicket', () => {
       groups: [makeGroup({ id: 'g1', votes: ['u1'] })],
     });
 
-    deleteTicket(session, 'C', { keepVotes: true });
+    deleteTicket(session, 'C');
 
     expect(session.groups).toHaveLength(1);
     expect(session.groups[0].votes).toEqual(['u1']);
@@ -672,10 +672,10 @@ describe('deleteTicket', () => {
 });
 
 /**
- * Deleting a group keeps its cards, ungrouped. On an open board its votes go
- * to the card it was anchored to: two reviews found the board's "Delete group"
- * running the Group phase's ungroup and dropping every vote the topic held,
- * while taking either card out of the same pair handed them over.
+ * Deleting a group keeps its cards, ungrouped, and its votes go to the card it
+ * was anchored to: two reviews found the board's "Delete group" running the
+ * Group phase's ungroup and dropping every vote the topic held, while taking
+ * either card out of the same pair handed them over.
  */
 describe('deleteGroup', () => {
   const pair = (anchorTicketId?: string) => makeSession({
@@ -687,10 +687,10 @@ describe('deleteGroup', () => {
     groups: [makeGroup({ id: 'g1', votes: ['u1', 'u2', 'u2'], ...(anchorTicketId ? { anchorTicketId } : {}) })],
   });
 
-  it('ungroups its cards and gives its votes to the card it was anchored to, on a board', () => {
+  it('ungroups its cards and gives its votes to the card it was anchored to', () => {
     const session = pair('B');
 
-    expect(deleteGroup(session, 'g1', { keepVotes: true })).toBe(true);
+    expect(deleteGroup(session, 'g1')).toBe(true);
 
     expect(session.groups).toEqual([]);
     expect(session.tickets.every((t) => t.groupId === null)).toBe(true);
@@ -701,24 +701,15 @@ describe('deleteGroup', () => {
   it('gives them to its first card when the anchor has left the group', () => {
     const session = pair('C');
 
-    deleteGroup(session, 'g1', { keepVotes: true });
+    deleteGroup(session, 'g1');
 
     expect(session.tickets.find((t) => t.id === 'A')?.votes).toEqual(['u1', 'u2', 'u2']);
     expect(session.tickets.find((t) => t.id === 'C')?.votes).toEqual([]);
   });
 
-  it('keeps no votes in the guided Group phase, which runs before the vote', () => {
-    const session = pair('A');
-
-    deleteGroup(session, 'g1');
-
-    expect(session.groups).toEqual([]);
-    expect(session.tickets.flatMap((t) => t.votes)).toEqual([]);
-  });
-
   it('answers false for a group that is already gone', () => {
     const session = pair();
-    expect(deleteGroup(session, 'missing', { keepVotes: true })).toBe(false);
+    expect(deleteGroup(session, 'missing')).toBe(false);
     expect(session.groups).toHaveLength(1);
   });
 });

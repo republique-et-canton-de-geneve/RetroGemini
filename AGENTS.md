@@ -536,24 +536,30 @@ are pure and coverage-gated in `utils/openBoard.ts`; `renderColumns('BOARD')` in
   every width, in both languages.
 - **Nothing is lost either way.** What only the guided phases show (actions,
   happiness, ROTI, invitees, the discussion focus) stays stored on the board and
-  is there again on the way back; the board shows every card, group and vote the
-  guided phases left.
+  is there again on the way back — Discuss resumes on the topic it was on, or on
+  the most voted one when the board grouped or deleted it; the board shows every
+  card, group and vote the guided phases left.
 - **Every card is readable** (`cardsVisibleToEveryone`): a card is written to be
   voted on, so "Reveal cards" does not apply on a board.
-- **On a board the votes travel with the cards.** Grouping there runs with
-  `keepVotes` (`utils/retroGrouping.ts`): a group gets the votes of the cards put
-  in it, a group left with one card hands its votes to that card, and a person
-  who voted for two cards that become one keeps one vote when only one per item
-  is allowed. The guided Group phase runs before the vote and keeps clearing
-  them. The board's vote control shows the total each card or group received
-  (the Vote phase keeps its totals to itself). Deleting takes none either:
-  "Delete group" (`deleteGroup`) gives the group's votes to the card it was made
-  on (its first card, once that one has left), and a card deleted out of a pair
-  hands the group's votes to the card left. Removing a column (`removeColumn`,
-  Edit Layout, in Brainstorm too) moves its cards and groups to the column
-  before it (after it, for the first): removed with it, they stayed in the
-  session out of sight, their votes still counting against their voters with
-  no control left to take them back. The last column can only be removed empty.
+- **The votes travel with the cards**, on a board and in the guided Group
+  phase alike (`utils/retroGrouping.ts` → `combineVotes`): a group gets the
+  votes of the cards put in it, a group left with one card hands its votes to
+  that card, and a person who voted for two cards that become one keeps one vote
+  when only one per item is allowed. The guided Group phase usually has none to
+  carry, but a retro turned back from a board, or browsed back from the Vote
+  phase, has votes on its cards, and grouping there cleared them until 42.0 —
+  silently, since that phase shows no vote. The board's vote control shows the
+  total each card or group received (the Vote phase keeps its totals to
+  itself). Deleting takes none either: "Delete group" (`deleteGroup`) gives the
+  group's votes to the card it was made on (its first card, once that one has
+  left), and a card deleted out of a pair hands the group's votes to the card
+  left. Removing a column (`removeColumn`, Edit Layout, in Brainstorm too) moves
+  its cards and groups to the column before it (after it, for the first):
+  removed with it, they stayed in the session out of sight, their votes still
+  counting against their voters with no control left to take them back. A card
+  written in it while it was removed follows them when its creation is
+  restored (`inExistingColumn` in `mergeRemoteSession.ts`). The last column can
+  only be removed empty.
 - **Votes moved by a regrouping are not own votes.** `registerOwnRetroChanges`
   claims no vote slice for a card whose group changed, or a group whose cards
   changed, in the same write, and drops a claim still outstanding on one; the
@@ -616,8 +622,20 @@ screen at once):
   including the votes cast for the other card before they were grouped: a
   group does not record which card a vote was for, on purpose — the votes are
   the topic's.
+- **A vote claim is a count, not a change.** When a user's vote on a group and
+  their own regrouping of a voted card into it both lose their race, the
+  regrouping drops the claim and the vote goes (`mergeRemoteSession.test.ts` →
+  *drops a group claim when the user then drops one of their voted cards into
+  the group*); and a vote that reached a card on the server while this client
+  was offline, then moved into a group with it, is not counted in by a claim
+  on that group made before. Both take two of one user's writes lost at once;
+  a claim stored as a change would close them.
+- **Removing a column that holds cards moves them without asking**: a "Stop"
+  card then reads as a "Start" one, and in Brainstorm with "Reveal cards" off
+  the facilitator moves cards they cannot read. A confirmation saying how many
+  cards move is not built.
 
-The guards: `__tests__/openBoard.test.ts`, the `keepVotes`, `deleteGroup` and
+The guards: `__tests__/openBoard.test.ts`, the vote-keeping, `deleteGroup` and
 `removeColumn` cases of `retroGrouping.test.ts`, `mergeRemoteSession.test.ts`
 (*votes moved by a regrouping*, *votes a regrouping moves into a group*),
 `sessionOpenBoard.test.tsx` (the screen, the keyboard paths, the switch, the
