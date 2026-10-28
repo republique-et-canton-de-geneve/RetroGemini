@@ -91,7 +91,7 @@ const IcebreakerPhase: React.FC<Props> = ({
               title={t('session.openBoard.switchToBoardHint')}
               className="text-indigo-200 hover:text-white text-sm font-bold flex items-center px-4 py-2 rounded-lg border border-slate-600 hover:bg-slate-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <span className="material-symbols-outlined mr-2" aria-hidden="true">view_column</span> {t('session.openBoard.switchToBoard')}
+              <span className="material-symbols-outlined mr-2" aria-hidden="true">view_kanban</span> {t('session.openBoard.switchToBoard')}
             </button>
           </div>
         )}

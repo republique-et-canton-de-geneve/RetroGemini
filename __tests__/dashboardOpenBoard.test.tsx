@@ -6,7 +6,8 @@ import Dashboard from '../components/Dashboard';
 import { dataService } from '../services/dataService';
 import { getRetroTemplateColumns } from '../i18n/content/retroTemplates';
 import type { Language } from '../i18n/languages';
-import type { RetroSession, Team, User } from '../types';
+import type { HealthCheckSession, RetroSession, Team, User } from '../types';
+import { effectivePair } from './helpers/tailwindTheme';
 
 /**
  * The "Start New Retrospective" dialog chooses the board type: the guided
@@ -70,7 +71,11 @@ const buildTeam = (retrospectives: RetroSession[] = []): Team => ({
   globalActions: []
 });
 
-const renderDashboard = (team: Team, language: Language = 'en', initialTab: 'ACTIONS' | 'RETROS' = 'ACTIONS') =>
+const renderDashboard = (
+  team: Team,
+  language: Language = 'en',
+  initialTab: 'ACTIONS' | 'RETROS' | 'HEALTH_CHECKS' = 'ACTIONS'
+) =>
   render(
     <LanguageProvider initialLanguage={language}>
       <Dashboard
@@ -215,5 +220,51 @@ describe('Retrospectives list — open boards', () => {
     expect(within(boardRow).getByText('OPEN BOARD')).toBeInTheDocument();
     expect(within(boardRow).queryByText('IN PROGRESS')).toBeNull();
     expect(within(guidedRow).getByText('IN PROGRESS')).toBeInTheDocument();
+  });
+});
+
+describe('Session lists — the status reads at 4.5:1', () => {
+  beforeEach(() => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }) as never;
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // 12px text, so the AA floor is 4.5:1. The green the lists used (600)
+  // measures 3.22:1 on their white rows; no e2e audit opens a list holding a
+  // session in progress, so this is where the colour is measured.
+  it('measures the retro list\u2019s OPEN BOARD and IN PROGRESS', () => {
+    renderDashboard(buildTeam([
+      retro({ id: 'board', name: 'Lean Coffee', phase: 'OPEN_BOARD' }),
+      retro({ id: 'guided', name: 'Sprint 12' })
+    ]), 'en', 'RETROS');
+
+    for (const status of ['OPEN BOARD', 'IN PROGRESS']) {
+      expect(effectivePair(screen.getByText(status)).ratio).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('measures the health check list\u2019s IN PROGRESS', () => {
+    const healthCheck: HealthCheckSession = {
+      id: 'hc-1',
+      teamId: 'team-1',
+      name: 'Q4 health',
+      date: '6/1/2026',
+      status: 'IN_PROGRESS',
+      phase: 'SURVEY',
+      templateId: 'team_health_en',
+      templateName: 'Team health',
+      dimensions: [],
+      settings: { isAnonymous: false, revealRoti: false },
+      ratings: {},
+      actions: [],
+      roti: {},
+      finishedUsers: []
+    };
+    renderDashboard({ ...buildTeam(), healthChecks: [healthCheck] }, 'en', 'HEALTH_CHECKS');
+
+    expect(effectivePair(screen.getByText('IN PROGRESS')).ratio).toBeGreaterThanOrEqual(4.5);
   });
 });

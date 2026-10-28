@@ -1,4 +1,5 @@
 import { RetroSession, HealthCheckSession, ActionItem, ActionImpactVote } from '../../types';
+import { isOpenBoard } from '../../utils/openBoard';
 import { restoreLostInvitees } from './sessionInvitees';
 
 // Pure merge of an incoming authoritative session state with the local state.
@@ -510,6 +511,11 @@ const withOwnVotes = (incomingVotes: string[], prevVotes: string[], userId: stri
   ...prevVotes.filter(v => v === userId)
 ];
 
+const withOwnVoteCount = (votes: string[], count: number, userId: string): string[] => [
+  ...votes.filter(v => v !== userId),
+  ...Array.from({ length: count }, () => userId)
+];
+
 // Entries of the open/history action snapshots are only ever added during a
 // session (the phase-init effects merge and append, never remove), so an
 // entry present locally but missing from the incoming state was lost to a
@@ -597,6 +603,27 @@ const mergeRemoteRetroSession = (
     return next;
   });
 
+  // Votes another client's regrouping moved into a group. On an open board,
+  // grouping carries a card's votes into its group (retroGrouping.ts →
+  // `keepVotes`), so when the incoming state put into a group cards this client
+  // still holds outside it, the group's count there includes this user's votes
+  // on those cards. A claim made before the move counts them in: the user's
+  // count alone would delete the votes the cards carried (a vote taken off the
+  // group would take them all), and would read a vote the server lost as
+  // confirmed. The guided Group phase drops a card's votes instead, so there
+  // nothing moved.
+  const prevTickets = new Map(prev.tickets.map(t => [t.id, t]));
+  const ownVotesMovedInto = (groupId: string): number => {
+    if (!isOpenBoard(incoming)) return 0;
+    let moved = 0;
+    for (const ticket of incoming.tickets) {
+      if (ticket.groupId !== groupId) continue;
+      const before = prevTickets.get(ticket.id);
+      if (before && before.groupId !== groupId) moved += ownVoteCount(before.votes, userId);
+    }
+    return moved;
+  };
+
   merged.groups = incoming.groups.map(group => {
     const prevGroup = prev.groups.find(g => g.id === group.id);
     if (!prevGroup) return group;
@@ -607,10 +634,11 @@ const mergeRemoteRetroSession = (
     if (!preserveVotes) {
       ledger.delete(key);
     } else {
-      const matches = ownVoteCount(group.votes, userId) === ownVoteCount(prevGroup.votes, userId);
+      const claimedOwn = ownVoteCount(prevGroup.votes, userId) + ownVotesMovedInto(group.id);
+      const matches = ownVoteCount(group.votes, userId) === claimedOwn;
       if (ownValueWins(ledger, key, matches, now)) {
         divergent = true;
-        next = { ...next, votes: withOwnVotes(group.votes, prevGroup.votes, userId) };
+        next = { ...next, votes: withOwnVoteCount(group.votes, claimedOwn, userId) };
       }
     }
 

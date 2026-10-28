@@ -1449,3 +1449,97 @@ describe('votes moved by a regrouping are not own votes', () => {
     expect(ownChanges.size).toBe(0);
   });
 });
+
+/**
+ * On an open board a regrouping carries a card's votes into its group, so a
+ * group's count is no longer only what its voters did to it. A claim on a group
+ * made before someone else's regrouping moved cards into it has to count the
+ * votes those cards brought, or re-asserting it deletes them: taking one vote
+ * off a group took the vote the moved card carried too (Codex review on PR
+ * #540, reproduced by the adversarial review), and a vote cast on the group
+ * while it happened read as already confirmed and was lost.
+ */
+describe('votes a regrouping moves into a group', () => {
+  const group = (id: string, votes: string[] = []) => ({ id, title: '', colId: 'col-1', votes });
+  const board = { phase: 'OPEN_BOARD' };
+  const inG1 = (id: string) => makeTicket(id, { groupId: 'g1' });
+  const mine = (votes: string[]) => votes.filter((v) => v === ME).length;
+
+  it('takes off the one vote the user removed, not the one a moved card carried', () => {
+    // My vote on group g1 and my vote on card C. I take my g1 vote back while
+    // someone drops C into g1, and their write wins.
+    const start = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [ME] })], groups: [group('g1', [ME])] });
+    const removed = makeSession({ ...board, tickets: start.tickets, groups: [group('g1')] });
+    const ownChanges = claiming(start, removed);
+    const incoming = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [ME, ME, OTHER])] });
+
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, removed, ctx({ ownChanges }), noPending());
+
+    expect(mine(merged.groups[0].votes)).toBe(1);
+    expect(merged.groups[0].votes).toContain(OTHER);
+    expect(divergent).toBe(true);
+  });
+
+  it('re-sends a vote cast on the group while a regrouping moved another of the user’s votes in', () => {
+    const start = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [ME] })], groups: [group('g1')] });
+    const voted = makeSession({ ...board, tickets: start.tickets, groups: [group('g1', [ME])] });
+    const ownChanges = claiming(start, voted);
+    // The regrouping won: C's vote moved into g1, my vote on g1 did not land.
+    const incoming = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [ME])] });
+
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, voted, ctx({ ownChanges }), noPending());
+
+    expect(mine(merged.groups[0].votes)).toBe(2);
+    expect(divergent).toBe(true);
+
+    // The re-send lands: the claim is confirmed and nothing more is sent.
+    const settled = mergeRemoteRetroSession(merged, merged, ctx({ ownChanges }), noPending());
+    expect(settled.divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
+  });
+
+  it('counts only the votes on cards the group received, not on cards it already held', () => {
+    const start = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [OTHER] })], groups: [group('g1')] });
+    const voted = makeSession({ ...board, tickets: start.tickets, groups: [group('g1', [ME])] });
+    const ownChanges = claiming(start, voted);
+    // C carried someone else's vote only: my claim stays one vote.
+    const incoming = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [OTHER])] });
+
+    const { merged } = mergeRemoteRetroSession(incoming, voted, ctx({ ownChanges }), noPending());
+
+    expect(mine(merged.groups[0].votes)).toBe(1);
+    expect(merged.groups[0].votes).toContain(OTHER);
+  });
+
+  it('counts nothing moved in a guided retro, whose grouping drops a card’s votes', () => {
+    const guided = { phase: 'GROUP' };
+    const start = makeSession({ ...guided, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [ME] })], groups: [group('g1', [ME])] });
+    const removed = makeSession({ ...guided, tickets: start.tickets, groups: [group('g1')] });
+    const ownChanges = claiming(start, removed);
+    // The guided Group phase dropped C's vote: g1 still holds only my old one.
+    const incoming = makeSession({ ...guided, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [ME])] });
+
+    const { merged } = mergeRemoteRetroSession(incoming, removed, ctx({ ownChanges }), noPending());
+
+    expect(mine(merged.groups[0].votes)).toBe(0);
+  });
+
+  it('drops a group claim when the user then drops one of their voted cards into the group', () => {
+    // I vote on g1, then drop C, which carries my vote, into it; both writes
+    // are refused and the heal is where I started. Kept, the g1 claim would
+    // re-assert two votes on g1 beside the one C keeps: two votes counted three.
+    const start = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [ME] })], groups: [group('g1')] });
+    const voted = makeSession({ ...board, tickets: start.tickets, groups: [group('g1', [ME])] });
+    const grouped = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [ME, ME])] });
+    const ledger: OwnChangeLedger = new Map();
+    registerOwnRetroChanges(ledger, start, voted, ME, NOW);
+    expect([...ledger.keys()]).toEqual(['groupVotes:g1']);
+    registerOwnRetroChanges(ledger, voted, grouped, ME, NOW + 10);
+
+    const { merged, divergent } = mergeRemoteRetroSession(start, grouped, ctx({ ownChanges: ledger }), noPending());
+
+    expect(merged.groups[0].votes).toEqual([]);
+    expect(merged.tickets.find((t) => t.id === 'C')?.votes).toEqual([ME]);
+    expect(divergent).toBe(false);
+  });
+});

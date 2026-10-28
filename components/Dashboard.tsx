@@ -1440,7 +1440,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                     <div key={retro.id} className="bg-white p-5 rounded-lg shadow-xs border border-slate-200 flex items-center justify-between mb-3 hover:shadow-md transition">
                         <div className="flex items-center grow">
                             <div className="w-12 h-12 rounded-sm bg-indigo-50 text-indigo-600 flex items-center justify-center mr-4">
-                                <span className="material-symbols-outlined" aria-hidden="true">{isOpenBoard(retro) ? 'view_column' : 'event_note'}</span>
+                                <span className="material-symbols-outlined" aria-hidden="true">{isOpenBoard(retro) ? 'view_kanban' : 'event_note'}</span>
                             </div>
                             <div className="grow">
                                 {editingRetroId === retro.id ? (
@@ -1485,8 +1485,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 )}
                                 <div className="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center gap-2">
                                     <span>{retro.date}</span> •
-                                    {/* A board is never closed: the list says what it is instead. */}
-                                    <span className={retro.status === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-500'}>
+                                    {/* A board is never closed: the list says what it is instead.
+                                        green-700, not 600: 12px green-600 on white measures 3.22:1. */}
+                                    <span className={retro.status === 'IN_PROGRESS' ? 'text-green-700' : 'text-slate-500'}>
                                         {isOpenBoard(retro) ? t('dashboard.retroStatus.OPEN_BOARD') : t(`dashboard.retroStatus.${retro.status}`)}
                                     </span>
                                 </div>
@@ -2008,7 +2009,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             <span>{hc.date}</span> •
                             <span>{hc.templateName}</span> •
                             <span>{tp('dashboard.healthChecks.participants', participantCount)}</span> •
-                            <span className={hcStatus === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-500'}>
+                            <span className={hcStatus === 'IN_PROGRESS' ? 'text-green-700' : 'text-slate-500'}>
                               {t(`dashboard.healthCheckStatus.${hcStatus}`)}
                             </span>
                           </div>
@@ -2095,7 +2096,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       </p>
                     )}
                     {teamRenameSuccess && (
-                      <p className="text-xs text-green-600 flex items-center">
+                      <p className="text-xs text-green-700 flex items-center">
                         <span className="material-symbols-outlined text-xs mr-1">check_circle</span>
                         {noticeText(teamRenameSuccess, t)}
                       </p>
@@ -2179,7 +2180,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       </p>
                     )}
                     {passwordChangeSuccess && (
-                      <p className="text-xs text-green-600 flex items-center">
+                      <p className="text-xs text-green-700 flex items-center">
                         <span className="material-symbols-outlined text-xs mr-1">check_circle</span>
                         {noticeText(passwordChangeSuccess, t)}
                       </p>

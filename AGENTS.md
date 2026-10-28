@@ -275,6 +275,24 @@ the card had correctly ignored was acted on by its parent. When you add a touch
 target inside another one, give it the whole gesture and let exactly one handler
 claim it.
 
+**A control shown on hover is shown on focus, and never hidden where nothing
+hovers.** A card's edit, delete and first-comment controls were `opacity-0`
+until the pointer hovered the card: a keyboard user tabbed onto a control
+nobody could see (2.4.7), and on a phone, where nothing hovers, editing and
+commenting were never found while the delete was invisible yet tappable. Hide
+such a control with `[@media(hover:hover)]:opacity-0 group-hover:opacity-100
+focus:opacity-100` (`focus-within:` for a wrapper) — the participants panel's
+pattern — so a touch screen always shows it. Tailwind already applies
+`group-hover:` only where a pointer can hover; a bare `opacity-0` has no such
+guard. A control a phone always shows must then be seen and must not hide the
+content: the card's pencil takes the card's measured text colour (slate-300
+measured 1.48:1), a float of its size (`ticket-edit-room`, shown only under
+`(hover: none)`) ends the first line before it, and the corner delete is not
+drawn while the card is edited, where it would lie over the field.
+`__tests__/sessionOpenBoard.test.tsx` pins the classes and
+`e2e/retro-touch-card-controls.spec.ts` the layout, on an emulated phone and a
+computer: jsdom applies no media query.
+
 **An icon is not a name, and `title` does not rescue it (audit H52).** A button
 whose only content is `<span className="material-symbols-outlined">delete</span>`
 is announced as **"delete"**: in the accessible-name algorithm a button's content
@@ -493,7 +511,7 @@ for weeks). The facilitator chooses it in *Start New Retrospective* (board type:
 guided or open; an open board starts anonymous, and the toggle stays free), and
 can turn a retro in progress into a board and back from the session. The rules
 are pure and coverage-gated in `utils/openBoard.ts`; `renderColumns('BOARD')` in
-`Session.tsx` draws it. Seven rules:
+`Session.tsx` draws it. Nine rules:
 
 - **The board is a phase, not a flag and not a session type.** Its phase is
   `OPEN_BOARD`, which is none of the guided phases, so no guided phase rule (the
@@ -511,7 +529,11 @@ are pure and coverage-gated in `utils/openBoard.ts`; `renderColumns('BOARD')` in
   navigation (`teamMerge.js` → `NAVIGATION_KEYS`). A closed retro is not switched
   (`canSwitchBoardType`). The switch is offered on the board's bar, the
   Icebreaker screen and the Brainstorm, Group and Vote bars — never in the
-  session header, which the header-fit e2e already measures to the pixel.
+  session header, which the header-fit e2e already measures to the pixel. The
+  bars wrap rather than overflow (French labels pushed *Next Phase* off a
+  1024px screen), and `e2e/i18n.spec.ts` → *headers fit in both languages*
+  measures the Brainstorm and Vote bars at 1024 and 1280px and the board's at
+  every width, in both languages.
 - **Nothing is lost either way.** What only the guided phases show (actions,
   happiness, ROTI, invitees, the discussion focus) stays stored on the board and
   is there again on the way back; the board shows every card, group and vote the
@@ -524,7 +546,14 @@ are pure and coverage-gated in `utils/openBoard.ts`; `renderColumns('BOARD')` in
   who voted for two cards that become one keeps one vote when only one per item
   is allowed. The guided Group phase runs before the vote and keeps clearing
   them. The board's vote control shows the total each card or group received
-  (the Vote phase keeps its totals to itself).
+  (the Vote phase keeps its totals to itself). Deleting takes none either:
+  "Delete group" (`deleteGroup`) gives the group's votes to the card it was made
+  on (its first card, once that one has left), and a card deleted out of a pair
+  hands the group's votes to the card left. Removing a column (`removeColumn`,
+  Edit Layout, in Brainstorm too) moves its cards and groups to the column
+  before it (after it, for the first): removed with it, they stayed in the
+  session out of sight, their votes still counting against their voters with
+  no control left to take them back. The last column can only be removed empty.
 - **Votes moved by a regrouping are not own votes.** `registerOwnRetroChanges`
   claims no vote slice for a card whose group changed, or a group whose cards
   changed, in the same write, and drops a claim still outstanding on one; the
@@ -532,7 +561,18 @@ are pure and coverage-gated in `utils/openBoard.ts`; `renderColumns('BOARD')` in
   Read as own votes, a regrouping that lost its race took the grouper's vote
   with it, and a vote racing a regrouping was re-asserted on a grouped card,
   where it counts against the budget with no control to take it back
-  (`__tests__/mergeRemoteSession.test.ts` → *votes moved by a regrouping*).
+  (`__tests__/mergeRemoteSession.test.ts` → *votes moved by a regrouping*). The
+  other way round, a vote claim on a group counts the user's votes the incoming
+  state moved into it with a card (`ownVotesMovedInto`): counted alone, taking
+  one's vote off a group took away the votes a card had just carried in, and a
+  vote the server lost read as confirmed (*votes a regrouping moves into a
+  group*).
+- **A hold lasts only while it can be acted on.** A held card (`draggedTicket`)
+  or group (`movingItem`) is put down by Escape, by a phase or type change,
+  when the connection drops — the card's own control, the way to cancel, goes
+  with the connection while the targets would stay — and when someone else
+  deletes what is held: a hold on nothing went on offering targets for a card
+  no one could see (`sessionOpenBoard.test.tsx` → *every hold and every drop*).
 - **Its participants panel lists who is connected right now, and no one
   else.** `ParticipantsPanel` filters the roster by presence on a board: no
   waiting list (the invite modal records no invitee there), no "has left"
@@ -541,17 +581,52 @@ are pure and coverage-gated in `utils/openBoard.ts`; `renderColumns('BOARD')` in
   visit to the next. A board's facilitator can change its anonymity from the
   board; turning it off asks first (`ShowAuthorsDialog`), because it names the
   author of every card, the ones written while the board was anonymous too.
+- **Anonymous means no colour by author either**, on a board and in a guided
+  retro alike. While a session is anonymous the cards and the comments dialog
+  are coloured by topic and "Colour by" offers Author disabled: one colour per
+  author tells anyone which cards one person wrote, and whoever knows one of
+  them knows the rest. The stored `colorBy` is kept, so the facilitator's
+  choice is back as soon as the session names its authors.
 
 Residuals, stated on purpose: a client from before 42.0 that opens a board
 during the rolling update draws nothing for the `OPEN_BOARD` phase until it
 reloads, and a pod from before 42.0 does not protect `guidedPhase`. A board is
 in progress for good, so a participant who joins without a link lands on it when
-it is the team's newest retro in progress (`App.tsx` routing is unchanged). The
-guards: `__tests__/openBoard.test.ts`, the `keepVotes` cases of
-`retroGrouping.test.ts`, `sessionOpenBoard.test.tsx` (the screen, the keyboard
-paths, the switch and the panel), `dashboardOpenBoard.test.tsx`, and
-`e2e/retro-open-board.spec.ts` (two browsers, the presence panel, a round trip
-through the guided retro, and the axe audit of the board).
+it is the team's newest retro in progress (`App.tsx` routing is unchanged).
+
+Found by the review of the board and left as they are, because they predate it
+(the board only makes them likelier: everyone votes, groups and moves on one
+screen at once):
+
+- **Shared content loses its races, as everywhere** (see *Moving cards on the
+  board*): a card's text, a move, or the last keystrokes of a group title whose
+  write was refused are healed away and redone by hand. A title slice like
+  `reviewSummary`'s would close the group-title case.
+- **With one vote per item, an own vote is never re-asserted**
+  (`preserveVotes` in `mergeRemoteSession.ts`, as in the Vote phase): a vote
+  that loses its race shows as not cast until it is cast again. And a vote on
+  a group in the instant someone dissolves it is lost whatever the setting: the
+  group it was for is gone.
+- **A board kept for weeks keeps every card in one session blob.** Past the
+  1 MB socket message (`SOCKET_MAX_BUFFER_SIZE`) and the 1 MiB JSON body, its
+  writes stop going through: start a new board instead.
+- **The presence panel merges participants by name** (`getParticipants`), so
+  two connected members with the same name show once.
+- **Taking a card out of a pair hands the card left every vote of the group**,
+  including the votes cast for the other card before they were grouped: a
+  group does not record which card a vote was for, on purpose — the votes are
+  the topic's.
+
+The guards: `__tests__/openBoard.test.ts`, the `keepVotes`, `deleteGroup` and
+`removeColumn` cases of `retroGrouping.test.ts`, `mergeRemoteSession.test.ts`
+(*votes moved by a regrouping*, *votes a regrouping moves into a group*),
+`sessionOpenBoard.test.tsx` (the screen, the keyboard paths, the switch, the
+panel, and every hold and every drop), `dashboardOpenBoard.test.tsx` (the
+board type, and the lists' statuses measured at 4.5:1), `e2e/i18n.spec.ts`
+(the action bars), `e2e/retro-touch-card-controls.spec.ts` (a card's controls
+on a phone and on a computer), and `e2e/retro-open-board.spec.ts` (two browsers,
+the presence panel, a round trip through the guided retro, and the axe audit of
+the board).
 
 ## Retrospectives and health checks — one behaviour for what they share
 

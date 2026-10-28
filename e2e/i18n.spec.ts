@@ -235,6 +235,41 @@ test.describe('headers fit in both languages', () => {
     await expect(page.locator('header').getByText('cloud_off', { exact: true })).toHaveCount(0, { timeout: 60_000 });
   };
 
+  // The bar under a retro's header carries the phase's controls, Next Phase
+  // among them, inside a box that clips what overflows, so nothing may end up
+  // past its edge. The open board's switch pushed Next Phase out of the guided
+  // bars at 1024 and 1280px in French (42.0 review): the right-hand group now
+  // wraps to a line of its own, and the board's bar is one list that wraps.
+  // Guided bars are measured from 1024px, where a facilitator runs a retro;
+  // the board's at every width.
+  const assertActionBarFits = async (page: Page, screen: string, widths: readonly number[]) => {
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const language of ['fr', 'en'] as const) {
+        await page.getByTestId(`language-option-${language}`).click();
+        await expect(page.locator('html')).toHaveAttribute('lang', language);
+        const m = await page.evaluate(() => {
+          const bar = document.querySelector<HTMLElement>('[data-testid="phase-action-bar"]');
+          if (!bar) return null;
+          const box = bar.getBoundingClientRect();
+          const outside = [...bar.querySelectorAll<HTMLElement>('h2, label, select, input, button')]
+            .filter((el) => el.getClientRects().length > 0)
+            .filter((el) => {
+              const r = el.getBoundingClientRect();
+              return r.left < box.left - 0.5 || r.right > box.right + 0.5;
+            })
+            .map((el) => (el.textContent ?? '').trim() || el.getAttribute('aria-label') || el.tagName);
+          return { overflow: bar.scrollWidth - bar.clientWidth, outside };
+        });
+        const where = `${screen} bar at ${width}px (${language})`;
+        expect(m, `action bar on screen, ${where}`).not.toBeNull();
+        expect(m!.overflow, `action bar overflow, ${where}`).toBe(0);
+        expect(m!.outside, `controls past the action bar's edge, ${where}`).toEqual([]);
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+  };
+
   test('dashboard and session headers keep every control on screen', async ({ page }) => {
     // Icons keep their own font: only the inherited text font is replaced.
     await page.addInitScript(() => {
@@ -263,14 +298,21 @@ test.describe('headers fit in both languages', () => {
     await assertEveryWidth(page, 'retro');
     await assertEveryWidthWithChipShown(page, 'retro');
 
+    // The bars under the header with the most on them: the facilitator's
+    // settings, the switch to an open board and Next Phase.
+    await page.getByRole('button', { name: 'BRAINSTORM', exact: true }).click();
+    await assertActionBarFits(page, 'brainstorm', [1024, 1280]);
+    await page.getByRole('button', { name: 'VOTE', exact: true }).click();
+    await assertActionBarFits(page, 'vote', [1024, 1280]);
+
     // The open board's header (42.0): no phase bar, the board's name in its
     // place. Switching is a phase change, so the timer is set to its widest
     // again.
-    await page.getByRole('button', { name: 'BRAINSTORM', exact: true }).click();
     await page.getByRole('button', { name: 'Switch to an open board' }).click();
     await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 10_000 });
     await setTimerToItsWidest(page);
     await assertEveryWidth(page, 'open board');
+    await assertActionBarFits(page, 'open board', WIDTHS);
 
     await page.getByRole('button', { name: 'Leave the retrospective' }).click();
     await page.getByRole('button', { name: 'Health Checks' }).click();

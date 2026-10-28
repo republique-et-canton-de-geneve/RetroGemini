@@ -5,6 +5,7 @@ import React from 'react';
 import Session from '../components/Session';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { RetroSession, Team, User } from '../types';
+import { effectivePair } from './helpers/tailwindTheme';
 
 /**
  * The open board (utils/openBoard.ts): every card activity of a retrospective
@@ -20,12 +21,16 @@ import { RetroSession, Team, User } from '../types';
  */
 
 let rosterListener: ((roster: { id: string; name: string }[]) => void) | null = null;
+let connectionListener: ((connected: boolean) => void) | null = null;
+let sessionUpdateListener: ((session: RetroSession) => void) | null = null;
 
 vi.mock('../services/dataService', () => ({
   dataService: {
     getTeam: vi.fn(() => null),
     updateSession: vi.fn(),
     persistParticipants: vi.fn(),
+    applyRemoteSession: vi.fn(),
+    getSessionToken: vi.fn(() => 'token-1'),
   },
 }));
 
@@ -36,7 +41,10 @@ vi.mock('../services/syncService', () => ({
     leaveSession: vi.fn(),
     updateSession: vi.fn(),
     getCurrentSessionId: vi.fn(() => 'session-1'),
-    onSessionUpdate: vi.fn(() => () => {}),
+    onSessionUpdate: vi.fn((listener: (session: RetroSession) => void) => {
+      sessionUpdateListener = listener;
+      return () => {};
+    }),
     onMemberJoined: vi.fn(() => () => {}),
     onMemberLeft: vi.fn(() => () => {}),
     onRoster: vi.fn((listener: (roster: { id: string; name: string }[]) => void) => {
@@ -45,7 +53,10 @@ vi.mock('../services/syncService', () => ({
     }),
     onActivity: vi.fn(() => () => {}),
     sendActivity: vi.fn(),
-    onConnectionChange: vi.fn(() => () => {}),
+    onConnectionChange: vi.fn((listener: (connected: boolean) => void) => {
+      connectionListener = listener;
+      return () => {};
+    }),
     onJoinDenied: vi.fn(() => () => {}),
     onUpdateRefused: vi.fn(() => () => {}),
     onSyncHealth: vi.fn(() => () => {}),
@@ -158,6 +169,8 @@ describe('Open board — one screen for every card activity', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     rosterListener = null;
+    connectionListener = null;
+    sessionUpdateListener = null;
     global.fetch = vi.fn(() =>
       Promise.resolve({ json: () => Promise.resolve({ enabled: false }) }),
     ) as unknown as typeof fetch;
@@ -490,5 +503,398 @@ describe('Open board — one screen for every card activity', () => {
     expect(screen.getByRole('button', { name: 'Passer en rétrospective guidée' })).toBeTruthy();
     expect(screen.getByText('2 votes au total')).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: 'Anonyme' })).toBeTruthy();
+  });
+});
+
+/**
+ * Every hold on the board and everything it can be dropped on, the matrix the
+ * state-machines review drew for the open board: a card held for grouping (the
+ * Group phase's hold), a group held to move it whole (Brainstorm's), and what
+ * puts each down. The cells the first tests left open are pinned here, among
+ * them the three it found the code getting wrong: a held card that outlived a
+ * lost connection or its own deletion, and "Delete group" dropping the votes.
+ */
+describe('Open board — every hold and every drop', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    rosterListener = null;
+    connectionListener = null;
+    sessionUpdateListener = null;
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ json: () => Promise.resolve({ enabled: false }) }),
+    ) as unknown as typeof fetch;
+  });
+
+  const ticket = (id: string, text: string, overrides: Partial<RetroSession['tickets'][number]> = {}) => ({
+    id, colId: 'todo', text, authorId: 'alice', groupId: null, votes: [] as string[], ...overrides,
+  });
+  // Delivery: Flaky deploys + Slow rollbacks, with Bob's vote; Too many meetings
+  // on its own with Alice's.
+  const groupedBoard = (overrides: Partial<RetroSession> = {}) => createBoard({
+    tickets: [
+      ticket('t-a', 'Flaky deploys', { groupId: 'g1' }),
+      ticket('t-b', 'Slow rollbacks', { authorId: 'bob', groupId: 'g1' }),
+      ticket('t-c', 'Too many meetings', { votes: ['alice'] }),
+    ],
+    groups: [{ id: 'g1', title: 'Delivery', colId: 'todo', votes: ['bob'], anchorTicketId: 't-a' }],
+    ...overrides,
+  });
+  const groupElement = (title: string) => screen.getByDisplayValue(title).closest('.group-container') as HTMLElement;
+  const drag = (from: HTMLElement, to: HTMLElement) => {
+    const transfer = dataTransfer();
+    fireEvent.dragStart(from, { dataTransfer: transfer });
+    fireEvent.drop(to, { dataTransfer: transfer });
+  };
+  const cardTargets = () => screen.queryAllByRole('button', {
+    name: /Group here: group the selected ticket|Add selected card to this group|Move selected card here/,
+  });
+  const groupTargets = () => screen.queryAllByRole('button', { name: /move the selected group to/ });
+
+  it('a card dropped on a group joins it, and the group gains the card’s votes', async () => {
+    renderBoard(groupedBoard());
+    await screen.findByText('Too many meetings');
+
+    drag(cardElement('Too many meetings'), groupElement('Delivery'));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.tickets.find((t) => t.id === 't-c')).toMatchObject({ groupId: 'g1', votes: [] });
+      expect([...persisted!.groups[0].votes].sort()).toEqual(['alice', 'bob']);
+    });
+  });
+
+  it('a card dropped on another column moves there ungrouped, keeping its votes', async () => {
+    renderBoard(createBoard({
+      tickets: [ticket('t-c', 'Too many meetings', { votes: ['alice'], originColId: 'doing' })],
+    }));
+    await screen.findByText('Too many meetings');
+
+    drag(cardElement('Too many meetings'), columnElement('doing'));
+
+    await waitFor(async () => {
+      const moved = (await lastPersisted())?.tickets.find((t) => t.id === 't-c');
+      expect(moved).toMatchObject({ colId: 'doing', groupId: null, votes: ['alice'] });
+      expect(moved).not.toHaveProperty('originColId');
+    });
+  });
+
+  it('a card dropped back on its own column writes nothing', async () => {
+    renderBoard();
+    await screen.findByText('Too many meetings');
+    const before = await persistedCount();
+
+    drag(cardElement('Too many meetings'), columnElement('todo'));
+
+    expect(await persistedCount()).toBe(before);
+  });
+
+  it('a grouped card dropped on another group joins it, and the pair it left hands its votes to its last card', async () => {
+    renderBoard(groupedBoard({
+      tickets: [
+        ticket('t-a', 'Flaky deploys', { groupId: 'g1' }),
+        ticket('t-b', 'Slow rollbacks', { groupId: 'g1' }),
+        ticket('t-c', 'Too many meetings', { colId: 'doing', groupId: 'g2' }),
+        ticket('t-d', 'Long stand-ups', { colId: 'doing', groupId: 'g2' }),
+      ],
+      groups: [
+        { id: 'g1', title: 'Delivery', colId: 'todo', votes: ['bob'] },
+        { id: 'g2', title: 'Meetings', colId: 'doing', votes: ['alice'] },
+      ],
+    }));
+    await screen.findByText('Flaky deploys');
+
+    drag(cardElement('Flaky deploys'), groupElement('Meetings'));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.tickets.find((t) => t.id === 't-a')).toMatchObject({ groupId: 'g2', colId: 'doing' });
+      expect(persisted?.groups.map((g) => g.id)).toEqual(['g2']);
+      expect(persisted?.groups[0].votes).toEqual(['alice']);
+      expect(persisted?.tickets.find((t) => t.id === 't-b')).toMatchObject({ groupId: null, votes: ['bob'] });
+    });
+  });
+
+  it('a grouped card dropped on its own column leaves its group, and the card left gets the votes', async () => {
+    renderBoard(groupedBoard());
+    await screen.findByText('Slow rollbacks');
+
+    drag(cardElement('Slow rollbacks'), columnElement('todo'));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.groups).toEqual([]);
+      expect(persisted?.tickets.find((t) => t.id === 't-b')).toMatchObject({ groupId: null, colId: 'todo', votes: [] });
+      expect(persisted?.tickets.find((t) => t.id === 't-a')?.votes).toEqual(['bob']);
+    });
+  });
+
+  it('deleting a grouped card hands the votes to the card left', async () => {
+    const user = userEvent.setup();
+    renderBoard(groupedBoard());
+    await screen.findByText('Slow rollbacks');
+
+    await user.click(within(cardElement('Slow rollbacks')).getByRole('button', { name: 'Delete ticket' }));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.tickets.map((t) => t.id)).toEqual(['t-a', 't-c']);
+      expect(persisted?.groups).toEqual([]);
+      expect(persisted?.tickets.find((t) => t.id === 't-a')?.votes).toEqual(['bob']);
+    });
+  });
+
+  it('"Delete group" keeps the cards and gives the votes to the card the group was made on', async () => {
+    const user = userEvent.setup();
+    renderBoard(groupedBoard());
+    await screen.findByText('Flaky deploys');
+
+    await user.click(screen.getByRole('button', { name: 'Delete group' }));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.groups).toEqual([]);
+      expect(persisted?.tickets.find((t) => t.id === 't-a')).toMatchObject({ groupId: null, votes: ['bob'] });
+      expect(persisted?.tickets.find((t) => t.id === 't-b')).toMatchObject({ groupId: null, votes: [] });
+    });
+  });
+
+  it('a group dropped on a card of another column moves there whole, never merged', async () => {
+    renderBoard(groupedBoard({
+      tickets: [
+        ticket('t-a', 'Flaky deploys', { groupId: 'g1' }),
+        ticket('t-b', 'Slow rollbacks', { groupId: 'g1' }),
+        ticket('t-c', 'Too many meetings', { colId: 'doing' }),
+      ],
+    }));
+    await screen.findByText('Too many meetings');
+
+    drag(groupElement('Delivery'), cardElement('Too many meetings'));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.groups[0]).toMatchObject({ id: 'g1', colId: 'doing', votes: ['bob'] });
+      expect(persisted?.tickets.filter((t) => t.groupId === 'g1').every((t) => t.colId === 'doing')).toBe(true);
+      expect(persisted?.tickets.find((t) => t.id === 't-c')?.groupId).toBeNull();
+    });
+  });
+
+  it('a group dropped on a group of another column moves there whole, never merged', async () => {
+    renderBoard(groupedBoard({
+      tickets: [
+        ticket('t-a', 'Flaky deploys', { groupId: 'g1' }),
+        ticket('t-b', 'Slow rollbacks', { groupId: 'g1' }),
+        ticket('t-c', 'Too many meetings', { colId: 'doing', groupId: 'g2' }),
+        ticket('t-d', 'Long stand-ups', { colId: 'doing', groupId: 'g2' }),
+      ],
+      groups: [
+        { id: 'g1', title: 'Delivery', colId: 'todo', votes: ['bob'] },
+        { id: 'g2', title: 'Meetings', colId: 'doing', votes: [] },
+      ],
+    }));
+    await screen.findByText('Flaky deploys');
+
+    drag(groupElement('Delivery'), groupElement('Meetings'));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.groups.find((g) => g.id === 'g1')).toMatchObject({ colId: 'doing', votes: ['bob'] });
+      expect(persisted?.tickets.filter((t) => t.groupId === 'g2').map((t) => t.id).sort()).toEqual(['t-c', 't-d']);
+    });
+  });
+
+  // What puts a hold down, for each of the three things a board holds.
+  const holds = [
+    { held: 'a card', pickUp: /Pick up the ticket Too many meetings/, targets: cardTargets, id: 't-c' },
+    { held: 'a grouped card', pickUp: /Pick up the ticket Flaky deploys/, targets: cardTargets, id: 't-a' },
+    { held: 'a group', pickUp: /Move the group Delivery to another column/, targets: groupTargets, id: 'g1' },
+  ];
+
+  it.each(holds)('Escape puts $held down, and writes nothing', async ({ pickUp, targets }) => {
+    const user = userEvent.setup();
+    renderBoard(groupedBoard());
+    await screen.findByText('Too many meetings');
+    const before = await persistedCount();
+
+    await user.click(button(pickUp));
+    expect(targets().length).toBeGreaterThan(0);
+    await user.keyboard('{Escape}');
+
+    expect(targets()).toHaveLength(0);
+    expect(await persistedCount()).toBe(before);
+  });
+
+  it.each(holds)('switching the board to a guided retro puts $held down', async ({ pickUp }) => {
+    const user = userEvent.setup();
+    renderBoard(groupedBoard({ guidedPhase: 'GROUP' }));
+    await screen.findByText('Too many meetings');
+
+    await user.click(button(pickUp));
+    await user.click(screen.getByRole('button', { name: 'Switch to a guided retrospective' }));
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Group Ideas' })).toBeTruthy();
+    // The Group phase offers the same targets for a card it holds.
+    expect(cardTargets()).toHaveLength(0);
+    expect(groupTargets()).toHaveLength(0);
+  });
+
+  it.each(holds)('losing the connection puts $held down, for good', async ({ pickUp, targets }) => {
+    const user = userEvent.setup();
+    renderBoard(groupedBoard());
+    await screen.findByText('Too many meetings');
+
+    await user.click(button(pickUp));
+    expect(targets().length).toBeGreaterThan(0);
+
+    act(() => connectionListener?.(false));
+    expect(targets()).toHaveLength(0);
+    act(() => connectionListener?.(true));
+    expect(targets()).toHaveLength(0);
+  });
+
+  it.each(holds)('$held is put down when someone else deletes it', async ({ pickUp, targets, id }) => {
+    const user = userEvent.setup();
+    const board = groupedBoard();
+    renderBoard(board);
+    await screen.findByText('Too many meetings');
+
+    await user.click(button(pickUp));
+    expect(targets().length).toBeGreaterThan(0);
+
+    const gone = id.startsWith('g')
+      ? { ...board, groups: [], tickets: board.tickets.map((t) => ({ ...t, groupId: null })) }
+      : { ...board, tickets: board.tickets.filter((t) => t.id !== id) };
+    act(() => sessionUpdateListener?.({ ...gone, _rev: 9 } as RetroSession));
+
+    await waitFor(() => expect(targets()).toHaveLength(0));
+  });
+
+  it('applies AI-suggested groups with the votes of their cards', async () => {
+    const user = userEvent.setup();
+    global.fetch = vi.fn((url: string) => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(
+        url.includes('/api/ai/suggest-groups')
+          ? { groups: [{ title: 'Delivery', ticketIds: ['t-a', 't-b'] }] }
+          : { enabled: url.includes('/api/ai-status') },
+      ),
+    })) as unknown as typeof fetch;
+    renderBoard();
+
+    await user.click(await screen.findByRole('button', { name: /Suggest groups with AI/ }));
+    await user.click(await screen.findByRole('button', { name: 'Accept' }));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.groups).toHaveLength(1);
+      expect([...persisted!.groups[0].votes].sort()).toEqual(['alice', 'bob', 'fac']);
+    });
+  });
+
+  it('shows hover-only card controls on focus, and on touch screens', async () => {
+    renderBoard(groupedBoard());
+    await screen.findByText('Too many meetings');
+
+    const bareOpacity0 = /(^|\s)opacity-0(\s|$)/;
+    const edits = screen.getAllByRole('button', { name: 'Edit ticket' });
+    const deletes = screen.getAllByRole('button', { name: 'Delete ticket' });
+    expect(deletes.length).toBeGreaterThan(1); // the grouped cards' corner and the vote row's
+    for (const control of [...edits, ...deletes]) {
+      // Hidden only where a pointer can hover: on a phone, where nothing
+      // hovers, an edit no one sees is never found and a delete no one sees
+      // is tapped by accident.
+      expect(control.className).not.toMatch(bareOpacity0);
+      expect(control.className).toContain('[@media(hover:hover)]:opacity-0');
+      expect(control.className).toContain('focus:opacity-100');
+    }
+    // A card's first comment is added from a control shown the same way.
+    const commentControl = within(cardElement('Too many meetings')).getByTestId('ticket-comment-btn').parentElement!;
+    expect(commentControl.className).not.toMatch(bareOpacity0);
+    expect(commentControl.className).toContain('[@media(hover:hover)]:opacity-0');
+    expect(commentControl.className).toContain('focus-within:opacity-100');
+  });
+
+  it('keeps the first line clear of the edit control, where nothing hovers', async () => {
+    renderBoard(groupedBoard(), alice);
+    await screen.findByText('Too many meetings');
+
+    // Alice edits her own cards only, so only they make room for the control.
+    const room = within(cardElement('Too many meetings')).getByTestId('ticket-edit-room');
+    expect(room.className).toContain('hidden');
+    expect(room.className).toContain('[@media(hover:none)]:block');
+    expect(room.className).toContain('float-right');
+    expect(room).toHaveAttribute('aria-hidden', 'true');
+    expect(within(cardElement('Slow rollbacks')).queryByTestId('ticket-edit-room')).toBeNull();
+    expect(within(cardElement('Slow rollbacks')).queryByRole('button', { name: 'Edit ticket' })).toBeNull();
+  });
+
+  it('draws the edit control at a contrast a phone user can see', async () => {
+    renderBoard(groupedBoard());
+    await screen.findByText('Too many meetings');
+
+    const edit = within(cardElement('Too many meetings')).getByRole('button', { name: 'Edit ticket' });
+    // An icon is non-text: 3:1 (1.4.11).
+    expect(effectivePair(edit).ratio).toBeGreaterThanOrEqual(3);
+  });
+
+  it('takes the corner delete away while the card is edited', async () => {
+    const user = userEvent.setup();
+    renderBoard(groupedBoard());
+    await screen.findByText('Flaky deploys');
+    expect(within(cardElement('Flaky deploys')).getByRole('button', { name: 'Delete ticket' })).toBeTruthy();
+
+    await user.click(within(cardElement('Flaky deploys')).getByRole('button', { name: 'Edit ticket' }));
+
+    const field = screen.getByDisplayValue('Flaky deploys');
+    expect(within(field.closest('.group') as HTMLElement).queryByRole('button', { name: 'Delete ticket' })).toBeNull();
+  });
+
+  it('never paints a card in its author’s colour while the board is anonymous', async () => {
+    const colourful = (isAnonymous: boolean) => createBoard({
+      settings: { ...createBoard().settings, isAnonymous, colorBy: 'author' },
+    });
+
+    const { unmount } = renderBoard(colourful(false));
+    await screen.findByText('Flaky deploys');
+    // Alice's rose: the control the anonymous case is measured against.
+    expect(cardElement('Flaky deploys').style.backgroundColor).not.toBe('');
+    unmount();
+
+    renderBoard(colourful(true));
+    await screen.findByText('Flaky deploys');
+    expect(cardElement('Flaky deploys').style.backgroundColor).toBe('');
+    const select = screen.getByRole('combobox', { name: /colou?r/i }) as HTMLSelectElement;
+    expect(select.value).toBe('topic');
+    expect((within(select).getByRole('option', { name: 'Author' }) as HTMLOptionElement).disabled).toBe(true);
+  });
+
+  it('turning a board back into the Discuss phase keeps the topic under discussion', async () => {
+    const user = userEvent.setup();
+    // Slow rollbacks has the most votes: entering Discuss afresh would focus it.
+    renderBoard(createBoard({ guidedPhase: 'DISCUSS', discussionFocusId: 't-c' }));
+
+    await user.click(await screen.findByRole('button', { name: 'Switch to a guided retrospective' }));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.phase).toBe('DISCUSS');
+      expect(persisted?.discussionFocusId).toBe('t-c');
+    });
+  });
+
+  it('removing a column moves its cards and their votes to the column beside it', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({
+      tickets: [ticket('t-x', 'Pairing on Fridays', { colId: 'doing', votes: ['bob', 'alice'] })],
+    }));
+    await screen.findByText('Pairing on Fridays');
+
+    await user.click(button(/Edit Layout/));
+    await user.click(screen.getByRole('button', { name: 'Remove the Discussing column' }));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.columns.map((c) => c.id)).toEqual(['todo']);
+      expect(persisted?.tickets.find((t) => t.id === 't-x')).toMatchObject({ colId: 'todo', votes: ['bob', 'alice'] });
+    });
   });
 });

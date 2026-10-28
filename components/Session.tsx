@@ -11,9 +11,11 @@ import { ticketQuote } from '../utils/textCut';
 import {
   addTicketToGroup,
   applySuggestedClusters,
+  deleteGroup,
   deleteTicket,
   getTicketOriginColumn,
   groupTicketsTogether,
+  removeColumn,
   removeTicketFromGroup,
 } from '../utils/retroGrouping';
 import {
@@ -379,14 +381,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     setMovingItem(null);
   }, [session?.phase, sessionId, isLive]);
 
-  // The card held for grouping too, once its phase is gone: the open board
-  // holds cards the way the Group phase does, and switching the board to a
-  // guided retro (or back) must not leave one armed on the next screen.
+  // The card held for grouping too, by the same rule: the open board holds
+  // cards the way the Group phase does, and switching the board to a guided
+  // retro (or back) must not leave one armed on the next screen. Offline, the
+  // card's own control (the way to cancel) is gone while the targets stay.
   useEffect(() => {
     setDraggedTicket(null);
     setIsSelectThenDrop(false);
     setDragTarget(null);
-  }, [session?.phase, sessionId]);
+  }, [session?.phase, sessionId, isLive]);
+
+  // And once the card itself is gone (someone deleted it): a hold on nothing
+  // would go on offering targets for a card no one can see.
+  const heldTicketId = draggedTicket?.id;
+  const heldTicketExists = !heldTicketId || !!session?.tickets.some(t => t.id === heldTicketId);
+  useEffect(() => {
+    if (heldTicketExists) return;
+    setDraggedTicket(null);
+    setIsSelectThenDrop(false);
+    setDragTarget(null);
+  }, [heldTicketExists]);
 
   // A hold that loses its permission is dropped, not left armed. The
   // facilitator can hide the cards again while someone is mid-move, and the
@@ -1390,6 +1404,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // the type stops the timer, clears "finished" and closes the editors exactly
   // as moving to the next phase does.
   const setPhase = (p: string) => updateSession(s => {
+      const fromBoard = isOpenBoard(s);
       recordBoardTypeChange(s, p);
       s.phase = p;
       // Shared with the health check (utils/sessionTimer.ts): entering a phase
@@ -1404,8 +1419,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // browsing back through the phases afterwards does not reopen it.
       s.status = effectiveSessionStatus(s);
 
-      // Auto-expand the first topic when entering the Discuss phase
-      if (p === 'DISCUSS') {
+      // Auto-expand the first topic when entering the Discuss phase. Not on
+      // the way back from an open board: the topic the discussion was on is
+      // still stored, and turning the retro back must not move it.
+      if (p === 'DISCUSS' && !fromBoard) {
         const items: {id: string, votes: number}[] = [];
         s.tickets.filter(t => !t.groupId).forEach(t => {
           items.push({ id: t.id, votes: t.votes.length });
@@ -2224,15 +2241,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const isSelected = regroupsCards
           ? draggedTicket?.id === t.id
           : mode === 'BRAINSTORM' && movingItem?.kind === 'ticket' && movingItem.id === t.id;
-      // Tap-to-pick-up is live in both phases. A grouped card in Brainstorm is
-      // deliberately inert: the gesture belongs to its group container, which
-      // moves the group as a unit — and a card that ended the gesture here
-      // would take it away from the container that bubbling reaches next.
+      // Tap-to-pick-up is live in Brainstorm, Group and on the board. A grouped
+      // card in Brainstorm is deliberately inert: the gesture belongs to its
+      // group container, which moves the group as a unit — and a card that
+      // ended the gesture here would take it away from the container that
+      // bubbling reaches next. On a board a grouped card is held for grouping,
+      // as in the Group phase, and the container only takes a tap that ends
+      // outside its cards.
       const tapEnabled = mode === 'GROUP' || isMovableCard || isBoardCard;
       const isDraggableCard = mode === 'GROUP' || isMovableCard || isBoardCard;
       // Brainstorm deletes a card of its own (or any, for the facilitator)
       // that is not grouped; a board, any of them, grouped or not.
       const canDeleteCard = (isMine || isFacilitator) && ((mode === 'BRAINSTORM' && !isGrouped) || isBoard);
+      // Its text is edited in Brainstorm and on the board, by its author or the
+      // facilitator, once they can read it.
+      const canEditText = visible && (mode === 'BRAINSTORM' || isBoard) && (isMine || isFacilitator);
+      const showsAuthor = visible && !session.settings.isAnonymous && !!author;
       const deleteCard = (e: React.MouseEvent) => {
           e.stopPropagation();
           updateSession(s => {
@@ -2241,8 +2265,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           });
       };
 
-      // Color by author or topic
-      const colorBy = session.settings.colorBy || 'topic';
+      // Color by author or topic. Never by author while the session is
+      // anonymous: each participant keeps one colour (the panel's avatars), so
+      // a card painted in its author's colour names its author.
+      const colorBy = session.settings.isAnonymous ? 'topic' : (session.settings.colorBy || 'topic');
       const column = session.columns.find(c => c.id === t.colId);
       // Cross-column grouping keeps the ticket's origin visible: like a
       // physical post-it moved on a board, the card keeps the colour of the
@@ -2362,13 +2388,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                  />
             ) : (
                 <div className="relative">
-                    <div className={`text-sm w-full whitespace-pre-wrap wrap-break-word ${!visible ? 'ticket-blur' : cardTextColor} ${visible && !session.settings.isAnonymous && author ? 'pr-8' : ''}`}>
+                    <div className={`text-sm w-full whitespace-pre-wrap wrap-break-word ${!visible ? 'ticket-blur' : cardTextColor} ${showsAuthor ? 'pr-8' : ''}`}>
+                        {/* Where nothing hovers, the edit control below stays
+                            in view over the end of the first line: a float of
+                            its size, under it, makes that line end before it. */}
+                        {canEditText && (
+                            <span aria-hidden="true" data-testid="ticket-edit-room" className={`hidden [@media(hover:none)]:block float-right w-6 h-6 ml-1 ${showsAuthor ? '' : 'mr-8'}`} />
+                        )}
                         {t.text}
                     </div>
-                    {visible && (mode === 'BRAINSTORM' || isBoard) && (isMine || isFacilitator) && (
+                    {canEditText && (
                         <button
                             onClick={(e) => { e.stopPropagation(); setEditingTicketId(t.id); }}
-                            className="absolute top-0 right-8 text-slate-300 hover:text-indigo-500 opacity-0 group-hover:opacity-100 transition"
+                            // The card's own measured text colour on a coloured
+                            // card, as the comment button: an icon a phone always
+                            // shows must be seen (1.4.11), and slate-300 measured
+                            // 1.48:1 on white.
+                            className={`absolute top-0 right-8 ${cardBgHex ? cardTextColor : 'text-slate-500 hover:text-indigo-600'} [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus:opacity-100 transition`}
                             title={tr('session.ticket.editTitle')}
                             aria-label={tr('session.ticket.editAria')}
                         >
@@ -2384,7 +2420,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 </div>
             )}
 
-            {visible && !session.settings.isAnonymous && author && (
+            {showsAuthor && (
                 <div className="absolute top-2 right-2">
                     <div className={`w-6 h-6 rounded-full ${avatarColorClasses(author.color)} flex items-center justify-center text-[10px] font-bold shadow-xs ring-1 ring-white`}>
                         {author.name.substring(0,2).toUpperCase()}
@@ -2465,11 +2501,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 leaves with one card is dissolved, its votes going to that card.
                 An ungrouped board card carries its delete control in its vote
                 row instead (below): in this corner it would lie over the vote
-                button, and an invisible control still takes the click. */}
-            {canDeleteCard && !(isBoard && !isGrouped) && (
+                button, and an invisible control still takes the click. Hidden
+                until hover only where hovering exists: a phone has none, and a
+                delete no one can see would be tapped by accident. Not while
+                the card is edited: it would lie over the field's corner. */}
+            {canDeleteCard && !isEditing && !(isBoard && !isGrouped) && (
                 <button
                     onClick={deleteCard}
-                    className="absolute bottom-2 right-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"
+                    className="absolute bottom-2 right-2 w-6 h-6 flex items-center justify-center rounded-sm bg-white/90 text-slate-500 hover:text-red-600 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
                     aria-label={tr('session.ticket.delete')}
                 >
                     <span className="material-symbols-outlined text-sm">delete</span>
@@ -2478,7 +2517,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
             {/* Comment badge & button */}
             {visible && !isEditing && (
-                <div className={`flex items-center mt-1 ${(t.comments?.length || 0) > 0 ? '' : 'opacity-0 group-hover:opacity-100'} transition`}>
+                <div className={`flex items-center mt-1 ${(t.comments?.length || 0) > 0 ? '' : '[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100'} transition`}>
                     <button
                         onClick={(e) => { e.stopPropagation(); setFocusedTicketId(t.id); }}
                         className={`flex items-center space-x-1 text-xs px-1.5 py-0.5 rounded transition ${
@@ -2575,7 +2614,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             {canDeleteCard && (
                                 <button
                                     onClick={deleteCard}
-                                    className="w-6 h-6 flex items-center justify-center rounded-sm bg-white/90 text-slate-500 hover:text-red-600 opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                                    className="w-6 h-6 flex items-center justify-center rounded-sm bg-white/90 text-slate-500 hover:text-red-600 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
                                     aria-label={tr('session.ticket.delete')}
                                 >
                                     <span className="material-symbols-outlined text-sm">delete</span>
@@ -2620,17 +2659,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           </div>
       );
 
-      const renderColorBySelect = () => (
-          <div className="flex items-center space-x-2 border-l border-slate-200 pl-4">
+      // A guided bar separates its settings with a rule. The board's bar wraps,
+      // and a rule would then open a line of its own: it spaces them only.
+      const separator = (separated: boolean) => (separated ? 'border-l border-slate-200 pl-4' : '');
+
+      const renderColorBySelect = (separated = true) => (
+          <div className={`flex items-center space-x-2 ${separator(separated)}`}>
             <span className="text-xs text-slate-500 font-medium whitespace-nowrap">{tr('session.board.colorBy')}</span>
+            {/* Author is not offered while the session is anonymous: the
+                cards would name their authors by colour. */}
             <select
               aria-label={tr('session.board.colorByAria')}
-              value={session.settings.colorBy || 'topic'}
+              value={session.settings.isAnonymous ? 'topic' : (session.settings.colorBy || 'topic')}
               onChange={(e) => updateSession(s => s.settings.colorBy = e.target.value as 'author' | 'topic')}
               className="text-xs bg-white border border-slate-300 rounded-sm px-2 py-1 text-slate-700 font-medium cursor-pointer hover:border-slate-400"
             >
               <option value="topic">{tr('session.board.colorByTopic')}</option>
-              <option value="author">{tr('session.board.colorByAuthor')}</option>
+              <option value="author" disabled={session.settings.isAnonymous}>{tr('session.board.colorByAuthor')}</option>
             </select>
           </div>
       );
@@ -2645,8 +2690,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           </button>
       );
 
-      const renderVoteSettings = () => (
-           <div className="flex items-center space-x-2 text-sm text-slate-600 border-l border-slate-200 pl-4">
+      const renderVoteSettings = (separated = true) => (
+           <div className={`flex flex-wrap items-center gap-2 text-sm text-slate-600 ${separator(separated)}`}>
                 <label className="flex items-center space-x-1 cursor-pointer">
                     <input type="checkbox" checked={session.settings.oneVotePerTicket} onChange={(e) => handleToggleOneVote(e.target.checked)} />
                     <span>{tr('session.board.oneVotePerItem')}</span>
@@ -2716,46 +2761,45 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               title={tr('session.openBoard.switchToBoardHint')}
               className="flex items-center gap-1 px-3 py-2 rounded-sm border border-slate-200 text-sm font-bold text-slate-600 whitespace-nowrap hover:bg-slate-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-              <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">view_column</span>
+              <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">view_kanban</span>
               <span>{tr('session.openBoard.switchToBoard')}</span>
           </button>
       );
 
-      // One bar for everything an open board does. It wraps rather than
-      // scrolls: the facilitator's settings are many, and none may hide.
+      // One bar for everything an open board does, one list that wraps rather
+      // than scrolls: the facilitator's settings are many, and none may hide.
+      // e2e/i18n.spec.ts measures it at every width, in both languages.
       const renderBoardActionBar = () => (
-          <div className="bg-white border-b px-6 py-3 flex flex-wrap justify-between items-center gap-x-4 gap-y-2 shrink-0 shadow-xs z-30 sticky top-0">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                  <h2 className="font-bold text-slate-700 text-lg">{tr('session.openBoard.title')}</h2>
-                  {renderVotesRemaining()}
-                  {isFacilitator && (
-                      <>
-                          <label className="flex items-center space-x-2 text-sm text-slate-600 cursor-pointer border-l border-slate-200 pl-4">
-                              <input
-                                  type="checkbox"
-                                  checked={session.settings.isAnonymous}
-                                  disabled={!isLive}
-                                  onChange={(e) => handleToggleAnonymous(e.target.checked)}
-                              />
-                              <span className="whitespace-nowrap">{tr('session.openBoard.anonymous')}</span>
-                          </label>
-                          {renderColorBySelect()}
-                          {renderVoteSettings()}
-                          {renderEditLayoutButton()}
-                          {aiEnabled && renderSuggestGroupsButton()}
-                      </>
-                  )}
-              </div>
+          <div data-testid="phase-action-bar" className="bg-white border-b px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0 shadow-xs z-30 sticky top-0">
+              <h2 className="font-bold text-slate-700 text-lg">{tr('session.openBoard.title')}</h2>
+              {renderVotesRemaining()}
+              {isFacilitator && (
+                  <>
+                      <label className="flex items-center space-x-2 text-sm text-slate-600 cursor-pointer">
+                          <input
+                              type="checkbox"
+                              checked={session.settings.isAnonymous}
+                              disabled={!isLive}
+                              onChange={(e) => handleToggleAnonymous(e.target.checked)}
+                          />
+                          <span className="whitespace-nowrap">{tr('session.openBoard.anonymous')}</span>
+                      </label>
+                      {renderColorBySelect(false)}
+                      {renderVoteSettings(false)}
+                      {renderEditLayoutButton()}
+                      {aiEnabled && renderSuggestGroupsButton()}
+                  </>
+              )}
               {maySwitchBoardType && (
                   <button
                       type="button"
                       onClick={switchToGuidedRetro}
                       disabled={!isLive}
                       title={tr('session.openBoard.switchToGuidedHint')}
-                      // `ml-auto`: on a line of its own once the settings wrap,
-                      // it stays at the right, where a guided bar keeps its
-                      // phase controls.
-                      className="ml-auto flex items-center gap-1 px-3 py-2 rounded-sm border border-slate-200 text-sm font-bold text-slate-600 whitespace-nowrap hover:bg-slate-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      // `ml-auto`: at the end of the line it lands on, where a
+                      // guided bar keeps its phase controls. Its label may wrap:
+                      // on a phone it is wider than the bar.
+                      className="ml-auto flex items-center gap-1 px-3 py-2 rounded-sm border border-slate-200 text-sm font-bold text-left text-slate-600 hover:bg-slate-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                       <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">event_note</span>
                       <span>{tr('session.openBoard.switchToGuided')}</span>
@@ -2765,7 +2809,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       );
 
       const renderPhaseActionBar = () => isBoard ? renderBoardActionBar() : (
-          <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 shadow-xs z-30 sticky top-0">
+          <div data-testid="phase-action-bar" className="bg-white border-b px-6 py-3 flex flex-wrap justify-between items-center gap-x-4 gap-y-2 shrink-0 shadow-xs z-30 sticky top-0">
                <div className="flex items-center space-x-4">
                    {mode === 'BRAINSTORM' && (
                        <h2 className="font-bold text-slate-700 text-lg">{tr('session.board.brainstormTitle')}</h2>
@@ -2797,7 +2841,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                    {mode === 'VOTE' && isFacilitator && renderVoteSettings()}
                </div>
 
-               <div className="flex items-center space-x-3">
+               {/* Wraps to a line of its own, at the right, when the bar is too
+                   narrow for both halves. It used to be pushed out of view
+                   instead, and it holds Next Phase: the switch to an open board
+                   hid it at 1024 and 1280px (e2e/i18n.spec.ts measures it). */}
+               <div className="ml-auto flex items-center space-x-3">
                    {(mode === 'BRAINSTORM' || mode === 'VOTE') && (
                        <div className="flex items-center space-x-2 mr-4">
                             <button
@@ -2965,10 +3013,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         <div className="font-bold text-slate-800 text-sm">{g.title || tr('session.group.untitled')}</div>
                                                     )}
                                                 </div>
+                                                {/* The cards stay; on a board the votes go to the
+                                                    group's anchor card (retroGrouping.ts → deleteGroup). */}
                                                 {(mode === 'GROUP' || isBoard) && isFacilitator && (
                                                     <button onClick={() => updateSession(s => {
-                                                        s.groups = s.groups.filter(x => x.id !== g.id);
-                                                        s.tickets.filter(t => t.groupId === g.id).forEach(t => t.groupId = null);
+                                                        deleteGroup(s, g.id, { keepVotes: isOpenBoard(s) });
                                                     })} className="text-slate-500 hover:text-red-500 p-1"
                                                     aria-label={tr('session.group.delete')}><span className="material-symbols-outlined text-lg">delete</span></button>
                                                 )}
@@ -3000,10 +3049,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 </button>
                                             )}
 
-                                            {/* Brainstorm: pick the whole group up. The group is the
-                                                only thing that moves here — its composition is the
-                                                Group phase's business, so no control inside it offers
-                                                to take a card out. */}
+                                            {/* Pick the whole group up, in Brainstorm and on the
+                                                board. In Brainstorm the group is the only thing that
+                                                moves — its composition is the Group phase's business,
+                                                so no control inside it offers to take a card out. On
+                                                the board its cards are held for grouping too. */}
                                             {isMovableGroup && (!movingItem || isGroupSelected) && (
                                                 <button
                                                     type="button"
@@ -3237,9 +3287,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             {/* After the header in the DOM, so the tab order follows what is
                                 seen (move arrows, title, then this corner button); absolute,
                                 so its place in the DOM does not move it. */}
-                            {isEditingColumns && (
+                            {/* Its cards and groups move to the column beside it
+                                (retroGrouping.ts → removeColumn), so the last
+                                column is not offered while something is in it. */}
+                            {isEditingColumns && (session.columns.length > 1 || tickets.length + groups.length === 0) && (
                                 <button
-                                    onClick={() => updateSession(s => { s.columns = s.columns.filter(c => c.id !== col.id); })}
+                                    onClick={() => updateSession(s => { removeColumn(s, col.id); })}
                                     className="absolute top-2 right-2 z-10 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-sm hover:bg-red-600"
                                     aria-label={columnLabels.remove}
                                 >
@@ -3318,10 +3371,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 )}
                                 
                                 {/* All phases render groups + ungrouped tickets so grouped
-                                    tickets stay visible in Brainstorm too (grouping itself
-                                    is still only possible in the Group phase — the drag
-                                    handlers are gated to mode === 'GROUP', and
-                                    renderGroupContainer is read-only outside GROUP/VOTE). */}
+                                    tickets stay visible in Brainstorm too. Grouping itself is
+                                    only possible in the Group phase and on the open board
+                                    (allowsRegrouping, regroupsCards): the drag handlers and
+                                    renderGroupContainer's title field and delete control
+                                    follow the same two modes. */}
                                 {getColumnEntries(session, col.id).map(entry => {
                                     if (entry.kind === 'group') return renderGroupContainer(entry.group);
                                     const t = entry.ticket;
@@ -3619,7 +3673,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         {focusedTicketId && (() => {
             const focusedTicket = session.tickets.find(t => t.id === focusedTicketId);
             if (!focusedTicket) return null;
-            const colorBy = session.settings.colorBy || 'topic';
+            // As on the card: never the author's colour in an anonymous session.
+            const colorBy = session.settings.isAnonymous ? 'topic' : (session.settings.colorBy || 'topic');
             const focusedAuthor = participants.find(m => m.id === focusedTicket.authorId);
             const focusedCol = getTicketOriginColumn(focusedTicket, session.columns)
                 ?? session.columns.find(c => c.id === focusedTicket.colId);

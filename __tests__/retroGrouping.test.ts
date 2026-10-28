@@ -3,10 +3,12 @@ import type { RetroSession, Ticket, Group } from '../types';
 import {
   addTicketToGroup,
   applySuggestedClusters,
+  deleteGroup,
   deleteTicket,
   dissolveGroupIfTooSmall,
   getTicketOriginColumn,
   groupTicketsTogether,
+  removeColumn,
   removeTicketFromGroup,
 } from '../utils/retroGrouping';
 
@@ -666,5 +668,115 @@ describe('deleteTicket', () => {
     const session = makeSession({ tickets: [makeTicket({ id: 'A' })] });
     expect(deleteTicket(session, 'missing')).toBe(false);
     expect(session.tickets).toHaveLength(1);
+  });
+});
+
+/**
+ * Deleting a group keeps its cards, ungrouped. On an open board its votes go
+ * to the card it was anchored to: two reviews found the board's "Delete group"
+ * running the Group phase's ungroup and dropping every vote the topic held,
+ * while taking either card out of the same pair handed them over.
+ */
+describe('deleteGroup', () => {
+  const pair = (anchorTicketId?: string) => makeSession({
+    tickets: [
+      makeTicket({ id: 'A', groupId: 'g1' }),
+      makeTicket({ id: 'B', groupId: 'g1' }),
+      makeTicket({ id: 'C' }),
+    ],
+    groups: [makeGroup({ id: 'g1', votes: ['u1', 'u2', 'u2'], ...(anchorTicketId ? { anchorTicketId } : {}) })],
+  });
+
+  it('ungroups its cards and gives its votes to the card it was anchored to, on a board', () => {
+    const session = pair('B');
+
+    expect(deleteGroup(session, 'g1', { keepVotes: true })).toBe(true);
+
+    expect(session.groups).toEqual([]);
+    expect(session.tickets.every((t) => t.groupId === null)).toBe(true);
+    expect(session.tickets.find((t) => t.id === 'B')?.votes).toEqual(['u1', 'u2', 'u2']);
+    expect(session.tickets.find((t) => t.id === 'A')?.votes).toEqual([]);
+  });
+
+  it('gives them to its first card when the anchor has left the group', () => {
+    const session = pair('C');
+
+    deleteGroup(session, 'g1', { keepVotes: true });
+
+    expect(session.tickets.find((t) => t.id === 'A')?.votes).toEqual(['u1', 'u2', 'u2']);
+    expect(session.tickets.find((t) => t.id === 'C')?.votes).toEqual([]);
+  });
+
+  it('keeps no votes in the guided Group phase, which runs before the vote', () => {
+    const session = pair('A');
+
+    deleteGroup(session, 'g1');
+
+    expect(session.groups).toEqual([]);
+    expect(session.tickets.flatMap((t) => t.votes)).toEqual([]);
+  });
+
+  it('answers false for a group that is already gone', () => {
+    const session = pair();
+    expect(deleteGroup(session, 'missing', { keepVotes: true })).toBe(false);
+    expect(session.groups).toHaveLength(1);
+  });
+});
+
+/**
+ * Removing a column moves what it holds to the column beside it. Removed with
+ * only the column, its cards stayed in the session out of sight, and on an open
+ * board their votes went on counting against their voters (adversarial review
+ * of PR #540).
+ */
+describe('removeColumn', () => {
+  const column = (id: string) => ({ ...makeSession().columns[0], id, title: id });
+  const threeColumns = () => makeSession({
+    columns: [column('c1'), column('c2'), column('c3')],
+    tickets: [
+      makeTicket({ id: 'A', colId: 'c2', votes: ['u1'] }),
+      makeTicket({ id: 'B', colId: 'c2', groupId: 'g1' }),
+      makeTicket({ id: 'C', colId: 'c2', groupId: 'g1' }),
+      makeTicket({ id: 'D', colId: 'c3', originColId: 'c2' }),
+      makeTicket({ id: 'E', colId: 'c1' }),
+    ],
+    groups: [makeGroup({ id: 'g1', colId: 'c2', votes: ['u2'] })],
+  });
+
+  it('moves its cards and groups, votes and all, to the column before it', () => {
+    const session = threeColumns();
+
+    expect(removeColumn(session, 'c2')).toBe(true);
+
+    expect(session.columns.map((c) => c.id)).toEqual(['c1', 'c3']);
+    expect(session.tickets.filter((t) => t.colId === 'c1').map((t) => t.id).sort()).toEqual(['A', 'B', 'C', 'E']);
+    expect(session.groups[0]).toMatchObject({ colId: 'c1', votes: ['u2'] });
+    expect(session.tickets.find((t) => t.id === 'A')?.votes).toEqual(['u1']);
+    // A "from" chip naming the removed column would name nothing.
+    expect(session.tickets.find((t) => t.id === 'D')).not.toHaveProperty('originColId');
+  });
+
+  it('moves them to the column after it when it was the first', () => {
+    const session = threeColumns();
+
+    removeColumn(session, 'c1');
+
+    expect(session.tickets.find((t) => t.id === 'E')?.colId).toBe('c2');
+  });
+
+  it('removes the last column only when nothing is in it', () => {
+    const holding = makeSession({ columns: [column('only')], tickets: [makeTicket({ id: 'A', colId: 'only' })] });
+    expect(removeColumn(holding, 'only')).toBe(false);
+    expect(holding.columns).toHaveLength(1);
+
+    const empty = makeSession({ columns: [column('only')] });
+    expect(removeColumn(empty, 'only')).toBe(true);
+    expect(empty.columns).toEqual([]);
+  });
+
+  it('answers false for a column that is already gone', () => {
+    const session = threeColumns();
+    expect(removeColumn(session, 'missing')).toBe(false);
+    expect(session.columns).toHaveLength(3);
   });
 });

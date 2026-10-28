@@ -227,6 +227,60 @@ export const deleteTicket = (
   return true;
 };
 
+/**
+ * Deletes a group: its cards stay, ungrouped, where they are. With `keepVotes`
+ * (an open board) the group's votes go to the card it was anchored to (the
+ * card it was made on), or to its first card when that one has left it: a
+ * deletion that only meant to separate the cards never takes the votes the
+ * topic received. The guided Group phase runs before the vote, so it has none
+ * to keep. Answers false when the group is already gone.
+ */
+export const deleteGroup = (
+  session: RetroSession,
+  groupId: string,
+  options: GroupingOptions = {},
+): boolean => {
+  const group = session.groups.find((g) => g.id === groupId);
+  if (!group) return false;
+  const members = session.tickets.filter((t) => t.groupId === groupId);
+  if (options.keepVotes && members.length > 0) {
+    const heir = members.find((t) => t.id === group.anchorTicketId) ?? members[0];
+    heir.votes = combineVotes(session, heir.votes, group.votes);
+  }
+  for (const t of members) t.groupId = null;
+  session.groups = session.groups.filter((g) => g.id !== groupId);
+  return true;
+};
+
+/**
+ * Removes a column. Its cards and groups move to the column before it (after
+ * it, for the first one), so nothing written in it disappears with it: removed
+ * whole, they stayed in the session, out of sight, and on an open board their
+ * votes went on counting against their voters with no control left to take
+ * them back. Answers false, removing nothing, for an unknown column or for the
+ * last one while something is still in it.
+ */
+export const removeColumn = (session: RetroSession, colId: string): boolean => {
+  const index = session.columns.findIndex((c) => c.id === colId);
+  if (index === -1) return false;
+  const heir = session.columns[index - 1] ?? session.columns[index + 1];
+  const holdsSomething =
+    session.tickets.some((t) => t.colId === colId) || session.groups.some((g) => g.colId === colId);
+  if (!heir && holdsSomething) return false;
+  if (heir) {
+    for (const t of session.tickets) {
+      if (t.colId === colId) t.colId = heir.id;
+      // A "from" chip naming a column that is gone would name nothing.
+      if (t.originColId === colId) delete t.originColId;
+    }
+    for (const g of session.groups) {
+      if (g.colId === colId) g.colId = heir.id;
+    }
+  }
+  session.columns = session.columns.filter((c) => c.id !== colId);
+  return true;
+};
+
 export interface SuggestedCluster {
   title: string;
   ticketIds: string[];
