@@ -4,10 +4,11 @@ import { dismissAnnouncementsIfPresent } from './helpers/announcements';
 /**
  * A card's edit, delete and comment controls on a screen with nothing to
  * hover. They wait for the pointer on a computer (`[@media(hover:hover)]:
- * opacity-0`), and a phone has no pointer: there they are always in view, and
- * the edit control, in the card's top-right corner, must not lie over the
- * text (a float under it ends the first line before it — Session.tsx →
- * `ticket-edit-room`).
+ * opacity-0`), and a phone has no pointer: there they are always in view. On
+ * both, the edit control, at the end of the first line, must not lie over the
+ * text (a float under it ends the line before it — Session.tsx →
+ * `ticket-edit-room`): on a computer it used to appear over the last words of
+ * the line as soon as the pointer was on the card.
  *
  * jsdom applies no media query and measures every element at zero, so only a
  * browser can hold this; `sessionOpenBoard.test.tsx` pins the classes.
@@ -45,6 +46,20 @@ const measureCard = async (target: Locator) =>
 
 const opacityOf = (target: Locator) => target.evaluate((el) => getComputedStyle(el).opacity);
 
+/** Sets the board's anonymity from its settings, and closes them. */
+const setAnonymous = async (page: Page, anonymous: boolean) => {
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settings = page.getByRole('dialog', { name: 'Board settings' });
+  const box = settings.getByRole('checkbox', { name: 'Anonymous' });
+  // A click, not `uncheck()`: the box stays checked until the dialog that
+  // asks first is answered.
+  await box.click();
+  if (!anonymous) await page.getByRole('button', { name: 'Show the authors' }).click();
+  await expect(box).toBeChecked({ checked: anonymous });
+  await settings.getByRole('button', { name: 'Close' }).click();
+  await expect(settings).toBeHidden();
+};
+
 test('a card shows its controls on a phone, and its edit control lies over none of its text', async ({ browser }) => {
   const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
   const phoneContext = await browser.newContext({ ...phone, locale: 'en-US' });
@@ -70,11 +85,7 @@ test('a card shows its controls on a phone, and its edit control lies over none 
     await dialog.getByTestId('retro-template-lean_coffee').click();
     await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
     // Named authors, so the avatar takes the corner beside the edit control.
-    // A click, not `uncheck()`: the box stays checked until the dialog that
-    // asks first is answered.
-    await page.getByRole('checkbox', { name: 'Anonymous' }).click();
-    await page.getByRole('button', { name: 'Show the authors' }).click();
-    await expect(page.getByRole('checkbox', { name: 'Anonymous' })).not.toBeChecked();
+    await setAnonymous(page, false);
 
     const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
     await field.fill(LONG_CARD);
@@ -90,9 +101,8 @@ test('a card shows its controls on a phone, and its edit control lies over none 
     expect(await opacityOf(longCard.getByRole('button', { name: 'Delete ticket' }))).toBe('1');
     expect(await opacityOf(longCard.getByTestId('ticket-comment-btn').locator('..'))).toBe('1');
 
-    // Anonymous again: no avatar, the edit control keeps its place.
-    await page.getByRole('checkbox', { name: 'Anonymous' }).check();
-    await expect(page.getByRole('checkbox', { name: 'Anonymous' })).toBeChecked();
+    // Anonymous again: no avatar, the edit control takes the corner.
+    await setAnonymous(page, true);
     const anonymous = await measureCard(longCard);
     expect(anonymous).not.toBeNull();
     expect(anonymous!.lines.filter((line) => rectsOverlap(line, anonymous!.edit))).toEqual([]);
@@ -133,10 +143,25 @@ test('on a computer the same controls wait for the pointer', async ({ page }) =>
   expect(await opacityOf(edit)).toBe('0');
   expect(await opacityOf(remove)).toBe('0');
   expect(await opacityOf(comment)).toBe('0');
-  // The room made for the edit control is a phone's alone.
-  await expect(shortCard.getByTestId('ticket-edit-room')).toBeHidden();
 
   await shortCard.hover();
   await expect.poll(() => opacityOf(edit)).toBe('1');
   await expect.poll(() => opacityOf(remove)).toBe('1');
+
+  // Under the pointer, the edit control covers none of the text: it used to
+  // appear over the last words of the first line. Anonymous (a board's
+  // default), then with the author's avatar beside it.
+  await field.fill(LONG_CARD);
+  await page.keyboard.press('Enter');
+  const longCard = card(page, LONG_CARD);
+  await expect(longCard).toBeVisible();
+  for (const anonymous of [true, false]) {
+    if (!anonymous) await setAnonymous(page, false);
+    await longCard.hover();
+    await expect.poll(() => opacityOf(longCard.getByRole('button', { name: 'Edit ticket' }))).toBe('1');
+    const hovered = await measureCard(longCard);
+    expect(hovered, 'the long card and its edit control').not.toBeNull();
+    expect(hovered!.lines.length).toBeGreaterThan(1);
+    expect(hovered!.lines.filter((line) => rectsOverlap(line, hovered!.edit)), `anonymous: ${anonymous}`).toEqual([]);
+  }
 });

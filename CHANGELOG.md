@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [42.0] - 2026-10-28
 
 ### Added
-- Start an open board, a retrospective with no phases where everyone adds, groups, moves and votes on cards from one screen that stays open, ideal for a Lean Coffee; it can be anonymous or not, its participants panel shows only the people connected right now, and the facilitator can switch a retrospective in progress between guided and open board without losing a card
+- Start an open board, a retrospective with no phases where everyone adds, groups, moves and votes on cards from one screen that stays open, ideal for a Lean Coffee: the newest cards show first and can be searched or sorted by votes, votes can be unlimited (in a guided retrospective too), the facilitator can hide the cards, turn voting off, hide the vote counts and make the board anonymous or not, its participants panel shows only the people connected right now, and a retrospective in progress can switch between guided and open board without losing a card
 
 ## [41.0] - 2026-10-21
 

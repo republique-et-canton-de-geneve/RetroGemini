@@ -58,3 +58,15 @@ export const getTicketCardStyle = ({
         borderWidth: '2px'
       }
     : undefined;
+
+// Letters that blur like words. A hidden card keeps the shape of its text —
+// people see that cards are being written, and how long they are — while none
+// of its words reaches the page: blurred by CSS alone, a screen reader read
+// them out and a find in page matched them.
+const HIDDEN_CARD_FILLER = 'loremipsumdolorsitametconsecteturadipiscingelitseddoeiusmod';
+
+/** What a card its viewer cannot read shows, blurred: its shape, never its words. */
+export const hiddenCardFiller = (text: string): string => {
+  let next = 0;
+  return text.replace(/\S/gu, () => HIDDEN_CARD_FILLER[next++ % HIDDEN_CARD_FILLER.length]);
+};

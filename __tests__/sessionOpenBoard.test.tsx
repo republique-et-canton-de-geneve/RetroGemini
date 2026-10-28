@@ -94,8 +94,8 @@ const createBoard = (overrides: Partial<RetroSession> = {}): RetroSession => ({
     isAnonymous: false,
     maxVotes: 5,
     oneVotePerTicket: false,
-    // Off on purpose: a board shows every card whatever this says.
-    revealBrainstorm: false,
+    // Shown, as a board is created; the "Hide cards" cases turn it off.
+    revealBrainstorm: true,
     revealHappiness: false,
     revealRoti: false,
     timerSeconds: 300,
@@ -159,6 +159,19 @@ const dataTransfer = () => ({
 });
 
 const cardElement = (text: string) => screen.getByText(text).closest('div.group') as HTMLElement;
+// A hidden card shows none of its words, so it is found by its id.
+const cardById = (id: string) => {
+  const el = document.querySelector<HTMLElement>(`[data-ticket-id="${id}"]`);
+  if (!el) throw new Error(`no card ${id}`);
+  return el;
+};
+const touch = (x: number, y: number) => ({ touches: [{ clientX: x, clientY: y }] });
+
+// The facilitator's settings open in a dialog from the board's bar.
+const openSettings = async (user: ReturnType<typeof userEvent.setup>, buttonName = 'Settings', dialogName = 'Board settings') => {
+  await user.click(screen.getByRole('button', { name: buttonName }));
+  return within(await screen.findByRole('dialog', { name: dialogName }));
+};
 const columnElement = (colId: string) => {
   const el = document.querySelector<HTMLElement>(`[data-column-id="${colId}"]`);
   if (!el) throw new Error(`no column ${colId}`);
@@ -182,12 +195,17 @@ describe('Open board — one screen for every card activity', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'Open board' })).toBeTruthy();
     // Writing: one field per column.
     expect(screen.getAllByPlaceholderText('Add an idea...')).toHaveLength(2);
-    // Voting, straight on the cards, with what everyone gave each one.
-    expect(screen.getAllByRole('button', { name: 'Add a vote to this ticket' })).toHaveLength(3);
-    expect(screen.getByText('2 votes in total')).toBeTruthy();
-    // The facilitator already gave one of their five.
+    // Voting, straight on the cards: one button each, which carries what
+    // everyone gave — the name starts with the number it shows (WCAG 2.5.3).
+    expect(screen.getByRole('button', { name: '1 vote, add a vote to this ticket' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '2 votes, add a vote to this ticket' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '0 votes, add a vote to this ticket' })).toBeTruthy();
+    // The facilitator already gave one of their five, shown as their own.
     expect(screen.getByText('4 votes remaining')).toBeTruthy();
-    // Every card readable, although "Reveal cards" is off.
+    expect(within(cardElement('Slow rollbacks')).getByText('You gave it 1 vote')).toBeTruthy();
+    // One number per card, never the total beside a counter of one's own.
+    expect(within(cardElement('Slow rollbacks')).getAllByText('2')).toHaveLength(1);
+    // Every card readable: a board is created with its cards shown.
     expect(screen.getByText('Slow rollbacks').className).not.toContain('ticket-blur');
     // No phase to go through.
     expect(document.querySelectorAll('.phase-nav-btn')).toHaveLength(0);
@@ -213,12 +231,15 @@ describe('Open board — one screen for every card activity', () => {
     renderBoard(createBoard(), alice);
 
     const flaky = within(cardElement('Flaky deploys'));
-    await user.click(flaky.getByRole('button', { name: 'Add a vote to this ticket' }));
+    // Nothing of hers to take back yet.
+    expect(flaky.queryByRole('button', { name: 'Take back one of your votes on this ticket' })).toBeNull();
+    await user.click(flaky.getByRole('button', { name: '1 vote, add a vote to this ticket' }));
     await waitFor(async () => {
       expect((await lastPersisted())?.tickets.find((t) => t.id === 't-a')?.votes).toEqual(['bob', 'alice']);
     });
+    expect(within(cardElement('Flaky deploys')).getByRole('button', { name: '2 votes, add a vote to this ticket' })).toBeTruthy();
 
-    await user.click(within(cardElement('Flaky deploys')).getByRole('button', { name: 'Remove a vote from this ticket' }));
+    await user.click(within(cardElement('Flaky deploys')).getByRole('button', { name: 'Take back one of your votes on this ticket' }));
     await waitFor(async () => {
       expect((await lastPersisted())?.tickets.find((t) => t.id === 't-a')?.votes).toEqual(['bob']);
     });
@@ -230,7 +251,7 @@ describe('Open board — one screen for every card activity', () => {
 
     const transfer = dataTransfer();
     fireEvent.dragStart(cardElement('Flaky deploys'), { dataTransfer: transfer });
-    fireEvent.drop(cardElement('Slow rollbacks'), { dataTransfer: transfer });
+    fireEvent.drop(cardById('t-b'), { dataTransfer: transfer });
 
     await waitFor(async () => {
       const persisted = await lastPersisted();
@@ -385,12 +406,14 @@ describe('Open board — one screen for every card activity', () => {
     await waitFor(async () => expect((await lastPersisted())?.phase).toBe('ICEBREAKER'));
   });
 
-  it('offers the switch to the facilitator only', async () => {
+  it('offers the switch and the settings to the facilitator only', async () => {
     renderBoard(createBoard(), alice);
     await screen.findByText('Flaky deploys');
 
     expect(screen.queryByRole('button', { name: 'Switch to a guided retrospective' })).toBeNull();
-    expect(screen.queryByRole('checkbox', { name: 'Anonymous' })).toBeNull();
+    // Anonymity, the hidden cards and the votes are set in the Settings
+    // dialog, which a participant is not offered.
+    expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
   });
 
   it('turns a guided Brainstorm into an open board, remembering the phase', async () => {
@@ -453,20 +476,22 @@ describe('Open board — one screen for every card activity', () => {
     // No initials on the cards.
     expect(within(cardElement('Flaky deploys')).queryByText('AL')).toBeNull();
 
-    const anonymous = screen.getByRole('checkbox', { name: 'Anonymous' });
+    const settings = await openSettings(user);
+    const anonymous = settings.getByRole('checkbox', { name: 'Anonymous' });
     expect((anonymous as HTMLInputElement).checked).toBe(true);
     const before = await persistedCount();
 
-    // Turning it off shows the authors of every card, the earlier ones too.
+    // Turning it off shows the authors of every card, the earlier ones too:
+    // it asks first, over the settings.
     await user.click(anonymous);
     const dialog = await screen.findByRole('dialog', { name: 'Show who wrote each card?' });
     await user.click(within(dialog).getByRole('button', { name: 'Keep it anonymous' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Show who wrote each card?' })).toBeNull();
     expect(await persistedCount()).toBe(before);
-    expect((screen.getByRole('checkbox', { name: 'Anonymous' }) as HTMLInputElement).checked).toBe(true);
+    expect((settings.getByRole('checkbox', { name: 'Anonymous' }) as HTMLInputElement).checked).toBe(true);
 
-    await user.click(screen.getByRole('checkbox', { name: 'Anonymous' }));
-    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Show the authors' }));
+    await user.click(settings.getByRole('checkbox', { name: 'Anonymous' }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Show who wrote each card?' })).getByRole('button', { name: 'Show the authors' }));
     await waitFor(async () => expect((await lastPersisted())?.settings.isAnonymous).toBe(false));
   });
 
@@ -475,17 +500,21 @@ describe('Open board — one screen for every card activity', () => {
     renderBoard();
     await screen.findByText('Flaky deploys');
 
-    await user.click(screen.getByRole('checkbox', { name: 'Anonymous' }));
+    const settings = await openSettings(user);
+    await user.click(settings.getByRole('checkbox', { name: 'Anonymous' }));
 
     await waitFor(async () => expect((await lastPersisted())?.settings.isAnonymous).toBe(true));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Show who wrote each card?' })).toBeNull();
   });
 
   it('names the max votes field, on the board and in the Vote phase', async () => {
     // It had no name at all: the visible "Max:" beside it is a plain span, and
     // axe reported it (critical) on the first audit of the board.
+    const user = userEvent.setup();
     const { unmount } = renderBoard();
-    expect(await screen.findByRole('textbox', { name: 'Max votes per person' })).toHaveProperty('value', '5');
+    await screen.findByText('Flaky deploys');
+    const settings = await openSettings(user);
+    expect(settings.getByRole('textbox', { name: 'Votes per person' })).toHaveProperty('value', '5');
     unmount();
 
     renderBoard(createBoard({ phase: 'VOTE' }));
@@ -501,8 +530,9 @@ describe('Open board — one screen for every card activity', () => {
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Tableau ouvert' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Passer en rétrospective guidée' })).toBeTruthy();
-    expect(screen.getByText('2 votes au total')).toBeTruthy();
-    expect(screen.getByRole('checkbox', { name: 'Anonyme' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '2 votes, ajouter un vote à cette carte' })).toBeTruthy();
+    const settings = await openSettings(userEvent.setup(), 'Paramètres', 'Paramètres du tableau');
+    expect(settings.getByRole('checkbox', { name: 'Anonyme' })).toBeTruthy();
   });
 });
 
@@ -555,6 +585,196 @@ describe('Open board — every hold and every drop', () => {
     name: /Group here: group the selected ticket|Add selected card to this group|Move selected card here/,
   });
   const groupTargets = () => screen.queryAllByRole('button', { name: /move the selected group to/ });
+
+  describe('with the cards hidden', () => {
+    // Alice reads her own cards only, and Delivery holds hers and Bob's.
+    const hiddenGroupedBoard = () => groupedBoard({ settings: { ...createBoard().settings, revealBrainstorm: false } });
+    const containerOf = (text: string) => cardElement(text).closest('.group-container') as HTMLElement;
+
+    it('puts a card released over itself, or anywhere in its own group, back where it was', async () => {
+      renderBoard(hiddenGroupedBoard(), alice);
+      await screen.findByText('Flaky deploys');
+      const before = await persistedCount();
+
+      // The group takes no card (Bob's is hidden from her), so these drops
+      // used to go on to the column, which took her card out of the group.
+      // Each drag start puts a copy of the card on the page for its image,
+      // gone a frame later.
+      const nextFrame = () => act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+      drag(cardElement('Flaky deploys'), cardElement('Flaky deploys'));
+      await nextFrame();
+      drag(cardElement('Flaky deploys'), containerOf('Flaky deploys'));
+      await nextFrame();
+      drag(cardElement('Flaky deploys'), cardById('t-b'));
+
+      expect(await persistedCount()).toBe(before);
+    });
+
+    it('keeps her card out of a group it cannot be read with, and takes it to that column', async () => {
+      const board = hiddenGroupedBoard();
+      board.tickets = board.tickets.map((t) => (t.id === 't-c' ? { ...t, colId: 'doing' } : t));
+      renderBoard(board, alice);
+      await screen.findByText('Too many meetings');
+
+      drag(cardElement('Too many meetings'), containerOf('Flaky deploys'));
+
+      await waitFor(async () => {
+        expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')).toMatchObject({ colId: 'todo', groupId: null });
+      });
+    });
+
+    it('offers no Delete group and no title field on a group holding a card the facilitator cannot read', async () => {
+      renderBoard(hiddenGroupedBoard());
+      await screen.findByText('Delivery');
+
+      expect(screen.queryByRole('button', { name: 'Delete group' })).toBeNull();
+      expect(screen.queryByDisplayValue('Delivery')).toBeNull();
+      // Its title is still shown, as its cards are.
+      expect(screen.getByText('Delivery')).toBeTruthy();
+    });
+
+    it('offers no keyboard target on a card grouped with one its holder cannot read', async () => {
+      const user = userEvent.setup();
+      renderBoard(hiddenGroupedBoard(), alice);
+      await user.click(await screen.findByRole('button', { name: /Pick up the ticket Too many meetings/ }));
+      await screen.findByRole('button', { name: /Selected for grouping/ });
+
+      // Flaky deploys is hers, but its group holds Bob's hidden card: offered,
+      // the drop was refused there and the hold put down with nothing said.
+      expect(screen.queryByRole('button', { name: /group the selected ticket with Flaky deploys/ })).toBeNull();
+      expect(screen.getByRole('button', { name: /Selected for grouping/ })).toBeTruthy();
+    });
+
+    it('keeps the hold through a tap on a card it cannot be grouped with', async () => {
+      const user = userEvent.setup();
+      renderBoard(hiddenGroupedBoard(), alice);
+      await user.click(await screen.findByRole('button', { name: /Pick up the ticket Too many meetings/ }));
+      await screen.findByRole('button', { name: /Selected for grouping/ });
+      const before = await persistedCount();
+
+      // Taken by the card, the tap was refused there and put the hold down.
+      fireEvent.touchStart(cardById('t-a'), touch(40, 40));
+      fireEvent.touchEnd(cardById('t-a'), touch(40, 40));
+
+      expect(screen.getByRole('button', { name: /Selected for grouping/ })).toBeTruthy();
+      expect(await persistedCount()).toBe(before);
+    });
+
+    it('tells a phone user which cards they can move', async () => {
+      renderBoard(hiddenGroupedBoard(), alice);
+      await screen.findByText('Flaky deploys');
+
+      expect(screen.getByText(/tap one of your own cards/)).toBeTruthy();
+    });
+
+    // Alice's own group, Planning: two cards of hers, readable whatever the
+    // facilitator hides.
+    const withOwnGroup = (settings: Partial<RetroSession['settings']> = {}) => groupedBoard({
+      settings: { ...createBoard().settings, ...settings },
+      tickets: [
+        ticket('t-a', 'Flaky deploys', { groupId: 'g1' }),
+        ticket('t-b', 'Slow rollbacks', { authorId: 'bob', groupId: 'g1' }),
+        ticket('t-c', 'Too many meetings'),
+        ticket('t-d', 'Sprint goals', { colId: 'doing', groupId: 'g2' }),
+        ticket('t-e', 'Backlog grooming', { colId: 'doing', groupId: 'g2' }),
+        ticket('t-f', 'Late reviews', { authorId: 'bob', colId: 'doing' }),
+      ],
+      groups: [
+        { id: 'g1', title: 'Delivery', colId: 'todo', votes: [] },
+        { id: 'g2', title: 'Planning', colId: 'doing', votes: [] },
+      ],
+    });
+    const hide = () => act(() => sessionUpdateListener?.({ ...withOwnGroup({ revealBrainstorm: false }), _rev: 9 } as RetroSession));
+
+    // Every hold, as the facilitator hides the cards: kept while its holder
+    // can still read what is held, put down otherwise.
+    it.each([
+      { held: 'an own card', pickUp: /Pick up the ticket Too many meetings/, targets: cardTargets, kept: true },
+      { held: 'an own card in a group holding another author’s', pickUp: /Pick up the ticket Flaky deploys/, targets: cardTargets, kept: true },
+      { held: 'another author’s card in a group', pickUp: /Pick up the ticket Slow rollbacks/, targets: cardTargets, kept: false },
+      { held: 'a group of own cards', pickUp: /Move the group Planning to another column/, targets: groupTargets, kept: true },
+      { held: 'a group holding another author’s card', pickUp: /Move the group Delivery to another column/, targets: groupTargets, kept: false },
+    ])('hides the cards while $held is held: kept $kept', async ({ pickUp, targets, kept }) => {
+      const user = userEvent.setup();
+      renderBoard(withOwnGroup(), alice);
+      await screen.findByText('Too many meetings');
+      await user.click(button(pickUp));
+      expect(targets().length).toBeGreaterThan(0);
+      const before = await persistedCount();
+
+      hide();
+
+      if (kept) {
+        await screen.findAllByText('Hidden card');
+        expect(targets().length).toBeGreaterThan(0);
+      } else {
+        await waitFor(() => expect(targets()).toHaveLength(0));
+      }
+      expect(await persistedCount()).toBe(before);
+      // A group holding a hidden card is left as it was.
+      expect(cardById('t-a').closest('.group-container')).toBeTruthy();
+    });
+
+    it('moves a group of own cards whole to the column of a hidden card it is dropped on, never into it', async () => {
+      renderBoard(withOwnGroup({ revealBrainstorm: false }), alice);
+      await screen.findByDisplayValue('Planning');
+      const transfer = dataTransfer();
+      fireEvent.dragStart(groupElement('Planning'), { dataTransfer: transfer });
+      // Bob's Slow rollbacks, hidden from her, in To Discuss.
+      fireEvent.drop(cardById('t-b'), { dataTransfer: transfer });
+
+      await waitFor(async () => {
+        const persisted = await lastPersisted();
+        expect(persisted?.groups.find((g) => g.id === 'g2')?.colId).toBe('todo');
+        expect(persisted?.tickets.filter((t) => t.groupId === 'g2').map((t) => t.id).sort()).toEqual(['t-d', 't-e']);
+        expect(persisted?.tickets.find((t) => t.id === 't-b')?.groupId).toBe('g1');
+      });
+    });
+
+    it('writes nothing for a group of own cards released over itself', async () => {
+      renderBoard(withOwnGroup({ revealBrainstorm: false }), alice);
+      await screen.findByDisplayValue('Planning');
+      const before = await persistedCount();
+      const planning = groupElement('Planning');
+      const transfer = dataTransfer();
+      fireEvent.dragStart(planning, { dataTransfer: transfer });
+      fireEvent.drop(cardById('t-d'), { dataTransfer: transfer });
+
+      expect(await persistedCount()).toBe(before);
+    });
+
+    it('takes her own grouped card out of its group to the column of another author’s hidden card', async () => {
+      // Released over a hidden card outside its own group: the column takes
+      // it, as for any card that cannot be read with its target.
+      renderBoard(withOwnGroup({ revealBrainstorm: false }), alice);
+      await screen.findByDisplayValue('Planning');
+
+      drag(cardById('t-d'), cardById('t-b'));
+
+      await waitFor(async () => {
+        const persisted = await lastPersisted();
+        expect(persisted?.tickets.find((t) => t.id === 't-d')).toMatchObject({ colId: 'todo', groupId: null });
+        // A pair left with one card hands it its votes, and is gone.
+        expect(persisted?.groups.find((g) => g.id === 'g2')).toBeUndefined();
+      });
+    });
+  });
+
+  it('keeps the held card on screen while a search would hide it', async () => {
+    const user = userEvent.setup();
+    renderBoard(groupedBoard(), alice);
+    await screen.findByText('Too many meetings');
+
+    await tabTo(user, /Pick up the ticket Too many meetings/);
+    await user.keyboard('{Enter}');
+    await user.type(screen.getByRole('searchbox', { name: 'Search the cards' }), 'deploys');
+
+    // Found: Delivery, which holds Flaky deploys. Held: Too many meetings,
+    // still there with the control that puts it down, and not counted.
+    expect(screen.getByText('1 result')).toBeTruthy();
+    expect(screen.getByText('Too many meetings')).toBeTruthy();
+    expect(button(/Selected for grouping: Too many meetings/)).toBeTruthy();
+  });
 
   it('a card dropped on a group joins it, and the group gains the card’s votes', async () => {
     renderBoard(groupedBoard());
@@ -819,14 +1039,16 @@ describe('Open board — every hold and every drop', () => {
     expect(commentControl.className).toContain('focus-within:opacity-100');
   });
 
-  it('keeps the first line clear of the edit control, where nothing hovers', async () => {
+  it('keeps the first line clear of the edit control, on every screen', async () => {
     renderBoard(groupedBoard(), alice);
     await screen.findByText('Too many meetings');
 
     // Alice edits her own cards only, so only they make room for the control.
+    // On a computer too: there the control appeared over the end of the first
+    // line under the pointer, hiding the words it covered.
     const room = within(cardElement('Too many meetings')).getByTestId('ticket-edit-room');
-    expect(room.className).toContain('hidden');
-    expect(room.className).toContain('[@media(hover:none)]:block');
+    expect(room.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+    expect(room.className).not.toContain('hover:none');
     expect(room.className).toContain('float-right');
     expect(room).toHaveAttribute('aria-hidden', 'true');
     expect(within(cardElement('Slow rollbacks')).queryByTestId('ticket-edit-room')).toBeNull();
@@ -868,7 +1090,8 @@ describe('Open board — every hold and every drop', () => {
     renderBoard(colourful(true));
     await screen.findByText('Flaky deploys');
     expect(cardElement('Flaky deploys').style.backgroundColor).toBe('');
-    const select = screen.getByRole('combobox', { name: /colou?r/i }) as HTMLSelectElement;
+    const settings = await openSettings(userEvent.setup());
+    const select = settings.getByRole('combobox', { name: /colou?r/i }) as HTMLSelectElement;
     expect(select.value).toBe('topic');
     expect((within(select).getByRole('option', { name: 'Author' }) as HTMLOptionElement).disabled).toBe(true);
   });
@@ -954,5 +1177,535 @@ describe('Open board — every hold and every drop', () => {
       expect(persisted?.columns.map((c) => c.id)).toEqual(['todo']);
       expect(persisted?.tickets.find((t) => t.id === 't-x')).toMatchObject({ colId: 'todo', votes: ['bob', 'alice'] });
     });
+  });
+});
+
+/**
+ * How a board kept for weeks is read and voted on, as EasyRetro does it: each
+ * person's own sort (newest first by default) and search, one vote button per
+ * card that carries the total, and the facilitator's settings — hide the
+ * cards, turn voting off, hide the totals, lift the limit on votes.
+ */
+describe('Open board — sort, search, votes and the facilitator’s settings', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    rosterListener = null;
+    connectionListener = null;
+    sessionUpdateListener = null;
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ json: () => Promise.resolve({ enabled: false }) }),
+    ) as unknown as typeof fetch;
+  });
+
+  // The cards of a column as they are read, top to bottom.
+  const columnTexts = (colId: string) =>
+    Array.from(columnElement(colId).querySelectorAll<HTMLElement>('div.group .whitespace-pre-wrap'))
+      .map((el) => el.textContent);
+  const settingsOf = (overrides: Partial<RetroSession['settings']>) =>
+    ({ ...createBoard().settings, ...overrides });
+
+  it('shows the newest cards first, and sorts as each person asks', async () => {
+    const user = userEvent.setup();
+    renderBoard();
+    await screen.findByText('Flaky deploys');
+
+    // The written order is Flaky deploys, Slow rollbacks, Too many meetings.
+    expect(columnTexts('todo')).toEqual(['Too many meetings', 'Slow rollbacks', 'Flaky deploys']);
+    const before = await persistedCount();
+
+    const sort = screen.getByRole('combobox', { name: 'Sort the cards' });
+    await user.selectOptions(sort, 'Oldest first');
+    expect(columnTexts('todo')).toEqual(['Flaky deploys', 'Slow rollbacks', 'Too many meetings']);
+    await user.selectOptions(sort, 'Most voted first');
+    expect(columnTexts('todo')).toEqual(['Slow rollbacks', 'Flaky deploys', 'Too many meetings']);
+    // A view, never a write: nobody else's board moves.
+    expect(await persistedCount()).toBe(before);
+  });
+
+  it('finds cards whatever their accents or case, and says how many', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({
+      tickets: [
+        { id: 't-a', colId: 'todo', text: 'Équipe pérenne', authorId: 'alice', groupId: null, votes: [] },
+        { id: 't-b', colId: 'doing', text: 'Too many meetings', authorId: 'bob', groupId: null, votes: [] },
+      ],
+    }));
+    await screen.findByText('Équipe pérenne');
+
+    const search = screen.getByRole('searchbox', { name: 'Search the cards' });
+    await user.type(search, 'EQUIPE');
+    expect(screen.queryByText('Too many meetings')).toBeNull();
+    expect(screen.getByText('Équipe pérenne')).toBeTruthy();
+    // Said by a status region, so a screen reader hears it too.
+    expect(screen.getByText('1 result').getAttribute('role')).toBe('status');
+
+    // Escape empties it, as a browser's own field does.
+    await user.keyboard('{Escape}');
+    expect((search as HTMLInputElement).value).toBe('');
+    expect(screen.getByText('Too many meetings')).toBeTruthy();
+  });
+
+  it('hides the other authors’ cards when the facilitator hides them, and nothing acts on them', async () => {
+    renderBoard(createBoard({ settings: settingsOf({ revealBrainstorm: false }) }), alice);
+    await screen.findByText('Flaky deploys');
+
+    // Bob's card is blurred; Alice's own stay readable.
+    expect(cardById('t-b').querySelector('.ticket-blur')).toBeTruthy();
+    expect(screen.getByText('Flaky deploys').className).not.toContain('ticket-blur');
+    // No vote on it, its total only, and no way to pick it up.
+    const hidden = within(cardById('t-b'));
+    expect(hidden.queryByRole('button', { name: /add a vote/ })).toBeNull();
+    expect(hidden.getAllByTestId('vote-total')[0].textContent).toContain('2');
+    expect(hidden.queryByRole('button', { name: /Pick up/ })).toBeNull();
+    // Her own card is voted on as usual.
+    expect(within(cardElement('Flaky deploys')).getByRole('button', { name: '1 vote, add a vote to this ticket' })).toBeTruthy();
+  });
+
+  it('never finds a card its reader cannot read', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({ settings: settingsOf({ revealBrainstorm: false }) }), alice);
+    await screen.findByText('Flaky deploys');
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search the cards' }), 'rollbacks');
+    expect(screen.queryByText('Slow rollbacks')).toBeNull();
+    expect(screen.getByText('0 results')).toBeTruthy();
+  });
+
+  it('never groups a card with one its holder cannot read', async () => {
+    renderBoard(createBoard({ settings: settingsOf({ revealBrainstorm: false }) }), alice);
+    await screen.findByText('Flaky deploys');
+    const before = await persistedCount();
+
+    const transfer = dataTransfer();
+    fireEvent.dragStart(cardElement('Flaky deploys'), { dataTransfer: transfer });
+    fireEvent.drop(cardById('t-b'), { dataTransfer: transfer });
+
+    // Dropped on its own column instead: nothing to write.
+    expect(await persistedCount()).toBe(before);
+  });
+
+  it('keeps the words of a hidden card out of the page, and says it is hidden', async () => {
+    renderBoard(createBoard({ settings: settingsOf({ revealBrainstorm: false }) }), alice);
+    await screen.findByText('Flaky deploys');
+
+    // Not in the page at all: a screen reader read it, and a find in page
+    // matched it, while the board's own search refused to.
+    expect(document.body.innerHTML).not.toContain('Slow rollbacks');
+    expect(within(cardById('t-b')).getByText('Hidden card')).toBeTruthy();
+    // Still the blurred shape of a card's text, kept from assistive tech.
+    expect(cardById('t-b').querySelector('.ticket-blur')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('keeps the words of a hidden card out of the page in a guided Brainstorm too', async () => {
+    renderBoard(createBoard({ phase: 'BRAINSTORM', settings: settingsOf({ revealBrainstorm: false }) }), alice);
+    await screen.findByText('Flaky deploys');
+
+    expect(document.body.innerHTML).not.toContain('Slow rollbacks');
+    expect(within(cardById('t-b')).getByText('Hidden card')).toBeTruthy();
+  });
+
+  it('lets a voter take back a vote on a card that became hidden, which still counts', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({ settings: settingsOf({ revealBrainstorm: false }) }), alice);
+    await screen.findByText('Flaky deploys');
+
+    // Alice gave Bob's card a vote while it was shown.
+    const hidden = within(cardById('t-b'));
+    expect(hidden.getByText('You gave it 1 vote')).toBeTruthy();
+    expect(hidden.queryByRole('button', { name: /add a vote/ })).toBeNull();
+    await user.click(hidden.getByRole('button', { name: 'Take back one of your votes on this ticket' }));
+
+    await waitFor(async () => {
+      expect((await lastPersisted())?.tickets.find((t) => t.id === 't-b')?.votes).toEqual(['fac']);
+    });
+  });
+
+  it('closes a card’s comments, and its editor, once the card is hidden from its reader', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard(), alice);
+    await screen.findByText('Slow rollbacks');
+
+    await user.click(within(cardElement('Slow rollbacks')).getByTestId('ticket-comment-btn'));
+    expect(await screen.findByRole('dialog', { name: /Comments on the ticket/ })).toBeTruthy();
+
+    act(() => sessionUpdateListener?.(createBoard({ settings: settingsOf({ revealBrainstorm: false }), _rev: 9 } as Partial<RetroSession>)));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Comments on the ticket/ })).toBeNull());
+  });
+
+  it('closes the facilitator’s editor on a card hidden from them', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard());
+    await screen.findByText('Slow rollbacks');
+
+    await user.click(within(cardElement('Slow rollbacks')).getByRole('button', { name: 'Edit ticket' }));
+    expect(cardById('t-b').querySelector('textarea')).toBeTruthy();
+
+    act(() => sessionUpdateListener?.(createBoard({ settings: settingsOf({ revealBrainstorm: false }), _rev: 9 } as Partial<RetroSession>)));
+
+    await waitFor(() => expect(cardById('t-b').querySelector('textarea')).toBeNull());
+    expect(document.body.innerHTML).not.toContain('Slow rollbacks');
+  });
+
+  it('never asks the assistant for a title from hidden cards', async () => {
+    const user = userEvent.setup();
+    const calls: string[] = [];
+    global.fetch = vi.fn((url: string) => {
+      calls.push(String(url));
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(String(url).includes('suggest-group-title') ? { title: 'Leak' } : { enabled: String(url).includes('/api/ai-status') }),
+      });
+    }) as unknown as typeof fetch;
+    renderBoard(createBoard({ settings: settingsOf({ revealBrainstorm: false }) }), alice);
+    await screen.findByText('Flaky deploys');
+    await waitFor(() => expect(calls.some((u) => u.includes('/api/ai-status'))).toBe(true));
+
+    // Two of her own cards: hers to read, but the title would be everyone's.
+    await tabTo(user, /Pick up the ticket Flaky deploys/);
+    await user.keyboard('{Enter}');
+    await user.click(await waitFor(() => button(/group the selected ticket with Too many meetings/)));
+    await waitFor(async () => expect((await lastPersisted())?.groups).toHaveLength(1));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 250)));
+
+    expect(calls.some((u) => u.includes('suggest-group-title'))).toBe(false);
+  });
+
+  it('closes the assistant’s suggestions when the cards are hidden', async () => {
+    const user = userEvent.setup();
+    global.fetch = vi.fn((url: string) => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(
+        String(url).includes('/api/ai/suggest-groups')
+          ? { groups: [{ title: 'Delivery', ticketIds: ['t-a', 't-b'] }] }
+          : { enabled: String(url).includes('/api/ai-status') },
+      ),
+    })) as unknown as typeof fetch;
+    renderBoard();
+    await user.click(await screen.findByRole('button', { name: /Suggest groups with AI/ }));
+    expect(await screen.findByRole('button', { name: 'Accept' })).toBeTruthy();
+
+    act(() => sessionUpdateListener?.(createBoard({ settings: settingsOf({ revealBrainstorm: false }), _rev: 9 } as Partial<RetroSession>)));
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull());
+  });
+
+  it('puts a held card down when the facilitator hides it', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard(), alice);
+    await screen.findByText('Slow rollbacks');
+
+    await tabTo(user, /Pick up the ticket Slow rollbacks/);
+    await user.keyboard('{Enter}');
+    await waitFor(() => button(/group the selected ticket with Flaky deploys/));
+
+    act(() => sessionUpdateListener?.(createBoard({ settings: settingsOf({ revealBrainstorm: false }) })));
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /group the selected ticket/ })).toBeNull());
+  });
+
+  it('does not offer the assistant’s groups while the cards are hidden', async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ json: () => Promise.resolve({ enabled: true }) }),
+    ) as unknown as typeof fetch;
+    const { unmount } = renderBoard();
+    expect(await screen.findByRole('button', { name: /Suggest groups with AI/ })).toBeTruthy();
+    unmount();
+
+    renderBoard(createBoard({ settings: settingsOf({ revealBrainstorm: false }) }));
+    // The facilitator reads none of these cards: each says it is hidden.
+    expect(await screen.findAllByText('Hidden card')).toHaveLength(3);
+    // Once the assistant's status has answered (it said enabled above).
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(screen.queryByRole('button', { name: /Suggest groups with AI/ })).toBeNull();
+  });
+
+  it('writes each setting of the dialog', async () => {
+    const user = userEvent.setup();
+    renderBoard();
+    await screen.findByText('Flaky deploys');
+    const settings = await openSettings(user);
+
+    await user.click(settings.getByRole('checkbox', { name: 'Hide cards' }));
+    await waitFor(async () => expect((await lastPersisted())?.settings.revealBrainstorm).toBe(false));
+    await user.click(settings.getByRole('checkbox', { name: 'Disable voting' }));
+    await waitFor(async () => expect((await lastPersisted())?.settings.votingDisabled).toBe(true));
+    await user.click(settings.getByRole('checkbox', { name: 'Hide vote count' }));
+    await waitFor(async () => expect((await lastPersisted())?.settings.voteCountHidden).toBe(true));
+    await user.click(settings.getByRole('checkbox', { name: 'One vote per card or group' }));
+    await waitFor(async () => expect((await lastPersisted())?.settings.oneVotePerTicket).toBe(true));
+    // Each setting explains itself.
+    expect(settings.getByRole('checkbox', { name: 'Hide cards' }).getAttribute('aria-describedby')).toBeTruthy();
+
+    await user.click(settings.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog', { name: 'Board settings' })).toBeNull();
+  });
+
+  it('labels the dialog’s number and colour like its other settings, and shows the keyboard on the number', async () => {
+    const user = userEvent.setup();
+    renderBoard();
+    await screen.findByText('Flaky deploys');
+    const settings = await openSettings(user);
+
+    const votesLabel = settings.getByText('Votes per person', { selector: 'label' });
+    const colourLabel = settings.getByText('Color by:', { selector: 'label' });
+    for (const label of [votesLabel, colourLabel]) {
+      expect(label.className).toContain('text-sm font-medium text-slate-800');
+    }
+    // A label like the toggles', which a click reaches the field through.
+    await user.click(votesLabel);
+    const field = settings.getByRole('textbox', { name: 'Votes per person' });
+    expect(document.activeElement).toBe(field);
+    // The field draws no outline of its own: its stepper does (2.4.7).
+    expect(field.parentElement!.className).toContain('focus-within:ring-2');
+  });
+
+  it('closes the settings on Escape, writing nothing', async () => {
+    const user = userEvent.setup();
+    renderBoard();
+    await screen.findByText('Flaky deploys');
+    await openSettings(user);
+    const before = await persistedCount();
+
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog', { name: 'Board settings' })).toBeNull();
+    expect(await persistedCount()).toBe(before);
+  });
+
+  it('closes the settings when the board turns guided, here or in another tab', async () => {
+    const user = userEvent.setup();
+    renderBoard();
+    await screen.findByText('Flaky deploys');
+    await openSettings(user);
+
+    act(() => sessionUpdateListener?.(createBoard({ phase: 'BRAINSTORM', _rev: 9 } as Partial<RetroSession>)));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Board settings' })).toBeNull());
+  });
+
+  it('closes only the show-authors question on Escape, leaving the settings open and nothing written', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({ settings: settingsOf({ isAnonymous: true }) }));
+    await screen.findByText('Flaky deploys');
+    const settings = await openSettings(user);
+    await user.click(settings.getByRole('checkbox', { name: 'Anonymous' }));
+    await screen.findByRole('dialog', { name: 'Show who wrote each card?' });
+    const before = await persistedCount();
+
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog', { name: 'Show who wrote each card?' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Board settings' })).toBeTruthy();
+    expect(await persistedCount()).toBe(before);
+  });
+
+  it('closes the show-authors confirmation with the board, and offers no confirm while reconnecting', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({ settings: settingsOf({ isAnonymous: true }) }));
+    await screen.findByText('Flaky deploys');
+    const settings = await openSettings(user);
+    await user.click(settings.getByRole('checkbox', { name: 'Anonymous' }));
+    const confirm = within(await screen.findByRole('dialog', { name: 'Show who wrote each card?' }));
+
+    // Reconnecting: a click would close it as if done while the write is dropped.
+    act(() => connectionListener?.(false));
+    expect((confirm.getByRole('button', { name: 'Show the authors' }) as HTMLButtonElement).disabled).toBe(true);
+    act(() => connectionListener?.(true));
+    expect((confirm.getByRole('button', { name: 'Show the authors' }) as HTMLButtonElement).disabled).toBe(false);
+
+    // Another facilitator tab turns the board into a guided retro: confirmed
+    // there, it would name the authors of the guided retro.
+    act(() => sessionUpdateListener?.(createBoard({ phase: 'VOTE', settings: settingsOf({ isAnonymous: true }), _rev: 9 } as Partial<RetroSession>)));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Show who wrote each card?' })).toBeNull());
+  });
+
+  it('shows only the totals while voting is off, and says why', async () => {
+    renderBoard(createBoard({ settings: settingsOf({ votingDisabled: true }) }), alice);
+    await screen.findByText('Flaky deploys');
+
+    expect(screen.queryByRole('button', { name: /add a vote/ })).toBeNull();
+    expect(screen.queryByText(/votes remaining/)).toBeNull();
+    expect(screen.getByText('Voting is off')).toBeTruthy();
+    expect(within(cardElement('Slow rollbacks')).getByTestId('vote-total').textContent).toContain('2');
+  });
+
+  it('hides the totals and their ranking while the vote count is hidden', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({ settings: settingsOf({ voteCountHidden: true }) }), alice);
+    await screen.findByText('Flaky deploys');
+
+    // Each card is still voted on, with nothing that counts what it has.
+    expect(screen.getAllByRole('button', { name: 'Add a vote to this ticket' })).toHaveLength(3);
+    expect(within(cardElement('Slow rollbacks')).queryByText('2')).toBeNull();
+    // Her own vote is still hers to see.
+    expect(within(cardElement('Slow rollbacks')).getByText('You gave it 1 vote')).toBeTruthy();
+    // "Most voted first" would rank them anyway.
+    const sort = screen.getByRole('combobox', { name: 'Sort the cards' }) as HTMLSelectElement;
+    expect((within(sort).getByRole('option', { name: 'Most voted first' }) as HTMLOptionElement).disabled).toBe(true);
+    await user.selectOptions(sort, 'Oldest first');
+    expect(columnTexts('todo')).toEqual(['Flaky deploys', 'Slow rollbacks', 'Too many meetings']);
+  });
+
+  it('lets one vote per card be taken back, and no second one be added', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({ settings: settingsOf({ oneVotePerTicket: true }) }), alice);
+    await screen.findByText('Flaky deploys');
+
+    const add = within(cardElement('Slow rollbacks')).getByRole('button', { name: '2 votes, add a vote to this ticket' });
+    expect(add.getAttribute('aria-disabled')).toBe('true');
+    const before = await persistedCount();
+    await user.click(add);
+    expect(await persistedCount()).toBe(before);
+    await user.click(within(cardElement('Slow rollbacks')).getByRole('button', { name: 'Take back one of your votes on this ticket' }));
+    await waitFor(async () => {
+      expect((await lastPersisted())?.tickets.find((t) => t.id === 't-b')?.votes).toEqual(['fac']);
+    });
+  });
+
+  it('keeps the keyboard on the vote button as votes are given and taken back', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({ settings: settingsOf({ oneVotePerTicket: true }) }), alice);
+    await screen.findByText('Flaky deploys');
+
+    // The vote that uses up one vote per card leaves its button focusable,
+    // never disabled under the focus, which would send it to the page.
+    const add = within(cardElement('Too many meetings')).getByRole('button', { name: '0 votes, add a vote to this ticket' });
+    add.focus();
+    await user.keyboard('{Enter}');
+    const voted = await within(cardElement('Too many meetings')).findByRole('button', { name: '1 vote, add a vote to this ticket' });
+    expect(document.activeElement).toBe(voted);
+    expect((voted as HTMLButtonElement).disabled).toBe(false);
+    expect(voted.getAttribute('aria-disabled')).toBe('true');
+
+    // Taking back the last vote removes the cross: the focus goes to the vote
+    // button first.
+    within(cardElement('Too many meetings')).getByRole('button', { name: 'Take back one of your votes on this ticket' }).focus();
+    await user.keyboard('{Enter}');
+    const again = await within(cardElement('Too many meetings')).findByRole('button', { name: '0 votes, add a vote to this ticket' });
+    expect(document.activeElement).toBe(again);
+  });
+
+  it('never runs out of votes while they are unlimited, and caps them once they are not', async () => {
+    const user = userEvent.setup();
+    const busy = createBoard({
+      settings: settingsOf({ maxVotes: 1, unlimitedVotes: true }),
+      tickets: [
+        { id: 't-a', colId: 'todo', text: 'Flaky deploys', authorId: 'alice', groupId: null, votes: ['fac', 'bob'] },
+        { id: 't-b', colId: 'todo', text: 'Slow rollbacks', authorId: 'bob', groupId: null, votes: ['fac', 'fac'] },
+      ],
+    });
+    renderBoard(busy);
+    await screen.findByText('Flaky deploys');
+
+    // Three votes cast with a maximum of one, and still one more to give.
+    expect(screen.queryByText(/votes remaining/)).toBeNull();
+    expect(within(cardElement('Flaky deploys')).getByRole('button', { name: /add a vote/ }).getAttribute('aria-disabled')).toBe('false');
+
+    const settings = await openSettings(user);
+    // The number can be set first: it caps nothing until unlimited is off.
+    expect((settings.getByRole('textbox', { name: 'Votes per person' }) as HTMLInputElement).disabled).toBe(false);
+    await user.click(settings.getByRole('checkbox', { name: 'Unlimited votes' }));
+
+    await waitFor(async () => {
+      const persisted = await lastPersisted();
+      expect(persisted?.settings.unlimitedVotes).toBe(false);
+      // The facilitator keeps one vote, the first card's taken back first.
+      expect(persisted?.tickets.find((t) => t.id === 't-a')?.votes).toEqual(['bob']);
+      expect(persisted?.tickets.find((t) => t.id === 't-b')?.votes).toEqual(['fac']);
+    });
+  });
+
+  it('offers unlimited votes in the guided Vote phase too', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({ phase: 'VOTE', settings: settingsOf({ unlimitedVotes: true }) }));
+    await screen.findByText('Flaky deploys');
+
+    expect(screen.queryByText(/votes remaining/)).toBeNull();
+    expect((screen.getByRole('textbox', { name: 'Max votes per person' }) as HTMLInputElement).disabled).toBe(false);
+    await user.click(screen.getByRole('checkbox', { name: 'Unlimited votes' }));
+    await waitFor(async () => expect((await lastPersisted())?.settings.unlimitedVotes).toBe(false));
+  });
+
+  it('lets the number be set before unlimited votes are turned off, so only the votes above it go', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({
+      settings: settingsOf({ maxVotes: 1, unlimitedVotes: true }),
+      tickets: [{ id: 't-a', colId: 'todo', text: 'Flaky deploys', authorId: 'alice', groupId: null, votes: ['bob', 'bob'] }],
+    }));
+    await screen.findByText('Flaky deploys');
+    const settings = await openSettings(user);
+
+    await user.click(settings.getByRole('button', { name: 'Increase max votes' }));
+    // Still unlimited: the number takes nothing back yet.
+    await waitFor(async () => expect((await lastPersisted())?.settings.maxVotes).toBe(2));
+    expect((await lastPersisted())?.tickets[0].votes).toEqual(['bob', 'bob']);
+    await user.click(settings.getByRole('checkbox', { name: 'Unlimited votes' }));
+
+    await waitFor(async () => expect((await lastPersisted())?.settings.unlimitedVotes).toBe(false));
+    expect((await lastPersisted())?.tickets[0].votes).toEqual(['bob', 'bob']);
+  });
+
+  it('takes no vote back while a number is typed, and applies it on Enter', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({
+      tickets: [{ id: 't-a', colId: 'todo', text: 'Flaky deploys', authorId: 'alice', groupId: null, votes: ['bob', 'bob'] }],
+    }));
+    await screen.findByText('Flaky deploys');
+    const settings = await openSettings(user);
+    const field = settings.getByRole('textbox', { name: 'Votes per person' });
+    const before = await persistedCount();
+
+    await user.clear(field);
+    await user.type(field, '10');
+    // Typed, not applied: on its way to 10 the field read 1, which took
+    // Bob's second vote back for good.
+    expect(await persistedCount()).toBe(before);
+    await user.keyboard('{Enter}');
+
+    await waitFor(async () => expect((await lastPersisted())?.settings.maxVotes).toBe(10));
+    expect((await lastPersisted())?.tickets[0].votes).toEqual(['bob', 'bob']);
+  });
+
+  it('applies a typed number when the field is left, and puts back one that is not a number', async () => {
+    const user = userEvent.setup();
+    renderBoard();
+    await screen.findByText('Flaky deploys');
+    const settings = await openSettings(user);
+    const field = settings.getByRole('textbox', { name: 'Votes per person' }) as HTMLInputElement;
+
+    await user.clear(field);
+    await user.type(field, '3');
+    await user.tab();
+    await waitFor(async () => expect((await lastPersisted())?.settings.maxVotes).toBe(3));
+
+    const before = await persistedCount();
+    await user.clear(field);
+    await user.tab();
+    expect(field.value).toBe('3');
+    expect(await persistedCount()).toBe(before);
+  });
+
+  it('turns every setting off while the session reconnects, the colour and the number included', async () => {
+    const user = userEvent.setup();
+    renderBoard();
+    await screen.findByText('Flaky deploys');
+    const settings = await openSettings(user);
+
+    act(() => connectionListener?.(false));
+
+    expect((settings.getByRole('combobox', { name: 'Color cards by' }) as HTMLSelectElement).disabled).toBe(true);
+    expect((settings.getByRole('textbox', { name: 'Votes per person' }) as HTMLInputElement).disabled).toBe(true);
+    for (const toggle of settings.getAllByRole('checkbox')) expect((toggle as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it('turns the Vote phase’s vote settings off while the session reconnects', async () => {
+    renderBoard(createBoard({ phase: 'VOTE' }));
+    await screen.findByText('Flaky deploys');
+
+    act(() => connectionListener?.(false));
+
+    expect((screen.getByRole('checkbox', { name: '1 vote/item' }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('checkbox', { name: 'Unlimited votes' }) as HTMLInputElement).disabled).toBe(true);
   });
 });

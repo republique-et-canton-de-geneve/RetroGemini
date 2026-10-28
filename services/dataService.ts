@@ -1402,8 +1402,13 @@ export const dataService = {
       settings: {
         isAnonymous: options?.isAnonymous ?? false,
         maxVotes: 5,
-        oneVotePerTicket: false,
-        revealBrainstorm: false,
+        // A board is voted on with a "like": one vote per card, on as many
+        // cards as one wishes (a board kept for weeks would run out of a fixed
+        // budget after its first meeting), and every card shown. The facilitator
+        // can change all three from the board's settings.
+        oneVotePerTicket: !!options?.openBoard,
+        revealBrainstorm: !!options?.openBoard,
+        ...(options?.openBoard ? { unlimitedVotes: true } : {}),
         revealHappiness: false,
         revealRoti: false,
         ...createTimerSettings(DEFAULT_TIMER_SECONDS)

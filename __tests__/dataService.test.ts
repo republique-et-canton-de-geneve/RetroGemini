@@ -870,8 +870,16 @@ describe('dataService', () => {
       expect(board.status).toBe('IN_PROGRESS');
       expect(board).not.toHaveProperty('guidedPhase');
       expect(board.settings.isAnonymous).toBe(true);
+      // Voted on with a "like": one vote per card, no budget, every card shown.
+      expect(board.settings.oneVotePerTicket).toBe(true);
+      expect(board.settings.unlimitedVotes).toBe(true);
+      expect(board.settings.revealBrainstorm).toBe(true);
       // Without the option, the guided retrospective it always was.
-      expect(dataService.createSession(team.id, 'Retro', columns).phase).toBe('ICEBREAKER');
+      const guided = dataService.createSession(team.id, 'Retro', columns);
+      expect(guided.phase).toBe('ICEBREAKER');
+      expect(guided.settings.oneVotePerTicket).toBe(false);
+      expect(guided.settings.revealBrainstorm).toBe(false);
+      expect(guided.settings).not.toHaveProperty('unlimitedVotes');
     });
 
     it('creates a retrospective with its timer stopped at five minutes', async () => {

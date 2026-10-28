@@ -67,7 +67,7 @@ const board = (overrides: Partial<RetroSession> = {}): RetroSession => ({
     isAnonymous: true,
     maxVotes: 3,
     oneVotePerTicket: false,
-    revealBrainstorm: false,
+    revealBrainstorm: true,
     revealHappiness: false,
     revealRoti: false,
     timerSeconds: 300,
@@ -106,17 +106,38 @@ describe('Open board — in French', () => {
     ) as unknown as typeof fetch;
   });
 
-  it('names the board, its settings and its totals in French', async () => {
+  it('names the board, its controls and its settings in French', async () => {
+    const user = userEvent.setup();
     renderInFrench(board());
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Tableau ouvert' })).toBeTruthy();
-    expect(screen.getByRole('checkbox', { name: 'Anonyme' })).toBeTruthy();
-    expect(screen.getByRole('textbox', { name: 'Votes max par personne' })).toBeTruthy();
-    expect(screen.getByText('1 vote au total')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Ajouter un vote à cette carte' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '1 vote, ajouter un vote à cette carte' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Passer en rétrospective guidée' })).toBeTruthy();
     // getByText normalises the no-break space before the colon to a space.
     expect(screen.getByText('Votes restants : 3')).toBeTruthy();
+
+    // The search and the sort, everyone's.
+    const sort = screen.getByRole('combobox', { name: 'Trier les cartes' });
+    expect(within(sort).getAllByRole('option').map((o) => o.textContent))
+      .toEqual(['Plus récentes d’abord', 'Plus anciennes d’abord', 'Plus votées d’abord']);
+    await user.type(screen.getByRole('searchbox', { name: 'Rechercher dans les cartes' }), 'deploiement');
+    expect(await screen.findByText('1 résultat')).toBeTruthy();
+
+    // The facilitator's settings.
+    await user.click(screen.getByRole('button', { name: 'Paramètres' }));
+    const settings = within(await screen.findByRole('dialog', { name: 'Paramètres du tableau' }));
+    for (const name of [
+      'Anonyme',
+      'Masquer les cartes',
+      'Désactiver le vote',
+      'Masquer le nombre de votes',
+      'Votes illimités',
+      'Un vote par carte ou par groupe',
+    ]) {
+      expect(settings.getByRole('checkbox', { name }), name).toBeTruthy();
+    }
+    expect(settings.getByRole('textbox', { name: 'Votes par personne' })).toBeTruthy();
+    expect(settings.getByRole('button', { name: 'Fermer' })).toBeTruthy();
   });
 
   it('titles the participants panel by who is connected', async () => {
@@ -134,7 +155,9 @@ describe('Open board — in French', () => {
     renderInFrench(board());
     await screen.findByText('Déploiements');
 
-    await user.click(screen.getByRole('checkbox', { name: 'Anonyme' }));
+    await user.click(screen.getByRole('button', { name: 'Paramètres' }));
+    const settings = within(await screen.findByRole('dialog', { name: 'Paramètres du tableau' }));
+    await user.click(settings.getByRole('checkbox', { name: 'Anonyme' }));
 
     const dialog = await screen.findByRole('dialog', { name: 'Afficher qui a écrit chaque carte\u202f?' });
     expect(within(dialog).getByRole('button', { name: 'Rester anonyme' })).toBeTruthy();

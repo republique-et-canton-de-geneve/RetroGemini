@@ -196,14 +196,18 @@ test.describe('Accessibility baseline (audit H42)', () => {
 
       // The participant's card, so the Group phase shows a lime author avatar.
       // The participant is not audited here: with "Reveal cards" off, the
-      // facilitator's card is on their board as blurred text, which axe measures
-      // at about 1.2:1 (ACCESSIBILITY.md, gap 7) — a finding about hidden cards,
-      // not about avatars, and auditing it here would leave only bad ways to pass.
+      // facilitator's card is on their board as a blurred filler, which axe would
+      // measure at about 1.2:1 as text (ACCESSIBILITY.md, gap 7) — a finding about
+      // hidden cards, not about avatars, and auditing it here would leave only bad
+      // ways to pass.
       const participantIdea = participant.getByRole('textbox', { name: 'Add an idea...' }).first();
       await expect(participantIdea).toBeVisible({ timeout: 15_000 });
       await participantIdea.fill('Lime idea');
       await participantIdea.press('Enter');
-      await expect(page.getByText('Lime idea')).toBeAttached({ timeout: 15_000 });
+      // The facilitator cannot read it yet, so it reaches their board as a hidden
+      // card, whose words never reach their page.
+      await expect(page.getByText('Hidden card', { exact: true })).toHaveCount(1, { timeout: 15_000 });
+      await expect(page.getByText('Lime idea')).toHaveCount(0);
 
       // The Group phase, with a card on the board. Added after the keyboard work:
       // it was the screen this audit did not walk, and it was the screen where the

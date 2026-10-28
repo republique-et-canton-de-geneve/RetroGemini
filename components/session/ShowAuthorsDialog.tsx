@@ -12,11 +12,16 @@ import { useTranslation } from '../../i18n/I18nContext';
  */
 
 interface Props {
+  /**
+   * Reconnecting: the write would be dropped, and a confirmation that closes
+   * as if done would say the authors are shown when they are not.
+   */
+  disabled?: boolean;
   onKeepAnonymous: () => void;
   onShowAuthors: () => void;
 }
 
-const ShowAuthorsDialog: React.FC<Props> = ({ onKeepAnonymous, onShowAuthors }) => {
+const ShowAuthorsDialog: React.FC<Props> = ({ disabled = false, onKeepAnonymous, onShowAuthors }) => {
   const { t } = useTranslation();
 
   return (
@@ -42,7 +47,8 @@ const ShowAuthorsDialog: React.FC<Props> = ({ onKeepAnonymous, onShowAuthors }) 
         <button
           type="button"
           onClick={onShowAuthors}
-          className="flex-1 bg-retro-primary text-white py-2.5 rounded-lg font-bold hover:bg-retro-primaryHover transition"
+          disabled={disabled}
+          className="flex-1 bg-retro-primary text-white py-2.5 rounded-lg font-bold hover:bg-retro-primaryHover transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {t('session.openBoard.showAuthors')}
         </button>

@@ -91,12 +91,25 @@ test.describe('Open board', () => {
     await expect(boardHeading(facilitator)).toBeVisible({ timeout: 15_000 });
     await expect(facilitator.locator('.phase-nav-btn')).toHaveCount(0);
     await expect(facilitator.getByRole('button', { name: 'Next Phase' })).toHaveCount(0);
-    // Created anonymous, as the board type proposes.
-    await expect(facilitator.getByRole('checkbox', { name: 'Anonymous' })).toBeChecked();
+    // Its settings: created anonymous, as the board type proposes, with its
+    // cards shown and a "like" per card, as many as one wishes.
+    await facilitator.getByRole('button', { name: 'Settings' }).click();
+    const settings = facilitator.getByRole('dialog', { name: 'Board settings' });
+    await expect(settings.getByRole('checkbox', { name: 'Anonymous' })).toBeChecked();
+    await expect(settings.getByRole('checkbox', { name: 'Hide cards' })).not.toBeChecked();
+    await expect(settings.getByRole('checkbox', { name: 'Unlimited votes' })).toBeChecked();
+    await expect(settings.getByRole('checkbox', { name: 'One vote per card or group' })).toBeChecked();
+    await audit(facilitator, test.info(), 'retro-open-board-settings', { scope: settings });
+    await settings.getByRole('button', { name: 'Close' }).click();
+    await expect(settings).toBeHidden();
 
     await addIdea(facilitator, 0, 'Flaky deploys');
     await addIdea(facilitator, 0, 'Slow rollbacks');
     await addIdea(facilitator, 0, 'Too many meetings');
+    // Newest first: a board kept for weeks shows on top what nobody has
+    // talked about yet.
+    await expect(columns(facilitator).nth(0).locator('div.group .whitespace-pre-wrap'))
+      .toHaveText(['Too many meetings', 'Slow rollbacks', 'Flaky deploys']);
 
     // ---- A participant joins through the invite link and lands on the board ----
     const inviteUrl = await readInviteLink(facilitator);
@@ -121,14 +134,40 @@ test.describe('Open board', () => {
     await expect(facilitator.getByTestId('toggle-left-btn')).toHaveCount(0);
 
     // ---- A vote in one browser shows in the other ----
-    await card(participant, 'Flaky deploys').getByRole('button', { name: 'Add a vote to this ticket' }).click();
+    await card(participant, 'Flaky deploys').getByRole('button', { name: '0 votes, add a vote to this ticket' }).click();
     await expect(card(facilitator, 'Flaky deploys').getByTestId('vote-total')).toContainText('1', { timeout: 10_000 });
+    // One vote per card: the participant's is theirs to take back, not to repeat.
+    await expect(card(participant, 'Flaky deploys').getByRole('button', { name: '1 vote, add a vote to this ticket' })).toBeDisabled();
+    await expect(card(participant, 'Flaky deploys').getByRole('button', { name: 'Take back one of your votes on this ticket' })).toBeVisible();
 
     // The author votes on their own card: a real click, which fails if any
     // control (an invisible delete button) lies over the vote button.
-    await card(facilitator, 'Too many meetings').getByRole('button', { name: 'Add a vote to this ticket' }).click();
+    await card(facilitator, 'Too many meetings').getByRole('button', { name: '0 votes, add a vote to this ticket' }).click();
     await expect(card(facilitator, 'Too many meetings').getByTestId('vote-total')).toContainText('1');
     await expect(card(participant, 'Too many meetings').getByTestId('vote-total')).toContainText('1', { timeout: 10_000 });
+
+    // ---- Hiding the cards reaches the participant ----
+    // Found by its id: hidden, the card shows none of its words.
+    const rollbacksId = await card(facilitator, 'Slow rollbacks').getAttribute('data-ticket-id');
+    const rollbacks = participant.locator(`[data-ticket-id="${rollbacksId}"]`);
+    await facilitator.getByRole('button', { name: 'Settings' }).click();
+    await settings.getByRole('checkbox', { name: 'Hide cards' }).check();
+    await settings.getByRole('button', { name: 'Close' }).click();
+    await expect(rollbacks.locator('.ticket-blur')).toBeVisible({ timeout: 10_000 });
+    await expect(rollbacks).not.toContainText('Slow rollbacks');
+    await expect(rollbacks.getByText('Hidden card')).toBeAttached();
+    await expect(rollbacks.getByRole('button', { name: /add a vote/ })).toHaveCount(0);
+    await facilitator.getByRole('button', { name: 'Settings' }).click();
+    await settings.getByRole('checkbox', { name: 'Hide cards' }).uncheck();
+    await settings.getByRole('button', { name: 'Close' }).click();
+    await expect(card(participant, 'Slow rollbacks').locator('.whitespace-pre-wrap')).not.toHaveClass(/ticket-blur/, { timeout: 10_000 });
+
+    // ---- The participant searches; the facilitator's board does not move ----
+    await participant.getByRole('searchbox', { name: 'Search the cards' }).fill('ROLLBACK');
+    await expect(participant.getByText('1 result')).toBeVisible();
+    await expect(columns(participant).nth(0)).not.toContainText('Flaky deploys');
+    await expect(columns(facilitator).nth(0)).toContainText('Flaky deploys');
+    await participant.getByRole('searchbox', { name: 'Search the cards' }).fill('');
 
     await audit(facilitator, test.info(), 'retro-open-board');
 
@@ -168,6 +207,10 @@ test.describe('Open board', () => {
     await expect(boardHeading(facilitator)).toBeVisible({ timeout: 15_000 });
     await expect(columns(facilitator).nth(1)).toContainText('Flaky deploys');
     await expect(facilitator.locator('.group-container').getByTestId('vote-total').last()).toContainText('1');
+    // The settings travelled with it: still unlimited, still one per card.
+    await facilitator.getByRole('button', { name: 'Settings' }).click();
+    await expect(settings.getByRole('checkbox', { name: 'Unlimited votes' })).toBeChecked();
+    await settings.getByRole('button', { name: 'Close' }).click();
 
     // ---- Back on the Dashboard, the list names the board ----
     await facilitator.getByRole('button', { name: 'Leave the retrospective' }).click();

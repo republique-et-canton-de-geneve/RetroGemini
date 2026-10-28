@@ -319,6 +319,17 @@ export interface RetroSettings extends SessionTimerSettings {
   participantsPanelCollapsed?: boolean; // Whether participants panel is collapsed
   colorBy?: 'author' | 'topic'; // Color post-its by author or by topic/column
   showParticipantVotes?: boolean; // Show individual vote types in proposal vote tooltip
+  // No limit on the votes one person may cast (utils/voteBudget.ts), read
+  // wherever the budget is, the Vote phase included. An open board kept for
+  // weeks has its votes cast once and never handed back.
+  unlimitedVotes?: boolean;
+  // Read on the open board only: no vote can be cast or taken back there, and
+  // the totals stay shown unless hidden too.
+  votingDisabled?: boolean;
+  // Read on the open board only: nobody sees the totals, only their own votes,
+  // and the board is not sorted by them (the Vote phase keeps its totals to
+  // itself whatever this says).
+  voteCountHidden?: boolean;
 }
 
 // A teammate the facilitator invited by email while the session was open.

@@ -1,5 +1,6 @@
-import { RetroSession, HealthCheckSession, ActionItem, ActionImpactVote } from '../../types';
+import { RetroSession, RetroSettings, HealthCheckSession, ActionItem, ActionImpactVote } from '../../types';
 import { restoreLostInvitees } from './sessionInvitees';
+import { capVotes, keepOneVotePerItem, voteBudget } from '../../utils/voteBudget';
 
 // Pure merge of an incoming authoritative session state with the local state.
 //
@@ -145,8 +146,31 @@ const ownKey = {
   actionImpact: (actionId: string) => `actionImpact:${actionId}`,
   closedActionsSnapshot: 'closedActionsSnapshot',
   columnOrder: 'columnOrder',
-  reviewSummary: 'reviewSummary'
+  reviewSummary: 'reviewSummary',
+  setting: (name: string) => `setting:${name}`
 } as const;
+
+// The settings a facilitator changes one click at a time — the open board's
+// settings dialog and the Vote phase's bar. Facilitator-only content
+// (`sessionGuard.js`), claimed like the review summary.
+const CLAIMED_SETTINGS = [
+  'isAnonymous',
+  'revealBrainstorm',
+  'colorBy',
+  'votingDisabled',
+  'voteCountHidden',
+  'unlimitedVotes',
+  'maxVotes',
+  'oneVotePerTicket'
+] as const satisfies readonly (keyof RetroSettings)[];
+type ClaimedSetting = (typeof CLAIMED_SETTINGS)[number];
+
+// A setting as the screen reads it: unset is off, and an unset colour is by topic.
+const settingOf = (settings: RetroSettings, key: ClaimedSetting): unknown => {
+  if (key === 'maxVotes') return settings.maxVotes;
+  if (key === 'colorBy') return settings.colorBy || 'topic';
+  return !!settings[key];
+};
 
 // No summary and an empty one say the same thing: a retro saved before the
 // Review step has none.
@@ -317,6 +341,10 @@ const withOwnEntry = <T>(
 const ownVoteCount = (votes: string[] | undefined, userId: string) =>
   (votes ?? []).filter(v => v === userId).length;
 
+/** Every vote the user holds in a session, on cards and groups alike. */
+const ownVotesIn = (session: Pick<RetroSession, 'tickets' | 'groups'>, userId: string) =>
+  [...session.tickets, ...session.groups].reduce((sum, item) => sum + ownVoteCount(item.votes, userId), 0);
+
 const hasOwnEntry = (list: string[] | undefined, userId: string) => (list ?? []).includes(userId);
 
 // Group id -> its cards' ids, as one string: what tells a regrouping apart
@@ -432,6 +460,15 @@ const registerOwnRetroChanges = (
   // field back when anyone else writes it.
   if (isFacilitator && reviewSummaryOf(before) !== reviewSummaryOf(after)) {
     claim(ownKey.reviewSummary);
+  }
+
+  // The facilitator's settings, one click each: two clicks within one round
+  // trip are two writes from one revision, and the heal of the second took it
+  // back. Only the facilitator's client claims, for the summary's reason.
+  if (isFacilitator) {
+    for (const key of CLAIMED_SETTINGS) {
+      if (settingOf(before.settings, key) !== settingOf(after.settings, key)) claim(ownKey.setting(key));
+    }
   }
 
   const beforeImpact = before.actionImpactVotes ?? {};
@@ -587,11 +624,19 @@ const mergeRemoteRetroSession = (
     divergent = true;
   }
 
-  // --- Own votes on tickets and groups. Skipped when the vote model changed
-  // (facilitator toggled oneVotePerTicket or adjusted maxVotes): the server
-  // state is then the cleanup result and must win.
-  const maxVotesChanged = incoming.settings.maxVotes !== prev.settings.maxVotes;
-  const preserveVotes = !incoming.settings.oneVotePerTicket && !maxVotesChanged;
+  // --- Own votes on tickets and groups. The server wins when the vote model
+  // tightened between the two states — one vote per item turned on, a lower
+  // budget (unlimited votes turned off included), voting turned off: its state
+  // is then the cleanup result, or votes are closed. A looser model took
+  // nothing back, so a vote that lost its race against one is re-sent like any
+  // other, and so is one under one vote per item, an open board's default.
+  const tightened = (!!incoming.settings.oneVotePerTicket && !prev.settings.oneVotePerTicket)
+    || voteBudget(incoming.settings) < voteBudget(prev.settings)
+    || (!!incoming.settings.votingDisabled && !prev.settings.votingDisabled);
+  const preserveVotes = !tightened;
+  // The vote slices re-asserted below, undone together when they would take
+  // the voter past the budget (after both lists).
+  const reassertedVotes: string[] = [];
 
   merged.tickets = incoming.tickets.map(ticket => {
     const prevTicket = prev.tickets.find(t => t.id === ticket.id);
@@ -610,7 +655,7 @@ const mergeRemoteRetroSession = (
     } else {
       const matches = ownVoteCount(ticket.votes, userId) === ownVoteCount(prevTicket.votes, userId);
       if (ownValueWins(ledger, key, matches, now)) {
-        divergent = true;
+        reassertedVotes.push(key);
         next = { ...next, votes: withOwnVotes(ticket.votes, prevTicket.votes, userId) };
       }
     }
@@ -654,10 +699,16 @@ const mergeRemoteRetroSession = (
     if (!preserveVotes) {
       ledger.delete(key);
     } else {
-      const claimedOwn = ownVoteCount(prevGroup.votes, userId) + ownVotesMovedInto(group.id);
+      // At most one under one vote per item: the grouping kept one vote of a
+      // voter whose card it moved in (combineVotes), so a vote on the group
+      // and the moved card's are the same vote for the item.
+      const claimedOwn = Math.min(
+        incoming.settings.oneVotePerTicket ? 1 : Number.POSITIVE_INFINITY,
+        ownVoteCount(prevGroup.votes, userId) + ownVotesMovedInto(group.id),
+      );
       const matches = ownVoteCount(group.votes, userId) === claimedOwn;
       if (ownValueWins(ledger, key, matches, now)) {
-        divergent = true;
+        reassertedVotes.push(key);
         next = { ...next, votes: withOwnVoteCount(group.votes, claimedOwn, userId) };
       }
     }
@@ -668,6 +719,27 @@ const mergeRemoteRetroSession = (
 
     return next;
   });
+
+  // Re-asserted votes never take the voter past the budget, nor past what the
+  // server already counts for them. Two browsers of one person voting from the
+  // same revision would otherwise both keep their vote, one more than the
+  // budget allows: the server's state is the one that was counted, so it wins
+  // for every vote this merge would have re-sent.
+  if (reassertedVotes.length > 0) {
+    const allowed = Math.max(voteBudget(incoming.settings), ownVotesIn(incoming, userId));
+    if (ownVotesIn(merged, userId) > allowed) {
+      const undone = new Set(reassertedVotes);
+      const serverTickets = new Map(incoming.tickets.map(t => [t.id, t.votes]));
+      const serverGroups = new Map(incoming.groups.map(g => [g.id, g.votes]));
+      merged.tickets = merged.tickets.map(t =>
+        undone.has(ownKey.ticketVotes(t.id)) ? { ...t, votes: serverTickets.get(t.id) ?? t.votes } : t);
+      merged.groups = merged.groups.map(g =>
+        undone.has(ownKey.groupVotes(g.id)) ? { ...g, votes: serverGroups.get(g.id) ?? g.votes } : g);
+      undone.forEach(key => ledger.delete(key));
+    } else {
+      divergent = true;
+    }
+  }
 
   // --- Own votes on action proposals.
   merged.actions = incoming.actions.map(action => {
@@ -848,6 +920,31 @@ const mergeRemoteRetroSession = (
     divergent = true;
   } else if (isOlderState(incoming, prev)) {
     merged.reviewSummary = prev.reviewSummary;
+  }
+
+  // --- The facilitator's own settings, re-asserted while unconfirmed: the
+  // setting as clicked here, everything else as the server has it. A setting
+  // that takes votes back (a lower number, unlimited off, one vote per item
+  // on) took them in the write that lost, so it takes them back again from the
+  // server's votes — the re-sent state would otherwise hold more than it
+  // allows. Every other client takes the server's settings.
+  const reassertedSettings = CLAIMED_SETTINGS.filter(key =>
+    ownValueWins(ledger, ownKey.setting(key), settingOf(prev.settings, key) === settingOf(incoming.settings, key), now));
+  if (reassertedSettings.length > 0) {
+    const settings: RetroSettings = { ...merged.settings };
+    for (const key of reassertedSettings) {
+      (settings as unknown as Record<string, unknown>)[key] = prev.settings[key];
+    }
+    merged.settings = settings;
+    divergent = true;
+    const takesVotesBack = (!!settings.oneVotePerTicket && !incoming.settings.oneVotePerTicket)
+      || voteBudget(settings) < voteBudget(incoming.settings);
+    if (takesVotesBack) {
+      merged.tickets = merged.tickets.map(t => ({ ...t, votes: [...t.votes] }));
+      merged.groups = merged.groups.map(g => ({ ...g, votes: [...g.votes] }));
+      if (settings.oneVotePerTicket) keepOneVotePerItem(merged);
+      if (!settings.unlimitedVotes) capVotes(merged, settings.maxVotes);
+    }
   }
 
   return { merged, divergent };
