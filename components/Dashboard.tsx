@@ -42,6 +42,7 @@ import {
   initialTemplateLanguage
 } from '../i18n/content/retroTemplates';
 import { effectiveSessionStatus } from '../utils/sessionStatus';
+import { isOpenBoard } from '../utils/openBoard';
 import { avatarColorClasses } from '../utils/participantColors';
 import { HEALTH_RATING_BADGE } from '../utils/healthRatingColors';
 
@@ -189,6 +190,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   const [templateName, setTemplateName] = useState('');
   const [retroName, setRetroName] = useState('');
   const [isAnonymous, setIsAnonymous] = useState(false);
+  // A guided retrospective, or an open board (utils/openBoard.ts): every card
+  // activity on one screen, kept open. Reset each time the dialog opens.
+  const [boardType, setBoardType] = useState<'guided' | 'open'>('guided');
   const [showRetroTemplateBuilder, setShowRetroTemplateBuilder] = useState(false);
   const [retroTemplateName, setRetroTemplateName] = useState('');
   const [retroTemplateCols, setRetroTemplateCols] = useState<Column[]>(() => [
@@ -249,7 +253,17 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     handleTemplateLanguageChange(nextLanguage);
     setRetroName(suggestRetroName(nextLanguage));
     setIsAnonymous(false);
+    setBoardType('guided');
     setShowNewRetroModal(true);
+  };
+
+  // An open board is anonymous unless the facilitator says otherwise, and a
+  // guided retro names its authors unless they say otherwise: each type brings
+  // its own default, and the toggle below it stays free.
+  const handleBoardTypeChange = (next: 'guided' | 'open') => {
+    if (next === boardType) return;
+    setBoardType(next);
+    setIsAnonymous(next === 'open');
   };
 
   // Switching the template language re-words whatever the facilitator has not
@@ -355,7 +369,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     // Deep copy cols
     const safeCols = JSON.parse(JSON.stringify(cols));
     const finalName = retroName.trim() || getDefaultRetroName(templateLanguage);
-    const session = dataService.createSession(team.id, finalName, safeCols, { isAnonymous, templateLanguage });
+    const session = dataService.createSession(team.id, finalName, safeCols, {
+      isAnonymous,
+      templateLanguage,
+      ...(boardType === 'open' ? { openBoard: true } : {})
+    });
     
     // Save template if name provided during creation of CUSTOM
     if(isCreatingCustom && templateName) {
@@ -748,6 +766,34 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   
                   {!isCreatingCustom ? (
                       <div className="space-y-6">
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div id="board-type-label" className="text-sm font-bold text-slate-700">{t('dashboard.newRetro.boardTypeLabel')}</div>
+                            <div
+                              role="group"
+                              aria-labelledby="board-type-label"
+                              aria-describedby="board-type-hint"
+                              className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-bold shrink-0"
+                            >
+                              {(['guided', 'open'] as const).map(option => (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  aria-pressed={boardType === option}
+                                  onClick={() => handleBoardTypeChange(option)}
+                                  className={`rounded-md px-3 py-1 transition ${boardType === option ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                                  data-testid={`board-type-${option}`}
+                                >
+                                  {option === 'open' ? t('dashboard.newRetro.boardTypeOpen') : t('dashboard.newRetro.boardTypeGuided')}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <p id="board-type-hint" className="text-xs text-slate-500 mt-1">
+                            {boardType === 'open' ? t('dashboard.newRetro.boardTypeOpenHint') : t('dashboard.newRetro.boardTypeGuidedHint')}
+                          </p>
+                        </div>
+
                         <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
                           <div>
                             <div className="text-sm font-bold text-slate-700">{t('dashboard.form.anonymousMode')}</div>
@@ -1394,7 +1440,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                     <div key={retro.id} className="bg-white p-5 rounded-lg shadow-xs border border-slate-200 flex items-center justify-between mb-3 hover:shadow-md transition">
                         <div className="flex items-center grow">
                             <div className="w-12 h-12 rounded-sm bg-indigo-50 text-indigo-600 flex items-center justify-center mr-4">
-                                <span className="material-symbols-outlined">event_note</span>
+                                <span className="material-symbols-outlined" aria-hidden="true">{isOpenBoard(retro) ? 'view_kanban' : 'event_note'}</span>
                             </div>
                             <div className="grow">
                                 {editingRetroId === retro.id ? (
@@ -1439,8 +1485,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 )}
                                 <div className="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center gap-2">
                                     <span>{retro.date}</span> •
-                                    <span className={retro.status === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-500'}>
-                                        {t(`dashboard.retroStatus.${retro.status}`)}
+                                    {/* A board is never closed: the list says what it is instead.
+                                        green-700, not 600: 12px green-600 on white measures 3.22:1. */}
+                                    <span className={retro.status === 'IN_PROGRESS' ? 'text-green-700' : 'text-slate-500'}>
+                                        {isOpenBoard(retro) ? t('dashboard.retroStatus.OPEN_BOARD') : t(`dashboard.retroStatus.${retro.status}`)}
                                     </span>
                                 </div>
                                 {/* What this retro's actions were worth, once the
@@ -1961,7 +2009,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             <span>{hc.date}</span> •
                             <span>{hc.templateName}</span> •
                             <span>{tp('dashboard.healthChecks.participants', participantCount)}</span> •
-                            <span className={hcStatus === 'IN_PROGRESS' ? 'text-green-600' : 'text-slate-500'}>
+                            <span className={hcStatus === 'IN_PROGRESS' ? 'text-green-700' : 'text-slate-500'}>
                               {t(`dashboard.healthCheckStatus.${hcStatus}`)}
                             </span>
                           </div>
@@ -2048,7 +2096,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       </p>
                     )}
                     {teamRenameSuccess && (
-                      <p className="text-xs text-green-600 flex items-center">
+                      <p className="text-xs text-green-700 flex items-center">
                         <span className="material-symbols-outlined text-xs mr-1">check_circle</span>
                         {noticeText(teamRenameSuccess, t)}
                       </p>
@@ -2132,7 +2180,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       </p>
                     )}
                     {passwordChangeSuccess && (
-                      <p className="text-xs text-green-600 flex items-center">
+                      <p className="text-xs text-green-700 flex items-center">
                         <span className="material-symbols-outlined text-xs mr-1">check_circle</span>
                         {noticeText(passwordChangeSuccess, t)}
                       </p>

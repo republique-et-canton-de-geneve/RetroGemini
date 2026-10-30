@@ -23,6 +23,7 @@ const phases = {
   'phases.header.expandParticipants': 'Click to expand participants panel',
   'phases.header.progressFinished': 'finished',
   'phases.header.progressVoted': 'voted',
+  'phases.header.progressConnected': 'connected',
   'phases.header.user': 'User',
   'phases.header.invite': 'Invite / Join',
 
@@ -106,6 +107,9 @@ const phases = {
   'phases.tips.close.label': 'Close',
   'phases.tips.close.purpose':
     'Wrap up the retrospective with a quick ROTI vote and close the session cleanly. If the feedback shows the retro did not feel like a good use of time, use this step to capture actions that will improve future retrospectives.',
+  'phases.tips.openBoard.label': 'Open board',
+  'phases.tips.openBoard.purpose':
+    'Everyone adds topics, groups the ones that are alike and votes, all on one screen. For a Lean Coffee, move the most voted topic to the discussion column, timebox it, and move it on once the group has said enough.',
 
   // Icebreaker phase.
   'phases.icebreaker.title': 'Icebreaker',
@@ -253,6 +257,9 @@ const phases = {
   'phases.participants.ticketsAdded_one': '{count} ticket added',
   'phases.participants.ticketsAdded_other': '{count} tickets added',
   'phases.participants.title': 'Participants ({count})',
+  // Open board: the panel lists the people connected right now, and only them.
+  'phases.participants.connectedTitle': 'Connected now ({count})',
+  'phases.participants.footerConnected': 'Only the people connected right now are listed.',
   'phases.participants.expand': 'Expand panel',
   'phases.participants.collapse': 'Collapse panel',
   'phases.participants.online': 'Online',

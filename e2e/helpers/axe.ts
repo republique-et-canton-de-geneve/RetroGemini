@@ -65,6 +65,11 @@ export const BASELINE: Record<string, number> = {
   'retro-close': 0,
   'healthcheck-survey': 0,
   'healthcheck-close': 0,
+  // e2e/retro-open-board.spec.ts: the open board (42.0), with cards, a vote and
+  // a second person connected. Joined at zero.
+  'retro-open-board': 0,
+  // Its settings dialog (42.0), scoped: the dialog over the board.
+  'retro-open-board-settings': 0,
   // e2e/jira.spec.ts
   'jira-console-card': 0,
   'jira-settings-card': 0,

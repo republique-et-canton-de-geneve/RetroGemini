@@ -169,34 +169,49 @@ describe('mergeRemoteRetroSession', () => {
     expect(divergent).toBe(true);
   });
 
-  it('lets the server win on votes when oneVotePerTicket is on or maxVotes changed', () => {
+  it('lets the server win on votes when the vote model tightened', () => {
     const incomingOneVote = makeSession({
-      settings: { ...baseSettings(), oneVotePerTicket: true },
-      tickets: [makeTicket('t1', { votes: [] })]
-    });
-    const prevOneVote = makeSession({
       settings: { ...baseSettings(), oneVotePerTicket: true },
       tickets: [makeTicket('t1', { votes: [ME] })]
     });
-    // Even with the vote claimed as an unconfirmed local write, the vote-model
-    // cleanup is authoritative.
-    const oneVoteClaims = claiming(
-      makeSession({
-        settings: { ...baseSettings(), oneVotePerTicket: true },
-        tickets: [makeTicket('t1', { votes: [] })]
-      }),
-      prevOneVote
-    );
+    const prevOneVote = makeSession({
+      tickets: [makeTicket('t1', { votes: [ME, ME] })]
+    });
+    // Even with the votes claimed as an unconfirmed local write, the cleanup
+    // of turning one vote per item on is authoritative.
+    const oneVoteClaims = claiming(makeSession({ tickets: [makeTicket('t1', { votes: [] })] }), prevOneVote);
     const oneVote = mergeRemoteRetroSession(
       incomingOneVote,
       prevOneVote,
       ctx({ ownChanges: oneVoteClaims }),
       noPending()
     );
-    expect(oneVote.merged.tickets[0].votes).toEqual([]);
+    expect(oneVote.merged.tickets[0].votes).toEqual([ME]);
     expect(oneVote.divergent).toBe(false);
     expect(oneVoteClaims.size).toBe(0);
 
+    // Turning unlimited votes off caps them: the cap wins too.
+    const incomingCapped = makeSession({
+      settings: { ...baseSettings(), maxVotes: 1 },
+      tickets: [makeTicket('t1', { votes: [ME] }), makeTicket('t2', { votes: [] })]
+    });
+    const prevUnlimited = makeSession({
+      settings: { ...baseSettings(), maxVotes: 1, unlimitedVotes: true },
+      tickets: [makeTicket('t1', { votes: [ME] }), makeTicket('t2', { votes: [ME] })]
+    });
+    const cappedClaims = claiming(
+      makeSession({
+        settings: { ...baseSettings(), maxVotes: 1, unlimitedVotes: true },
+        tickets: [makeTicket('t1', { votes: [ME] }), makeTicket('t2', { votes: [] })]
+      }),
+      prevUnlimited
+    );
+    const capped = mergeRemoteRetroSession(incomingCapped, prevUnlimited, ctx({ ownChanges: cappedClaims }), noPending());
+    expect(capped.merged.tickets[1].votes).toEqual([]);
+    expect(capped.divergent).toBe(false);
+    expect(cappedClaims.size).toBe(0);
+
+    // A lower number takes back the votes above it: so does the server's.
     const incomingMaxChanged = makeSession({
       settings: { ...baseSettings(), maxVotes: 1 },
       tickets: [makeTicket('t1', { votes: [] })]
@@ -212,6 +227,132 @@ describe('mergeRemoteRetroSession', () => {
     );
     expect(maxChanged.merged.tickets[0].votes).toEqual([]);
     expect(maxChanged.divergent).toBe(false);
+  });
+
+  it('re-sends a vote that raced a looser vote model, which took nothing back', () => {
+    // One vote per item turned off, unlimited votes turned on, a higher
+    // number, a number moved while votes are unlimited: none of them takes a
+    // vote back, so a vote that lost its race against one is re-sent.
+    const loosenings = [
+      { before: { oneVotePerTicket: true }, after: { oneVotePerTicket: false } },
+      { before: {}, after: { unlimitedVotes: true } },
+      { before: { maxVotes: 1 }, after: { maxVotes: 5 } },
+      { before: { unlimitedVotes: true, maxVotes: 2 }, after: { unlimitedVotes: true, maxVotes: 1 } },
+    ];
+    for (const { before, after } of loosenings) {
+      const prevSettings = { ...baseSettings(), ...before };
+      const start = makeSession({ settings: prevSettings, tickets: [makeTicket('t1', { votes: [OTHER] })] });
+      const prev = makeSession({ settings: prevSettings, tickets: [makeTicket('t1', { votes: [OTHER, ME] })] });
+      const claims = claiming(start, prev);
+      const incoming = makeSession({
+        settings: { ...baseSettings(), ...after },
+        tickets: [makeTicket('t1', { votes: [OTHER] })]
+      });
+
+      const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx({ ownChanges: claims }), noPending());
+
+      expect(merged.tickets[0].votes, JSON.stringify(after)).toEqual([OTHER, ME]);
+      expect(divergent, JSON.stringify(after)).toBe(true);
+    }
+  });
+
+  it('treats a vote on a group as a vote on a card against every change of the vote model', () => {
+    const g1 = (votes: string[]) => ({ id: 'g1', title: 'G', colId: 'col-1', votes });
+    const cases = [
+      { before: { oneVotePerTicket: true }, after: { oneVotePerTicket: false }, resent: true },
+      { before: {}, after: { unlimitedVotes: true }, resent: true },
+      { before: { maxVotes: 1 }, after: { maxVotes: 5 }, resent: true },
+      { before: {}, after: { oneVotePerTicket: true }, resent: false },
+      { before: { unlimitedVotes: true }, after: {}, resent: false },
+      { before: { maxVotes: 5 }, after: { maxVotes: 1 }, resent: false },
+      { before: {}, after: { votingDisabled: true }, resent: false },
+    ];
+    for (const { before, after, resent } of cases) {
+      const prevSettings = { ...baseSettings(), ...before };
+      const start = makeSession({ phase: 'OPEN_BOARD', settings: prevSettings, groups: [g1([OTHER])] });
+      const prev = makeSession({ phase: 'OPEN_BOARD', settings: prevSettings, groups: [g1([OTHER, ME])] });
+      const claims = claiming(start, prev);
+      const incoming = makeSession({ phase: 'OPEN_BOARD', settings: { ...baseSettings(), ...after }, groups: [g1([OTHER])] });
+
+      const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx({ ownChanges: claims }), noPending());
+
+      expect(merged.groups[0].votes, JSON.stringify(after)).toEqual(resent ? [OTHER, ME] : [OTHER]);
+      expect(divergent, JSON.stringify(after)).toBe(resent);
+    }
+  });
+
+  it('lets the server win once voting is turned off', () => {
+    // A vote cast and a vote taken back, both racing "Disable voting": neither
+    // lands after it, or the totals would move while voting is off.
+    const board = { phase: 'OPEN_BOARD' };
+    const g1 = (votes: string[]) => ({ id: 'g1', title: 'G', colId: 'col-1', votes });
+    const start = makeSession({ ...board, tickets: [makeTicket('t1')], groups: [g1([ME])] });
+    const prev = makeSession({ ...board, tickets: [makeTicket('t1', { votes: [ME] })], groups: [g1([])] });
+    const claims = claiming(start, prev);
+    const incoming = makeSession({
+      ...board,
+      settings: { ...baseSettings(), votingDisabled: true },
+      tickets: [makeTicket('t1')],
+      groups: [g1([ME])]
+    });
+
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx({ ownChanges: claims }), noPending());
+
+    expect(merged.tickets[0].votes).toEqual([]);
+    expect(merged.groups[0].votes).toEqual([ME]);
+    expect(divergent).toBe(false);
+    expect(claims.size).toBe(0);
+  });
+
+  it('never re-sends more votes than the voter has: two browsers voting from one revision', () => {
+    // One vote to give. The other browser of this user voted on t1 and won the
+    // race; this one voted on t2 from the same revision. Re-sent, the voter
+    // would hold two votes out of one: the server's state is the one counted.
+    for (const oneVotePerTicket of [false, true]) {
+      const one = { ...baseSettings(), maxVotes: 1, oneVotePerTicket };
+      const start = makeSession({ settings: one, tickets: [makeTicket('t1'), makeTicket('t2')] });
+      const prev = makeSession({ settings: one, tickets: [makeTicket('t1'), makeTicket('t2', { votes: [ME] })] });
+      const claims = claiming(start, prev);
+      const incoming = makeSession({ settings: one, tickets: [makeTicket('t1', { votes: [ME] }), makeTicket('t2')] });
+
+      const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx({ ownChanges: claims }), noPending());
+
+      expect(merged.tickets.map(t => t.votes), `oneVotePerTicket ${oneVotePerTicket}`).toEqual([[ME], []]);
+      expect(divergent).toBe(false);
+      expect(claims.size).toBe(0);
+    }
+  });
+
+  it('re-sends a vote that lost its race with one vote per item on, as an open board votes', () => {
+    const oneVote = { ...baseSettings(), oneVotePerTicket: true, unlimitedVotes: true };
+    const incoming = makeSession({
+      settings: oneVote,
+      tickets: [makeTicket('t1', { votes: [OTHER] })],
+      groups: [{ id: 'g1', title: 'G', colId: 'col-1', votes: [] }]
+    });
+    const prev = makeSession({
+      settings: oneVote,
+      tickets: [makeTicket('t1', { votes: [OTHER, ME] })],
+      groups: [{ id: 'g1', title: 'G', colId: 'col-1', votes: [ME] }]
+    });
+    const claims = claiming(
+      makeSession({
+        settings: oneVote,
+        tickets: [makeTicket('t1', { votes: [OTHER] })],
+        groups: [{ id: 'g1', title: 'G', colId: 'col-1', votes: [] }]
+      }),
+      prev
+    );
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx({ ownChanges: claims }), noPending());
+    expect(merged.tickets[0].votes.filter(v => v === ME)).toHaveLength(1);
+    expect(merged.tickets[0].votes).toContain(OTHER);
+    expect(merged.groups[0].votes).toEqual([ME]);
+    expect(divergent).toBe(true);
+
+    // Nothing outstanding: the server's word stands, as for any vote.
+    const settled = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+    expect(settled.merged.tickets[0].votes).toEqual([OTHER]);
+    expect(settled.divergent).toBe(false);
   });
 
   it('preserves own votes on action proposals', () => {
@@ -252,6 +393,38 @@ describe('mergeRemoteRetroSession', () => {
     const second = mergeRemoteRetroSession(confirming, merged, ctx(), pending);
     expect(pending.has('t-new')).toBe(false);
     expect(second.divergent).toBe(false);
+  });
+
+  it('puts a pending ticket written in a column removed meanwhile beside it, never under nothing', () => {
+    const column = (id: string) => ({
+      id, title: id, color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200'
+    });
+    const pending = () => new Map<string, PendingCreation>([['t-new', { kind: 'ticket', expiresAt: 2_000_000 }]]);
+    const written = (colId: string) => makeSession({
+      phase: 'BRAINSTORM',
+      columns: [column('start'), column('stop'), column('continue')],
+      tickets: [makeTicket('t-new', { colId })],
+    });
+    // The facilitator removed a column while I wrote a card in it
+    // (retroGrouping.ts → removeColumn), and the heal does not hold my card.
+    const without = (...ids: string[]) =>
+      makeSession({ phase: 'BRAINSTORM', columns: ['start', 'stop', 'continue'].filter((id) => !ids.includes(id)).map(column) });
+
+    const middle = mergeRemoteRetroSession(without('stop'), written('stop'), ctx(), pending());
+    expect(middle.merged.tickets.find((t) => t.id === 't-new')?.colId).toBe('start');
+    expect(middle.divergent).toBe(true);
+
+    // The first column has none before it: the one after it.
+    const first = mergeRemoteRetroSession(without('start'), written('start'), ctx(), pending());
+    expect(first.merged.tickets.find((t) => t.id === 't-new')?.colId).toBe('stop');
+
+    // Two removed at once: the nearest one left.
+    const two = mergeRemoteRetroSession(without('start', 'stop'), written('stop'), ctx(), pending());
+    expect(two.merged.tickets.find((t) => t.id === 't-new')?.colId).toBe('continue');
+
+    // A column that still exists keeps its card.
+    const kept = mergeRemoteRetroSession(without('stop'), written('continue'), ctx(), pending());
+    expect(kept.merged.tickets.find((t) => t.id === 't-new')?.colId).toBe('continue');
   });
 
   it('re-injects a pending action proposal', () => {
@@ -1170,6 +1343,80 @@ describe('scheduleSessionResend', () => {
 // second away, and `columns` is facilitator-only content where incoming wins,
 // so the board jumped back one place a round-trip later — the keyboard flow
 // the move buttons keep focus for (press, press again) lost every other press.
+describe('the facilitator’s own settings are claimed', () => {
+  const board = (settings: Partial<RetroSession['settings']> = {}, overrides: Partial<RetroSession> = {}) =>
+    makeSession({ phase: 'OPEN_BOARD', settings: { ...baseSettings(), ...settings }, ...overrides });
+  const facilitatorClaims = (steps: RetroSession[]): OwnChangeLedger => {
+    const ledger: OwnChangeLedger = new Map();
+    for (let i = 1; i < steps.length; i++) registerOwnRetroChanges(ledger, steps[i - 1], steps[i], ME, NOW, { isFacilitator: true });
+    return ledger;
+  };
+
+  it('keeps a setting changed before the previous one was acknowledged', () => {
+    // Two toggles within one round trip are two writes from one revision: the
+    // server kept the first and healed the second away.
+    const start = board({}, { _rev: 4 });
+    const first = board({ votingDisabled: true }, { _rev: 4 });
+    const second = board({ votingDisabled: true, voteCountHidden: true }, { _rev: 4 });
+    const ownChanges = facilitatorClaims([start, first, second]);
+    const healed = board({ votingDisabled: true }, { _rev: 5 });
+
+    const { merged, divergent } = mergeRemoteRetroSession(healed, second, ctx({ ownChanges }), noPending());
+
+    expect(merged.settings.votingDisabled).toBe(true);
+    expect(merged.settings.voteCountHidden).toBe(true);
+    expect(divergent).toBe(true);
+    // The re-send lands: nothing more is sent.
+    const settled = mergeRemoteRetroSession(merged, merged, ctx({ ownChanges }), noPending());
+    expect(settled.divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
+  });
+
+  it('keeps the last press of the stepper, and takes the votes above it back again', () => {
+    // 5 → 4 → 3, the second press healed away. Its cap went with it: the
+    // re-sent state takes the votes above 3 back from the server's votes.
+    const votes = (...voters: string[]) => voters;
+    const cards = () => [
+      makeTicket('t1', { votes: votes(OTHER, OTHER) }),
+      makeTicket('t2', { votes: votes(OTHER, OTHER) }),
+    ];
+    const start = board({ maxVotes: 5 }, { tickets: cards() });
+    const four = board({ maxVotes: 4 }, { tickets: cards() });
+    const three = board({ maxVotes: 3 }, { tickets: [makeTicket('t1', { votes: votes(OTHER) }), makeTicket('t2', { votes: votes(OTHER, OTHER) })] });
+    const ownChanges = facilitatorClaims([start, four, three]);
+    const healed = board({ maxVotes: 4 }, { tickets: cards() });
+
+    const { merged, divergent } = mergeRemoteRetroSession(healed, three, ctx({ ownChanges }), noPending());
+
+    expect(merged.settings.maxVotes).toBe(3);
+    expect([...merged.tickets[0].votes, ...merged.tickets[1].votes].filter((v) => v === OTHER)).toHaveLength(3);
+    expect(divergent).toBe(true);
+    // The server's own state is left as it came.
+    expect(healed.tickets[0].votes).toEqual([OTHER, OTHER]);
+  });
+
+  it('re-applies one vote per item to the server’s votes when it re-asserts it', () => {
+    const start = board({}, { tickets: [makeTicket('t1', { votes: [OTHER, OTHER] })] });
+    const oneEach = board({ oneVotePerTicket: true }, { tickets: [makeTicket('t1', { votes: [OTHER] })] });
+    const ownChanges = facilitatorClaims([start, oneEach]);
+
+    const { merged } = mergeRemoteRetroSession(start, oneEach, ctx({ ownChanges }), noPending());
+
+    expect(merged.settings.oneVotePerTicket).toBe(true);
+    expect(merged.tickets[0].votes).toEqual([OTHER]);
+  });
+
+  it('lets a participant take the server’s settings', () => {
+    // A participant's client never claims them: the server puts a refused one
+    // back, and a claim would re-assert it at every heal.
+    const ownChanges = claiming(board(), board({ votingDisabled: true }));
+    expect(ownChanges.size).toBe(0);
+    const { merged, divergent } = mergeRemoteRetroSession(board(), board({ votingDisabled: true }), ctx({ ownChanges }), noPending());
+    expect(merged.settings.votingDisabled).toBeFalsy();
+    expect(divergent).toBe(false);
+  });
+});
+
 describe('the column order is claimed by the client that reordered', () => {
   const col = (id: string, title = id.toUpperCase()) => ({
     id, title, color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200'
@@ -1349,5 +1596,216 @@ describe('the review summary is claimed by the facilitator who typed it', () => 
     expect(merged.reviewSummary).toBe('Something else');
     expect(divergent).toBe(false);
     expect(ownChanges.size).toBe(0);
+  });
+});
+
+/**
+ * Votes that move because cards were regrouped are not the user voting.
+ *
+ * Grouping carries the cards' votes into the group (utils/retroGrouping.ts →
+ * `combineVotes`), and an open board votes while it groups. Grouping is
+ * shared content where the server wins, like a card's column: a regrouping
+ * that loses a race is healed away and redone by hand. Read as own votes, the
+ * moved votes did two kinds of damage. The grouper's own vote, claimed on the
+ * card it left, was re-asserted as "no vote" on the card the heal put back,
+ * and the vote was gone for good. And a participant whose vote on a card raced
+ * the regrouping re-asserted it on a card the server had grouped, where it
+ * counts against their budget with no control to take it back.
+ */
+describe('votes moved by a regrouping are not own votes', () => {
+  const group = (id: string, votes: string[] = []) => ({ id, title: '', colId: 'col-1', votes });
+
+  it('claims no vote slice for a card or a group the write regrouped', () => {
+    const before = makeSession({
+      tickets: [makeTicket('A', { votes: [ME] }), makeTicket('B', { votes: [OTHER] })]
+    });
+    const after = makeSession({
+      tickets: [makeTicket('A', { groupId: 'g1' }), makeTicket('B', { groupId: 'g1' })],
+      groups: [group('g1', [ME, OTHER])]
+    });
+
+    const ledger = claiming(before, after);
+
+    expect([...ledger.keys()]).toEqual([]);
+  });
+
+  it('claims none for an existing group whose cards changed either', () => {
+    const before = makeSession({
+      tickets: [
+        makeTicket('A', { groupId: 'g1' }),
+        makeTicket('B', { groupId: 'g1' }),
+        makeTicket('C', { votes: [ME] })
+      ],
+      groups: [group('g1', [ME])]
+    });
+    const after = makeSession({
+      tickets: [
+        makeTicket('A', { groupId: 'g1' }),
+        makeTicket('B', { groupId: 'g1' }),
+        makeTicket('C', { groupId: 'g1' })
+      ],
+      groups: [group('g1', [ME, ME])]
+    });
+
+    expect([...claiming(before, after).keys()]).toEqual([]);
+  });
+
+  it('drops a vote claim still outstanding on a card the user then regrouped', () => {
+    const ledger: OwnChangeLedger = new Map();
+    const fresh = makeSession({ tickets: [makeTicket('A'), makeTicket('B')] });
+    const voted = makeSession({ tickets: [makeTicket('A', { votes: [ME] }), makeTicket('B')] });
+    registerOwnRetroChanges(ledger, fresh, voted, ME, NOW);
+    expect([...ledger.keys()]).toEqual(['ticketVotes:A']);
+
+    const grouped = makeSession({
+      tickets: [makeTicket('A', { groupId: 'g1' }), makeTicket('B', { groupId: 'g1' })],
+      groups: [group('g1', [ME])]
+    });
+    registerOwnRetroChanges(ledger, voted, grouped, ME, NOW + 10);
+
+    // The regrouping lost its race: the heal has the vote on A, ungrouped.
+    const heal = makeSession({ tickets: [makeTicket('A', { votes: [ME] }), makeTicket('B')] });
+    const { merged, divergent } = mergeRemoteRetroSession(heal, grouped, ctx({ ownChanges: ledger }), noPending());
+
+    expect(merged.tickets.find((t) => t.id === 'A')?.votes).toEqual([ME]);
+    expect(divergent).toBe(false);
+  });
+
+  it('still claims a vote cast on a card that stays where it is', () => {
+    const before = makeSession({ tickets: [makeTicket('A', { groupId: 'g1' }), makeTicket('B', { groupId: 'g1' })], groups: [group('g1')] });
+    const after = makeSession({ tickets: [makeTicket('A', { groupId: 'g1' }), makeTicket('B', { groupId: 'g1' })], groups: [group('g1', [ME])] });
+
+    expect([...claiming(before, after).keys()]).toEqual(['groupVotes:g1']);
+  });
+
+  it('never re-asserts an own vote on a card the incoming state has grouped', () => {
+    // My vote on A was refused while someone grouped A with B: the heal moved
+    // whatever A held into the group, and A itself takes no vote any more.
+    const before = makeSession({ tickets: [makeTicket('A'), makeTicket('B')] });
+    const prev = makeSession({ tickets: [makeTicket('A', { votes: [ME] }), makeTicket('B')] });
+    const ownChanges = claiming(before, prev);
+    const incoming = makeSession({
+      tickets: [makeTicket('A', { groupId: 'g1' }), makeTicket('B', { groupId: 'g1' })],
+      groups: [group('g1')]
+    });
+
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx({ ownChanges }), noPending());
+
+    expect(merged.tickets.find((t) => t.id === 'A')?.votes).toEqual([]);
+    expect(divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
+  });
+});
+
+/**
+ * A regrouping carries a card's votes into its group, so a group's count is
+ * no longer only what its voters did to it. A claim on a group
+ * made before someone else's regrouping moved cards into it has to count the
+ * votes those cards brought, or re-asserting it deletes them: taking one vote
+ * off a group took the vote the moved card carried too (Codex review on PR
+ * #540, reproduced by the adversarial review), and a vote cast on the group
+ * while it happened read as already confirmed and was lost.
+ */
+describe('votes a regrouping moves into a group', () => {
+  const group = (id: string, votes: string[] = []) => ({ id, title: '', colId: 'col-1', votes });
+  const board = { phase: 'OPEN_BOARD' };
+  const inG1 = (id: string) => makeTicket(id, { groupId: 'g1' });
+  const mine = (votes: string[]) => votes.filter((v) => v === ME).length;
+
+  it('takes off the one vote the user removed, not the one a moved card carried', () => {
+    // My vote on group g1 and my vote on card C. I take my g1 vote back while
+    // someone drops C into g1, and their write wins.
+    const start = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [ME] })], groups: [group('g1', [ME])] });
+    const removed = makeSession({ ...board, tickets: start.tickets, groups: [group('g1')] });
+    const ownChanges = claiming(start, removed);
+    const incoming = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [ME, ME, OTHER])] });
+
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, removed, ctx({ ownChanges }), noPending());
+
+    expect(mine(merged.groups[0].votes)).toBe(1);
+    expect(merged.groups[0].votes).toContain(OTHER);
+    expect(divergent).toBe(true);
+  });
+
+  it('re-sends a vote cast on the group while a regrouping moved another of the user’s votes in', () => {
+    const start = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [ME] })], groups: [group('g1')] });
+    const voted = makeSession({ ...board, tickets: start.tickets, groups: [group('g1', [ME])] });
+    const ownChanges = claiming(start, voted);
+    // The regrouping won: C's vote moved into g1, my vote on g1 did not land.
+    const incoming = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [ME])] });
+
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, voted, ctx({ ownChanges }), noPending());
+
+    expect(mine(merged.groups[0].votes)).toBe(2);
+    expect(divergent).toBe(true);
+
+    // The re-send lands: the claim is confirmed and nothing more is sent.
+    const settled = mergeRemoteRetroSession(merged, merged, ctx({ ownChanges }), noPending());
+    expect(settled.divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
+  });
+
+  it('keeps one vote on a group under one vote per item, when a moved card carried another', () => {
+    // One vote per item, a board's default. I vote on g1 while someone drops
+    // C, which holds my vote, into it: their write wins, and the grouping kept
+    // one vote of mine on g1 (combineVotes). My claim and the moved card's
+    // vote are the same vote for the item: re-sent as two, g1 held two votes
+    // of one person under one vote per item.
+    const oneVote = { ...board, settings: { ...baseSettings(), oneVotePerTicket: true, unlimitedVotes: true } };
+    const start = makeSession({ ...oneVote, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [ME] })], groups: [group('g1')] });
+    const voted = makeSession({ ...oneVote, tickets: start.tickets, groups: [group('g1', [ME])] });
+    const ownChanges = claiming(start, voted);
+    const incoming = makeSession({ ...oneVote, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [ME])] });
+
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, voted, ctx({ ownChanges }), noPending());
+
+    expect(mine(merged.groups[0].votes)).toBe(1);
+    expect(divergent).toBe(false);
+    expect(ownChanges.size).toBe(0);
+  });
+
+  it('counts only the votes on cards the group received, not on cards it already held', () => {
+    const start = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [OTHER] })], groups: [group('g1')] });
+    const voted = makeSession({ ...board, tickets: start.tickets, groups: [group('g1', [ME])] });
+    const ownChanges = claiming(start, voted);
+    // C carried someone else's vote only: my claim stays one vote.
+    const incoming = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [OTHER])] });
+
+    const { merged } = mergeRemoteRetroSession(incoming, voted, ctx({ ownChanges }), noPending());
+
+    expect(mine(merged.groups[0].votes)).toBe(1);
+    expect(merged.groups[0].votes).toContain(OTHER);
+  });
+
+  it('counts them in a guided retro too, back from a board with votes on its cards', () => {
+    const guided = { phase: 'GROUP' };
+    const start = makeSession({ ...guided, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [ME] })], groups: [group('g1', [ME])] });
+    const removed = makeSession({ ...guided, tickets: start.tickets, groups: [group('g1')] });
+    const ownChanges = claiming(start, removed);
+    // The Group phase carries C's vote into g1, as the board does.
+    const incoming = makeSession({ ...guided, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [ME, ME])] });
+
+    const { merged } = mergeRemoteRetroSession(incoming, removed, ctx({ ownChanges }), noPending());
+
+    expect(mine(merged.groups[0].votes)).toBe(1);
+  });
+
+  it('drops a group claim when the user then drops one of their voted cards into the group', () => {
+    // I vote on g1, then drop C, which carries my vote, into it; both writes
+    // are refused and the heal is where I started. Kept, the g1 claim would
+    // re-assert two votes on g1 beside the one C keeps: two votes counted three.
+    const start = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), makeTicket('C', { votes: [ME] })], groups: [group('g1')] });
+    const voted = makeSession({ ...board, tickets: start.tickets, groups: [group('g1', [ME])] });
+    const grouped = makeSession({ ...board, tickets: [inG1('A'), inG1('B'), inG1('C')], groups: [group('g1', [ME, ME])] });
+    const ledger: OwnChangeLedger = new Map();
+    registerOwnRetroChanges(ledger, start, voted, ME, NOW);
+    expect([...ledger.keys()]).toEqual(['groupVotes:g1']);
+    registerOwnRetroChanges(ledger, voted, grouped, ME, NOW + 10);
+
+    const { merged, divergent } = mergeRemoteRetroSession(start, grouped, ctx({ ownChanges: ledger }), noPending());
+
+    expect(merged.groups[0].votes).toEqual([]);
+    expect(merged.tickets.find((t) => t.id === 'C')?.votes).toEqual([ME]);
+    expect(divergent).toBe(false);
   });
 });

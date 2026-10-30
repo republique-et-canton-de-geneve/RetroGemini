@@ -7,6 +7,7 @@ import {
   rateableRoundActions
 } from './closedActionsForRating';
 import SessionParticipantsPanel, { ParticipantRowStatus } from './SessionParticipantsPanel';
+import { isOpenBoard } from '../../utils/openBoard';
 
 /**
  * The retrospective's participants panel: the shared SessionParticipantsPanel,
@@ -47,6 +48,32 @@ const ParticipantsPanel: React.FC<Props> = ({
   getMemberDisplay
 }) => {
   const { t, tp } = useTranslation();
+
+  // An open board stays open for weeks, and anyone with the link may drop by:
+  // its panel lists who is connected right now and no one else, and someone
+  // who leaves leaves the list. No waiting list, no "has left" marking and no
+  // progress to count — every one of those would only ever grow.
+  if (isOpenBoard(session)) {
+    const connected = participants.filter((p) => connectedUsers.has(p.id));
+    return (
+      <SessionParticipantsPanel
+        participants={connected}
+        anonymous={session.settings.isAnonymous}
+        connectedUsers={connectedUsers}
+        currentUser={currentUser}
+        isFacilitator={isFacilitator}
+        isCollapsed={isCollapsed}
+        activityUsers={activityUsers}
+        memberStatus={() => null}
+        heading={t('phases.participants.connectedTitle', { count: connected.length })}
+        footer={t('phases.participants.footerConnected')}
+        onToggleCollapse={onToggleCollapse}
+        onInvite={onInvite}
+        getMemberDisplay={getMemberDisplay}
+      />
+    );
+  }
+
   // Tickets authored per participant (Brainstorm onwards). Computed here so the
   // panel updates live as cards are added.
   const ticketCounts: Record<string, number> = {};

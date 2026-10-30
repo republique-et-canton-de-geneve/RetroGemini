@@ -44,6 +44,13 @@ const dashboard = {
   'dashboard.newRetro.title': 'Start New Retrospective',
   'dashboard.newRetro.close': 'Close new retrospective dialog',
   'dashboard.newRetro.anonymousHint': 'Hide author names on tickets for this retro.',
+  'dashboard.newRetro.boardTypeLabel': 'Board type',
+  'dashboard.newRetro.boardTypeGuided': 'Guided retrospective',
+  'dashboard.newRetro.boardTypeOpen': 'Open board',
+  'dashboard.newRetro.boardTypeGuidedHint':
+    'Phase by phase: icebreaker, brainstorm, grouping, vote, discussion and actions.',
+  'dashboard.newRetro.boardTypeOpenHint':
+    'Everything on one screen, and it stays open: add, group, move and vote on cards at any time. Ideal for a Lean Coffee. You can switch it to a guided retrospective later, and back.',
   'dashboard.newRetro.savedTemplates': 'Saved Templates',
   'dashboard.newRetro.createCustom': 'Create Custom Template',
   'dashboard.newRetro.customTemplateName': 'Template Name (Optional, to save)',
@@ -92,6 +99,8 @@ const dashboard = {
   'dashboard.session.resume': 'Resume',
   'dashboard.retroStatus.IN_PROGRESS': 'IN PROGRESS',
   'dashboard.retroStatus.CLOSED': 'CLOSED',
+  // An open board is never closed: the list names it instead of a status.
+  'dashboard.retroStatus.OPEN_BOARD': 'OPEN BOARD',
   'dashboard.healthCheckStatus.IN_PROGRESS': 'IN PROGRESS',
   'dashboard.healthCheckStatus.CLOSED': 'CLOSED',
 

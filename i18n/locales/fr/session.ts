@@ -29,6 +29,8 @@ const session: Record<keyof typeof en, string> = {
   'session.board.editLayout': 'Modifier la disposition',
   'session.board.oneVotePerItem': '1 vote par élément',
   'session.board.maxVotes': 'Max\u00a0:',
+  'session.board.maxVotesInput': 'Votes max par personne',
+  'session.board.unlimitedVotes': 'Votes illimités',
   'session.board.decreaseMaxVotes': 'Diminuer le nombre maximal de votes',
   'session.board.increaseMaxVotes': 'Augmenter le nombre maximal de votes',
   'session.board.finished': 'Terminé\u202f!',
@@ -39,6 +41,47 @@ const session: Record<keyof typeof en, string> = {
   'session.board.nextColumns': 'Afficher les colonnes suivantes',
   'session.board.columnOffScreen': '(hors de l’écran)',
   'session.board.columnsInView': 'Colonnes visibles\u00a0: {shown} sur {total}',
+
+  // Open board (utils/openBoard.ts)
+  'session.openBoard.title': 'Tableau ouvert',
+  'session.openBoard.anonymous': 'Anonyme',
+  'session.openBoard.showAuthorsTitle': 'Afficher qui a écrit chaque carte\u202f?',
+  'session.openBoard.showAuthorsBody':
+    'Les cartes écrites pendant que le tableau était anonyme montreront aussi leur auteur, pour toutes les personnes présentes sur le tableau.',
+  'session.openBoard.keepAnonymous': 'Rester anonyme',
+  'session.openBoard.showAuthors': 'Afficher les auteurs',
+  'session.openBoard.switchToGuided': 'Passer en rétrospective guidée',
+  'session.openBoard.switchToGuidedHint':
+    'Parcourir les phases une à une. Toutes les cartes, tous les groupes et tous les votes restent sur le tableau.',
+  'session.openBoard.switchToBoard': 'Passer en tableau ouvert',
+  'session.openBoard.switchToBoardHint':
+    'Tout sur un seul écran, sans phases\u00a0: ajoutez, regroupez, déplacez et votez sur les cartes à tout moment. Toutes les cartes, tous les groupes et tous les votes sont conservés.',
+  'session.openBoard.settingsButton': 'Paramètres',
+  'session.openBoard.settingsTitle': 'Paramètres du tableau',
+  'session.openBoard.settingsCards': 'Cartes',
+  'session.openBoard.anonymousHint': 'Aucune carte n’indique qui l’a écrite.',
+  'session.openBoard.hideCards': 'Masquer les cartes',
+  'session.openBoard.hideCardsHint':
+    'Chaque personne ne lit que ses propres cartes jusqu’à ce que vous les affichiez. Une carte masquée ne peut être ni votée, ni regroupée, ni déplacée.',
+  'session.openBoard.settingsVotes': 'Votes',
+  'session.openBoard.disableVoting': 'Désactiver le vote',
+  'session.openBoard.disableVotingHint':
+    'Aucun vote ne peut être ajouté ni retiré. Les totaux restent affichés, sauf si vous les masquez aussi.',
+  'session.openBoard.hideVoteCount': 'Masquer le nombre de votes',
+  'session.openBoard.hideVoteCountHint':
+    'Chaque personne ne voit que ses propres votes, et le tableau n’est pas trié par votes.',
+  'session.openBoard.unlimitedVotesHint': 'Le désactiver retire les votes au-delà du maximum.',
+  'session.openBoard.oneVotePerItem': 'Un vote par carte ou par groupe',
+  'session.openBoard.votesPerPerson': 'Votes par personne',
+  'session.openBoard.votingOff': 'Vote désactivé',
+  'session.openBoard.search': 'Rechercher dans les cartes',
+  'session.openBoard.searchPlaceholder': 'Rechercher',
+  'session.openBoard.searchResults_one': '{count} résultat',
+  'session.openBoard.searchResults_other': '{count} résultats',
+  'session.openBoard.sortBy': 'Trier les cartes',
+  'session.openBoard.sortNewest': 'Plus récentes d’abord',
+  'session.openBoard.sortOldest': 'Plus anciennes d’abord',
+  'session.openBoard.sortVotes': 'Plus votées d’abord',
 
   // Touch hints (role="status", phone layout only)
   'session.hint.groupSelected':
@@ -51,6 +94,10 @@ const session: Record<keyof typeof en, string> = {
     'Astuce tactile\u00a0: touchez une carte pour la sélectionner, puis choisissez la colonne où la déplacer.',
   'session.hint.moveIdleOwnCards':
     'Astuce tactile\u00a0: touchez l’une de vos cartes pour la sélectionner, puis choisissez la colonne où la déplacer.',
+  'session.hint.boardIdle':
+    'Astuce tactile\u00a0: touchez une carte, puis une autre carte, un groupe ou une colonne pour l’y déplacer. Touchez un groupe pour le déplacer dans une autre colonne.',
+  'session.hint.boardIdleOwnCards':
+    'Astuce tactile\u00a0: touchez l’une de vos cartes, puis une autre de vos cartes, un groupe de vos cartes ou une colonne pour l’y déplacer. Touchez un groupe de vos cartes pour le déplacer dans une autre colonne.',
 
   // Columns
   'session.column.moveTo': 'Déplacer vers {title}',
@@ -73,9 +120,17 @@ const session: Record<keyof typeof en, string> = {
   'session.ticket.editAria': 'Modifier la carte',
   'session.ticket.addReaction': 'Ajouter une réaction',
   'session.ticket.delete': 'Supprimer la carte',
+  'session.ticket.hidden': 'Carte masquée',
   'session.ticket.comments': 'Commentaires',
   'session.ticket.removeVote': 'Retirer un vote de cette carte',
   'session.ticket.addVote': 'Ajouter un vote à cette carte',
+  'session.ticket.voteTotal_one': '{count} vote au total',
+  'session.ticket.voteTotal_other': '{count} votes au total',
+  'session.ticket.addVoteWithTotal_one': '{count} vote, ajouter un vote à cette carte',
+  'session.ticket.addVoteWithTotal_other': '{count} votes, ajouter un vote à cette carte',
+  'session.ticket.removeMyVote': 'Retirer l’un de vos votes de cette carte',
+  'session.ticket.myVotes_one': 'Vous lui avez donné {count} vote',
+  'session.ticket.myVotes_other': 'Vous lui avez donné {count} votes',
 
   // Group container
   'session.group.label': 'Groupe',
@@ -87,6 +142,9 @@ const session: Record<keyof typeof en, string> = {
   'session.group.addSelectedCard': 'Ajouter la carte sélectionnée à ce groupe',
   'session.group.removeVote': 'Retirer un vote de ce groupe',
   'session.group.addVote': 'Ajouter un vote à ce groupe',
+  'session.group.addVoteWithTotal_one': '{count} vote, ajouter un vote à ce groupe',
+  'session.group.addVoteWithTotal_other': '{count} votes, ajouter un vote à ce groupe',
+  'session.group.removeMyVote': 'Retirer l’un de vos votes de ce groupe',
 
   // Grouping banners on a ticket card (TicketGroupingBanner.tsx)
   'session.groupingBanner.dropTarget': 'Regrouper avec cette carte',

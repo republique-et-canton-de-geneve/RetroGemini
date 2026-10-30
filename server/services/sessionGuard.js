@@ -19,6 +19,9 @@
 // differ.
 const PROTECTED_SESSION_FIELDS = [
   'phase',
+  // The guided phase an open board resumes at when the facilitator turns it
+  // back (utils/openBoard.ts). Written with `phase`, by the same gesture.
+  'guidedPhase',
   'status',
   'name',
   'date',
@@ -64,7 +67,13 @@ const PROTECTED_SETTINGS_FIELDS = [
   'revealActionImpact',
   'colorBy',
   'showParticipantVotes',
-  'timerInitial'
+  'timerInitial',
+  // The vote rules an open board adds (utils/voteBudget.ts, utils/boardView.ts):
+  // a participant who could lift the budget, re-open voting or show the totals
+  // would decide them for everyone.
+  'unlimitedVotes',
+  'votingDisabled',
+  'voteCountHidden'
 ];
 
 // Deep structural equality, insensitive to object key order, with null and

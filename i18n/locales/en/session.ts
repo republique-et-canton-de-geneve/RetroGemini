@@ -29,6 +29,10 @@ const session = {
   'session.board.editLayout': 'Edit Layout',
   'session.board.oneVotePerItem': '1 vote/item',
   'session.board.maxVotes': 'Max:',
+  // The number field beside "Max:". Its name carries that visible word (WCAG 2.5.3).
+  'session.board.maxVotesInput': 'Max votes per person',
+  // No limit on the votes one person may cast (utils/voteBudget.ts).
+  'session.board.unlimitedVotes': 'Unlimited votes',
   'session.board.decreaseMaxVotes': 'Decrease max votes',
   'session.board.increaseMaxVotes': 'Increase max votes',
   'session.board.finished': 'Finished!',
@@ -40,6 +44,49 @@ const session = {
   'session.board.columnOffScreen': '(off screen)',
   'session.board.columnsInView': 'Columns in view: {shown} of {total}',
 
+  // Open board (utils/openBoard.ts): every card activity on one screen, no phases
+  'session.openBoard.title': 'Open board',
+  'session.openBoard.anonymous': 'Anonymous',
+  // ShowAuthorsDialog.tsx: turning anonymity off reveals the earlier cards too.
+  'session.openBoard.showAuthorsTitle': 'Show who wrote each card?',
+  'session.openBoard.showAuthorsBody':
+    'The cards written while the board was anonymous will show their author too, for everyone on the board.',
+  'session.openBoard.keepAnonymous': 'Keep it anonymous',
+  'session.openBoard.showAuthors': 'Show the authors',
+  'session.openBoard.switchToGuided': 'Switch to a guided retrospective',
+  'session.openBoard.switchToGuidedHint':
+    'Go through the phases one by one. Every card, group and vote stays on the board.',
+  'session.openBoard.switchToBoard': 'Switch to an open board',
+  'session.openBoard.switchToBoardHint':
+    'Everything on one screen, with no phases: add, group, move and vote on cards at any time. Every card, group and vote is kept.',
+  // Its settings (BoardSettingsDialog.tsx), opened from the board's bar.
+  'session.openBoard.settingsButton': 'Settings',
+  'session.openBoard.settingsTitle': 'Board settings',
+  'session.openBoard.settingsCards': 'Cards',
+  'session.openBoard.anonymousHint': 'No card shows who wrote it.',
+  'session.openBoard.hideCards': 'Hide cards',
+  'session.openBoard.hideCardsHint':
+    'Each person reads only their own cards until you show them. A hidden card cannot be voted on, grouped or moved.',
+  'session.openBoard.settingsVotes': 'Votes',
+  'session.openBoard.disableVoting': 'Disable voting',
+  'session.openBoard.disableVotingHint':
+    'No vote can be added or taken back. The totals stay shown, unless you hide them too.',
+  'session.openBoard.hideVoteCount': 'Hide vote count',
+  'session.openBoard.hideVoteCountHint': 'Each person sees only their own votes, and the board is not sorted by votes.',
+  'session.openBoard.unlimitedVotesHint': 'Turning it off takes back the votes above the maximum.',
+  'session.openBoard.oneVotePerItem': 'One vote per card or group',
+  'session.openBoard.votesPerPerson': 'Votes per person',
+  'session.openBoard.votingOff': 'Voting is off',
+  // Search and sort (utils/boardView.ts): each person's own view of the board.
+  'session.openBoard.search': 'Search the cards',
+  'session.openBoard.searchPlaceholder': 'Search',
+  'session.openBoard.searchResults_one': '{count} result',
+  'session.openBoard.searchResults_other': '{count} results',
+  'session.openBoard.sortBy': 'Sort the cards',
+  'session.openBoard.sortNewest': 'Newest first',
+  'session.openBoard.sortOldest': 'Oldest first',
+  'session.openBoard.sortVotes': 'Most voted first',
+
   // Touch hints (role="status", phone layout only)
   'session.hint.groupSelected':
     'Card selected. Tap another card, a group, or a column to move it there. Tap the selected card again, or press Escape, to cancel.',
@@ -49,6 +96,10 @@ const session = {
   'session.hint.moveIdleRevealed': 'Touch hint: tap a card to select it, then choose the column to move it to.',
   'session.hint.moveIdleOwnCards':
     'Touch hint: tap one of your own cards to select it, then choose the column to move it to.',
+  'session.hint.boardIdle':
+    'Touch hint: tap a card, then another card, a group or a column to move it there. Tap a group to move it to another column.',
+  'session.hint.boardIdleOwnCards':
+    'Touch hint: tap one of your own cards, then another of yours, a group of your own cards or a column to move it there. Tap a group of your own cards to move it to another column.',
 
   // Columns
   'session.column.moveTo': 'Move to {title}',
@@ -72,9 +123,20 @@ const session = {
   'session.ticket.editAria': 'Edit ticket',
   'session.ticket.addReaction': 'Add reaction',
   'session.ticket.delete': 'Delete ticket',
+  'session.ticket.hidden': 'Hidden card',
   'session.ticket.comments': 'Comments',
   'session.ticket.removeVote': 'Remove a vote from this ticket',
   'session.ticket.addVote': 'Add a vote to this ticket',
+  // Open board: the votes a card or a group holds from everyone.
+  'session.ticket.voteTotal_one': '{count} vote in total',
+  'session.ticket.voteTotal_other': '{count} votes in total',
+  // The board's vote button (BoardVoteControl.tsx): its visible text is the
+  // total, so its name starts with it (WCAG 2.5.3).
+  'session.ticket.addVoteWithTotal_one': '{count} vote, add a vote to this ticket',
+  'session.ticket.addVoteWithTotal_other': '{count} votes, add a vote to this ticket',
+  'session.ticket.removeMyVote': 'Take back one of your votes on this ticket',
+  'session.ticket.myVotes_one': 'You gave it {count} vote',
+  'session.ticket.myVotes_other': 'You gave it {count} votes',
 
   // Group container
   'session.group.label': 'Group',
@@ -86,6 +148,9 @@ const session = {
   'session.group.addSelectedCard': 'Add selected card to this group',
   'session.group.removeVote': 'Remove a vote from this group',
   'session.group.addVote': 'Add a vote to this group',
+  'session.group.addVoteWithTotal_one': '{count} vote, add a vote to this group',
+  'session.group.addVoteWithTotal_other': '{count} votes, add a vote to this group',
+  'session.group.removeMyVote': 'Take back one of your votes on this group',
 
   // Grouping banners on a ticket card (TicketGroupingBanner.tsx)
   'session.groupingBanner.dropTarget': 'Group with this',

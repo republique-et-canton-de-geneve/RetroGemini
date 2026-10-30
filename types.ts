@@ -319,6 +319,17 @@ export interface RetroSettings extends SessionTimerSettings {
   participantsPanelCollapsed?: boolean; // Whether participants panel is collapsed
   colorBy?: 'author' | 'topic'; // Color post-its by author or by topic/column
   showParticipantVotes?: boolean; // Show individual vote types in proposal vote tooltip
+  // No limit on the votes one person may cast (utils/voteBudget.ts), read
+  // wherever the budget is, the Vote phase included. An open board kept for
+  // weeks has its votes cast once and never handed back.
+  unlimitedVotes?: boolean;
+  // Read on the open board only: no vote can be cast or taken back there, and
+  // the totals stay shown unless hidden too.
+  votingDisabled?: boolean;
+  // Read on the open board only: nobody sees the totals, only their own votes,
+  // and the board is not sorted by them (the Vote phase keeps its totals to
+  // itself whatever this says).
+  voteCountHidden?: boolean;
 }
 
 // A teammate the facilitator invited by email while the session was open.
@@ -355,7 +366,13 @@ export interface RetroSession extends RevisionStamped {
   name: string;
   date: string;
   status: 'IN_PROGRESS' | 'CLOSED';
+  // One of the guided phases, or `OPEN_BOARD` for an open board: every card
+  // activity on one screen, no phases, never closed (utils/openBoard.ts).
   phase: string;
+  // The guided phase a retro was at when the facilitator turned it into an
+  // open board, and where turning it back resumes. Absent on a board created
+  // open, and on every guided retro. Facilitator-only, like `phase`.
+  guidedPhase?: string;
   participants?: User[];
   // Participants marked by the facilitator as having left mid-session
   // (emergency, other commitment...). They stay visible in the participants

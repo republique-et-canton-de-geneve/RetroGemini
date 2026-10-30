@@ -87,6 +87,17 @@ const RETRO_PHASE_TIP_DEFINITIONS: RetroPhaseTipDefinition[] = [
     purposeKey: 'phases.tips.close.purpose',
     timeboxMinutes: 3,
     defaultTimerSeconds: 180
+  },
+  // The open board (utils/openBoard.ts) has no phases, so its timer serves the
+  // topic under discussion: the usual Lean Coffee timebox. Switching a retro
+  // to the board resets the timer to it, as any phase change does.
+  {
+    phase: 'OPEN_BOARD',
+    labelKey: 'phases.tips.openBoard.label',
+    purposeKey: 'phases.tips.openBoard.purpose',
+    timeboxMinutes: 5,
+    timeboxPerTopic: true,
+    defaultTimerSeconds: 300
   }
 ];
 
