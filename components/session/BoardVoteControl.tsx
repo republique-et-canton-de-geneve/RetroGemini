@@ -17,7 +17,9 @@ import { useTranslation } from '../../i18n/I18nContext';
  * vote right now is `aria-disabled`, not `disabled`, because the vote that
  * used up one vote per item would otherwise disable the very button it was
  * cast with and send the focus to the page; and taking back one's last vote
- * hands the focus to the vote button before the cross that had it goes.
+ * hands the focus to the vote button before the cross that had it goes — or,
+ * on an item that takes no vote, to the card or group itself, which the
+ * session marks `data-vote-focus-host` and makes focusable.
  */
 
 interface Props {
@@ -101,7 +103,13 @@ const BoardVoteControl: React.FC<Props> = ({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              if (mine === 1 && !takeBackOnly && document.activeElement === e.currentTarget) addRef.current?.focus();
+              if (mine === 1 && document.activeElement === e.currentTarget) {
+                // An item that takes no vote has no vote button to hand the
+                // focus to, and its row may go with the cross: the card or
+                // group itself takes it (`data-vote-focus-host`).
+                if (takeBackOnly) e.currentTarget.closest<HTMLElement>('[data-vote-focus-host]')?.focus();
+                else addRef.current?.focus();
+              }
               onRemove();
             }}
             disabled={disabled}

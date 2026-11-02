@@ -22,7 +22,6 @@ const session: Record<keyof typeof en, string> = {
     'Demander à l’assistant de proposer des regroupements. Vous validerez chaque suggestion avant qu’elle soit appliquée.',
   'session.board.revealCards': 'Révéler les cartes',
   'session.board.colorBy': 'Couleur par\u00a0:',
-  'session.board.colorByAria': 'Colorer les cartes par',
   'session.board.colorByTopic': 'Thème',
   'session.board.colorByAuthor': 'Auteur',
   'session.board.doneEditingLayout': 'Terminer la modification',

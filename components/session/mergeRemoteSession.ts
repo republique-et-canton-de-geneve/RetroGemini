@@ -465,9 +465,20 @@ const registerOwnRetroChanges = (
   // The facilitator's settings, one click each: two clicks within one round
   // trip are two writes from one revision, and the heal of the second took it
   // back. Only the facilitator's client claims, for the summary's reason.
+  //
+  // Settings a phase change wrote travel with it: a switch of type before any
+  // card takes the new type's card and vote defaults, and entering the board
+  // from Group shows the cards (recordBoardTypeChange). The phase is not
+  // claimed — it is navigation, where the server wins — so a phase change that
+  // loses its race is healed away whole. Claimed, its settings outlived it, and
+  // a guided Brainstorm took the board's defaults: every card shown. Such a
+  // write also replaces any earlier claim on the settings it changed.
   if (isFacilitator) {
+    const phaseChanged = before.phase !== after.phase;
     for (const key of CLAIMED_SETTINGS) {
-      if (settingOf(before.settings, key) !== settingOf(after.settings, key)) claim(ownKey.setting(key));
+      if (settingOf(before.settings, key) === settingOf(after.settings, key)) continue;
+      if (phaseChanged) ledger.delete(ownKey.setting(key));
+      else claim(ownKey.setting(key));
     }
   }
 
@@ -624,15 +635,29 @@ const mergeRemoteRetroSession = (
     divergent = true;
   }
 
+  // --- The facilitator's own settings, re-asserted while unconfirmed: the
+  // setting as clicked here, everything else as the server has it (applied
+  // after the votes, below). Worked out first, because the votes follow the
+  // vote model this merge ends with: compared with the server's alone, the
+  // facilitator's own unconfirmed loosening read as the server tightening it,
+  // and every vote they cast under it was dropped while the looser model was
+  // re-sent. Every other client claims none and takes the server's settings.
+  const reassertedSettings = CLAIMED_SETTINGS.filter(key =>
+    ownValueWins(ledger, ownKey.setting(key), settingOf(prev.settings, key) === settingOf(incoming.settings, key), now));
+  const settings: RetroSettings = { ...incoming.settings };
+  for (const key of reassertedSettings) {
+    (settings as unknown as Record<string, unknown>)[key] = prev.settings[key];
+  }
+
   // --- Own votes on tickets and groups. The server wins when the vote model
   // tightened between the two states — one vote per item turned on, a lower
   // budget (unlimited votes turned off included), voting turned off: its state
   // is then the cleanup result, or votes are closed. A looser model took
   // nothing back, so a vote that lost its race against one is re-sent like any
   // other, and so is one under one vote per item, an open board's default.
-  const tightened = (!!incoming.settings.oneVotePerTicket && !prev.settings.oneVotePerTicket)
-    || voteBudget(incoming.settings) < voteBudget(prev.settings)
-    || (!!incoming.settings.votingDisabled && !prev.settings.votingDisabled);
+  const tightened = (!!settings.oneVotePerTicket && !prev.settings.oneVotePerTicket)
+    || voteBudget(settings) < voteBudget(prev.settings)
+    || (!!settings.votingDisabled && !prev.settings.votingDisabled);
   const preserveVotes = !tightened;
   // The vote slices re-asserted below, undone together when they would take
   // the voter past the budget (after both lists).
@@ -703,7 +728,7 @@ const mergeRemoteRetroSession = (
       // voter whose card it moved in (combineVotes), so a vote on the group
       // and the moved card's are the same vote for the item.
       const claimedOwn = Math.min(
-        incoming.settings.oneVotePerTicket ? 1 : Number.POSITIVE_INFINITY,
+        settings.oneVotePerTicket ? 1 : Number.POSITIVE_INFINITY,
         ownVoteCount(prevGroup.votes, userId) + ownVotesMovedInto(group.id),
       );
       const matches = ownVoteCount(group.votes, userId) === claimedOwn;
@@ -726,7 +751,7 @@ const mergeRemoteRetroSession = (
   // budget allows: the server's state is the one that was counted, so it wins
   // for every vote this merge would have re-sent.
   if (reassertedVotes.length > 0) {
-    const allowed = Math.max(voteBudget(incoming.settings), ownVotesIn(incoming, userId));
+    const allowed = Math.max(voteBudget(settings), ownVotesIn(incoming, userId));
     if (ownVotesIn(merged, userId) > allowed) {
       const undone = new Set(reassertedVotes);
       const serverTickets = new Map(incoming.tickets.map(t => [t.id, t.votes]));
@@ -922,19 +947,11 @@ const mergeRemoteRetroSession = (
     merged.reviewSummary = prev.reviewSummary;
   }
 
-  // --- The facilitator's own settings, re-asserted while unconfirmed: the
-  // setting as clicked here, everything else as the server has it. A setting
-  // that takes votes back (a lower number, unlimited off, one vote per item
-  // on) took them in the write that lost, so it takes them back again from the
-  // server's votes — the re-sent state would otherwise hold more than it
-  // allows. Every other client takes the server's settings.
-  const reassertedSettings = CLAIMED_SETTINGS.filter(key =>
-    ownValueWins(ledger, ownKey.setting(key), settingOf(prev.settings, key) === settingOf(incoming.settings, key), now));
+  // --- The facilitator's own settings worked out above. A setting that takes
+  // votes back (a lower number, unlimited off, one vote per item on) took them
+  // in the write that lost, so it takes them back again from the server's
+  // votes — the re-sent state would otherwise hold more than it allows.
   if (reassertedSettings.length > 0) {
-    const settings: RetroSettings = { ...merged.settings };
-    for (const key of reassertedSettings) {
-      (settings as unknown as Record<string, unknown>)[key] = prev.settings[key];
-    }
     merged.settings = settings;
     divergent = true;
     const takesVotesBack = (!!settings.oneVotePerTicket && !incoming.settings.oneVotePerTicket)

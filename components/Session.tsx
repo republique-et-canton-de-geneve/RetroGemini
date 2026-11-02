@@ -181,6 +181,20 @@ const isRetroSession = (session: unknown): session is RetroSession => {
 };
 
 
+/**
+ * How long a number typed in the votes field and left by a click waits for
+ * that click's own write before it is written alone (commitMaxVotesInput).
+ * Longer than a click takes from the press to its release.
+ */
+const PENDING_MAX_VOTES_MS = 400;
+
+// Lowering the number takes back the votes above it (utils/voteBudget.ts).
+// With unlimited votes the number waits, unused, and caps nothing.
+const applyMaxVotes = (s: RetroSession, newVal: number) => {
+  s.settings.maxVotes = Math.max(1, newVal);
+  if (!s.settings.unlimitedVotes) capVotes(s, s.settings.maxVotes);
+};
+
 const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
   // Named `tr`, not `t`: `t` is the ticket variable throughout this file.
   const { t: tr } = useTranslation();
@@ -563,8 +577,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     };
     if (hiddenFromViewer(focusedTicketId)) setFocusedTicketId(null);
     if (hiddenFromViewer(editingTicketId)) setEditingTicketId(null);
-  }, [session, focusedTicketId, editingTicketId, currentUser.id]);
+    // A group's title field goes too, without its blur, which React never runs
+    // for an element it removes: the group would stay "being typed" here, its
+    // title kept over every rename (mergeRemoteSession), and the field would
+    // take the focus again when it came back.
+    const groupHidden = (id: string | null) => !!id && isOpenBoard(session)
+      && session.groups.some(g => g.id === id) && !canReadGroup(session, id, currentUser.id);
+    if (groupHidden(editingGroupId)) setEditingGroupId(null);
+    if (groupHidden(focusGroupId)) setFocusGroupId(null);
+  }, [session, focusedTicketId, editingTicketId, editingGroupId, focusGroupId, currentUser.id]);
   const [maxVotesInput, setMaxVotesInput] = useState(session?.settings.maxVotes.toString() ?? '5');
+  // A number typed in the votes field and left by a click on another control
+  // waits for that control's own write (updateSession folds it in) or, when
+  // the click writes nothing, a moment: the blur and the click were two writes
+  // from one revision, and the server refused the second — a Next Phase or a
+  // timer start pressed right after typing snapped back. A gesture is one write.
+  const pendingMaxVotesRef = useRef<number | null>(null);
+  const pendingMaxVotesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (pendingMaxVotesTimerRef.current) clearTimeout(pendingMaxVotesTimerRef.current);
+  }, []);
   // Local participants panel state (not synced across users)
   const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
   const [isRetroTipsOpen, setIsRetroTipsOpen] = useState(false);
@@ -575,6 +607,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setMaxVotesInput(session.settings.maxVotes.toString());
     }
   }, [session?.settings.maxVotes]);
+  // A draft belongs to the field it was typed in. Escape closes the settings
+  // without leaving the field, and a phase change removes the Vote bar's, so
+  // neither applies it: dropped here, it never comes back in the next field to
+  // be applied by the first Tab through it.
+  useEffect(() => {
+    const stored = sessionRef.current?.settings.maxVotes;
+    if (stored) setMaxVotesInput(String(stored));
+  }, [boardSettingsOpen, session?.phase]);
 
   const getAnonymizedLabel = (memberId: string) => {
     if (!session?.settings.isAnonymous) return null;
@@ -788,7 +828,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             currentUserId: currentUser.id,
             preserveIcebreaker: currentUser.role === 'facilitator' && localIcebreakerQuestion !== null,
             editingTicketId: editingTicketIdRef.current,
-            editingGroupId: editingGroupIdRef.current,
+            // Only while its field really has the focus. React runs no blur
+            // for a field it removes (a phase change, the cards hidden), and a
+            // group left "being typed" here kept its old title over every
+            // rename, and sent it back to everyone with this screen's next write.
+            editingGroupId: editingGroupIdRef.current
+              && document.activeElement?.getAttribute('data-group-title-id') === editingGroupIdRef.current
+              ? editingGroupIdRef.current
+              : null,
             ownChanges: ownChangesRef.current
           },
           pendingCreationsRef.current
@@ -895,12 +942,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       setIsLive(false);
     });
 
-    // Send initial session state (facilitator sends their version)
-    if (currentUser.role === 'facilitator' && session) {
-      setTimeout(() => syncService.updateSession(session), 500);
-    }
+    // Send initial session state (facilitator sends their version). Cancelled
+    // with the rest on the way out: a session left within the delay sent its
+    // state after the leave.
+    const initialSend = currentUser.role === 'facilitator' && session
+      ? setTimeout(() => syncService.updateSession(session), 500)
+      : null;
 
     return () => {
+      if (initialSend) clearTimeout(initialSend);
       unsubUpdate();
       unsubJoin();
       unsubLeave();
@@ -975,18 +1025,27 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   }, [activeDiscussTicket]);
 
     // Force update wrapper using Ref for reliability
-    const updateSession = (updater: (s: RetroSession) => void) => {
+    const takePendingMaxVotes = (): number | null => {
+    const pending = pendingMaxVotesRef.current;
+    pendingMaxVotesRef.current = null;
+    if (pendingMaxVotesTimerRef.current) clearTimeout(pendingMaxVotesTimerRef.current);
+    pendingMaxVotesTimerRef.current = null;
+    return pending;
+  };
+
+    // Answers the session it wrote, or null when it wrote nothing.
+    const updateSession = (updater: (s: RetroSession) => void): RetroSession | null => {
     // Editing is paused while offline: applying a change to a stale,
     // disconnected snapshot would be lost or rejected on reconnect. Inputs are
     // disabled and a banner explains the state, so this is the final guard.
     if (!isLiveRef.current) {
-      return;
+      return null;
     }
     const baseSession = sessionRef.current
       ?? dataService.getTeam(team.id)?.retrospectives.find(r => r.id === sessionId)
       ?? null;
 
-    if(!baseSession) return;
+    if(!baseSession) return null;
 
     const newSession = JSON.parse(JSON.stringify(baseSession));
     if (!newSession.participants) newSession.participants = [];
@@ -1004,6 +1063,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       existingIds.add(currentUser.id);
     }
 
+    const pendingMaxVotes = takePendingMaxVotes();
+    if (pendingMaxVotes !== null) applyMaxVotes(newSession, pendingMaxVotes);
     updater(newSession);
     // Declare which of the current user's own slices this write changed, before
     // it goes out: the merge needs that to tell a healed write of ours from a
@@ -1014,6 +1075,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     setSession(newSession);
     // Sync to other clients via WebSocket
     syncService.updateSession(newSession);
+    return newSession;
   };
 
   // Handle icebreaker question change with debounce to prevent sync conflicts
@@ -1344,13 +1406,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // --- Logic ---
   const handleExit = () => {
+      // A number just left for this button is written first, through the
+      // session's own write, so the exit's save below carries it.
+      const leaving = (pendingMaxVotesRef.current !== null ? updateSession(() => {}) : null) ?? session;
       dataService.persistParticipants(team.id, getParticipants());
       // Shared rule (utils/sessionStatus.ts): a retro that reached Close stays
       // closed. This used to reopen it whenever the facilitator left from an
       // earlier phase — which is where "View Summary" plus a click back through
       // the phases left it, putting a finished retro back in progress.
-      session.status = effectiveSessionStatus(session);
-      dataService.updateSession(team.id, session);
+      leaving.status = effectiveSessionStatus(leaving);
+      dataService.updateSession(team.id, leaving);
       onExit();
   };
 
@@ -1385,15 +1450,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       });
   };
 
-  // Lowering the number takes back the votes above it (utils/voteBudget.ts).
-  // With unlimited votes the number waits, unused, and caps nothing.
-  const handleMaxVotesChange = (newVal: number) => {
-      const newMax = Math.max(1, newVal);
-      updateSession(s => {
-          s.settings.maxVotes = newMax;
-          if (!s.settings.unlimitedVotes) capVotes(s, newMax);
-      });
-  };
+  const handleMaxVotesChange = (newVal: number) => { updateSession(s => applyMaxVotes(s, newVal)); };
+  // The arrows move the number the write starts from, a typed one just left
+  // for them included (updateSession folds it in first).
+  const stepMaxVotes = (step: number) => { updateSession(s => applyMaxVotes(s, s.settings.maxVotes + step)); };
 
   // Turning unlimited votes off is lowering the number to the one shown.
   const handleToggleUnlimitedVotes = (unlimited: boolean) => {
@@ -2360,6 +2420,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             key={t.id}
             // Found by its id: a hidden card shows none of its words.
             data-ticket-id={t.id}
+            // Where the keyboard goes when the last vote taken back from a card
+            // that takes no vote removes the only control it had
+            // (BoardVoteControl): focusable from script, never a tab stop.
+            {...(isBoard && boardTakeBackOnly ? { 'data-vote-focus-host': '', tabIndex: -1 } : {})}
             draggable={isDraggableCard}
             onDragStart={(e) => {
                 if (isMovableCard) {
@@ -2741,10 +2805,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           {tr('session.board.colorBy')}
         </label>
         {/* Author is not offered while the session is anonymous: the
-            cards would name their authors by colour. */}
+            cards would name their authors by colour. Named by its label,
+            the words it shows (WCAG 2.5.3). */}
         <select
           id={`color-by-${placement}`}
-          aria-label={tr('session.board.colorByAria')}
           // Off while reconnecting, like every other setting: the change
           // would be dropped.
           disabled={!isLive}
@@ -2761,14 +2825,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // A typed number is applied on Enter or when the field is left, never on
   // each keystroke: typing 10 passes through 1, which took every vote above
   // one back for good. One that is not a number puts the current one back.
-  const commitMaxVotesInput = () => {
+  const commitMaxVotesInput = ({ leftForAClick = false } = {}) => {
       const typed = parseInt(maxVotesInput, 10);
       if (isNaN(typed) || typed < 1) {
           setMaxVotesInput(String(session.settings.maxVotes || 1));
           return;
       }
       setMaxVotesInput(String(typed));
-      if (typed !== session.settings.maxVotes) handleMaxVotesChange(typed);
+      if (typed === session.settings.maxVotes) return;
+      if (!leftForAClick) {
+          handleMaxVotesChange(typed);
+          return;
+      }
+      // Left for another control: its click, which follows, writes it with
+      // its own change, or this does once the click has written nothing.
+      pendingMaxVotesRef.current = typed;
+      if (pendingMaxVotesTimerRef.current) clearTimeout(pendingMaxVotesTimerRef.current);
+      pendingMaxVotesTimerRef.current = setTimeout(() => {
+          pendingMaxVotesTimerRef.current = null;
+          if (pendingMaxVotesRef.current !== null) updateSession(() => {});
+      }, PENDING_MAX_VOTES_MS);
   };
 
   // The number of votes per person: the Vote phase's bar shows it after
@@ -2792,7 +2868,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             <div className="flex items-center bg-slate-100 rounded-sm overflow-hidden text-sm focus-within:ring-2 focus-within:ring-indigo-500">
                 {placement === 'bar' && label}
                 <button
-                    onClick={() => handleMaxVotesChange(session.settings.maxVotes - 1)}
+                    onClick={() => stepMaxVotes(-1)}
                     disabled={off}
                     className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
                     title={tr('session.board.decreaseMaxVotes')}
@@ -2818,10 +2894,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     onKeyDown={(e) => {
                         if (e.key === 'Enter') commitMaxVotesInput();
                     }}
-                    onBlur={commitMaxVotesInput}
+                    onBlur={() => commitMaxVotesInput({ leftForAClick: true })}
                 />
                 <button
-                    onClick={() => handleMaxVotesChange(session.settings.maxVotes + 1)}
+                    onClick={() => stepMaxVotes(1)}
                     disabled={off}
                     className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
                     title={tr('session.board.increaseMaxVotes')}
@@ -2850,10 +2926,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // the bar's status, which says it to a screen reader too. The card or
       // group held right now stays in view whatever the search finds: its own
       // control is the way to put it down, and a hold on something off screen
-      // would go on offering targets for it.
+      // would go on offering targets for it. So does a group whose title is
+      // being typed: the keystroke that stops it matching would take its field
+      // away mid-word, with the rest of the typing. It leaves with the focus.
       const isHeldEntry = (entry: ColumnEntry) => entry.kind === 'ticket'
           ? entry.ticket.id === draggedTicket?.id
           : (movingItem?.kind === 'group' && movingItem.id === entry.group.id)
+              || entry.group.id === editingGroupId
               || (!!draggedTicket && session.tickets.some(t => t.id === draggedTicket.id && t.groupId === entry.group.id));
       let boardSearchFound = 0;
       const entriesByColumn = new Map(session.columns.map(col => {
@@ -3118,6 +3197,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           return (
                                         <div
                                             key={g.id}
+                                            // The keyboard's place once a vote is taken back
+                                            // from a group that takes no vote (BoardVoteControl).
+                                            {...(isBoard && groupTakeBackOnly ? { 'data-vote-focus-host': '', tabIndex: -1 } : {})}
                                             draggable={isMovableGroup}
                                             onDragStart={(e) => {
                                                 if (!isMovableGroup) return;
@@ -3206,7 +3288,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                             value={g.title}
                                                             // eslint-disable-next-line jsx-a11y/no-autofocus -- conditional: only the group the user asked to name
                                                             autoFocus={focusGroupId === g.id}
-                                                            onFocus={() => setEditingGroupId(g.id)}
+                                                            data-group-title-id={g.id}
+                                                            // The focus is given once, to name a new group: a
+                                                            // field that comes back later (cards shown again)
+                                                            // must not take it from whatever is being typed.
+                                                            onFocus={() => {
+                                                                setEditingGroupId(g.id);
+                                                                setFocusGroupId(null);
+                                                            }}
                                                             onBlur={() => {
                                                                 setFocusGroupId(null);
                                                                 setEditingGroupId(null);

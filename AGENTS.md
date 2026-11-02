@@ -593,7 +593,12 @@ Eleven rules:
   unlimited, where it caps nothing: it is set first, then the box unticked. A
   typed number is applied on Enter or when the field is left, never per
   keystroke — typing 10 passed through 1, which took every vote above one back
-  for good. `unlimitedVotes`, `votingDisabled` and
+  for good. Left for a click on another control, it is written with that
+  control's own write (`updateSession` folds it in; alone 400 ms later when the
+  click writes nothing): the blur and the click were two writes from one
+  revision, and a Next Phase or a timer start pressed right after typing
+  snapped back. A number abandoned with Escape, which leaves no field, is
+  dropped when the settings close, never applied later. `unlimitedVotes`, `votingDisabled` and
   `voteCountHidden` are facilitator-only in `sessionGuard.js`; the last two are
   read on a board only. An own vote that loses its race is re-sent under one
   vote per item too — a board's default, so never re-sending made every lost
@@ -601,22 +606,33 @@ Eleven rules:
   (`mergeRemoteSession.ts`: one vote per item turned on, a lower budget —
   unlimited votes turned off included — or voting turned off): its state is
   then the cleanup, or votes are closed. A looser one took nothing back, so a
-  vote that raced it is re-sent. And re-sent votes never take the voter past
+  vote that raced it is re-sent — the facilitator's own unconfirmed loosening
+  included: the model the merge compares with is the one it ends with, its
+  own re-asserted settings applied. And re-sent votes never take the voter past
   the budget, nor past what the server already counts for them: two browsers
   of one person voting from one revision would otherwise both keep their vote.
   The control keeps the keyboard where it is (2.4.3): a vote button that cannot
   add right now is `aria-disabled`, not `disabled` — the vote that used up one
   vote per item disabled the very button it was cast with, under the focus —
-  and taking back one's last vote moves the focus to it before the cross goes.
+  and taking back one's last vote moves the focus to it before the cross goes
+  — on a card or group its viewer cannot read, which has no vote button, to
+  the card or group itself (`data-vote-focus-host`).
 - **The sort and the search belong to the person looking**
   (`utils/boardView.ts`, `BoardViewControls`): newest first by default — a
   board kept for weeks shows on top what nobody has talked about yet — then
   oldest first or most voted first; a search ignores accents, case and word
-  order, reads the apostrophe a phone types (’) as the one a laptop does (')
-  and œ, æ as oe, ae, never finds a card its reader cannot read, shows a group whole when
+  order, reads the apostrophe a phone types (’) and the modifier letter (ʼ) as
+  the one a laptop does (') — folded before the accents go, since ʼ is a
+  diacritic to Unicode — and œ, æ as oe, ae, never finds a card its reader cannot read, shows a group whole when
   its title or one of its readable cards matches, and a status says how many
   it found. The card or group held right now stays in view whatever the search
-  finds, and is not counted: its own control is the way to put it down.
+  finds, and is not counted: its own control is the way to put it down. So
+  does a group whose title is being typed, until the field is left: the
+  keystroke that stopped it matching took the field away mid-word. And a title
+  field React removes (the cards hidden, a phase change) runs no blur, so the
+  merge keeps a local title only while its field really has the focus
+  (`data-group-title-id`): a group left "being typed" kept its old title over
+  every rename and sent it back with that screen's next write.
   Nothing is written: two people read one board in two orders. A group's own
   cards keep the order they were written in.
 - **The votes travel with the cards**, on a board and in the guided Group
@@ -693,6 +709,24 @@ created stored `revealBrainstorm: false` (42.0 showed a board's cards whatever
 it said), so it opens with its cards hidden: untick *Hide cards* in its
 settings.
 
+Residuals of the board's own design (42.1), stated on purpose:
+
+- **Turning unlimited votes off takes back the votes above the number without
+  asking**, as lowering the number in the Vote phase always has; on a board
+  kept for weeks that can be many, so the board's settings say so under the
+  box (the guided Vote bar's box carries no such line), and the number can be
+  set before the box is unticked.
+- **A card written while a search is on, and not matching it, leaves its
+  writer's screen** until the search is cleared, and a group renamed so that
+  it no longer matches leaves it once its title field is left (it stays while
+  the field has the focus); the bar's count is what says the board is
+  filtered.
+- **Newest first and most voted first move cards while people work**: a card
+  written at the top of its column, or a vote that re-ranks a card, can move
+  another one between the moment it is aimed at and the click or the drop.
+  Oldest first, the guided phases' order, only ever adds below. EasyRetro has
+  the same; freezing the order under the pointer is not built.
+
 Found by the review of the board and left as they are, because they predate it
 (the board only makes them likelier: everyone votes, groups and moves on one
 screen at once):
@@ -727,20 +761,6 @@ screen at once):
   card then reads as a "Start" one, and in Brainstorm with "Reveal cards" off
   the facilitator moves cards they cannot read. A confirmation saying how many
   cards move is not built.
-- **Turning unlimited votes off takes back the votes above the number without
-  asking**, as lowering the number in the Vote phase always has; on a board
-  kept for weeks that can be many, so the board's settings say so under the
-  box (the guided Vote bar's box carries no such line), and the number can be
-  set before the box is unticked.
-- **A card written while a search is on, and not matching it, leaves its
-  writer's screen** until the search is cleared; the bar's count is what says
-  the board is filtered.
-- **Newest first and most voted first move cards while people work**: a card
-  written at the top of its column, or a vote that re-ranks a card, can move
-  another one between the moment it is aimed at and the click or the drop.
-  Oldest first, the guided phases' order, only ever adds below. EasyRetro has
-  the same; freezing the order under the pointer is not built.
-
 The guards: `__tests__/openBoard.test.ts` (with `canDropHeldCard`),
 `boardView.test.ts` (the sort and the search), `voteBudget.test.ts`, the
 vote-keeping, `deleteGroup` and `removeColumn` cases of
@@ -3100,7 +3120,12 @@ setting that takes votes back (a lower number, unlimited off, one vote per
 item on) takes them back again from the server's votes, through the same
 rules as the click (`capVotes`, `keepOneVotePerItem`): the write that lost
 carried the cleanup, and the re-sent state would otherwise hold more votes
-than it allows.
+than it allows. Settings a **phase change** wrote are never claimed: a switch
+of type before any card takes the new type's defaults, and entering the board
+from Group shows the cards (`recordBoardTypeChange`), in the phase change's
+own write. The phase is navigation, where the server wins, so a phase change
+that loses its race is healed away whole; claimed, its settings outlived it,
+and a guided Brainstorm took the board's defaults — every card shown.
 
 `__tests__/twoBrowserSessionConvergence.test.ts` is the guard, and it is a
 *convergence* test on purpose: it drives the real loop (server CAS, broadcast,

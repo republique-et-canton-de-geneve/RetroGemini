@@ -137,6 +137,9 @@ describe('Open board — in French', () => {
       expect(settings.getByRole('checkbox', { name }), name).toBeTruthy();
     }
     expect(settings.getByRole('textbox', { name: 'Votes par personne' })).toBeTruthy();
+    // Named by the words it shows (WCAG 2.5.3): "Colorer les cartes par" did
+    // not hold "Couleur".
+    expect(settings.getByRole('combobox', { name: 'Couleur par\u00a0:' })).toBeTruthy();
     expect(settings.getByRole('button', { name: 'Fermer' })).toBeTruthy();
   });
 

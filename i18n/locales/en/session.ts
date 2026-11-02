@@ -22,7 +22,6 @@ const session = {
     'Ask the assistant to suggest groupings. You will validate each suggestion before it is applied.',
   'session.board.revealCards': 'Reveal cards',
   'session.board.colorBy': 'Color by:',
-  'session.board.colorByAria': 'Color cards by',
   'session.board.colorByTopic': 'Topic',
   'session.board.colorByAuthor': 'Author',
   'session.board.doneEditingLayout': 'Done Editing',

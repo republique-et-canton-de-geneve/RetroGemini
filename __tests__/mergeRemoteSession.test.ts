@@ -11,6 +11,7 @@ import {
   PendingCreation
 } from '../components/session/mergeRemoteSession';
 import { RetroSession, HealthCheckSession, Ticket, ActionItem } from '../types';
+import { recordBoardTypeChange } from '../utils/openBoard';
 
 const ME = 'me';
 const OTHER = 'other';
@@ -1404,6 +1405,135 @@ describe('the facilitator’s own settings are claimed', () => {
 
     expect(merged.settings.oneVotePerTicket).toBe(true);
     expect(merged.tickets[0].votes).toEqual([OTHER]);
+  });
+
+  // Review finding (pass 2 of 42.1): before any card is written, a switch of
+  // type carries the new type's card and vote defaults in the phase change's
+  // own write (recordBoardTypeChange). Claimed as settings, they outlived the
+  // phase change when it lost its race: the heal put the guided phase back and
+  // the merge re-asserted the board's defaults onto it, so a guided Brainstorm
+  // showed every card nobody had revealed.
+  describe('a type switch that loses its race', () => {
+    const switched = (from: RetroSession, phase: string): RetroSession => {
+      const next = structuredClone(from);
+      recordBoardTypeChange(next, phase);
+      next.phase = phase;
+      return next;
+    };
+
+    it('leaves the guided retro with its own card settings', () => {
+      const brainstorm = makeSession({ phase: 'BRAINSTORM', _rev: 6, settings: { ...baseSettings(), revealBrainstorm: false } });
+      const toBoard = switched(brainstorm, 'OPEN_BOARD');
+      expect(toBoard.settings).toMatchObject({ revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true });
+      const ownChanges = facilitatorClaims([brainstorm, toBoard]);
+      // A participant's first card reached the server first.
+      const healed = makeSession({
+        phase: 'BRAINSTORM',
+        _rev: 7,
+        settings: { ...baseSettings(), revealBrainstorm: false },
+        tickets: [makeTicket('t1', { authorId: OTHER })],
+      });
+
+      const { merged, divergent } = mergeRemoteRetroSession(healed, toBoard, ctx({ ownChanges }), noPending());
+
+      expect(merged.phase).toBe('BRAINSTORM');
+      expect(merged.settings.revealBrainstorm).toBe(false);
+      expect(merged.settings.oneVotePerTicket).toBe(false);
+      expect(merged.settings.unlimitedVotes).toBeFalsy();
+      expect(divergent).toBe(false);
+    });
+
+    it('leaves the board with its own card settings', () => {
+      const openBoard = board({ revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true }, { _rev: 6 });
+      const toGuided = switched(openBoard, 'ICEBREAKER');
+      expect(toGuided.settings).toMatchObject({ revealBrainstorm: false, oneVotePerTicket: false, unlimitedVotes: false });
+      const ownChanges = facilitatorClaims([openBoard, toGuided]);
+      const healed = board(
+        { revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true },
+        { _rev: 7, tickets: [makeTicket('t1', { authorId: OTHER })] },
+      );
+
+      const { merged, divergent } = mergeRemoteRetroSession(healed, toGuided, ctx({ ownChanges }), noPending());
+
+      expect(merged.phase).toBe('OPEN_BOARD');
+      expect(merged.settings).toMatchObject({ revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true });
+      expect(divergent).toBe(false);
+    });
+
+    it('still re-asserts a setting the facilitator changed in a write of its own', () => {
+      const brainstorm = makeSession({ phase: 'BRAINSTORM', _rev: 6, settings: { ...baseSettings(), revealBrainstorm: false } });
+      const anonymous = structuredClone(brainstorm);
+      anonymous.settings.isAnonymous = true;
+      const toBoard = switched(anonymous, 'OPEN_BOARD');
+      const ownChanges = facilitatorClaims([brainstorm, anonymous, toBoard]);
+      const healed = makeSession({ phase: 'BRAINSTORM', _rev: 7, settings: { ...baseSettings(), revealBrainstorm: false } });
+
+      const { merged, divergent } = mergeRemoteRetroSession(healed, toBoard, ctx({ ownChanges }), noPending());
+
+      expect(merged.settings.isAnonymous).toBe(true);
+      expect(merged.settings.revealBrainstorm).toBe(false);
+      expect(divergent).toBe(true);
+    });
+  });
+
+  // Review finding (pass 2 of 42.1): the vote model the merge compared with was
+  // the server's, before the facilitator's own unconfirmed settings were
+  // re-asserted. Their own loosening then read as the server tightening it, and
+  // every vote they had cast was dropped while the looser model was re-sent.
+  describe('the facilitator’s own looser vote model', () => {
+    it('keeps the votes cast after turning one vote per item off', () => {
+      const start = board({ oneVotePerTicket: true, unlimitedVotes: true }, { _rev: 3, tickets: [makeTicket('t1', { authorId: OTHER })] });
+      const loosened = board({ oneVotePerTicket: false, unlimitedVotes: true }, { _rev: 3, tickets: [makeTicket('t1', { authorId: OTHER })] });
+      const voted = board({ oneVotePerTicket: false, unlimitedVotes: true }, { _rev: 3, tickets: [makeTicket('t1', { authorId: OTHER, votes: [ME, ME] })] });
+      const ownChanges = facilitatorClaims([start, loosened, voted]);
+      // A participant's write landed first: neither of the facilitator's did.
+      const healed = board({ oneVotePerTicket: true, unlimitedVotes: true }, { _rev: 4, tickets: [makeTicket('t1', { authorId: OTHER, votes: [OTHER] })] });
+
+      const { merged, divergent } = mergeRemoteRetroSession(healed, voted, ctx({ ownChanges }), noPending());
+
+      expect(merged.settings.oneVotePerTicket).toBe(false);
+      expect(merged.tickets[0].votes.filter(v => v === ME)).toHaveLength(2);
+      expect(merged.tickets[0].votes).toContain(OTHER);
+      expect(divergent).toBe(true);
+    });
+
+    it('keeps the votes cast after turning unlimited votes on, past the old number', () => {
+      const cards = (votes: string[][]) => votes.map((v, i) => makeTicket(`t${i + 1}`, { authorId: OTHER, votes: v }));
+      const start = board({ maxVotes: 1, unlimitedVotes: false }, { _rev: 3, tickets: cards([[], []]) });
+      const unlimited = board({ maxVotes: 1, unlimitedVotes: true }, { _rev: 3, tickets: cards([[], []]) });
+      const voted = board({ maxVotes: 1, unlimitedVotes: true }, { _rev: 3, tickets: cards([[ME], [ME]]) });
+      const ownChanges = facilitatorClaims([start, unlimited, voted]);
+      const healed = board({ maxVotes: 1, unlimitedVotes: false }, { _rev: 4, tickets: cards([[], []]) });
+
+      const { merged, divergent } = mergeRemoteRetroSession(healed, voted, ctx({ ownChanges }), noPending());
+
+      expect(merged.settings.unlimitedVotes).toBe(true);
+      expect(merged.tickets.map(t => t.votes)).toEqual([[ME], [ME]]);
+      expect(divergent).toBe(true);
+    });
+  });
+
+  // Every setting of the dialog and the Vote bar, one at a time: the slice is
+  // a list, and a setting left out of it reverts when its write loses.
+  it.each([
+    ['isAnonymous', true],
+    ['revealBrainstorm', false],
+    ['colorBy', 'author'],
+    ['votingDisabled', true],
+    ['voteCountHidden', true],
+    ['unlimitedVotes', true],
+    ['maxVotes', 7],
+    ['oneVotePerTicket', true],
+  ] as const)('re-asserts %s while the facilitator’s change of it is unconfirmed', (key, value) => {
+    const start = board({}, { _rev: 4 });
+    const changed = board({ [key]: value }, { _rev: 4 });
+    const ownChanges = facilitatorClaims([start, changed]);
+    const healed = board({}, { _rev: 5 });
+
+    const { merged, divergent } = mergeRemoteRetroSession(healed, changed, ctx({ ownChanges }), noPending());
+
+    expect(merged.settings[key]).toBe(value);
+    expect(divergent).toBe(true);
   });
 
   it('lets a participant take the server’s settings', () => {

@@ -88,6 +88,15 @@ describe('restoreProtectedFields', () => {
     }
   });
 
+  // The loop below tests the mechanism for whatever the list holds; this says
+  // what it must hold. A participant who could write these would lift the vote
+  // budget, reopen voting or show the totals the facilitator hid (42.1).
+  it('protects the open board’s vote settings', () => {
+    expect(PROTECTED_SETTINGS_FIELDS).toEqual(expect.arrayContaining([
+      'unlimitedVotes', 'votingDisabled', 'voteCountHidden', 'revealBrainstorm', 'oneVotePerTicket', 'maxVotes', 'isAnonymous', 'colorBy',
+    ]));
+  });
+
   it('restores every facilitator-only setting and keeps the timer runtime fields', () => {
     for (const field of PROTECTED_SETTINGS_FIELDS) {
       const auth = authoritative();

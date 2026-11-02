@@ -96,10 +96,19 @@ describe('recordBoardTypeChange', () => {
   });
 
   it('shows the cards on a board entered from a phase that showed them all', () => {
+    // With a card written, so that the type's defaults (no card yet) do not
+    // show them anyway: "Reveal cards" was off since Brainstorm, and the
+    // board must not hide from everyone the cards they have just read.
+    const othersCard = { id: 't1', colId: 'c', text: 'theirs', authorId: 'someone-else', groupId: null, votes: [] };
     for (const phase of ['GROUP', 'VOTE', 'DISCUSS', 'REVIEW']) {
-      const retro = session({ phase });
+      const retro = session({ phase, tickets: [othersCard] });
       recordBoardTypeChange(retro, OPEN_BOARD_PHASE);
+      retro.phase = OPEN_BOARD_PHASE;
       expect(retro.settings.revealBrainstorm, phase).toBe(true);
+      expect(canReadCard(retro, othersCard, 'me'), phase).toBe(true);
+      // Nothing else of the guided retro's vote model moves.
+      expect(retro.settings.oneVotePerTicket, phase).toBe(false);
+      expect(retro.settings.unlimitedVotes, phase).toBeFalsy();
     }
   });
 
@@ -134,9 +143,14 @@ describe('recordBoardTypeChange', () => {
 
   it('keeps the settings of a session that already holds a card, either way', () => {
     const card = { id: 't1', colId: 'c', text: 'mine', authorId: 'me', groupId: null, votes: ['u1', 'u1'] };
-    const board = session({ tickets: [card], settings: { ...session().settings, revealBrainstorm: true, unlimitedVotes: true } });
+    const board = session({ tickets: [card], settings: { ...session().settings, revealBrainstorm: true, unlimitedVotes: true, oneVotePerTicket: true } });
     recordBoardTypeChange(board, 'VOTE');
-    expect(board.settings).toMatchObject({ revealBrainstorm: true, unlimitedVotes: true });
+    expect(board.settings).toMatchObject({ revealBrainstorm: true, unlimitedVotes: true, oneVotePerTicket: true });
+
+    const guided = session({ phase: 'BRAINSTORM', tickets: [card], settings: { ...session().settings, maxVotes: 3 } });
+    recordBoardTypeChange(guided, OPEN_BOARD_PHASE);
+    expect(guided.settings).toMatchObject({ revealBrainstorm: false, oneVotePerTicket: false, maxVotes: 3 });
+    expect(guided.settings.unlimitedVotes).toBeFalsy();
   });
 });
 

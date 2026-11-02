@@ -145,6 +145,18 @@ describe('the search of a board', () => {
     expect(matchesSearch('Ex æquo', 'aequo')).toBe(true);
   });
 
+  // Review finding (pass 2 of 42.1): the modifier-letter apostrophe (ʼ, which
+  // some keyboards and documents use) is a "diacritic" to Unicode, and was
+  // removed with the accents before the apostrophes were folded.
+  it('reads the modifier-letter apostrophe as an apostrophe, and a pasted ligature as its letters', () => {
+    expect(matchesSearch('Améliorer lʼéquipe', "l'equipe")).toBe(true);
+    expect(matchesSearch('Améliorer lʼéquipe', 'l’équipe')).toBe(true);
+    expect(matchesSearch("Améliorer l'équipe", 'lʼéquipe')).toBe(true);
+    expect(matchesSearch('Améliorer lʼéquipe', 'lequipe')).toBe(false);
+    // Text pasted from a PDF carries "ﬁ" as one character.
+    expect(matchesSearch('Les ﬁchiers partagés', 'fichiers')).toBe(true);
+  });
+
   it('finds every word of the query, in any order', () => {
     expect(matchesSearch('Uniformiser les workflow Jira', 'jira workflow')).toBe(true);
     expect(matchesSearch('Uniformiser les workflow Jira', 'jira confluence')).toBe(false);

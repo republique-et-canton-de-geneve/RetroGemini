@@ -35,15 +35,20 @@ export const effectiveBoardSort = (
  * Text as the search compares it: no accents, no case, single spaces. French
  * cards are typed with and without accents ("équipe", "equipe") and both must
  * be found by either spelling — and so for the apostrophe a phone types by
- * itself (’) and the one a laptop does ('), and for the ligatures œ and æ,
- * which no keyboard layout types the same way.
+ * itself (’), the one a laptop does (') and the modifier letter (ʼ), and for
+ * the ligatures œ and æ, which no keyboard layout types the same way. NFKD
+ * also spells out what a PDF pastes as one character ("ﬁ").
+ *
+ * The apostrophes are folded before the accents go, and only combining marks
+ * go: ʼ is a "diacritic" to Unicode, and removing every \p{Diacritic} deleted
+ * it before it was read as an apostrophe.
  */
 export const normalizeForSearch = (text: string): string =>
   text
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLowerCase()
+    .normalize('NFKD')
     .replace(/[’‘ʼ]/g, "'")
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
     .replace(/œ/g, 'oe')
     .replace(/æ/g, 'ae')
     .replace(/\s+/g, ' ')
