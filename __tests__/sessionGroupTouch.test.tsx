@@ -181,4 +181,35 @@ describe('Group phase — dropping a held card with touch', () => {
     expect(await persistedGroupOf('loose')).toBeNull();
     expect(screen.getByRole('button', { name: /Selected for grouping: Loose card/ })).toBeTruthy();
   });
+
+  // Review finding (pass 4 of 42.1): a tap the board acts on lays the board
+  // out again under the finger, and the browser then sends the mouse events it
+  // emulates for a tap — a mousedown, a click — to whatever control came
+  // there. In Chromium a grouping tap on the open board deleted a card with no
+  // confirmation, and took the focus from the new group's title. A tap that
+  // was acted on cancels them; a scroll, or a tap on a control, keeps them.
+  it('cancels the browser’s emulated click for a tap it acted on, and only for that one', async () => {
+    const user = userEvent.setup();
+    renderGroupPhase();
+    await screen.findByText('Loose card');
+
+    // Picking a card up by touch, then dropping it on a group by touch.
+    const loose = screen.getByText('Loose card').closest('div.group') as HTMLElement;
+    fireEvent.touchStart(loose, touch(50, 50));
+    expect(fireEvent.touchEnd(loose, touch(50, 50))).toBe(false);
+    await waitFor(() => screen.getByRole('button', { name: /Selected for grouping: Loose card/ }));
+    const container = groupContainer();
+    fireEvent.touchStart(container, touch(50, 50));
+    expect(fireEvent.touchEnd(container, touch(50, 50))).toBe(false);
+    await waitFor(async () => expect(await persistedGroupOf('loose')).toBe('g1'));
+
+    // A scroll is the browser's, and so is a tap on a control.
+    await holdLooseCard(user);
+    fireEvent.touchStart(groupContainer(), touch(50, 200));
+    fireEvent.touchMove(groupContainer(), touch(52, 60));
+    expect(fireEvent.touchEnd(groupContainer(), touch(52, 60))).toBe(true);
+    const control = screen.getAllByRole('button', { name: /Selected for grouping|Pick up the ticket/ })[0];
+    fireEvent.touchStart(control, touch(50, 50));
+    expect(fireEvent.touchEnd(control, touch(50, 50))).toBe(true);
+  });
 });

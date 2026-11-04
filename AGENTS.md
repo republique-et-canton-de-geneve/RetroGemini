@@ -273,7 +273,14 @@ finger stayed put.* It exists because the group container had only an
 container unguarded, it overrode the ticket card's own 8px threshold, so a swipe
 the card had correctly ignored was acted on by its parent. When you add a touch
 target inside another one, give it the whole gesture and let exactly one handler
-claim it.
+claim it. **A tap a handler claims sends no emulated click**: the handler calls
+`preventDefault` on its `touchend`. Acting on the tap lays the board out again
+under the finger, and the mousedown and click a browser emulates for a tap then
+went to whatever control came there — on the open board a grouping tap deleted
+a card with no confirmation, added a vote or opened an editor, and took the
+focus off the new group's title. A scroll, or a tap on a control, keeps them.
+`e2e/retro-touch-card-controls.spec.ts` holds it in Chromium (jsdom emulates no
+mouse for a tap); `__tests__/sessionGroupTouch.test.tsx` pins which taps cancel.
 
 **A control shown on hover is shown on focus, and never hidden where nothing
 hovers.** A card's edit, delete and first-comment controls were `opacity-0`
@@ -602,7 +609,9 @@ Eleven rules:
   race healed the number away while the votes it took back stayed taken. A
   vote button judges the vote again on the state its write is built on
   (`mayAddVote`): it was enabled under the old number, and the vote went in
-  past the new one. A number abandoned with Escape, which leaves no field, is
+  past the new one. And the vote buttons read the number left for them
+  (`votesLeftToCast`): raised over a spent budget, the button was still off at
+  the release, and the click cast nothing. A number abandoned with Escape, which leaves no field, is
   dropped when the settings close, never applied later; so is one whose write
   the session refused offline, the draft with it (left waiting, the next write
   after the reconnect applied it, a teammate's join included), and one left
@@ -633,13 +642,15 @@ Eleven rules:
   the one a laptop does (') — folded before the accents go, since ʼ is a
   diacritic to Unicode — and œ, æ as oe, ae; it drops the diacritics, never
   every combining mark, so the point médian of inclusive writing
-  ("participant·es") is ignored and the vowel signs of other scripts are kept.
+  ("participant·es") is ignored and the vowel signs of other scripts are kept,
+  and it reads superscript letters as their letters ("1ᵉʳ" as "1er").
   It never finds a card its reader cannot read, shows a group whole when
   its title or one of its readable cards matches, and a status says how many
   it found. The card or group held right now stays in view whatever the search
   finds, and is not counted: its own control is the way to put it down. So
-  does the group whose title was typed on the board, until the search changes
-  (`searchKeptGroupId`): the keystroke that stopped it matching took the field
+  does every group whose title was focused on the board during the search,
+  until the search changes, whoever made it stop matching
+  (`searchKeptGroupIds`): the keystroke that stopped it matching took the field
   away mid-word, and kept only while the field had the focus, it went at the
   blur — the press of a click on its own vote button, the Tab to its next
   control — and took that control with it. And a title field React removes
@@ -731,9 +742,10 @@ Residuals of the board's own design (42.1), stated on purpose:
   box (the guided Vote bar's box carries no such line), and the number can be
   set before the box is unticked.
 - **A card written while a search is on, and not matching it, leaves its
-  writer's screen** until the search is cleared, while a group renamed so that
-  it no longer matches stays on it, uncounted, until the search changes; the
-  bar's count is what says the board is filtered.
+  writer's screen** until the search is cleared, while a group whose title its
+  reader focused during the search stays on it, uncounted, until the search
+  changes, whoever made it stop matching; the bar's count is what says the
+  board is filtered.
 - **Newest first and most voted first move cards while people work**: a card
   written at the top of its column, or a vote that re-ranks a card, can move
   another one between the moment it is aimed at and the click or the drop.
@@ -791,7 +803,8 @@ hidden cards' words included), `hiddenCardFiller.test.ts`,
 `dashboardOpenBoard.test.tsx` (the board type, and the lists' statuses
 measured at 4.5:1), `e2e/i18n.spec.ts` (the action bars),
 `e2e/retro-touch-card-controls.spec.ts` (a card's controls on a phone and on a
-computer, and the pencil over no text on either), and
+computer, the pencil over no text on either, and a grouping tap that clicks
+nothing else), and
 `e2e/retro-open-board.spec.ts` (two browsers, the presence panel, the settings
 and their axe audit, hidden cards reaching the participant, a search, a round
 trip through the guided retro, and the axe audit of the board).

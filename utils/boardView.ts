@@ -32,7 +32,15 @@ export const effectiveBoardSort = (
 ): BoardSort => (sort === 'votes' && settings.voteCountHidden ? DEFAULT_BOARD_SORT : sort);
 
 const APOSTROPHES = /[’‘ʼ]/g;
-const DIACRITICS = /\p{Diacritic}/gu;
+// The diacritics that are not letters: the accents, the point médian, a
+// spacing acute.
+const NON_LETTER_DIACRITICS = /(?!\p{L})\p{Diacritic}/gu;
+// Every diacritic the decomposition left (the ʻokina, ʹ), but the Japanese
+// long-vowel mark, a letter of the word it is in.
+const REMAINING_DIACRITICS = /(?!\u30FC)\p{Diacritic}/gu;
+// Marks that are no diacritics and say nothing a reader types: an emoji's
+// presentation selectors, the hamza and madda over or under an Arabic seat.
+const SILENT_MARKS = /[\uFE0E\uFE0F\u0653-\u0655]/g;
 
 /**
  * Text as the search compares it: no accents, no case, single spaces. French
@@ -40,25 +48,29 @@ const DIACRITICS = /\p{Diacritic}/gu;
  * be found by either spelling — and so for the apostrophe a phone types by
  * itself (’), the one a laptop does (') and the modifier letter (ʼ), and for
  * the ligatures œ and æ, which no keyboard layout types the same way. NFKD
- * also spells out what a PDF pastes as one character ("ﬁ").
+ * also spells out what a PDF pastes as one character ("ﬁ") and the superscript
+ * letters of a French ordinal ("1ᵉʳ").
  *
  * The apostrophes are folded before the accents go: ʼ is a "diacritic" to
  * Unicode, and removing every \p{Diacritic} deleted it before it was read as
  * an apostrophe. The diacritics go, never every combining mark: a Hindi or
  * Thai vowel sign is a mark that changes the word, while the point médian of
  * inclusive writing ("participant·es"), the Catalan middle dot and the ʻokina
- * are diacritics that are not marks. They go before the compatibility
- * decomposition, which would turn a spacing acute ("don´t") into a space and
- * an accent, and again after it, for the accents it spells out.
+ * are diacritics that are not marks. The ones that are not letters go before
+ * the compatibility decomposition, which would turn a spacing acute ("don´t")
+ * into a space and an accent; the letters wait for it, which spells ᵉ and ʳ
+ * out, and the ones it leaves go after it, but the Japanese long-vowel mark
+ * (ー), without which コーヒー found コピー.
  */
 export const normalizeForSearch = (text: string): string =>
   text
     .normalize('NFD')
     .replace(APOSTROPHES, "'")
-    .replace(DIACRITICS, '')
+    .replace(NON_LETTER_DIACRITICS, '')
     .normalize('NFKD')
     .replace(APOSTROPHES, "'")
-    .replace(DIACRITICS, '')
+    .replace(REMAINING_DIACRITICS, '')
+    .replace(SILENT_MARKS, '')
     .toLowerCase()
     .replace(/œ/g, 'oe')
     .replace(/æ/g, 'ae')

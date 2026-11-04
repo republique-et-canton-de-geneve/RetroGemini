@@ -175,6 +175,27 @@ describe('the search of a board', () => {
     expect(matchesSearch('एक दिन', 'दिन')).toBe(true);
   });
 
+  // Review finding (pass 4 of 42.1): removed before the compatibility
+  // decomposition, the diacritics that are letters went too — the superscript
+  // letters of French ordinals, which it spells out, and the Japanese
+  // long-vowel mark, which tells two words apart. And the folds of every mark
+  // went with the fix above: the hamza seats of Arabic, and an emoji's
+  // presentation selector.
+  it('reads superscript letters as their letters, and keeps the marks that tell words apart', () => {
+    expect(matchesSearch('Réunion du 1ᵉʳ trimestre', '1er')).toBe(true);
+    expect(matchesSearch('Le 2ᵉ sprint a glissé', '2e')).toBe(true);
+    expect(matchesSearch('Appeler Mᵐᵉ Dupont', 'mme')).toBe(true);
+    expect(matchesSearch('Sprint 12 démo', '1ᵉʳ')).toBe(false);
+    expect(matchesSearch('コピー機が壊れた', 'コーヒー')).toBe(false);
+    expect(matchesSearch('ビルの入口', 'ビール')).toBe(false);
+    expect(matchesSearch('コーヒーが切れた', 'コーヒー')).toBe(true);
+    expect(matchesSearch('أحمد في إجازة', 'احمد')).toBe(true);
+    expect(matchesSearch('⚠ Prod down', '⚠️')).toBe(true);
+    // What the fix above set out to do still holds.
+    expect(matchesSearch('Offsite à Oʻahu', 'oahu')).toBe(true);
+    expect(matchesSearch('Remercier les participant·es', 'participantes')).toBe(true);
+  });
+
   it('finds every word of the query, in any order', () => {
     expect(matchesSearch('Uniformiser les workflow Jira', 'jira workflow')).toBe(true);
     expect(matchesSearch('Uniformiser les workflow Jira', 'jira confluence')).toBe(false);

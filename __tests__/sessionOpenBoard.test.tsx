@@ -667,6 +667,69 @@ describe('Open board — every hold and every drop', () => {
       expect(titleField()).toBeNull();
     });
 
+    // Review finding (pass 4 of 42.1): only the group last focused was kept,
+    // so a group renamed out of the search left as soon as another group's
+    // title was focused, the search unchanged; and the rule kept a group
+    // whose title was only focused, not typed, which the docs did not say.
+    it('keeps every group whose title was focused during the search, whoever made it stop matching', async () => {
+      const user = userEvent.setup();
+      const twoGroups = (rev: number, titles: [string, string] = ['Delivery', 'Delivery speed']) => groupedBoard({
+        _rev: rev,
+        tickets: [
+          ticket('t-a', 'Flaky deploys', { groupId: 'g1' }),
+          ticket('t-b', 'Slow rollbacks', { authorId: 'bob', groupId: 'g1' }),
+          ticket('t-c', 'Too many meetings', { groupId: 'g2' }),
+          ticket('t-d', 'No focus time', { authorId: 'bob', groupId: 'g2' }),
+        ],
+        groups: [
+          { id: 'g1', title: titles[0], colId: 'todo', votes: [], anchorTicketId: 't-a' },
+          { id: 'g2', title: titles[1], colId: 'todo', votes: [], anchorTicketId: 't-c' },
+        ],
+      });
+      renderBoard(twoGroups(5), alice);
+      await screen.findByDisplayValue('Delivery');
+      const search = screen.getByRole('searchbox', { name: 'Search the cards' });
+      await user.type(search, 'delivery');
+      expect(screen.getByText('2 results')).toBeTruthy();
+
+      // Alice renames the first out of the search, then only clicks into the
+      // second's title: Bob renames that one.
+      const first = screen.getByDisplayValue('Delivery') as HTMLInputElement;
+      await user.click(first);
+      first.select();
+      await user.keyboard('Infra');
+      await user.click(screen.getByDisplayValue('Delivery speed'));
+      await user.tab();
+      act(() => sessionUpdateListener?.(twoGroups(6, ['Infra', 'Focus time'])));
+
+      expect(await screen.findByText('0 results')).toBeTruthy();
+      expect(screen.getByDisplayValue('Infra')).toBeTruthy();
+      expect(screen.getByDisplayValue('Focus time')).toBeTruthy();
+
+      // Another search finds what it finds.
+      await user.type(search, 'x');
+      expect(document.querySelector('.group-container')).toBeNull();
+    });
+
+    it('keeps no group focused in the Group phase in a board search left on through it', async () => {
+      const user = userEvent.setup();
+      renderBoard(groupedBoard({ _rev: 5 }), alice);
+      await screen.findByDisplayValue('Delivery');
+      await user.type(screen.getByRole('searchbox', { name: 'Search the cards' }), 'meetings');
+      expect(titleField()).toBeNull();
+
+      // The facilitator turns the board into a guided retro, where Alice
+      // clicks into the title, and back into a board: the search is still on.
+      act(() => sessionUpdateListener?.(groupedBoard({ _rev: 6, phase: 'GROUP' })));
+      await user.click(await screen.findByDisplayValue('Delivery'));
+      await user.tab();
+      act(() => sessionUpdateListener?.(groupedBoard({ _rev: 7 })));
+
+      await waitFor(() => expect((screen.getByRole('searchbox', { name: 'Search the cards' }) as HTMLInputElement).value).toBe('meetings'));
+      expect(screen.getByText('1 result')).toBeTruthy();
+      expect(titleField()).toBeNull();
+    });
+
     it('lets a group renamed out of a search go once its cards are hidden', async () => {
       const user = userEvent.setup();
       renderBoard(groupedBoard({ _rev: 5 }), alice);
@@ -2107,6 +2170,37 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
     expect((screen.getByRole('textbox', { name: 'Max votes per person' }) as HTMLInputElement).value).toBe('1');
   });
 
+  // Review finding (pass 4 of 42.1): the second claim, of what the click
+  // itself changed, compares with a copy of the state the number was folded
+  // into; nothing held it, and comparing with that state itself claimed
+  // nothing — a vote cast with a number left for it was healed away after a
+  // lost race, with the number kept.
+  it('keeps the vote cast with a number left for it through a lost race, and the number', async () => {
+    const user = userEvent.setup();
+    const voted = (rev: number, late: string[] = []) => createBoard({
+      phase: 'VOTE',
+      _rev: rev,
+      tickets: [
+        { id: 't-a', colId: 'todo', text: 'Flaky deploys', authorId: 'alice', groupId: null, votes: ['fac', 'fac', 'fac'] },
+        { id: 't-b', colId: 'todo', text: 'Slow rollbacks', authorId: 'bob', groupId: null, votes: late },
+      ],
+    });
+    renderBoard(voted(5));
+    const field = await screen.findByRole('textbox', { name: 'Max votes per person' });
+    await user.clear(field);
+    await user.type(field, '7');
+    await user.click(within(cardElement('Slow rollbacks')).getByRole('button', { name: 'Add a vote to this ticket' }));
+    expect((await lastPersisted())?.settings.maxVotes).toBe(7);
+
+    // Alice's vote reached the server first.
+    act(() => sessionUpdateListener?.(voted(6, ['alice'])));
+
+    await waitFor(async () => expect((await sentStates()).some(([, options]) => options?.resend)).toBe(true));
+    const resent = (await sentStates()).filter(([, options]) => options?.resend).at(-1)![0] as RetroSession;
+    expect(resent.settings.maxVotes).toBe(7);
+    expect(resent.tickets.find((t) => t.id === 't-b')?.votes).toEqual(['alice', 'fac']);
+  });
+
   // Review finding (pass 3 of 42.1): left for a vote button, the number joins
   // the vote's own write — but the button was enabled under the old number,
   // and the vote went in on top of it, past the new one.
@@ -2133,9 +2227,45 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
       : within(cardElement('Slow rollbacks')).getByRole('button', { name: buttonName });
     await user.click(target);
 
-    const written = (await lastPersisted())!;
-    expect(written.settings.maxVotes).toBe(3);
-    expect(votesOf(written, 'fac')).toBe(3);
+    // The button goes off as the field is left, under the new number, and the
+    // number is written alone a moment later; the vote's own write judges it
+    // again (mayAddVote) had the click still been taken.
+    await waitFor(async () => expect((await lastPersisted())?.settings.maxVotes).toBe(3));
+    expect(votesOf((await lastPersisted())!, 'fac')).toBe(3);
+    expect((target as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // Review finding (pass 4 of 42.1): raised over a spent budget and left for
+  // a vote button, the number only waited for that button's write — and the
+  // button, off under the old number, was still off at the release: the click
+  // cast nothing, and the button lit up a moment later.
+  it('casts the vote a number raised over a spent budget was left for', async () => {
+    const user = userEvent.setup();
+    const { dataService } = await import('../services/dataService');
+    renderBoard(createBoard({
+      phase: 'VOTE',
+      settings: settingsOf({ maxVotes: 3 }),
+      // Spent, and finished by the Vote phase for it already.
+      finishedUsers: ['fac'],
+      autoFinishedUsers: ['fac'],
+      tickets: [
+        { id: 't-a', colId: 'todo', text: 'Flaky deploys', authorId: 'alice', groupId: null, votes: ['fac', 'fac', 'fac'] },
+        { id: 't-b', colId: 'todo', text: 'Slow rollbacks', authorId: 'bob', groupId: null, votes: [] },
+      ],
+    }));
+    const field = await screen.findByRole('textbox', { name: 'Max votes per person' });
+    const plus = within(cardElement('Slow rollbacks')).getByRole('button', { name: 'Add a vote to this ticket' }) as HTMLButtonElement;
+    expect(plus.disabled).toBe(true);
+    await user.clear(field);
+    await user.type(field, '5');
+    const before = await persistedCount();
+
+    await user.click(plus);
+
+    // One gesture, one write: the number and the vote together.
+    const writes = (dataService.updateSession as unknown as ReturnType<typeof vi.fn>).mock.calls.slice(before).map(([, s]) => s as RetroSession);
+    expect(writes[0]?.settings.maxVotes).toBe(5);
+    expect(writes[0]?.tickets.find((t) => t.id === 't-b')?.votes).toEqual(['fac']);
   });
 
   // Review finding (pass 3 of 42.1): a number left while the session dropped
@@ -2143,10 +2273,13 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
   // unseen: the field showed the stored number again, and the next write of
   // any kind, a teammate joining included, applied it and took the votes
   // above it back.
+  // The second case comes back within the wait of a number left (400 ms): its
+  // blur's own guard is what drops it there, not the timer's write refused
+  // offline (review finding, pass 4 of 42.1).
   it.each([
-    ['left just before the connection dropped', true],
-    ['still being typed when the connection dropped', false],
-  ])('drops a number %s', async (_when, leftFirst) => {
+    ['left just before the connection dropped', true, 700],
+    ['still being typed when the connection dropped', false, 100],
+  ])('drops a number %s', async (_when, leftFirst, offlineMs) => {
     const user = userEvent.setup();
     renderBoard(createBoard({
       tickets: [{ id: 't-a', colId: 'todo', text: 'Flaky deploys', authorId: 'alice', groupId: null, votes: ['bob', 'bob', 'bob', 'bob'] }],
@@ -2161,8 +2294,10 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
     // A browser takes the focus off a field as it is disabled, and runs its
     // blur; jsdom keeps the focus there, so the blur is sent as Chromium sends it.
     if (!leftFirst) fireEvent.blur(field);
-    await act(() => new Promise((resolve) => setTimeout(resolve, 700)));
+    await act(() => new Promise((resolve) => setTimeout(resolve, offlineMs)));
     act(() => connectionListener?.(true));
+    // Past the wait, whenever the connection came back.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 700)));
 
     expect(field.value).toBe('5');
     await user.keyboard('{Escape}');

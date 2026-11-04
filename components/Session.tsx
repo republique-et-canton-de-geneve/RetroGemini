@@ -551,15 +551,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const [boardSettingsOpen, setBoardSettingsOpen] = useState(false);
   const [boardSort, setBoardSort] = useState<BoardSort>(DEFAULT_BOARD_SORT);
   const [boardSearch, setBoardSearch] = useState('');
-  // The group whose title was last typed on the board, kept in view until the
-  // search changes (isHeldEntry): renamed so that it no longer matches, it
-  // left at the keystroke, taking its field away mid-word, and then, kept only
-  // while the field had the focus, at the blur — the press of a click on its
-  // own vote button, or the Tab to its next control, which went with it.
-  const [searchKeptGroupId, setSearchKeptGroupId] = useState<string | null>(null);
+  // The groups whose title was focused on the board during this search, kept
+  // in view until the search changes (isHeldEntry), whoever made them stop
+  // matching. Renamed so that it no longer matched, a group left at the
+  // keystroke, taking its field away mid-word, and then, kept only while the
+  // field had the focus, at the blur — the press of a click on its own vote
+  // button, or the Tab to its next control, which went with it.
+  const [searchKeptGroupIds, setSearchKeptGroupIds] = useState<ReadonlySet<string>>(() => new Set());
   const searchBoard = (query: string) => {
     setBoardSearch(query);
-    setSearchKeptGroupId(null);
+    setSearchKeptGroupIds(kept => (kept.size === 0 ? kept : new Set()));
   };
   // The settings belong to the board: a board turned into a guided retro from
   // another facilitator tab closes them here too, with the confirmation opened
@@ -596,6 +597,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // timer start pressed right after typing snapped back. A gesture is one write.
   const pendingMaxVotesRef = useRef<number | null>(null);
   const pendingMaxVotesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The same number for the screen, which the vote buttons read: raised over
+  // a spent budget, the button the click was aimed at was still off at the
+  // release, and the click cast nothing.
+  const [pendingMaxVotes, setPendingMaxVotes] = useState<number | null>(null);
   useEffect(() => () => {
     if (pendingMaxVotesTimerRef.current) clearTimeout(pendingMaxVotesTimerRef.current);
   }, []);
@@ -1032,6 +1037,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     pendingMaxVotesRef.current = null;
     if (pendingMaxVotesTimerRef.current) clearTimeout(pendingMaxVotesTimerRef.current);
     pendingMaxVotesTimerRef.current = null;
+    if (pending !== null) setPendingMaxVotes(null);
     return pending;
   };
   const resetMaxVotesDraft = () => {
@@ -1146,6 +1152,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // Infinite with unlimited votes (utils/voteBudget.ts): never runs out, so the
   // Vote phase never finishes anyone on its own.
   const votesLeft = session ? voteBudget(session.settings) - (myTicketVotes + myGroupVotes) : 0;
+  // What the vote buttons offer: a number left in the votes field for the
+  // click now leaving it counts already, as it will in that click's write
+  // (updateSession folds it in, and mayAddVote judges the vote on the result).
+  const votesLeftToCast = session && pendingMaxVotes !== null
+    ? voteBudget({ ...session.settings, maxVotes: pendingMaxVotes }) - (myTicketVotes + myGroupVotes)
+    : votesLeft;
 
   // Auto Finish / Unfinish Effect
   useEffect(() => {
@@ -2512,6 +2524,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 const isMine = !onOwnControl && claimGesture(gesture);
                 endGesture(gesture);
                 if (!isMine) return;
+                // The tap is acted on here, so the browser emulates no mouse
+                // for it: the board is laid out again under the finger, and
+                // its click landed on whatever control came there — a card's
+                // delete, a vote — and took the focus off a new group's title.
+                e.preventDefault();
                 if (regroupsCards) handleGroupingActivate({ kind: 'ticket', ticket: t }, mode);
                 else handleBrainstormActivate({ kind: 'item', item: { kind: 'ticket', id: t.id }, canPickUp: true });
             }}
@@ -2873,6 +2890,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // Left for another control: its click, which follows, writes it with
       // its own change, or this does once the click has written nothing.
       pendingMaxVotesRef.current = typed;
+      setPendingMaxVotes(typed);
       if (pendingMaxVotesTimerRef.current) clearTimeout(pendingMaxVotesTimerRef.current);
       pendingMaxVotesTimerRef.current = setTimeout(() => {
           pendingMaxVotesTimerRef.current = null;
@@ -2963,13 +2981,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // the bar's status, which says it to a screen reader too. The card or
       // group held right now stays in view whatever the search finds: its own
       // control is the way to put it down, and a hold on something off screen
-      // would go on offering targets for it. So does the group whose title was
-      // typed during the search, until the search changes, while its reader
-      // can read it (searchKeptGroupId).
+      // would go on offering targets for it. So does a group whose title was
+      // focused during the search, until the search changes, while its reader
+      // can read it (searchKeptGroupIds).
       const isHeldEntry = (entry: ColumnEntry) => entry.kind === 'ticket'
           ? entry.ticket.id === draggedTicket?.id
           : (movingItem?.kind === 'group' && movingItem.id === entry.group.id)
-              || (entry.group.id === searchKeptGroupId && canReadGroup(session, entry.group.id, currentUser.id))
+              || (searchKeptGroupIds.has(entry.group.id) && canReadGroup(session, entry.group.id, currentUser.id))
               || (!!draggedTicket && session.tickets.some(t => t.id === draggedTicket.id && t.groupId === entry.group.id));
       let boardSearchFound = 0;
       const entriesByColumn = new Map(session.columns.map(col => {
@@ -3195,7 +3213,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
       const renderGroupContainer = (g: Group) => {
           const myVotesOnThis = g.votes.filter(v => v === currentUser.id).length;
-          const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
+          const canVote = votesLeftToCast > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
           // Read whole (openBoard.ts → canReadGroup): one card in it hidden
           // from this viewer, and a board's group takes no card and no vote.
           const groupReadable = !isBoard || canReadGroup(session, g.id, currentUser.id);
@@ -3297,12 +3315,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 if (mode === 'BRAINSTORM' || (isBoard && !selectThenDropActive)) {
                                                     const claimed = !onOwnControl && claimGesture(gesture);
                                                     endGesture(gesture);
-                                                    if (claimed) handleBrainstormActivate({ kind: 'item', item: { kind: 'group', id: g.id }, canPickUp: true });
+                                                    if (!claimed) return;
+                                                    // No emulated click, as on the card above.
+                                                    e.preventDefault();
+                                                    handleBrainstormActivate({ kind: 'item', item: { kind: 'group', id: g.id }, canPickUp: true });
                                                     return;
                                                 }
                                                 const isMine = isSelectThenDrop && !onOwnControl && claimGesture(gesture);
                                                 endGesture(gesture);
-                                                if (isMine) handleGroupingActivate({ kind: 'group', group: g }, mode);
+                                                if (!isMine) return;
+                                                e.preventDefault();
+                                                handleGroupingActivate({ kind: 'group', group: g }, mode);
                                             }}
                                         >
                                             {isGroupDragTarget && (
@@ -3332,7 +3355,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                             onFocus={() => {
                                                                 setEditingGroupId(g.id);
                                                                 setFocusGroupId(null);
-                                                                if (isBoard) setSearchKeptGroupId(g.id);
+                                                                if (isBoard) setSearchKeptGroupIds(kept => (kept.has(g.id) ? kept : new Set([...kept, g.id])));
                                                             }}
                                                             onBlur={() => {
                                                                 setFocusGroupId(null);
@@ -3739,7 +3762,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     if (entry.kind === 'group') return renderGroupContainer(entry.group);
                                     const t = entry.ticket;
                                     const myVotesOnThis = t.votes.filter(v => v === currentUser.id).length;
-                                    const canVote = votesLeft > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
+                                    const canVote = votesLeftToCast > 0 && (!session.settings.oneVotePerTicket || myVotesOnThis === 0);
                                     return renderTicketCard(t, mode, canVote, myVotesOnThis, false);
                                 })}
 

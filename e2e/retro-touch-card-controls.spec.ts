@@ -111,6 +111,64 @@ test('a card shows its controls on a phone, and its edit control lies over none 
   }
 });
 
+// Review finding (pass 4 of 42.1): a tap the board acts on lays the board out
+// again under the finger, and the browser then sent the mouse events it
+// emulates for a tap to whatever control came there: a grouping tap deleted a
+// card with no confirmation, added a vote or opened an editor, and took the
+// focus off the new group's title. A tap that is acted on sends no click.
+test('a tap that groups two cards on a phone clicks nothing else, and leaves the new group to be named', async ({ browser }) => {
+  const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
+  const phoneContext = await browser.newContext({ ...phone, locale: 'en-US' });
+  const page = await phoneContext.newPage();
+  try {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: '+ New Team' }).click();
+    await page.getByPlaceholder('e.g. Design Team').fill(`${TEAM_NAME}-tap`);
+    await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+    await page.getByLabel('Recovery Email').fill('facilitator@example.com');
+    await page.getByRole('button', { name: 'Create & Join' }).click();
+    await expect(page.getByText(`${TEAM_NAME}-tap Dashboard`)).toBeVisible({ timeout: 15_000 });
+    await dismissAnnouncementsIfPresent(page);
+
+    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
+    await dialog.getByTestId('retro-template-lean_coffee').click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
+
+    const texts = ['Flaky deploys', 'Slow rollbacks', 'Late release notes'];
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    for (const text of texts) {
+      await field.fill(text);
+      await page.keyboard.press('Enter');
+      await expect(card(page, text)).toBeVisible();
+    }
+
+    await card(page, 'Flaky deploys').tap();
+    await expect(page.getByRole('button', { name: /Selected for grouping/ })).toBeVisible();
+    await page.evaluate(() => {
+      const clicks: string[] = [];
+      (window as unknown as { tapClicks: string[] }).tapClicks = clicks;
+      document.addEventListener('click', (event) => {
+        const target = event.target as HTMLElement;
+        clicks.push(target.getAttribute('aria-label') ?? target.tagName);
+      }, true);
+    });
+
+    await card(page, 'Slow rollbacks').tap();
+    await expect(page.locator('.group-container')).toHaveCount(1);
+    // Past the moment a browser sends the click it emulates for a tap.
+    await page.waitForTimeout(500);
+
+    expect(await page.evaluate(() => (window as unknown as { tapClicks: string[] }).tapClicks)).toEqual([]);
+    await expect(page.locator('input[data-group-title-id]')).toBeFocused();
+    for (const text of texts) await expect(card(page, text)).toHaveCount(1);
+  } finally {
+    await phoneContext.close();
+  }
+});
+
 test('on a computer the same controls wait for the pointer', async ({ page }) => {
   expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(true);
   await page.goto('/');
