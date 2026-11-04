@@ -145,8 +145,13 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
       await expect(card(page, text)).toBeVisible();
     }
 
+    await expect(field).toBeFocused();
     await card(page, 'Flaky deploys').tap();
     await expect(page.getByRole('button', { name: /Selected for grouping/ })).toBeVisible();
+    // The tap takes the focus out of the field, as the mousedown it cancels
+    // did: the phone's keyboard closes over the board (review finding, pass 5
+    // of 42.1).
+    await expect(field).not.toBeFocused();
     await page.evaluate(() => {
       const clicks: string[] = [];
       (window as unknown as { tapClicks: string[] }).tapClicks = clicks;
@@ -164,6 +169,32 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
     expect(await page.evaluate(() => (window as unknown as { tapClicks: string[] }).tapClicks)).toEqual([]);
     await expect(page.locator('input[data-group-title-id]')).toBeFocused();
     for (const text of texts) await expect(card(page, text)).toHaveCount(1);
+
+    // Review finding (pass 5 of 42.1): a card's editor left open through the
+    // taps lost what was typed in it when one of them broke up its group.
+    await card(page, 'Flaky deploys').getByRole('button', { name: 'Edit ticket' }).tap();
+    const editor = card(page, 'Flaky deploys').locator('textarea');
+    await expect(editor).toBeFocused();
+    await editor.press('End');
+    await page.keyboard.type(' in staging');
+    // Holding its partner leaves the editor, and stores what it held.
+    await card(page, 'Slow rollbacks').tap();
+    await expect(page.locator('textarea:not([placeholder])')).toHaveCount(0);
+    await expect(page.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
+    // Past the server's answer: the drop below is a write of its own.
+    await page.waitForTimeout(500);
+    // Dropped on the loose card, the partner leaves the edited card alone.
+    await card(page, 'Late release notes').tap();
+    const group = page.locator('.group-container');
+    await expect(group).toHaveCount(1);
+    await expect(group.getByText('Late release notes', { exact: true })).toBeVisible();
+    await expect(group.getByText('Slow rollbacks', { exact: true })).toBeVisible();
+    await expect(group.getByText('Flaky deploys in staging', { exact: true })).toHaveCount(0);
+    // Still there once the server has answered the drop: nothing was refused
+    // and healed away.
+    await page.waitForTimeout(500);
+    await expect(page.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
+    await expect(group).toHaveCount(1);
   } finally {
     await phoneContext.close();
   }

@@ -480,6 +480,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // Editing Ticket State
   const [editingTicketId, setEditingTicketId] = useState<string | null>(null);
   const editingTicketIdRef = useRef<string | null>(null);
+  // The card whose editor was typed in since it took the focus, and the text
+  // it opened with: React sets the field's value as it mounts, so it shows
+  // that text whatever arrives meanwhile.
+  const typedTicketIdRef = useRef<string | null>(null);
+  const editorOpenedTextRef = useRef('');
   // Editing Group State
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const editingGroupIdRef = useRef<string | null>(null);
@@ -601,6 +606,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // a spent budget, the button the click was aimed at was still off at the
   // release, and the click cast nothing.
   const [pendingMaxVotes, setPendingMaxVotes] = useState<number | null>(null);
+  // What the field a tap leaves writes in its blur (an open card editor
+  // storing its text), held for the tap's own write (actOnClaimedTap): two
+  // writes from one revision, the server refused the second, and the drop or
+  // the text was lost. Collected while the tap takes the focus out of the
+  // field, folded into the next write by updateSession.
+  const collectingTapBlurWritesRef = useRef<Array<(s: RetroSession) => void> | null>(null);
+  const tapBlurWritesRef = useRef<Array<(s: RetroSession) => void>>([]);
   useEffect(() => () => {
     if (pendingMaxVotesTimerRef.current) clearTimeout(pendingMaxVotesTimerRef.current);
   }, []);
@@ -834,7 +846,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           {
             currentUserId: currentUser.id,
             preserveIcebreaker: currentUser.role === 'facilitator' && localIcebreakerQuestion !== null,
-            editingTicketId: editingTicketIdRef.current,
+            // Only once something was typed in it: an editor merely opened
+            // kept the card's old text over a teammate's edit, and its next
+            // write — the editor's own, as it was left — sent it back.
+            editingTicketId: editingTicketIdRef.current && typedTicketIdRef.current === editingTicketIdRef.current
+              ? editingTicketIdRef.current
+              : null,
             // Only while its field really has the focus. React runs no blur
             // for a field it removes (a phase change, the cards hidden), and a
             // group left "being typed" here kept its old title over every
@@ -1056,7 +1073,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // the reconnect, a teammate joining included, applied it and took the
       // votes above it back.
       if (takePendingMaxVotes() !== null) resetMaxVotesDraft();
+      tapBlurWritesRef.current = [];
       return null;
+    }
+    if (collectingTapBlurWritesRef.current) {
+      collectingTapBlurWritesRef.current.push(updater);
+      return sessionRef.current;
     }
     const baseSession = sessionRef.current
       ?? dataService.getTeam(team.id)?.retrospectives.find(r => r.id === sessionId)
@@ -1091,9 +1113,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // settings it writes — while the votes it took back were: a lost race
     // healed the number away and kept the cut.
     const pendingMaxVotes = takePendingMaxVotes();
+    // And so is what the field a tap left wrote, folded in the same way.
+    const tapBlurWrites = tapBlurWritesRef.current;
+    tapBlurWritesRef.current = [];
     let updaterBase: RetroSession = baseSession;
-    if (pendingMaxVotes !== null) {
-      applyMaxVotes(newSession, pendingMaxVotes);
+    if (pendingMaxVotes !== null || tapBlurWrites.length > 0) {
+      if (pendingMaxVotes !== null) applyMaxVotes(newSession, pendingMaxVotes);
+      tapBlurWrites.forEach(write => write(newSession));
       claimOwnChanges(baseSession, newSession);
       updaterBase = JSON.parse(JSON.stringify(newSession));
     }
@@ -1105,6 +1131,32 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // Sync to other clients via WebSocket
     syncService.updateSession(newSession);
     return newSession;
+  };
+
+  // A tap the board acts on cancels the mouse a browser emulates for it: the
+  // tap lays the board out again under the finger, and the click went to
+  // whatever control came there. The mousedown it cancels did more, and that
+  // is done here, before the tap acts: it took the focus out of the field
+  // being typed — an open card editor stored its text, a group title stopped
+  // being "typed", the phone's keyboard closed — and closed the reaction
+  // picker. What the field writes as it is left rides the tap's own write, or
+  // goes alone when the tap writes nothing (a hold).
+  const actOnClaimedTap = (e: React.TouchEvent, perform: () => void) => {
+    e.preventDefault();
+    if (emojiPickerOpenId && !emojiPickerRef.current?.contains(e.target as Node)) setEmojiPickerOpenId(null);
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body) {
+      const collected: Array<(s: RetroSession) => void> = [];
+      collectingTapBlurWritesRef.current = collected;
+      try {
+        active.blur();
+      } finally {
+        collectingTapBlurWritesRef.current = null;
+      }
+      tapBlurWritesRef.current.push(...collected);
+    }
+    perform();
+    if (tapBlurWritesRef.current.length > 0) updateSession(() => {});
   };
 
   // Handle icebreaker question change with debounce to prevent sync conflicts
@@ -2525,12 +2577,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 endGesture(gesture);
                 if (!isMine) return;
                 // The tap is acted on here, so the browser emulates no mouse
-                // for it: the board is laid out again under the finger, and
-                // its click landed on whatever control came there — a card's
-                // delete, a vote — and took the focus off a new group's title.
-                e.preventDefault();
-                if (regroupsCards) handleGroupingActivate({ kind: 'ticket', ticket: t }, mode);
-                else handleBrainstormActivate({ kind: 'item', item: { kind: 'ticket', id: t.id }, canPickUp: true });
+                // for it (actOnClaimedTap): the board is laid out again under
+                // the finger, and its click landed on whatever control came
+                // there — a card's delete, a vote — and took the focus off a
+                // new group's title.
+                actOnClaimedTap(e, () => {
+                    if (regroupsCards) handleGroupingActivate({ kind: 'ticket', ticket: t }, mode);
+                    else handleBrainstormActivate({ kind: 'item', item: { kind: 'ticket', id: t.id }, canPickUp: true });
+                });
             }}
             className={getTicketCardClassName(cardAppearance)}
             style={getTicketCardStyle(cardAppearance)}
@@ -2544,9 +2598,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     // eslint-disable-next-line jsx-a11y/no-autofocus -- the card the user just activated becomes this editor
                     autoFocus
                     defaultValue={t.text}
+                    onFocus={(e) => {
+                        typedTicketIdRef.current = null;
+                        editorOpenedTextRef.current = e.currentTarget.value.trim();
+                    }}
+                    onInput={() => { typedTicketIdRef.current = t.id; }}
                     onBlur={(e) => {
                         const val = e.currentTarget.value.trim();
-                        if(val) updateSession(s => { const tk = s.tickets.find(x => x.id === t.id); if(tk) tk.text = val; });
+                        // Written only when changed: left as it was opened, the
+                        // editor sent its old text back over a teammate's edit.
+                        if(val && val !== editorOpenedTextRef.current) updateSession(s => { const tk = s.tickets.find(x => x.id === t.id); if(tk) tk.text = val; });
+                        typedTicketIdRef.current = null;
                         setEditingTicketId(null);
                     }}
                     onKeyDown={(e) => {
@@ -2790,10 +2852,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
             {mode === 'VOTE' && !isGrouped && (
                 <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-end">
+                    {/* `aria-disabled`, not `disabled`, as on the board
+                        (BoardVoteControl): the vote cast with the keyboard that
+                        used the last one disabled the very button it was cast
+                        with, and the focus fell to the page (2.4.3). */}
                     <div className="flex items-center bg-indigo-50 rounded-lg p-1 shadow-xs">
-                        <button disabled={myVotesOnThis === 0} onClick={removeMyVote} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm disabled:opacity-30" aria-label={tr('session.ticket.removeVote')}><span className="material-symbols-outlined text-sm">remove</span></button>
+                        <button aria-disabled={myVotesOnThis === 0} onClick={() => { if (myVotesOnThis > 0) removeMyVote(); }} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent" aria-label={tr('session.ticket.removeVote')}><span className="material-symbols-outlined text-sm">remove</span></button>
                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                        <button disabled={!canVote} onClick={addMyVote} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm disabled:opacity-30" aria-label={tr('session.ticket.addVote')}><span className="material-symbols-outlined text-sm">add</span></button>
+                        <button aria-disabled={!canVote} onClick={() => { if (canVote) addMyVote(); }} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent" aria-label={tr('session.ticket.addVote')}><span className="material-symbols-outlined text-sm">add</span></button>
                     </div>
                 </div>
             )}
@@ -3317,15 +3383,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                     endGesture(gesture);
                                                     if (!claimed) return;
                                                     // No emulated click, as on the card above.
-                                                    e.preventDefault();
-                                                    handleBrainstormActivate({ kind: 'item', item: { kind: 'group', id: g.id }, canPickUp: true });
+                                                    actOnClaimedTap(e, () => handleBrainstormActivate({ kind: 'item', item: { kind: 'group', id: g.id }, canPickUp: true }));
                                                     return;
                                                 }
                                                 const isMine = isSelectThenDrop && !onOwnControl && claimGesture(gesture);
                                                 endGesture(gesture);
                                                 if (!isMine) return;
-                                                e.preventDefault();
-                                                handleGroupingActivate({ kind: 'group', group: g }, mode);
+                                                actOnClaimedTap(e, () => handleGroupingActivate({ kind: 'group', group: g }, mode));
                                             }}
                                         >
                                             {isGroupDragTarget && (
@@ -3353,7 +3417,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                             // field that comes back later (cards shown again)
                                                             // must not take it from whatever is being typed.
                                                             onFocus={() => {
-                                                                setEditingGroupId(g.id);
                                                                 setFocusGroupId(null);
                                                                 if (isBoard) setSearchKeptGroupIds(kept => (kept.has(g.id) ? kept : new Set([...kept, g.id])));
                                                             }}
@@ -3364,7 +3427,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                             onKeyDown={(e) => {
                                                                 if(e.key === 'Enter') e.currentTarget.blur();
                                                             }}
-                                                            onChange={(e) => updateSession(s => {const grp = s.groups.find(x => x.id === g.id); if(grp) grp.title = e.target.value;})}
+                                                            // Being typed from the first keystroke, not from the
+                                                            // focus: a new group's title takes the focus to be
+                                                            // named, and a name a teammate gave it meanwhile was
+                                                            // kept off this screen, then erased by its next write.
+                                                            onChange={(e) => {
+                                                                editingGroupIdRef.current = g.id;
+                                                                setEditingGroupId(g.id);
+                                                                updateSession(s => {const grp = s.groups.find(x => x.id === g.id); if(grp) grp.title = e.target.value;});
+                                                            }}
                                                             placeholder={aiSuggestingGroupId === g.id ? tr('session.group.aiSuggestingPlaceholder') : tr('session.group.namePlaceholder')}
                                                             className="w-full text-sm font-bold text-slate-700 border-none focus:ring-0 bg-transparent p-0 placeholder-indigo-300"
                                                           />
@@ -3443,9 +3514,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             {mode === 'VOTE' && (
                                                 <div className="mt-2 pt-2 border-t border-indigo-100 flex items-center justify-end">
                                                     <div className="flex items-center bg-white rounded-lg p-1 shadow-xs border border-indigo-100">
-                                                        <button disabled={myVotesOnThis === 0} onClick={removeGroupVote} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30" aria-label={tr('session.group.removeVote')}><span className="material-symbols-outlined text-sm">remove</span></button>
+                                                        {/* `aria-disabled`, as on a card's above. */}
+                                                        <button aria-disabled={myVotesOnThis === 0} onClick={() => { if (myVotesOnThis > 0) removeGroupVote(); }} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent" aria-label={tr('session.group.removeVote')}><span className="material-symbols-outlined text-sm">remove</span></button>
                                                         <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                                                        <button disabled={!canVote} onClick={addGroupVote} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm disabled:opacity-30" aria-label={tr('session.group.addVote')}><span className="material-symbols-outlined text-sm">add</span></button>
+                                                        <button aria-disabled={!canVote} onClick={() => { if (canVote) addGroupVote(); }} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent" aria-label={tr('session.group.addVote')}><span className="material-symbols-outlined text-sm">add</span></button>
                                                     </div>
                                                 </div>
                                             )}

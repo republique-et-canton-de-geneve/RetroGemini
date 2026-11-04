@@ -769,6 +769,63 @@ describe('Open board — every hold and every drop', () => {
       expect((await lastPersisted())?.groups[0].title).toBe('Release train');
     });
 
+    // Review finding (pass 5 of 42.1): a title was "being typed" from the
+    // moment it had the focus. A new group's title takes it to be named, and
+    // a name a teammate gave it meanwhile was kept off this screen — and in
+    // the state its next write of any kind sent to everyone, erasing it.
+    it('takes a teammate\u2019s name for a title it only focused, and keeps one it types', async () => {
+      const user = userEvent.setup();
+      const named = (rev: number, title: string) => {
+        const session = groupedBoard({ _rev: rev });
+        session.groups = session.groups.map((g) => ({ ...g, title }));
+        return session;
+      };
+      renderBoard(named(5, ''), alice);
+      await screen.findByText('Flaky deploys');
+      await user.click(titleField()!);
+
+      act(() => sessionUpdateListener?.(named(6, 'Calendar')));
+      await waitFor(() => expect(titleField()?.value).toBe('Calendar'));
+      expect(document.activeElement).toBe(titleField());
+      await voteOnMeetings(user);
+      expect((await lastPersisted())?.groups[0].title).toBe('Calendar');
+
+      // Typed, it is the typist's until the field is left.
+      await user.click(titleField()!);
+      await user.keyboard(' team');
+      act(() => sessionUpdateListener?.(named(8, 'Meetings')));
+      expect(titleField()?.value).toBe('Calendar team');
+    });
+
+    // Review finding (pass 5 of 42.1): the same for a card's editor, which
+    // kept the card's old text from the moment it opened, and wrote it back
+    // as it was left, typed in or not.
+    it('takes a teammate\u2019s edit of a card whose editor it only opened, and keeps one it types', async () => {
+      const user = userEvent.setup();
+      const worded = (rev: number, text: string) => {
+        const session = groupedBoard({ _rev: rev });
+        session.tickets = session.tickets.map((t) => (t.id === 't-c' ? { ...t, text } : t));
+        return session;
+      };
+      renderBoard(worded(5, 'Too many meetings'), alice);
+      await screen.findByText('Too many meetings');
+      await user.click(within(cardElement('Too many meetings')).getByRole('button', { name: 'Edit ticket' }));
+      const before = await persistedCount();
+
+      act(() => sessionUpdateListener?.(worded(6, 'Too many meetings on Tuesdays')));
+      await user.keyboard('{Enter}');
+      expect(await persistedCount()).toBe(before);
+      await user.click(within(cardElement('Too many meetings on Tuesdays')).getByRole('button', { name: /add a vote/ }));
+      expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings on Tuesdays');
+
+      // Typed, it is the typist's.
+      await user.click(within(cardElement('Too many meetings on Tuesdays')).getByRole('button', { name: 'Edit ticket' }));
+      await user.type(within(cardElement('Too many meetings on Tuesdays')).getByRole('textbox'), '!');
+      act(() => sessionUpdateListener?.(worded(8, 'Meetings')));
+      await user.keyboard('{Enter}');
+      expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings on Tuesdays!');
+    });
+
     it('takes a later rename once a phase change took its field away', async () => {
       const user = userEvent.setup();
       const group = (phase: string, rev: number, title = 'Delivery') => {
@@ -2228,18 +2285,59 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
     await user.click(target);
 
     // The button goes off as the field is left, under the new number, and the
-    // number is written alone a moment later; the vote's own write judges it
-    // again (mayAddVote) had the click still been taken.
+    // number is written alone a moment later.
     await waitFor(async () => expect((await lastPersisted())?.settings.maxVotes).toBe(3));
     expect(votesOf((await lastPersisted())!, 'fac')).toBe(3);
-    expect((target as HTMLButtonElement).disabled).toBe(true);
+    expect(target.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  // Review finding (pass 5 of 42.1): since the button reads the number left
+  // for it, the click above is refused before it reaches the vote's own
+  // write, and nothing held that write to the rule any more. A click handled
+  // before the field's blur is drawn reaches it: the vote's write judges the
+  // vote again (mayAddVote), on the state it is built on.
+  it.each([
+    ['a card', 'Add a vote to this ticket'],
+    ['a group', 'Add a vote to this group'],
+  ])('judges a vote on %s again as it is written, under the number folded into it', async (_kind, buttonName) => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({
+      phase: 'VOTE',
+      tickets: [
+        { id: 't-a', colId: 'todo', text: 'Flaky deploys', authorId: 'alice', groupId: null, votes: ['fac', 'fac', 'fac'] },
+        { id: 't-b', colId: 'todo', text: 'Slow rollbacks', authorId: 'bob', groupId: null, votes: [] },
+        { id: 't-c', colId: 'todo', text: 'Too many meetings', authorId: 'bob', groupId: 'g1', votes: [] },
+        { id: 't-d', colId: 'todo', text: 'No focus time', authorId: 'bob', groupId: 'g1', votes: [] },
+      ],
+      groups: [{ id: 'g1', title: 'Calendar', colId: 'todo', votes: [], anchorTicketId: 't-c' }],
+    }));
+    const field = await screen.findByRole('textbox', { name: 'Max votes per person' });
+    await user.clear(field);
+    await user.type(field, '3');
+    const target = buttonName.endsWith('group')
+      ? screen.getByRole('button', { name: buttonName })
+      : within(cardElement('Slow rollbacks')).getByRole('button', { name: buttonName });
+    const before = await persistedCount();
+
+    act(() => {
+      fireEvent.blur(field);
+      fireEvent.click(target);
+    });
+
+    const written = (await lastPersisted())!;
+    expect(await persistedCount()).toBe(before + 1);
+    expect(written.settings.maxVotes).toBe(3);
+    expect(votesOf(written, 'fac')).toBe(3);
   });
 
   // Review finding (pass 4 of 42.1): raised over a spent budget and left for
   // a vote button, the number only waited for that button's write — and the
   // button, off under the old number, was still off at the release: the click
   // cast nothing, and the button lit up a moment later.
-  it('casts the vote a number raised over a spent budget was left for', async () => {
+  it.each([
+    ['a card', 'Add a vote to this ticket'],
+    ['a group', 'Add a vote to this group'],
+  ])('casts the vote on %s a number raised over a spent budget was left for', async (_kind, buttonName) => {
     const user = userEvent.setup();
     const { dataService } = await import('../services/dataService');
     renderBoard(createBoard({
@@ -2251,11 +2349,16 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
       tickets: [
         { id: 't-a', colId: 'todo', text: 'Flaky deploys', authorId: 'alice', groupId: null, votes: ['fac', 'fac', 'fac'] },
         { id: 't-b', colId: 'todo', text: 'Slow rollbacks', authorId: 'bob', groupId: null, votes: [] },
+        { id: 't-c', colId: 'todo', text: 'Too many meetings', authorId: 'bob', groupId: 'g1', votes: [] },
+        { id: 't-d', colId: 'todo', text: 'No focus time', authorId: 'bob', groupId: 'g1', votes: [] },
       ],
+      groups: [{ id: 'g1', title: 'Calendar', colId: 'todo', votes: [], anchorTicketId: 't-c' }],
     }));
     const field = await screen.findByRole('textbox', { name: 'Max votes per person' });
-    const plus = within(cardElement('Slow rollbacks')).getByRole('button', { name: 'Add a vote to this ticket' }) as HTMLButtonElement;
-    expect(plus.disabled).toBe(true);
+    const plus = buttonName.endsWith('group')
+      ? screen.getByRole('button', { name: buttonName })
+      : within(cardElement('Slow rollbacks')).getByRole('button', { name: buttonName });
+    expect(plus.getAttribute('aria-disabled')).toBe('true');
     await user.clear(field);
     await user.type(field, '5');
     const before = await persistedCount();
@@ -2265,7 +2368,90 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
     // One gesture, one write: the number and the vote together.
     const writes = (dataService.updateSession as unknown as ReturnType<typeof vi.fn>).mock.calls.slice(before).map(([, s]) => s as RetroSession);
     expect(writes[0]?.settings.maxVotes).toBe(5);
-    expect(writes[0]?.tickets.find((t) => t.id === 't-b')?.votes).toEqual(['fac']);
+    expect(votesOf(writes[0]!, 'fac')).toBe(4);
+    expect(buttonName.endsWith('group')
+      ? writes[0]?.groups[0].votes
+      : writes[0]?.tickets.find((t) => t.id === 't-b')?.votes).toEqual(['fac']);
+  });
+
+  // Review finding (pass 5 of 42.1): the number the vote buttons read is put
+  // down with the one the writes read, in one place, and nothing held that:
+  // without it, a number left and then typed back stayed on the buttons, lit
+  // over a spent budget, and their click cast nothing.
+  it('puts the buttons back under the stored number once a number left is dropped', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({
+      phase: 'VOTE',
+      settings: settingsOf({ maxVotes: 3 }),
+      finishedUsers: ['fac'],
+      autoFinishedUsers: ['fac'],
+      tickets: [
+        { id: 't-a', colId: 'todo', text: 'Flaky deploys', authorId: 'alice', groupId: null, votes: ['fac', 'fac', 'fac'] },
+        { id: 't-b', colId: 'todo', text: 'Slow rollbacks', authorId: 'bob', groupId: null, votes: [] },
+      ],
+    }));
+    const field = await screen.findByRole('textbox', { name: 'Max votes per person' });
+    const plus = within(cardElement('Slow rollbacks')).getByRole('button', { name: 'Add a vote to this ticket' });
+    await user.clear(field);
+    await user.type(field, '5');
+    await user.tab();
+    expect(plus.getAttribute('aria-disabled')).toBe('false');
+
+    // Back into the field, which drops the number left, and out again with
+    // the stored one.
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(field);
+    expect(plus.getAttribute('aria-disabled')).toBe('true');
+    await user.clear(field);
+    await user.type(field, '3');
+    await user.tab();
+    expect(plus.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  // Review finding (pass 5 of 42.1): the guided Vote phase's buttons were
+  // `disabled`, so the vote cast with the keyboard that used the last one
+  // turned off the button under the focus, which fell to the page (2.4.3) —
+  // and so did taking back one's last vote with the minus.
+  it.each([
+    ['a card', 'ticket'],
+    ['a group', 'group'],
+  ])('keeps the keyboard on the vote buttons of %s that turn off under it', async (_kind, kind) => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({
+      phase: 'VOTE',
+      settings: settingsOf({ maxVotes: 3 }),
+      tickets: [
+        { id: 't-a', colId: 'todo', text: 'Flaky deploys', authorId: 'alice', groupId: null, votes: ['fac', 'fac'] },
+        { id: 't-b', colId: 'todo', text: 'Slow rollbacks', authorId: 'bob', groupId: null, votes: [] },
+        { id: 't-c', colId: 'todo', text: 'Too many meetings', authorId: 'bob', groupId: 'g1', votes: [] },
+        { id: 't-d', colId: 'todo', text: 'No focus time', authorId: 'bob', groupId: 'g1', votes: [] },
+      ],
+      groups: [{ id: 'g1', title: 'Calendar', colId: 'todo', votes: [], anchorTicketId: 't-c' }],
+    }));
+    await screen.findByText('Slow rollbacks');
+    const scope = () => (kind === 'group' ? screen.getByText('Calendar').closest('.group-container') as HTMLElement : cardElement('Slow rollbacks'));
+    const plus = within(scope()).getByRole('button', { name: `Add a vote to this ${kind}` });
+    plus.focus();
+
+    await user.keyboard(' ');
+
+    expect(votesOf((await lastPersisted())!, 'fac')).toBe(3);
+    expect(plus.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(plus);
+    // Pressed again, it adds nothing.
+    const before = await persistedCount();
+    await user.keyboard(' ');
+    expect(await persistedCount()).toBe(before);
+
+    const minus = within(scope()).getByRole('button', { name: `Remove a vote from this ${kind}` });
+    minus.focus();
+    await user.keyboard(' ');
+    expect(votesOf((await lastPersisted())!, 'fac')).toBe(2);
+    expect(minus.getAttribute('aria-disabled')).toBe('true');
+    expect(document.activeElement).toBe(minus);
+    const after = await persistedCount();
+    await user.keyboard(' ');
+    expect(await persistedCount()).toBe(after);
   });
 
   // Review finding (pass 3 of 42.1): a number left while the session dropped

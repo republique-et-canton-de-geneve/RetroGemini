@@ -279,8 +279,19 @@ under the finger, and the mousedown and click a browser emulates for a tap then
 went to whatever control came there — on the open board a grouping tap deleted
 a card with no confirmation, added a vote or opened an editor, and took the
 focus off the new group's title. A scroll, or a tap on a control, keeps them.
+**What the cancelled mousedown did besides is done by hand** (`actOnClaimedTap`
+in `Session.tsx`, the one path every claimed tap takes): before acting, the tap
+takes the focus out of the field being typed and closes the reaction picker.
+Without it an open card editor stayed open through the taps and lost what was
+typed when one broke up its card's group, a group title stayed "being typed"
+and a teammate's rename was sent back, the phone's keyboard stayed over the
+board, and the picker stayed open over the next card to tap. What the field
+writes as it is left rides the tap's own write (`updateSession` folds it in, as
+it folds the votes number), or goes alone when the tap writes nothing (a hold):
+two writes from one revision, and the server refused the second.
 `e2e/retro-touch-card-controls.spec.ts` holds it in Chromium (jsdom emulates no
-mouse for a tap); `__tests__/sessionGroupTouch.test.tsx` pins which taps cancel.
+mouse for a tap); `__tests__/sessionGroupTouch.test.tsx` pins which taps cancel,
+and what they leave.
 
 **A control shown on hover is shown on focus, and never hidden where nothing
 hovers.** A card's edit, delete and first-comment controls were `opacity-0`
@@ -606,12 +617,14 @@ Eleven rules:
   revision, and a Next Phase or a timer start pressed right after typing
   snapped back. Folded in, it is still claimed as a write of its own: a phase
   change claims none of the settings it writes, so a Next Phase that lost its
-  race healed the number away while the votes it took back stayed taken. A
-  vote button judges the vote again on the state its write is built on
-  (`mayAddVote`): it was enabled under the old number, and the vote went in
-  past the new one. And the vote buttons read the number left for them
-  (`votesLeftToCast`): raised over a spent budget, the button was still off at
-  the release, and the click cast nothing. A number abandoned with Escape, which leaves no field, is
+  race healed the number away while the votes it took back stayed taken. The
+  vote buttons read the number left for them (`votesLeftToCast`, from a copy
+  of it the screen holds, put down with the one the writes read): raised over
+  a spent budget, the button was still off at the release, and the click cast
+  nothing; lowered, the button goes off as the field is left. A vote's write
+  still judges the vote again on the state it is built on (`mayAddVote`), for
+  a click handled before the field's blur is drawn: it went in past the new
+  number. A number abandoned with Escape, which leaves no field, is
   dropped when the settings close, never applied later; so is one whose write
   the session refused offline, the draft with it (left waiting, the next write
   after the reconnect applied it, a teammate's join included), and one left
@@ -630,7 +643,9 @@ Eleven rules:
   of one person voting from one revision would otherwise both keep their vote.
   The control keeps the keyboard where it is (2.4.3): a vote button that cannot
   add right now is `aria-disabled`, not `disabled` — the vote that used up one
-  vote per item disabled the very button it was cast with, under the focus —
+  vote per item disabled the very button it was cast with, under the focus;
+  the guided Vote phase's plus and minus are `aria-disabled` too, since the
+  vote that used the last one, or took the last one back, did the same —
   and taking back one's last vote moves the focus to it before the cross goes
   — on a card or group its viewer cannot read, which has no vote button, to
   the card or group itself (`data-vote-focus-host`).
@@ -657,7 +672,13 @@ Eleven rules:
   (the cards hidden, a move, a phase change) runs no blur, so the merge keeps a
   local title only while its field really has the focus
   (`data-group-title-id`): a group left "being typed" kept its old title over
-  every rename and sent it back with that screen's next write.
+  every rename and sent it back with that screen's next write. A title is
+  "being typed" from its first keystroke, not from the focus: a new group's
+  title takes the focus to be named, and a name a teammate gave it meanwhile
+  was kept off the screen and erased by its next write. A card's editor
+  follows the same rule (keeps its text over a teammate's edit once typed in),
+  and is written as it is left only when its text changed: left as it was
+  opened, it sent the old text back.
   Nothing is written: two people read one board in two orders. A group's own
   cards keep the order they were written in.
 - **The votes travel with the cards**, on a board and in the guided Group
@@ -798,13 +819,15 @@ the voter has*, and *the facilitator's own settings are claimed*),
 the switch, the panel, every hold and every drop — *with the cards hidden*
 too, every hold as the cards are hidden — and *sort, search, votes and the
 facilitator's settings*, the vote control's focus, the votes field and the
-hidden cards' words included), `hiddenCardFiller.test.ts`,
-`i18nOpenBoard.test.tsx`,
+hidden cards' words included, and a title or a card's editor only focused
+taking a teammate's word), `sessionGroupTouch.test.tsx` (the taps that
+cancel the emulated mouse, and the field and the picker they leave),
+`hiddenCardFiller.test.ts`, `i18nOpenBoard.test.tsx`,
 `dashboardOpenBoard.test.tsx` (the board type, and the lists' statuses
 measured at 4.5:1), `e2e/i18n.spec.ts` (the action bars),
 `e2e/retro-touch-card-controls.spec.ts` (a card's controls on a phone and on a
-computer, the pencil over no text on either, and a grouping tap that clicks
-nothing else), and
+computer, the pencil over no text on either, a grouping tap that clicks
+nothing else, and an editor left open through the taps keeping its text), and
 `e2e/retro-open-board.spec.ts` (two browsers, the presence panel, the settings
 and their axe audit, hidden cards reaching the participant, a search, a round
 trip through the guided retro, and the axe audit of the board).
