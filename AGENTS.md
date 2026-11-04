@@ -597,8 +597,16 @@ Eleven rules:
   control's own write (`updateSession` folds it in; alone 400 ms later when the
   click writes nothing): the blur and the click were two writes from one
   revision, and a Next Phase or a timer start pressed right after typing
-  snapped back. A number abandoned with Escape, which leaves no field, is
-  dropped when the settings close, never applied later. `unlimitedVotes`, `votingDisabled` and
+  snapped back. Folded in, it is still claimed as a write of its own: a phase
+  change claims none of the settings it writes, so a Next Phase that lost its
+  race healed the number away while the votes it took back stayed taken. A
+  vote button judges the vote again on the state its write is built on
+  (`mayAddVote`): it was enabled under the old number, and the vote went in
+  past the new one. A number abandoned with Escape, which leaves no field, is
+  dropped when the settings close, never applied later; so is one whose write
+  the session refused offline, the draft with it (left waiting, the next write
+  after the reconnect applied it, a teammate's join included), and one left
+  and then typed in again, where the field holds the number. `unlimitedVotes`, `votingDisabled` and
   `voteCountHidden` are facilitator-only in `sessionGuard.js`; the last two are
   read on a board only. An own vote that loses its race is re-sent under one
   vote per item too — a board's default, so never re-sending made every lost
@@ -623,14 +631,20 @@ Eleven rules:
   oldest first or most voted first; a search ignores accents, case and word
   order, reads the apostrophe a phone types (’) and the modifier letter (ʼ) as
   the one a laptop does (') — folded before the accents go, since ʼ is a
-  diacritic to Unicode — and œ, æ as oe, ae, never finds a card its reader cannot read, shows a group whole when
+  diacritic to Unicode — and œ, æ as oe, ae; it drops the diacritics, never
+  every combining mark, so the point médian of inclusive writing
+  ("participant·es") is ignored and the vowel signs of other scripts are kept.
+  It never finds a card its reader cannot read, shows a group whole when
   its title or one of its readable cards matches, and a status says how many
   it found. The card or group held right now stays in view whatever the search
   finds, and is not counted: its own control is the way to put it down. So
-  does a group whose title is being typed, until the field is left: the
-  keystroke that stopped it matching took the field away mid-word. And a title
-  field React removes (the cards hidden, a phase change) runs no blur, so the
-  merge keeps a local title only while its field really has the focus
+  does the group whose title was typed on the board, until the search changes
+  (`searchKeptGroupId`): the keystroke that stopped it matching took the field
+  away mid-word, and kept only while the field had the focus, it went at the
+  blur — the press of a click on its own vote button, the Tab to its next
+  control — and took that control with it. And a title field React removes
+  (the cards hidden, a move, a phase change) runs no blur, so the merge keeps a
+  local title only while its field really has the focus
   (`data-group-title-id`): a group left "being typed" kept its old title over
   every rename and sent it back with that screen's next write.
   Nothing is written: two people read one board in two orders. A group's own
@@ -717,10 +731,9 @@ Residuals of the board's own design (42.1), stated on purpose:
   box (the guided Vote bar's box carries no such line), and the number can be
   set before the box is unticked.
 - **A card written while a search is on, and not matching it, leaves its
-  writer's screen** until the search is cleared, and a group renamed so that
-  it no longer matches leaves it once its title field is left (it stays while
-  the field has the focus); the bar's count is what says the board is
-  filtered.
+  writer's screen** until the search is cleared, while a group renamed so that
+  it no longer matches stays on it, uncounted, until the search changes; the
+  bar's count is what says the board is filtered.
 - **Newest first and most voted first move cards while people work**: a card
   written at the top of its column, or a vote that re-ranks a card, can move
   another one between the moment it is aimed at and the click or the drop.
@@ -3125,7 +3138,9 @@ of type before any card takes the new type's defaults, and entering the board
 from Group shows the cards (`recordBoardTypeChange`), in the phase change's
 own write. The phase is navigation, where the server wins, so a phase change
 that loses its race is healed away whole; claimed, its settings outlived it,
-and a guided Brainstorm took the board's defaults — every card shown.
+and a guided Brainstorm took the board's defaults — every card shown. A number
+typed and left for the phase change's button is not one of them:
+`updateSession` claims it as a write of its own before the phase change runs.
 
 `__tests__/twoBrowserSessionConvergence.test.ts` is the guard, and it is a
 *convergence* test on purpose: it drives the real loop (server CAS, broadcast,

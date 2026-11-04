@@ -10,6 +10,28 @@ export const voteBudget = (settings: Pick<RetroSettings, 'maxVotes' | 'unlimited
   settings.unlimitedVotes ? Number.POSITIVE_INFINITY : settings.maxVotes;
 
 /**
+ * Whether one more vote of `userId` may go on `item`: the voter has votes left
+ * (cards and groups counted together) and, with one vote per item, has not
+ * voted on it yet. Read on the state a write is built on, not only on the
+ * screen that offered the button: a number typed in the votes field and left
+ * for a vote button joins that button's own write (Session.tsx →
+ * updateSession), and the button had been enabled under the old number, so
+ * the vote went in past the new one.
+ */
+export const mayAddVote = (
+  session: Pick<RetroSession, 'tickets' | 'groups'> & {
+    settings: Pick<RetroSettings, 'maxVotes' | 'unlimitedVotes' | 'oneVotePerTicket'>;
+  },
+  item: { votes: string[] },
+  userId: string,
+): boolean => {
+  const cast = [...session.tickets, ...session.groups]
+    .reduce((sum, entry) => sum + entry.votes.filter((voter) => voter === userId).length, 0);
+  if (cast >= voteBudget(session.settings)) return false;
+  return !session.settings.oneVotePerTicket || !item.votes.includes(userId);
+};
+
+/**
  * Takes every voter back down to `max` votes: what lowering the number does,
  * and turning unlimited votes off. A voter's votes go from the cards first,
  * then from the groups, in the session's order — the rule the Vote phase has

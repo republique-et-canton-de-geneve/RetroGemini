@@ -1497,6 +1497,27 @@ describe('the facilitator’s own settings are claimed', () => {
       expect(divergent).toBe(true);
     });
 
+    // Review finding (pass 3 of 42.1): the group claim was counted against the
+    // server's one vote per item, so it read the single vote the server held
+    // as confirming it and dropped the second, as the card claim once did.
+    it('keeps the votes cast on a group after turning one vote per item off', () => {
+      const grouped = (oneVotePerTicket: boolean, rev: number, votes: string[]) => board({ oneVotePerTicket, unlimitedVotes: true }, {
+        _rev: rev,
+        tickets: [makeTicket('t1', { authorId: OTHER, groupId: 'g1' }), makeTicket('t2', { authorId: OTHER, groupId: 'g1' })],
+        groups: [{ id: 'g1', title: 'Delivery', colId: 'col-1', votes, anchorTicketId: 't1' }],
+      });
+      const ownChanges = facilitatorClaims([grouped(true, 3, [ME]), grouped(false, 3, [ME]), grouped(false, 3, [ME, ME])]);
+      // A participant's write landed first: neither of the facilitator's did.
+      const healed = grouped(true, 4, [ME, OTHER]);
+
+      const { merged, divergent } = mergeRemoteRetroSession(healed, grouped(false, 3, [ME, ME]), ctx({ ownChanges }), noPending());
+
+      expect(merged.settings.oneVotePerTicket).toBe(false);
+      expect(merged.groups[0].votes.filter(v => v === ME)).toHaveLength(2);
+      expect(merged.groups[0].votes).toContain(OTHER);
+      expect(divergent).toBe(true);
+    });
+
     it('keeps the votes cast after turning unlimited votes on, past the old number', () => {
       const cards = (votes: string[][]) => votes.map((v, i) => makeTicket(`t${i + 1}`, { authorId: OTHER, votes: v }));
       const start = board({ maxVotes: 1, unlimitedVotes: false }, { _rev: 3, tickets: cards([[], []]) });

@@ -155,6 +155,24 @@ describe('the search of a board', () => {
     expect(matchesSearch('Améliorer lʼéquipe', 'lequipe')).toBe(false);
     // Text pasted from a PDF carries "ﬁ" as one character.
     expect(matchesSearch('Les ﬁchiers partagés', 'fichiers')).toBe(true);
+    // And a phone's full-width letters as their plain ones.
+    expect(matchesSearch('Ｒｅｔｒｏ notes', 'retro')).toBe(true);
+  });
+
+  // Review finding (pass 3 of 42.1): the fix above removed every combining
+  // mark instead of the diacritics, after a compatibility decomposition. The
+  // marks that are not accents went too — a Hindi vowel sign, so a word found
+  // another one — and the spacing diacritics stayed: the point médian of
+  // French inclusive writing, the Catalan middle dot, the ʻokina, a spacing
+  // acute typed for an apostrophe.
+  it('ignores the point médian and the other spacing diacritics, and keeps the vowel signs of other scripts', () => {
+    expect(matchesSearch('Remercier les participant·es', 'participantes')).toBe(true);
+    expect(matchesSearch('Remercier les participantes', 'participant·es')).toBe(true);
+    expect(matchesSearch('Una col·laboració', 'collaboracio')).toBe(true);
+    expect(matchesSearch('Offsite à Oʻahu', 'oahu')).toBe(true);
+    expect(matchesSearch('We don´t ship on Fridays', 'dont')).toBe(true);
+    expect(matchesSearch('एक दिन', 'दान')).toBe(false);
+    expect(matchesSearch('एक दिन', 'दिन')).toBe(true);
   });
 
   it('finds every word of the query, in any order', () => {

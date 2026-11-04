@@ -172,4 +172,12 @@ describe('Open board — in French', () => {
 
     expect(await screen.findByRole('button', { name: /Passer en tableau ouvert/ })).toBeTruthy();
   });
+
+  // Review finding (pass 3 of 42.1): the colour's name was pinned in the
+  // board's dialog only, and the guided Brainstorm bar renders the same select.
+  it('names the guided Brainstorm bar’s colour by the words it shows', async () => {
+    renderInFrench(board({ phase: 'BRAINSTORM' }));
+
+    expect(await screen.findByRole('combobox', { name: 'Couleur par\u00a0:' })).toBeTruthy();
+  });
 });

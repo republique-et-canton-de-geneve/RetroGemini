@@ -31,6 +31,9 @@ export const effectiveBoardSort = (
   settings: Pick<RetroSettings, 'voteCountHidden'>,
 ): BoardSort => (sort === 'votes' && settings.voteCountHidden ? DEFAULT_BOARD_SORT : sort);
 
+const APOSTROPHES = /[’‘ʼ]/g;
+const DIACRITICS = /\p{Diacritic}/gu;
+
 /**
  * Text as the search compares it: no accents, no case, single spaces. French
  * cards are typed with and without accents ("équipe", "equipe") and both must
@@ -39,15 +42,23 @@ export const effectiveBoardSort = (
  * the ligatures œ and æ, which no keyboard layout types the same way. NFKD
  * also spells out what a PDF pastes as one character ("ﬁ").
  *
- * The apostrophes are folded before the accents go, and only combining marks
- * go: ʼ is a "diacritic" to Unicode, and removing every \p{Diacritic} deleted
- * it before it was read as an apostrophe.
+ * The apostrophes are folded before the accents go: ʼ is a "diacritic" to
+ * Unicode, and removing every \p{Diacritic} deleted it before it was read as
+ * an apostrophe. The diacritics go, never every combining mark: a Hindi or
+ * Thai vowel sign is a mark that changes the word, while the point médian of
+ * inclusive writing ("participant·es"), the Catalan middle dot and the ʻokina
+ * are diacritics that are not marks. They go before the compatibility
+ * decomposition, which would turn a spacing acute ("don´t") into a space and
+ * an accent, and again after it, for the accents it spells out.
  */
 export const normalizeForSearch = (text: string): string =>
   text
+    .normalize('NFD')
+    .replace(APOSTROPHES, "'")
+    .replace(DIACRITICS, '')
     .normalize('NFKD')
-    .replace(/[’‘ʼ]/g, "'")
-    .replace(/\p{M}/gu, '')
+    .replace(APOSTROPHES, "'")
+    .replace(DIACRITICS, '')
     .toLowerCase()
     .replace(/œ/g, 'oe')
     .replace(/æ/g, 'ae')

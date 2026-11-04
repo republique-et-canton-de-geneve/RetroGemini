@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Group, Ticket } from '../types';
-import { capVotes, keepOneVotePerItem, voteBudget } from '../utils/voteBudget';
+import { capVotes, keepOneVotePerItem, mayAddVote, voteBudget } from '../utils/voteBudget';
 
 /**
  * How many votes one person may cast (utils/voteBudget.ts), and what lowering
@@ -19,6 +19,38 @@ describe('voteBudget', () => {
     expect(voteBudget({ maxVotes: 5, unlimitedVotes: true })).toBe(Number.POSITIVE_INFINITY);
     // What the screens compute from it stays a number that never runs out.
     expect(voteBudget({ maxVotes: 5, unlimitedVotes: true }) - 40 > 0).toBe(true);
+  });
+});
+
+// Review finding (pass 3 of 42.1): a number typed in the votes field and left
+// for a vote button joins that button's own write, and the button was enabled
+// under the old number. The rule is read again on the state the write is
+// built on.
+describe('mayAddVote', () => {
+  const session = (votes: string[][], settings: { maxVotes: number; unlimitedVotes?: boolean; oneVotePerTicket?: boolean }) => ({
+    tickets: votes.map((v, i) => ticket(`t${i + 1}`, v)),
+    groups: [group('g1', ['u1'])],
+    settings: { oneVotePerTicket: false, ...settings },
+  });
+
+  it('adds a vote while the voter has some left, counting the groups too', () => {
+    const s = session([['u1'], []], { maxVotes: 3 });
+    expect(mayAddVote(s, s.tickets[1], 'u1')).toBe(true);
+    expect(mayAddVote(s, s.tickets[1], 'u2')).toBe(true);
+    const spent = session([['u1', 'u1'], []], { maxVotes: 3 });
+    expect(mayAddVote(spent, spent.tickets[1], 'u1')).toBe(false);
+  });
+
+  it('never runs out while votes are unlimited', () => {
+    const s = session([['u1', 'u1', 'u1'], []], { maxVotes: 1, unlimitedVotes: true });
+    expect(mayAddVote(s, s.tickets[1], 'u1')).toBe(true);
+  });
+
+  it('adds no second vote on one item while one vote per item is on', () => {
+    const s = session([['u1'], []], { maxVotes: 5, oneVotePerTicket: true });
+    expect(mayAddVote(s, s.tickets[0], 'u1')).toBe(false);
+    expect(mayAddVote(s, s.groups[0], 'u1')).toBe(false);
+    expect(mayAddVote(s, s.tickets[1], 'u1')).toBe(true);
   });
 });
 
