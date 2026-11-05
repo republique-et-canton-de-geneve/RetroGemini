@@ -572,6 +572,73 @@ test('a double click whose first click closes an editor presses nothing the layo
   }
 });
 
+// Review finding (pass 12 of 42.1): the first tap of a double tap picked the
+// card up and took the focus out of the editor above it, which closed. The
+// card grew back under the finger, and the second tap acted on it: grouped it
+// with the card picked up, or pressed one of its controls.
+test('a double tap whose first tap closes an editor does nothing the layout moved under it', async ({ browser }) => {
+  const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
+  const context = await browser.newContext({ ...phone, locale: 'en-US' });
+  const page = await context.newPage();
+  const sent: string[] = [];
+  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
+    const text = typeof payload === 'string' ? payload : payload.toString();
+    if (text.includes('"update-session"')) sent.push(text);
+  }));
+  try {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: '+ New Team' }).click();
+    await page.getByPlaceholder('e.g. Design Team').fill(`${TEAM_NAME}-dbltap`);
+    await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+    await page.getByLabel('Recovery Email').fill('facilitator@example.com');
+    await page.getByRole('button', { name: 'Create & Join' }).click();
+    await expect(page.getByText(`${TEAM_NAME}-dbltap Dashboard`)).toBeVisible({ timeout: 15_000 });
+    await dismissAnnouncementsIfPresent(page);
+    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
+    await dialog.getByTestId('retro-template-lean_coffee').click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(700);
+
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    await field.fill('Late release notes');
+    await page.keyboard.press('Enter');
+    // Newest first: written last, it sits above the other card.
+    const long = 'Release notes are written the evening before, nobody reads them, and support learns about every change from the customers who call to ask';
+    await field.fill(long);
+    await page.keyboard.press('Enter');
+    await expect(card(page, long)).toBeVisible();
+    await card(page, long).getByRole('button', { name: 'Edit ticket' }).tap();
+    const editor = page.locator('[data-ticket-id] textarea');
+    await expect(editor).toBeFocused();
+    await editor.press('Control+End');
+    await page.keyboard.type(' too');
+    await page.waitForTimeout(700);
+    const before = sent.length;
+
+    // Near the top of the card below: the editor closing pushes it down.
+    const below = (await card(page, 'Late release notes').boundingBox())!;
+    const at = { x: below.x + below.width / 2, y: below.y + 6 };
+    await page.touchscreen.tap(at.x, at.y);
+    await page.waitForTimeout(120);
+    await page.touchscreen.tap(at.x, at.y);
+    await page.waitForTimeout(700);
+
+    await expect(editor).toHaveCount(0);
+    await expect(card(page, `${long} too`)).toBeVisible();
+    await expect(page.locator('[data-ticket-id]')).toHaveCount(2);
+    await expect(page.locator('.group-container')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Selected for grouping: Late release notes/ })).toBeVisible();
+    expect(sent.length - before).toBe(1);
+    expect(sent.at(-1)).toContain(`${long} too`);
+  } finally {
+    await context.close();
+  }
+});
+
 test('on a computer the same controls wait for the pointer', async ({ page }) => {
   expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(true);
   await page.goto('/');

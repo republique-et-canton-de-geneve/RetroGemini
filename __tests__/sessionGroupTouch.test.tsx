@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import Session from '../components/Session';
@@ -249,9 +249,11 @@ describe('a tap the board acts on, and the field it leaves', () => {
     if (!element) throw new Error(`no card ${id}`);
     return element as HTMLElement;
   };
-  const tap = (element: HTMLElement) => {
-    fireEvent.touchStart(element, touch(50, 50));
-    return fireEvent.touchEnd(element, touch(50, 50));
+  // Every tap lands at one point unless told otherwise: what matters there
+  // is which element it reaches.
+  const tap = (element: HTMLElement, x = 50, y = 50) => {
+    fireEvent.touchStart(element, touch(x, y));
+    return fireEvent.touchEnd(element, touch(x, y));
   };
   const writes = async () => {
     const { dataService } = await import('../services/dataService');
@@ -291,8 +293,8 @@ describe('a tap the board acts on, and the field it leaves', () => {
     expect((await writes()).slice(before)).toHaveLength(1);
     expect((await writes()).at(-1)?.tickets.find((t) => t.id === 'ta')?.text).toBe('Flaky deploys in staging');
     expect(held('tb')).toBeTruthy();
-    // Then drop it on a loose card: the group dissolves.
-    tap(card('tc'));
+    // Then drop it on a loose card, further down: the group dissolves.
+    tap(card('tc'), 50, 200);
 
     await waitFor(async () => {
       const last = (await writes()).at(-1)!;
@@ -336,6 +338,111 @@ describe('a tap the board acts on, and the field it leaves', () => {
 
     expect(screen.queryAllByTestId('emoji-option')).toHaveLength(0);
     expect(held('tc')).toBeTruthy();
+  });
+
+  // Review finding (pass 12 of 42.1): a double tap whose first tap closed an
+  // editor. The card grew back under the finger, and the next tap acted on
+  // what came there: it grouped that card with the one the first tap picked
+  // up, for everyone, or opened its comments.
+  describe('the next tap of a double tap, once the first closed an editor', () => {
+    const editTyped = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(within(card('tc')).getByRole('button', { name: 'Edit ticket' }));
+      await user.type(within(card('tc')).getByRole('textbox'), ' on Mondays');
+    };
+    const groupOfTc = async () => (await writes()).at(-1)?.tickets.find((t) => t.id === 'tc')?.groupId ?? null;
+
+    it('does nothing on another card', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await editTyped(user);
+      const before = (await writes()).length;
+
+      expect(tap(card('td'))).toBe(false);
+      expect(held('td')).toBeTruthy();
+      expect(tap(card('tc'))).toBe(false);
+
+      // The text, stored as the first tap left its editor, and nothing else.
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(1);
+      expect(after[0].tickets.find((t) => t.id === 'tc')?.text).toBe('Too many meetings on Mondays');
+      expect(await groupOfTc()).toBeNull();
+      expect(held('td')).toBeTruthy();
+      // Further from the first, the tap is the board's.
+      tap(card('tc'), 50, 200);
+      await waitFor(async () => expect(await groupOfTc()).toBeTruthy());
+    });
+
+    it('is a tap again on the card the first reached', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await editTyped(user);
+
+      tap(card('td'));
+      expect(held('td')).toBeTruthy();
+      tap(card('td'));
+
+      expect(within(card('td')).queryByRole('button', { name: /Selected for grouping/ })).toBeNull();
+    });
+
+    it('is the board’s once the double tap’s time is over', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await editTyped(user);
+      const now = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+      try {
+        tap(card('td'));
+        clock.mockReturnValue(now + 501);
+        tap(card('tc'));
+      } finally {
+        clock.mockRestore();
+      }
+
+      await waitFor(async () => expect(await groupOfTc()).toBeTruthy());
+    });
+
+    it('presses no control with the mouse a browser emulates for it', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await editTyped(user);
+
+      tap(card('td'));
+      const comments = within(card('tc')).getByTestId('ticket-comment-btn');
+      // A tap on a control is the control's: the board does not claim it.
+      expect(tap(comments)).toBe(true);
+      expect(fireEvent.mouseDown(comments, { detail: 2, clientX: 50, clientY: 50 })).toBe(false);
+      fireEvent.mouseUp(comments, { detail: 2 });
+      expect(fireEvent.click(comments, { detail: 2 })).toBe(false);
+
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(held('td')).toBeTruthy();
+    });
+
+    it('does nothing on a card once the first, on a group’s title, closed the editor', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await editTyped(user);
+      const title = screen.getByDisplayValue('Delivery');
+
+      // Not the board's: the browser emulates the mouse for it.
+      expect(tap(title)).toBe(true);
+      fireEvent.mouseDown(title, { detail: 1, clientX: 50, clientY: 50 });
+      act(() => title.focus());
+      fireEvent.mouseUp(title, { detail: 1 });
+      fireEvent.click(title, { detail: 1 });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      expect(within(card('tc')).queryByRole('textbox')).toBeNull();
+
+      expect(tap(card('tc'))).toBe(false);
+
+      expect(within(card('tc')).queryByRole('button', { name: /Selected for grouping/ })).toBeNull();
+      expect(document.activeElement).toBe(title);
+    });
   });
 
   // Review finding (pass 6 of 42.1): every case above taps a card. The group

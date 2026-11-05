@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
+  DOUBLE_TAP_MS,
+  DOUBLE_TAP_SLOP_PX,
   TOUCH_SLOP_PX,
   claimGesture,
   endGesture,
   idleGesture,
+  isNextTap,
   moveGesture,
   startGesture,
 } from '../components/session/groupingTouch';
@@ -102,5 +105,27 @@ describe('a grouping touch gesture', () => {
     endGesture(gesture);
 
     expect(claimGesture(gesture)).toBe(false);
+  });
+});
+
+// Review finding (pass 12 of 42.1): the next tap of a double tap, once the
+// first closed an editor, acted on the card that grew back under the finger.
+describe('the next tap of a double tap', () => {
+  const first = { at: 1000, x: 50, y: 50 };
+
+  it('is a tap this soon after the first, this near it', () => {
+    expect(isNextTap(first, 1000, point(50, 50))).toBe(true);
+    expect(isNextTap(first, 1000 + DOUBLE_TAP_MS, point(50 + DOUBLE_TAP_SLOP_PX, 50))).toBe(true);
+  });
+
+  it('is no longer one later, or further away', () => {
+    expect(isNextTap(first, 1001 + DOUBLE_TAP_MS, point(50, 50))).toBe(false);
+    expect(isNextTap(first, 1000, point(50 + DOUBLE_TAP_SLOP_PX, 51))).toBe(false);
+    expect(isNextTap(first, 1000, point(50, 50 - DOUBLE_TAP_SLOP_PX - 1))).toBe(false);
+  });
+
+  it('follows no tap at all, nor one that came after it', () => {
+    expect(isNextTap(null, 1000, point(50, 50))).toBe(false);
+    expect(isNextTap(first, 999, point(50, 50))).toBe(false);
   });
 });

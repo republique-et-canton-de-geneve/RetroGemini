@@ -1968,6 +1968,8 @@ describe('Open board — every hold and every drop', () => {
             expect(editor()).toBeNull();
             const after = await persistedCount();
             expect(await clickOnce(second(), 2)).toBe(false);
+            // Nor the third of a triple click, which selects a whole title.
+            expect(await clickOnce(second(), 3)).toBe(false);
 
             expect(screen.getByText('Too many meetings on Mondays')).toBeTruthy();
             expect(await persistedCount()).toBe(after);
@@ -1984,7 +1986,8 @@ describe('Open board — every hold and every drop', () => {
           });
 
           // The press before it not over yet — its end comes a task after its
-          // release — has closed nothing: only an older press did.
+          // release — has closed nothing here (its click wrote nothing that
+          // took the editor's text): only an older press did.
           it('lets the next press of a double click through while the press before it has not ended', async () => {
             const user = userEvent.setup();
             renderBoard(worded(5, 'Too many meetings'), alice);
@@ -2033,6 +2036,115 @@ describe('Open board — every hold and every drop', () => {
             expect(await clickOnce(within(cardById('t-c')).getByRole('button', { name: /add a vote to this ticket/ }), 2)).toBe(true);
             expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.votes).toEqual(['alice', 'alice']);
           });
+
+          // Two presses on one control are one control's, whatever element of
+          // it each reaches: the first vote draws the voter's dot beside the
+          // thumb, and the next press lands on the button around it, or on
+          // the thumb.
+          const thumb = () => groupVote().querySelector<HTMLElement>('.material-symbols-outlined')!;
+          it.each([
+            ['its thumb, then the button', thumb, groupVote],
+            ['the button, then its thumb', groupVote, thumb],
+          ])('lets the next click of a double click through on another element of the control the first pressed: %s', async (_how, first, second) => {
+            const user = userEvent.setup();
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            await openEditor(user, 'Too many meetings');
+
+            expect(await clickOnce(first(), 1)).toBe(true);
+            expect(editor()).toBeNull();
+            expect(await clickOnce(second(), 2)).toBe(true);
+
+            expect((await lastPersisted())?.groups.find((g) => g.id === 'g1')?.votes).toEqual(['bob', 'alice', 'alice']);
+          });
+
+          // Review findings (pass 12 of 42.1): Chromium keeps the release of a
+          // press its context menu, or a select's list, took. That press
+          // lasts, with the editor it left drawn, and the first press of a
+          // double click ends it: the editor closed under that press, the
+          // card grew back, and the next press deleted it for everyone.
+          it.each([
+            ['the Sort list', () => screen.getByRole('combobox', { name: 'Sort the cards' }), 0],
+            ['a right click in the title', () => groupTitle(), 2],
+          ])('presses nothing with the next click of a double click whose first ended a press %s kept', async (_how, pressed, buttonNo) => {
+            const user = userEvent.setup();
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            await openEditor(user, 'Too many meetings');
+            await user.keyboard('{End} on Mondays');
+            const before = await persistedCount();
+            const stale = pressed();
+            fireEvent.mouseDown(stale, { button: buttonNo, detail: 1 });
+            act(() => stale.focus());
+            if (buttonNo === 2) fireEvent.contextMenu(stale);
+            await tick();
+            // Its release kept: the editor is drawn on.
+            expect(editor()).not.toBeNull();
+
+            expect(await clickOnce(groupTitle(), 1)).toBe(true);
+            expect(editor()).toBeNull();
+            expect(await clickOnce(deleteOf(), 2)).toBe(false);
+            expect(await clickOnce(deleteOf(), 3)).toBe(false);
+
+            expect(screen.getByText('Too many meetings on Mondays')).toBeTruthy();
+            expect(await textsSince(before)).toEqual(['Too many meetings on Mondays']);
+          });
+
+          // Review finding (pass 12 of 42.1): on a slow machine the next press
+          // of a double click is handled before the end of the press before
+          // it, which comes a task after its release. That press's click had
+          // already closed the editor, its text riding the click's write: the
+          // card grew back, and the next press deleted it.
+          it('presses nothing with the next click of a double click once the first click’s write closed the editor, before its press ended', async () => {
+            const user = userEvent.setup();
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            await openEditor(user, 'Too many meetings');
+            await user.keyboard('{End} on Mondays');
+            const before = await persistedCount();
+
+            fireEvent.mouseDown(groupVote(), { detail: 1 });
+            act(() => groupVote().focus());
+            fireEvent.mouseUp(groupVote(), { detail: 1 });
+            fireEvent.click(groupVote(), { detail: 1 });
+            expect(editor()).toBeNull();
+            expect(fireEvent.mouseDown(deleteOf(), { detail: 2 })).toBe(false);
+            fireEvent.mouseUp(deleteOf(), { detail: 2 });
+            expect(fireEvent.click(deleteOf(), { detail: 2 })).toBe(false);
+            await tick();
+
+            expect(screen.getByText('Too many meetings on Mondays')).toBeTruthy();
+            expect(await textsSince(before)).toEqual(['Too many meetings on Mondays']);
+            expect((await lastPersisted())?.groups.find((g) => g.id === 'g1')?.votes).toEqual(['bob', 'alice']);
+          });
+
+          // Review finding (pass 12 of 42.1): Linux pastes with the middle
+          // button, in the field it presses, with no click. The paste wrote
+          // the title, the end of the press wrote the card's text alone, from
+          // the same revision, and the server refused it: the edit was gone
+          // for everyone.
+          it('rides the write of the paste the middle button makes in a group’s title', async () => {
+            const user = userEvent.setup();
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            await openEditor(user, 'Too many meetings');
+            await user.keyboard('{End} on Mondays');
+            const before = await persistedCount();
+
+            fireEvent.mouseDown(groupTitle(), { button: 1, detail: 1 });
+            act(() => groupTitle().focus());
+            fireEvent.mouseUp(groupTitle(), { button: 1, detail: 1 });
+            fireEvent(groupTitle(), new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1, detail: 1 }));
+            fireEvent.input(groupTitle(), { target: { value: 'DeliverySprint' } });
+            await tick();
+
+            const { dataService } = await import('../services/dataService');
+            const sent = (dataService.updateSession as unknown as ReturnType<typeof vi.fn>).mock.calls.slice(before).map(([, s]) => s as RetroSession);
+            expect(sent).toHaveLength(1);
+            expect(sent[0].groups.find((g) => g.id === 'g1')?.title).toBe('DeliverySprint');
+            expect(sent[0].tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings on Mondays');
+            expect(editor()).toBeNull();
+          });
         });
       });
 
@@ -2065,11 +2177,11 @@ describe('Open board — every hold and every drop', () => {
           // beside it can still be picked up.
           expect(screen.queryByText('Selected - Tap to cancel')).toBeNull();
           expect(cardById('t-a').closest('.group-container')?.getAttribute('draggable')).toBe('true');
-          // Over another card: no target offered, the drop refused.
-          expect(fireEvent.dragOver(cardById('t-a'), { dataTransfer: transfer })).toBe(true);
-          expect(fireEvent.dragOver(columnElement('doing'), { dataTransfer: transfer })).toBe(true);
+          // Over another card, or a column: no target offered, the drop
+          // refused.
+          expect(refusedBy(cardById('t-a'), transfer)).toEqual(refused);
+          expect(refusedBy(columnElement('doing'), transfer)).toEqual(refused);
           expect(banner()).toBeNull();
-          expect(fireEvent.drop(cardById('t-a'), { dataTransfer: transfer })).toBe(true);
           // Back in the field: the browser moves them.
           expect(fireEvent.dragOver(field, { dataTransfer: transfer })).toBe(true);
           expect(fireEvent.drop(field, { dataTransfer: transfer })).toBe(true);
@@ -2096,9 +2208,8 @@ describe('Open board — every hold and every drop', () => {
           const transfer = dataTransfer();
           fireEvent.dragStart(title, { dataTransfer: transfer });
           expect(screen.queryAllByRole('button', { name: /move the selected group to/ })).toEqual([]);
-          expect(fireEvent.dragOver(group, { dataTransfer: transfer })).toBe(true);
-          expect(fireEvent.drop(group, { dataTransfer: transfer })).toBe(true);
-          expect(fireEvent.drop(columnElement('doing'), { dataTransfer: transfer })).toBe(true);
+          expect(refusedBy(group, transfer)).toEqual(refused);
+          expect(refusedBy(columnElement('doing'), transfer)).toEqual(refused);
           fireEvent.dragEnd(title, { dataTransfer: transfer });
 
           expect(await persistedCount()).toBe(before);
@@ -2185,14 +2296,177 @@ describe('Open board — every hold and every drop', () => {
         });
 
         // A drop from outside the page — a file from the desktop — onto a
-        // title is the column's, as before: the title refuses only words
-        // dragged out of a field.
-        it('leave a drop from outside the page on a title to the column', async () => {
+        // title is refused by the column, as on the rest of the board: the
+        // title refuses only words dragged out of a field.
+        it('leave a drop from outside the page on a title to the column, which refuses it', async () => {
           renderBoard(worded(5, 'Too many meetings'), alice);
           await screen.findByText('Too many meetings');
-          const transfer = dataTransfer() as ReturnType<typeof dataTransfer> & { dropEffect?: string };
-          expect(fireEvent.dragOver(title(), { dataTransfer: transfer })).toBe(false);
-          expect(transfer.dropEffect).not.toBe('none');
+          expect(refusedBy(title(), dataTransfer())).toEqual(refused);
+        });
+
+        // Review finding (pass 12 of 42.1): Firefox sends no dragend either to
+        // a field React only moved during the drag of its words — its group
+        // re-sorted by a teammate's write — which stays on the page: until the
+        // next press the board let a drag from outside the page through, a
+        // file from the desktop opened by the browser.
+        it('let the board keep a later drop from outside the page while their field’s end goes unheard', async () => {
+          renderBoard(worded(5, 'Too many meetings'), alice);
+          await screen.findByText('Too many meetings');
+          fireEvent.mouseDown(title());
+          fireEvent.dragStart(title(), { dataTransfer: dataTransfer() });
+          await tick();
+          expect(title().isConnected).toBe(true);
+
+          expect(refusedBy(columnElement('doing'), dataTransfer())).toEqual(refused);
+          expect(refusedBy(cardById('t-a'), dataTransfer())).toEqual(refused);
+          // No field takes a file, words or not.
+          const file = { ...dataTransfer(), types: ['Files'] };
+          expect(refusedBy(screen.getAllByPlaceholderText('Add an idea...')[0], file)).toEqual(refused);
+        });
+
+        // Review findings (pass 12 of 42.1): the board performed what the
+        // keyboard or a tap held for any drag at all — words of the page's
+        // own text, a file or text from another window — and, once a
+        // teammate's write drew the editor again under the drag of its words,
+        // for those words too: the held card was grouped with the card under
+        // the pointer, the held group moved, for everyone.
+        it.each(['OPEN_BOARD', 'GROUP'])('of the page’s own text, or from outside the page, drop nothing the keyboard holds: %s', async (phase) => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings', { phase }), alice);
+          await screen.findByText('Too many meetings');
+          act(() => screen.getByRole('button', { name: /Pick up the ticket Too many meetings/ }).focus());
+          await user.keyboard('{Enter}');
+          expect(screen.getByText('Selected - Tap to cancel')).toBeTruthy();
+          const before = await persistedCount();
+
+          const words = within(columnElement('doing')).getAllByText('Discussing')[0].firstChild!;
+          const transfer = dataTransfer();
+          fireEvent.mouseDown(words);
+          fireEvent.dragStart(words, { dataTransfer: transfer });
+          expect(refusedBy(cardById('t-a'), transfer)).toEqual(refused);
+          expect(refusedBy(document.querySelector<HTMLElement>('.group-container')!, transfer)).toEqual(refused);
+          fireEvent.dragEnd(words, { dataTransfer: transfer });
+          await tick();
+          // From outside the page: no drag starts here at all.
+          expect(refusedBy(cardById('t-a'), dataTransfer())).toEqual(refused);
+          expect(refusedBy(columnElement('doing'), dataTransfer())).toEqual(refused);
+
+          expect(await persistedCount()).toBe(before);
+          expect(screen.getByText('Selected - Tap to cancel')).toBeTruthy();
+        });
+
+        // A drag the board started, its end unheard — Firefox sends none to a
+        // card that left the page during its drag — is over once another
+        // gesture begins: a press, another drag, a hold of the keyboard, or
+        // its own drop. Taken as still under way, it dropped what came next.
+        describe('once a drag of the board’s own goes unheard', () => {
+          const dragOfCard = () => fireEvent.dragStart(cardById('t-c'), { dataTransfer: dataTransfer() });
+          it('refuses a drag from outside the page after the next press', async () => {
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            const before = await persistedCount();
+            dragOfCard();
+            fireEvent.mouseDown(document.body);
+            fireEvent.mouseUp(document.body);
+            await tick();
+
+            expect(refusedBy(cardById('t-a'), dataTransfer())).toEqual(refused);
+            expect(await persistedCount()).toBe(before);
+          });
+
+          it('refuses the next drag, started with no press', async () => {
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            const before = await persistedCount();
+            dragOfCard();
+            const words = within(columnElement('doing')).getAllByText('Discussing')[0].firstChild!;
+            const transfer = dataTransfer();
+            fireEvent.dragStart(words, { dataTransfer: transfer });
+
+            expect(refusedBy(cardById('t-a'), transfer)).toEqual(refused);
+            expect(await persistedCount()).toBe(before);
+          });
+
+          // Its card drawn again elsewhere by a teammate's write, React hears
+          // none of its end: the card it was dragged from heard it.
+          it('refuses a drag from outside the page once its end was heard by a card that left the page', async () => {
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            const source = cardById('t-c');
+            const before = await persistedCount();
+            fireEvent.dragStart(source, { dataTransfer: dataTransfer() });
+            const moved = worded(6, 'Too many meetings');
+            moved.tickets = moved.tickets.map((t) => (t.id === 't-c' ? { ...t, groupId: 'g1' } : t));
+            act(() => sessionUpdateListener?.(moved));
+            expect(source.isConnected).toBe(false);
+            fireEvent.dragEnd(source, { dataTransfer: dataTransfer() });
+
+            expect(refusedBy(columnElement('doing'), dataTransfer())).toEqual(refused);
+            expect(await persistedCount()).toBe(before);
+          });
+
+          it('refuses a drag from outside the page once its drop was performed', async () => {
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            const transfer = dataTransfer();
+            dragOfCard();
+            fireEvent.dragOver(cardById('t-b'), { dataTransfer: transfer });
+            fireEvent.drop(cardById('t-b'), { dataTransfer: transfer });
+            const after = await persistedCount();
+
+            expect(refusedBy(cardById('t-a'), dataTransfer())).toEqual(refused);
+            expect(await persistedCount()).toBe(after);
+          });
+
+          // Its card deleted by a teammate, the hold is put down, and the
+          // keyboard can hold another.
+          it.each([
+            ['a card', /Pick up the ticket Slow rollbacks/],
+            ['a group', /Move the group Delivery to another column/],
+          ])('drops nothing that the keyboard holds after it: %s', async (_what, control) => {
+            const user = userEvent.setup();
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            dragOfCard();
+            const deleted = worded(6, 'Too many meetings');
+            deleted.tickets = deleted.tickets.filter((t) => t.id !== 't-c');
+            act(() => sessionUpdateListener?.(deleted));
+            await waitFor(() => screen.getByRole('button', { name: control }));
+            const before = await persistedCount();
+            act(() => screen.getByRole('button', { name: control }).focus());
+            await user.keyboard('{Enter}');
+
+            expect(refusedBy(columnElement('doing'), dataTransfer())).toEqual(refused);
+            expect(await persistedCount()).toBe(before);
+          });
+        });
+
+        it.each([
+          ['OPEN_BOARD', { groupId: 'g1' }],
+          ['BRAINSTORM', { colId: 'doing' }],
+        ])('drop nothing the keyboard holds once a teammate draws their field again: %s', async (phase, teammate) => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings', { phase }), alice);
+          await screen.findByText('Too many meetings');
+          act(() => screen.getByRole('button', { name: /Move the group Delivery to another column/ }).focus());
+          await user.keyboard('{Enter}');
+          await openEditor(user, 'Too many meetings');
+          const field = editor()!;
+          const before = await persistedCount();
+
+          const transfer = dataTransfer();
+          fireEvent.mouseDown(field);
+          fireEvent.dragStart(field, { dataTransfer: transfer });
+          const moved = worded(6, 'Too many meetings', { phase });
+          moved.tickets = moved.tickets.map((t) => (t.id === 't-c' ? { ...t, ...teammate } : t));
+          act(() => sessionUpdateListener?.(moved));
+          expect(field.isConnected).toBe(false);
+          expect(refusedBy(columnElement('doing'), transfer)).toEqual(refused);
+          fireEvent.dragEnd(field, { dataTransfer: transfer });
+          await tick();
+
+          expect(await persistedCount()).toBe(before);
+          expect(groupTargets().length).toBeGreaterThan(0);
         });
 
         // Firefox sends no dragend to a field that left the page during its

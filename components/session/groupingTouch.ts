@@ -81,6 +81,28 @@ export const claimGesture = (gesture: GroupingGesture): boolean => {
   return true;
 };
 
+/**
+ * The next tap of a double tap: this soon after the one before, this near it
+ * (pass 12 of 42.1). Once the first tap closed an editor, the card grew back
+ * under the finger, and what the next tap reaches is not what the first one
+ * aimed at — it grouped that card with the one the first tap picked up.
+ *
+ * Half a second, as a mouse's double click allows, and a fingertip: what lies
+ * that close under the finger that soon was never aimed at once the board
+ * moved there, so the window can be generous without taking a real tap.
+ */
+export const DOUBLE_TAP_MS = 500;
+export const DOUBLE_TAP_SLOP_PX = 24;
+
+/** Where and when a gesture aimed. */
+export type GestureAim = TouchPoint & { at: number };
+
+export const isNextTap = (first: GestureAim | null, at: number, point: TouchPoint): boolean =>
+  !!first
+  && at >= first.at
+  && at - first.at <= DOUBLE_TAP_MS
+  && Math.hypot(point.x - first.x, point.y - first.y) <= DOUBLE_TAP_SLOP_PX;
+
 /** Forget the gesture — on `touchend`, and on `touchcancel`. */
 export const endGesture = (gesture: GroupingGesture): void => {
   gesture.origin = null;

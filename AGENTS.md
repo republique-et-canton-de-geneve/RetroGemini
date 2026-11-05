@@ -311,10 +311,11 @@ click's release goes to the context menu, and the press lasts until the next
 one) — and a copy React draws again
 for a teammate's write takes no focus and shows the typing (it took the focus
 from the field pressed, and closed with it at the release). Its text rides
-the write of that click, of the drop, or of the change a select picked from
+the write of that click, of the drop, of the change a select picked from
 its own list makes, with no click ("Colour by"; pressed, dragged onto the
 option and released, Firefox gives the option a mousedown of its own, which
-is the same press) (folded only while one of them is
+is the same press), or of the input of a paste the middle button makes on
+Linux, in the field it presses, with no click either (folded only while one of them is
 dispatched, and the editor closes with that write: drawn on, a drop that put
 its card in a new group drew it again over the title to name the group), or
 goes alone as the press ends; never a write nobody asked for (a teammate
@@ -330,20 +331,28 @@ on the field puts the caret where it presses, never where the draft had it
 (Firefox puts it before the focus). Closed by the write that took its text,
 the editor is no longer drawn as left: opened again before the press ends, it
 takes the focus, and the press's end leaves it open. **The next press of a
-double click presses nothing on another control once the press before closed
-the editor it left** (`pressedControl`; its click is stopped too, never the
-keyboard's, which has no detail): the card grew back between the two presses,
-and the second landed on what came under the pointer — its Delete, which asks
-nothing, its vote, its comments — instead of the word of a title being
-selected. On the same control it is the browser's, and the word is selected
-by a double click done again.
+double click presses nothing on another control once an editor closed after
+the press before was aimed** (`pressedControl`, `aim`; its click is stopped
+too, never the keyboard's, which has no detail): at that press's end, by its
+click's write — on a slow machine the next press comes before the end — or by
+ending, at its own mousedown, a press whose release Chromium kept for a context
+menu or a select's list. The card grew back under the pointer, and the next
+press landed on what came there — its Delete, which asks nothing, its vote,
+its comments — instead of the word of a title being selected. A press it
+stops aims at nothing, so the third press of a triple click is stopped too.
+On the same control it is the browser's, and the word is selected by a double
+click done again. **So does the next tap of a double tap** (`isNextTap`: half
+a second, a fingertip away) on another card or group the board claims it for,
+and the mouse a browser emulates for it on a control: the first tap took the
+focus out of the editor, which closed, and the second grouped the card that
+grew back with the one the first picked up, for everyone.
 `e2e/retro-touch-card-controls.spec.ts` holds it in Chromium (jsdom emulates no
 mouse for a tap and lays nothing out), counting the writes a hold and its drop
 send, on a card and on a group's own blank area, pressing the controls a
 closing editor used to move, on a computer and a phone, double clicking a
 title under a closing editor, and dragging a word within a title;
 `__tests__/sessionGroupTouch.test.tsx` pins which taps cancel, and what they
-leave, on a card and on a group container.
+leave, on a card and on a group container, and the next tap of a double tap.
 
 **A control shown on hover is shown on focus, and never hidden where nothing
 hovers.** A card's edit, delete and first-comment controls were `opacity-0`
@@ -500,6 +509,18 @@ Four rules:
   down nothing the keyboard or a tap holds (the card's and the group's
   `onDragEnd` skip a field's), and a field that left the page drags nothing:
   Firefox sends it no dragend, and every later drag read as its words.
+  **Only a drag the board started drops what it carries** (`boardDrags`: a
+  card's or a group's, from `handleDragStart` or `handleBrainstormDragStart`,
+  over once another gesture begins — a press, another drag, a hold of the
+  keyboard or a tap, its own drop). Any other drag — words from a field, the
+  page's own text, a file or text from another window — is refused by a
+  column, a card or a group (`refusesForeignDrag`), but for words a field takes,
+  and no field takes a file. Taken for a drop, such a drag performed what the
+  keyboard or a tap held — the held card grouped with the card under the
+  pointer, the held group moved — and so did words whose field a teammate's
+  write drew again during their drag; and Firefox sends no dragend to a field
+  React only moved during the drag of its words, so a drag from outside the
+  page was let through to the browser until the next press.
 - **The "from ..." chip follows who moved the card.** A card moved by hand is
   re-homed and loses the chip (same rule as dropping one on a column in the
   Group phase); a card displaced *by its group* keeps naming the column it was

@@ -60,10 +60,13 @@ import {
   resolveGroupingActivation
 } from './session/groupingKeyboard';
 import {
+    GestureAim,
     GroupingGesture,
+    TouchPoint,
     claimGesture,
     endGesture,
     idleGesture,
+    isNextTap,
     moveGesture,
     startGesture,
 } from './session/groupingTouch';
@@ -713,17 +716,28 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     dispatching: Event | null;
     leave: { ticketId: string; text: string | null; folded: boolean } | null;
     dragSource: EventTarget | null;
+    // The drag under way is the board's own — a card's, a group's
+    // (handleDragStart, handleBrainstormDragStart): only such a drag drops
+    // what it carries (boardDrags).
+    boardDrag: boolean;
     safety: ReturnType<typeof setTimeout> | null;
     // Which press this is: the end a press schedules ends that press only.
     seq: number;
     // What the press began on.
     target: Element | null;
-    // The press ended last closed the editor it left: the card grew back,
-    // and what lies under the pointer moved. A press under way never has.
+    // What the gesture before the next one aimed at, where and when: a press
+    // of the mouse (the control around its target), or a tap the board
+    // claimed (its card or group). A press that presses nothing, or a tap
+    // that does nothing, aims at nothing: the next press of the sequence is
+    // still measured against the first.
+    aim: (GestureAim & { key: Element | null }) | null;
+    // An editor closed after that gesture aimed — at its press's end, by its
+    // click's write, or by ending a press before it, at its own mousedown:
+    // the card grew back, and what lies under the pointer moved.
     closedEditor: boolean;
     // A press that presses nothing (begin): its click clicks nothing either.
     stopped: boolean;
-  }>({ active: false, leaving: false, dispatching: null, leave: null, dragSource: null, safety: null, seq: 0, target: null, closedEditor: false, stopped: false });
+  }>({ active: false, leaving: false, dispatching: null, leave: null, dragSource: null, boardDrag: false, safety: null, seq: 0, target: null, aim: null, closedEditor: false, stopped: false });
   // A press in a group's title is the field's: the group is not dragged from
   // there while it lasts (begin).
   const [pressedTitleGroupId, setPressedTitleGroupId] = useState<string | null>(null);
@@ -1196,6 +1210,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     const leave = press.leave;
     if (!leave || leave.folded || !press.dispatching || press.dispatching.eventPhase === Event.NONE) return [];
     leave.folded = true;
+    press.closedEditor = true;
     setEditingTicketId(current => (current === leave.ticketId ? null : current));
     // Closed, it is no longer drawn as left: opened again before the press
     // ends — the keyboard's click took the text while a popup kept the
@@ -1209,10 +1224,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
   // The press is over: the editor it left closes, and its text goes alone
   // when no write of the click took it. Offline it goes, as every edit made
-  // offline does — and it was never shown as stored.
-  const finishPress = () => {
+  // offline does — and it was never shown as stored. Answers whether the
+  // editor closed now.
+  const finishPress = (): boolean => {
     const press = pressRef.current;
-    if (!press.active) return;
+    if (!press.active) return false;
     press.active = false;
     press.leaving = false;
     press.dispatching = null;
@@ -1224,13 +1240,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // took the focus out of is typed in again.
     setLeftEditorTicketId(null);
     setPressedTitleGroupId(null);
-    // Closed here, or by the write of its click.
-    press.closedEditor = !!leave;
-    if (!leave) return;
+    if (!leave) return false;
+    // Closed here, or already by the write of its click.
+    const closes = !leave.folded;
+    if (closes) press.closedEditor = true;
     setEditingTicketId(current => (current === leave.ticketId ? null : current));
-    if (leave.text === null || leave.folded) return;
-    if (!sessionRef.current?.tickets.some(t => t.id === leave.ticketId)) return;
-    updateSession(writeTicketText(leave.ticketId, leave.text));
+    if (leave.text !== null && closes && sessionRef.current?.tickets.some(t => t.id === leave.ticketId)) {
+      updateSession(writeTicketText(leave.ticketId, leave.text));
+    }
+    return closes;
   };
   const finishPressRef = useRef(finishPress);
   useLayoutEffect(() => { finishPressRef.current = finishPress; });
@@ -1246,13 +1264,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     let sourceEnds: (() => void) | null = null;
     const begin = (e: MouseEvent) => {
       const target = e.target instanceof Element ? e.target : null;
-      // The next press of a double click, once the press before closed the
-      // editor it left: the card grew back by the rows the editor hides, and
-      // what lies under the pointer is no longer what that press pressed —
-      // the card's Delete, its vote, where a word of a group's title was
-      // being selected. On another control it presses nothing; on the same
-      // one, it is the browser's.
-      if (e.detail > 1 && press.closedEditor && pressedControl(target) !== pressedControl(press.target)) {
+      // The next press of a double click, once an editor closed after the
+      // press before was aimed: the card grew back by the rows the editor
+      // hides, and what lies under the pointer is no longer what that press
+      // pressed — the card's Delete, its vote, where a word of a group's
+      // title was being selected. On another control it presses nothing; on
+      // the same one, it is the browser's.
+      if (e.detail > 1 && press.closedEditor && press.aim && pressedControl(target) !== press.aim.key) {
         press.stopped = true;
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -1265,6 +1283,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (sourceEnds) press.dragSource?.removeEventListener('dragend', sourceEnds);
       sourceEnds = null;
       press.dragSource = null;
+      press.boardDrag = false;
       // Firefox gives a select picked by pressing it, dragging onto an option
       // and releasing a mousedown of its own on that option: the same press,
       // whose change still takes the text. Ended there, the text went alone
@@ -1278,9 +1297,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         press.leave = null;
       }
       // A press still under way, its end not reached yet, ends here: its
-      // text goes before this press can leave another editor.
-      if (press.active) ends();
-      press.closedEditor = false;
+      // text goes before this press can leave another editor. The editor it
+      // closes closes under this press, after it was aimed: Chromium keeps
+      // the release a context menu or a select's list took, and the next
+      // press of a double click landed on the card that grew back.
+      const closesUnder = press.active ? ends() : false;
+      press.aim = { key: pressedControl(target), at: e.timeStamp, x: e.clientX, y: e.clientY };
+      press.closedEditor = closesUnder;
       press.seq += 1;
       press.active = true;
       press.dispatching = null;
@@ -1322,12 +1345,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // element dragged and heard there: a drop that moved the card removed
     // that element, and nothing on the window heard it end.
     const dragStarts = (e: Event) => {
+      // The card's or the group's own handler, after this one, says whether
+      // the board started this drag.
+      press.boardDrag = false;
       const source = e.target;
       if (!source) return;
       if (sourceEnds) press.dragSource?.removeEventListener('dragend', sourceEnds);
       const endsDrag = endsThisPress();
       const heard = () => {
-        if (press.dragSource === source) press.dragSource = null;
+        if (press.dragSource === source) {
+          press.dragSource = null;
+          press.boardDrag = false;
+        }
         endsDrag();
       };
       sourceEnds = heard;
@@ -1345,8 +1374,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     window.addEventListener('click', stopsClick, true);
     window.addEventListener('mousedown', begin, true);
     window.addEventListener('click', dispatchStarts, true);
-    // A select picked from its own list writes in its change, with no click.
+    // A select picked from its own list writes in its change, with no click,
+    // and the middle button pastes on Linux, in the field it presses, with
+    // none either: the paste wrote the title, the text went alone after, from
+    // the same revision, and the server refused it.
     window.addEventListener('change', dispatchStarts, true);
+    window.addEventListener('input', dispatchStarts, true);
     window.addEventListener('drop', dispatchStarts, true);
     window.addEventListener('dragstart', dragStarts, true);
     window.addEventListener('mouseup', released);
@@ -1355,6 +1388,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       window.removeEventListener('mousedown', begin, true);
       window.removeEventListener('click', dispatchStarts, true);
       window.removeEventListener('change', dispatchStarts, true);
+      window.removeEventListener('input', dispatchStarts, true);
       window.removeEventListener('drop', dispatchStarts, true);
       window.removeEventListener('dragstart', dragStarts, true);
       window.removeEventListener('mouseup', released);
@@ -1447,10 +1481,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // being "typed", the phone's keyboard closed — and closed the reaction
   // picker. What the field writes as it is left rides the tap's own write, or
   // goes alone when the tap writes nothing (a hold).
-  const actOnClaimedTap = (e: React.TouchEvent, perform: () => void) => {
+  const actOnClaimedTap = (e: React.TouchEvent, point: TouchPoint, perform: () => void) => {
     e.preventDefault();
+    const press = pressRef.current;
+    const aimedAt = e.currentTarget as Element;
+    // The next tap of a double tap, once an editor closed after the tap
+    // before was aimed: the card grew back under the finger, and what this
+    // one reaches is not what the first aimed at. It grouped that card with
+    // the one the first tap picked up, for everyone. Elsewhere it does
+    // nothing; on the same card or group it is a tap again.
+    if (press.closedEditor && press.aim && press.aim.key !== aimedAt && isNextTap(press.aim, e.timeStamp, point)) return;
     if (emojiPickerOpenId && !emojiPickerRef.current?.contains(e.target as Node)) setEmojiPickerOpenId(null);
     const active = document.activeElement;
+    // Left, the card's editor closes, and what lies under the finger moves.
+    press.aim = { key: aimedAt, at: e.timeStamp, x: point.x, y: point.y };
+    press.closedEditor = !!active && active === editorFieldRef.current;
     if (active instanceof HTMLElement && active !== document.body) {
       const collected: Array<(s: RetroSession) => void> = [];
       collectingTapBlurWritesRef.current = collected;
@@ -2151,6 +2196,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // --- Drag & Drop ---
   const resetDragState = () => {
+      pressRef.current.boardDrag = false;
       setDraggedTicket(null);
       setIsSelectThenDrop(false);
       setDragTarget(null);
@@ -2190,6 +2236,27 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const source = pressRef.current.dragSource;
       return isFieldText(source) && source.isConnected;
   };
+  // Only a drag the board started — a card's, a group's — drops what it
+  // carries. Any other drag carries nothing the board holds: words from a
+  // field, the page's own text, a file or text from another window. Taken
+  // for a drop, they performed what the keyboard or a tap held — the held
+  // card grouped with the card under the pointer, the held group moved, for
+  // everyone — and so did words whose field a teammate's write drew again
+  // during their drag.
+  const boardDrags = () => pressRef.current.boardDrag;
+  // Where a drag the board did not start may land: words from a field, in a
+  // field — moved within it, or into another that takes them (no title does:
+  // refusesFieldText). A column, a card or a group refuses everything else,
+  // and no field takes a file: dropped and taken by nothing, the browser
+  // opened it, and Firefox sends no dragend to a field React moved during
+  // the drag of its words, whose drag then looked as if it went on.
+  const fieldTakesDrag = (e: React.DragEvent) =>
+      dragsFieldText() && isFieldText(e.target) && !Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  const refusesForeignDrag = (e: React.DragEvent) => {
+      if (fieldTakesDrag(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'none';
+  };
   // A title writes on every keystroke, and the browser drops words as two
   // edits — they leave where they were, then arrive — from one revision: the
   // server kept the first alone, and the words were gone for everyone, moved
@@ -2205,6 +2272,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const handleDragStart = (e: React.DragEvent, ticket: Ticket) => {
+      pressRef.current.boardDrag = true;
       setDraggedTicket(ticket);
       setIsSelectThenDrop(false);
       e.dataTransfer.effectAllowed = 'move';
@@ -2220,6 +2288,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           return;
       }
 
+      // A hold of the keyboard or a tap is no drag: a drag's end left
+      // unheard does not drop it.
+      pressRef.current.boardDrag = false;
       setDraggedTicket(ticket);
       setIsSelectThenDrop(true);
       setDragTarget({ type: 'ITEM', id: ticket.id });
@@ -2401,6 +2472,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // read every card in it (openBoard.ts → canReadGroup).
 
   const resetBrainstormMove = () => {
+      pressRef.current.boardDrag = false;
       setMovingItem(null);
       setDragTarget(null);
   };
@@ -2431,6 +2503,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       });
 
   const handleBrainstormDragStart = (e: React.DragEvent, item: BrainstormSelection) => {
+      pressRef.current.boardDrag = true;
       setMovingItem(item);
       e.dataTransfer.effectAllowed = 'move';
       setOpaqueDragImage(e);
@@ -2505,7 +2578,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               resetBrainstormMove();
               return;
           case 'pick-up':
-              if (target.kind === 'item') setMovingItem(target.item);
+              if (target.kind !== 'item') return;
+              pressRef.current.boardDrag = false;
+              setMovingItem(target.item);
               return;
           case 'move':
               if (target.kind === 'column') performBrainstormMove(target.colId);
@@ -2871,11 +2946,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             }}
             // A group held on a board is not dropped on a card: the event goes
             // on to the column, which moves the group there.
-            onDragOver={(e) => (receivesHeldCard && !dragsFieldText()) ? handleDragOverItem(e, t.id) : undefined}
+            onDragOver={(e) => (receivesHeldCard && boardDrags()) ? handleDragOverItem(e, t.id) : undefined}
             // Dropping on a card in Brainstorm means "put it in this card's
             // column" — never "group the two", which is the Group phase's job.
+            // A drag the board did not start is the column's to refuse.
             onDrop={(e) => {
-                if (dragsFieldText()) return;
+                if (!boardDrags()) return;
                 if (mode === 'BRAINSTORM') {
                     handleBrainstormDrop(e, t.colId);
                     return;
@@ -2921,14 +2997,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 // container whose own onTouchEnd receives the very same event a
                 // moment later, and exactly one of them may act on it.
                 const isMine = !onOwnControl && claimGesture(gesture);
+                const point = gesture.origin;
                 endGesture(gesture);
-                if (!isMine) return;
+                if (!isMine || !point) return;
                 // The tap is acted on here, so the browser emulates no mouse
                 // for it (actOnClaimedTap): the board is laid out again under
                 // the finger, and its click landed on whatever control came
                 // there — a card's delete, a vote — and took the focus off a
                 // new group's title.
-                actOnClaimedTap(e, () => {
+                actOnClaimedTap(e, point, () => {
                     if (regroupsCards) handleGroupingActivate({ kind: 'ticket', ticket: t }, mode);
                     else handleBrainstormActivate({ kind: 'item', item: { kind: 'ticket', id: t.id }, canPickUp: true });
                 });
@@ -3750,11 +3827,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 ${isGroupDragTarget ? 'border-indigo-500 ring-4 ring-indigo-200 z-20 scale-105' : isGroupSelected ? 'border-blue-500 ring-4 ring-blue-200 z-10' : 'border-dashed border-indigo-300'}
                                                 ${isDraggableGroup ? 'cursor-grab active:cursor-grabbing' : ''}
                                             `}
-                                            onDragOver={(e) => (receivesCards && !dragsFieldText()) ? handleDragOverItem(e, g.id) : undefined}
+                                            onDragOver={(e) => (receivesCards && boardDrags()) ? handleDragOverItem(e, g.id) : undefined}
                                             // A group held on a board is dropped on its column, not
                                             // on another group: the event goes on to the column.
                                             onDrop={(e) => {
-                                                if (dragsFieldText()) return;
+                                                if (!boardDrags()) return;
                                                 if (mode === 'BRAINSTORM') {
                                                     handleBrainstormDrop(e, g.colId);
                                                     return;
@@ -3797,16 +3874,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 // otherwise picks the group up, as Brainstorm does.
                                                 if (mode === 'BRAINSTORM' || (isBoard && !selectThenDropActive)) {
                                                     const claimed = !onOwnControl && claimGesture(gesture);
+                                                    const point = gesture.origin;
                                                     endGesture(gesture);
-                                                    if (!claimed) return;
+                                                    if (!claimed || !point) return;
                                                     // No emulated click, as on the card above.
-                                                    actOnClaimedTap(e, () => handleBrainstormActivate({ kind: 'item', item: { kind: 'group', id: g.id }, canPickUp: true }));
+                                                    actOnClaimedTap(e, point, () => handleBrainstormActivate({ kind: 'item', item: { kind: 'group', id: g.id }, canPickUp: true }));
                                                     return;
                                                 }
                                                 const isMine = isSelectThenDrop && !onOwnControl && claimGesture(gesture);
+                                                const point = gesture.origin;
                                                 endGesture(gesture);
-                                                if (!isMine) return;
-                                                actOnClaimedTap(e, () => handleGroupingActivate({ kind: 'group', group: g }, mode));
+                                                if (!isMine || !point) return;
+                                                actOnClaimedTap(e, point, () => handleGroupingActivate({ kind: 'group', group: g }, mode));
                                             }}
                                         >
                                             {isGroupDragTarget && (
@@ -4080,10 +4159,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 ${isColumnDragTarget ? 'border-indigo-500 bg-indigo-50 border-2' : 'border-slate-200'}
                             `}
                             onDragOver={(e) => {
-                                // Words from a field are the browser's to
-                                // drop: moved within their field, put in
-                                // another, refused here.
-                                if (dragsFieldText()) return;
+                                // A drag the board did not start is refused
+                                // here, but for words a field takes: moved
+                                // within their field, or put in another.
+                                if (!boardDrags()) {
+                                    refusesForeignDrag(e);
+                                    return;
+                                }
                                 if (receivesCard || isMoveDropTarget) {
                                     handleDragOverColumn(e, col.id);
                                     return;
@@ -4098,7 +4180,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 }
                             }}
                             onDrop={(e) => {
-                                if (dragsFieldText()) return;
+                                if (!boardDrags()) {
+                                    if (!fieldTakesDrag(e)) e.preventDefault();
+                                    return;
+                                }
                                 if (mode === 'BRAINSTORM' || (isBoard && movingItem)) handleBrainstormDrop(e, col.id);
                                 else handleDropOnColumn(e, col.id);
                             }}
