@@ -1231,6 +1231,8 @@ describe('Open board — every hold and every drop', () => {
 
           // Pressed on its own field, which keeps the focus; then Tab.
           await user.pointer({ keys: '[MouseLeft>]', target: editor()! });
+          // Still typed in: a draggable card would take the selection drag.
+          expect(cardById('t-c').getAttribute('draggable')).not.toBe('true');
           await user.tab();
 
           expect(await persistedCount()).toBe(before + 1);
@@ -1278,6 +1280,186 @@ describe('Open board — every hold and every drop', () => {
           expect(await persistedCount()).toBe(before + 1);
           expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings on Mondays');
           await waitFor(() => expect(editor()).toBeNull());
+        });
+
+        // Review finding (pass 9 of 42.1): an editor the press left, still
+        // drawn, and typed in again with the keyboard before that press ended
+        // — its release lost to a context menu, or the button still held —
+        // kept the press's old text waiting: written at the release, or by the
+        // next press, it went over the newer typing, or alone, closing the
+        // editor under it.
+        const textsSince = async (before: number, id = 't-c') => {
+          const { dataService } = await import('../services/dataService');
+          return (dataService.updateSession as unknown as ReturnType<typeof vi.fn>).mock.calls
+            .slice(before)
+            .map(([, s]) => (s as RetroSession).tickets.find((t) => t.id === id)?.text);
+        };
+        const tick = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+        // The press leaves the editor for the search box; the editor is drawn
+        // until the press ends, and the keyboard goes back into it.
+        const typeAgainDuringThePress = async (user: ReturnType<typeof userEvent.setup>) => {
+          await openEditor(user, 'Too many meetings');
+          await user.keyboard('{End} on Mondays');
+          const before = await persistedCount();
+          fireEvent.mouseDown(search());
+          act(() => search().focus());
+          expect(editor()).not.toBeNull();
+          await tick();
+          act(() => editor()!.focus());
+          await user.keyboard('{End} and Fridays');
+          return before;
+        };
+
+        it.each([
+          ['Tab', '{Tab}'],
+          ['Enter', '{Enter}'],
+        ])('writes the newer typing once, left by %s, when the keyboard went back into an editor the press left', async (_key, keys) => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings'), alice);
+          await screen.findByText('Too many meetings');
+          const before = await typeAgainDuringThePress(user);
+
+          await user.keyboard(keys);
+          expect(editor()).toBeNull();
+          fireEvent.mouseUp(search());
+          await tick();
+
+          expect(await textsSince(before)).toEqual(['Too many meetings on Mondays and Fridays']);
+        });
+
+        it('keeps the editor typed in again, and writes nothing, when the next press ends the press that left it', async () => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings'), alice);
+          await screen.findByText('Too many meetings');
+          const before = await typeAgainDuringThePress(user);
+
+          // Its release lost: the next press ends it.
+          fireEvent.mouseDown(document.body);
+          await tick();
+          fireEvent.mouseUp(document.body);
+          await tick();
+
+          expect(await textsSince(before)).toEqual([]);
+          expect(document.activeElement).toBe(editor());
+          expect(editor()?.value).toBe('Too many meetings on Mondays and Fridays');
+          await user.tab();
+          expect(await textsSince(before)).toEqual(['Too many meetings on Mondays and Fridays']);
+        });
+
+        it('opens the same card’s editor again with the focus once the editor typed in again was left', async () => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings'), alice);
+          await screen.findByText('Too many meetings');
+          await typeAgainDuringThePress(user);
+          await user.tab();
+          expect(editor()).toBeNull();
+
+          act(() => within(cardById('t-c')).getByRole('button', { name: 'Edit ticket' }).focus());
+          await user.keyboard('{Enter}');
+
+          expect(document.activeElement).toBe(editor());
+          expect(cardById('t-c').getAttribute('draggable')).not.toBe('true');
+        });
+
+        it('keeps the editor a click goes back into, when the press that left it never ended', async () => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings'), alice);
+          await screen.findByText('Too many meetings');
+          await openEditor(user, 'Too many meetings');
+          await user.keyboard('{End} on Mondays');
+          const before = await persistedCount();
+          fireEvent.mouseDown(search());
+          act(() => search().focus());
+          await tick();
+
+          // Its release lost, the next press is on the field itself.
+          fireEvent.mouseDown(editor()!);
+          act(() => editor()!.focus());
+          expect(cardById('t-c').getAttribute('draggable')).not.toBe('true');
+          fireEvent.mouseUp(editor()!);
+          await tick();
+
+          expect(await textsSince(before)).toEqual([]);
+          expect(document.activeElement).toBe(editor());
+          await user.keyboard('{End} and Fridays');
+          await user.tab();
+          expect(await textsSince(before)).toEqual(['Too many meetings on Mondays and Fridays']);
+        });
+
+        it('still writes an editor the press left when a click goes into another card’s editor', async () => {
+          const user = userEvent.setup();
+          renderBoard(createBoard({ _rev: 5 }), alice);
+          await screen.findByText('Too many meetings');
+          await openEditor(user, 'Too many meetings');
+          await user.keyboard('{End} on Mondays');
+          const before = await persistedCount();
+          // A press on another card's pencil leaves the first editor, and its
+          // release is lost; the click opens the second editor.
+          const pencil = within(cardElement('Flaky deploys')).getByRole('button', { name: 'Edit ticket' });
+          fireEvent.mouseDown(pencil);
+          act(() => pencil.focus());
+          fireEvent.click(pencil);
+          await tick();
+          expect(document.activeElement).toBe(editor());
+
+          fireEvent.mouseDown(editor()!);
+
+          expect(await textsSince(before)).toEqual(['Too many meetings on Mondays']);
+        });
+
+        it('opens an editor again with the focus after the next press, on its own card, ended the press that left it', async () => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings'), alice);
+          await screen.findByText('Too many meetings');
+          await openEditor(user, 'Too many meetings');
+          await user.keyboard('{End} on Mondays');
+          fireEvent.mouseDown(search());
+          act(() => search().focus());
+          await tick();
+
+          // Its release lost, the next press is on the card the editor left.
+          fireEvent.mouseDown(cardById('t-c'));
+          await waitFor(() => expect(editor()).toBeNull());
+          act(() => within(cardById('t-c')).getByRole('button', { name: 'Edit ticket' }).focus());
+          await user.keyboard('{Enter}');
+
+          expect(document.activeElement).toBe(editor());
+        });
+
+        // Review finding (pass 9 of 42.1): Firefox chooses between a drag and
+        // a text selection at the mousedown, before the editor's blur — so a
+        // card made draggable by that blur was still not draggable there, and
+        // the press selected text across the board.
+        it.each(['OPEN_BOARD', 'BRAINSTORM'])('makes the card being edited, and its group, draggable as the press on them begins: %s', async (phase) => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings', { phase }), alice);
+          await screen.findByText('Too many meetings');
+          await openEditor(user, 'Too many meetings');
+
+          // Draggable by the time the press reaches the card, before anything
+          // the browser does with it.
+          const seen: Array<string | null> = [];
+          const card = cardById('t-c');
+          const record = () => seen.push(card.getAttribute('draggable'));
+          card.addEventListener('mousedown', record);
+          fireEvent.mouseDown(card);
+          card.removeEventListener('mousedown', record);
+          expect(seen).toEqual(['true']);
+          expect(cardById('t-c').getAttribute('draggable')).toBe('true');
+          // A press that never took the focus out of the editor leaves it as
+          // it was once it ends: typed in, and not draggable.
+          fireEvent.mouseUp(cardById('t-c'));
+          await tick();
+          expect(document.activeElement).toBe(editor());
+          expect(cardById('t-c').getAttribute('draggable')).not.toBe('true');
+          await user.tab();
+
+          const group = () => document.querySelector<HTMLElement>('.group-container')!;
+          await openEditor(user, 'Flaky deploys');
+          fireEvent.mouseDown(group());
+          expect(group().getAttribute('draggable')).toBe('true');
+          fireEvent.mouseUp(group());
+          await tick();
         });
 
         it('lets the end one press schedules end that press only, not the next', async () => {
@@ -1385,6 +1567,88 @@ describe('Open board — every hold and every drop', () => {
           const written = (await lastPersisted())!;
           expect(written.settings.revealBrainstorm).toBe(true);
           expect(written.tickets.find((t) => t.id === 't-f')?.text).toBe('Ship on Fridays only');
+        });
+
+        // Review finding (pass 9 of 42.1): a select's pick writes in its
+        // change, which no click or drop carries — the colour was written
+        // without the text, the text alone after it from the same revision,
+        // and the server refused the text.
+        it('rides the write of a select picked during the press: Colour by', async () => {
+          const user = userEvent.setup();
+          const brainstorm = createBoard({ _rev: 5, phase: 'BRAINSTORM' });
+          brainstorm.tickets = [...brainstorm.tickets, { id: 't-f', colId: 'todo', text: 'Ship on Fridays', authorId: 'fac', groupId: null, votes: [] }];
+          renderBoard(brainstorm, facilitator);
+          await screen.findByText('Ship on Fridays');
+          await user.click(within(cardElement('Ship on Fridays')).getByRole('button', { name: 'Edit ticket' }));
+          await user.keyboard('{End} only');
+          const before = await persistedCount();
+
+          // The order a browser gives a pick in the select's own list.
+          const select = document.getElementById('color-by-bar') as HTMLSelectElement;
+          fireEvent.mouseDown(select);
+          act(() => select.focus());
+          fireEvent.change(select, { target: { value: 'author' } });
+          fireEvent.mouseUp(select);
+          fireEvent.click(select);
+
+          await waitFor(() => expect(editor()).toBeNull());
+          await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+          expect(await persistedCount()).toBe(before + 1);
+          const written = (await lastPersisted())!;
+          expect(written.settings.colorBy).toBe('author');
+          expect(written.tickets.find((t) => t.id === 't-f')?.text).toBe('Ship on Fridays only');
+        });
+
+        // Review finding (pass 9 of 42.1): the rule that an editor left as it
+        // was opened writes nothing held in no test of the press: either
+        // guard removed, a merely opened editor wrote its card's text empty
+        // with the next click or drop.
+        describe('opened and left untouched', () => {
+          it('casts a vote on another card with the card’s text as stored', async () => {
+            const user = userEvent.setup();
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            await openEditor(user, 'Too many meetings');
+            const before = await persistedCount();
+
+            await user.click(within(screen.getByDisplayValue('Delivery').closest('.group-container') as HTMLElement).getByRole('button', { name: /add a vote to this group/ }));
+
+            expect(await persistedCount()).toBe(before + 1);
+            const written = (await lastPersisted())!;
+            expect(written.groups[0].votes).toEqual(['bob', 'alice']);
+            expect(written.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings');
+            expect(editor()).toBeNull();
+          });
+
+          it('moves another card it drags, the card’s text as stored', async () => {
+            const user = userEvent.setup();
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            await openEditor(user, 'Too many meetings');
+            const before = await persistedCount();
+
+            await user.pointer({ keys: '[MouseLeft>]', target: cardById('t-b') });
+            dropAway(cardById('t-b'), columnElement('doing'));
+
+            expect(await persistedCount()).toBe(before + 1);
+            const written = (await lastPersisted())!;
+            expect(written.tickets.find((t) => t.id === 't-b')?.colId).toBe('doing');
+            expect(written.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings');
+          });
+
+          it.each(['OPEN_BOARD', 'BRAINSTORM'])('writes nothing for a press that clicks nothing: %s', async (phase) => {
+            const user = userEvent.setup();
+            renderBoard(worded(5, 'Too many meetings', { phase }), alice);
+            await screen.findByText('Too many meetings');
+            await openEditor(user, 'Too many meetings');
+            const before = await persistedCount();
+
+            await user.click(document.body);
+            await waitFor(() => expect(editor()).toBeNull());
+            await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+            expect(await persistedCount()).toBe(before);
+          });
         });
       });
 
@@ -1547,6 +1811,43 @@ describe('Open board — every hold and every drop', () => {
         act(() => sessionUpdateListener?.(next));
 
         expect([editor()?.selectionStart, editor()?.selectionEnd, editor()?.selectionDirection]).toEqual([9, 17, 'backward']);
+      });
+
+      // Review finding (pass 9 of 42.1): after a drag whose drop moved its
+      // card, React builds no select event until the next release of the
+      // mouse (a drag sends none), so the caret moved with the keyboard was
+      // not kept, and the next keystrokes went to the end, or the start.
+      it.each([
+        ['typed in', true],
+        ['nothing typed', false],
+      ])('keeps the caret moved with the keyboard after a drag that moved a card: %s', async (_how, typed) => {
+        const user = userEvent.setup();
+        renderBoard(createBoard({ _rev: 5 }), alice);
+        await screen.findByText('Too many meetings');
+        await user.pointer({ keys: '[MouseLeft>]', target: cardById('t-a') });
+        const from = cardById('t-a');
+        const transfer = dataTransfer();
+        fireEvent.dragStart(from, { dataTransfer: transfer });
+        fireEvent.dragOver(columnElement('doing'), { dataTransfer: transfer });
+        fireEvent.drop(columnElement('doing'), { dataTransfer: transfer });
+        expect(from.isConnected).toBe(false);
+        fireEvent.dragEnd(from, { dataTransfer: transfer });
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+        act(() => within(cardElement('Too many meetings')).getByRole('button', { name: 'Edit ticket' }).focus());
+        await user.keyboard('{Enter}');
+        expect(document.activeElement).toBe(editor());
+        await user.keyboard(typed ? '{End} x{ArrowLeft}{ArrowLeft}{ArrowLeft}' : '{End}{ArrowLeft}{ArrowLeft}{ArrowLeft}');
+        const caret = editor()!.selectionStart;
+
+        const grouped = createBoard({ _rev: 7 });
+        grouped.groups = [{ id: 'g1', title: 'Delivery', colId: 'todo', votes: [], anchorTicketId: 't-b' }];
+        grouped.tickets = grouped.tickets.map((t) => (t.id === 't-c' || t.id === 't-b' ? { ...t, groupId: 'g1' } : t.id === 't-a' ? { ...t, colId: 'doing' } : t));
+        act(() => sessionUpdateListener?.(grouped));
+        expect(editor()!.selectionStart).toBe(caret);
+        await user.keyboard('Q{Enter}');
+
+        expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe(typed ? 'Too many meetingQs x' : 'Too many meetiQngs');
       });
 
       // A field React removes runs no blur: an editor whose card left the

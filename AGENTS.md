@@ -302,17 +302,24 @@ heard there: a drop that moved its card removed that element, nothing on the
 window heard it end, and for 10 s the editor stayed drawn and every blur was
 read as a press. Drawn on, the editor is no longer typed in: the press can
 drag its card, or its group (still "being edited", they were not draggable,
-and the drag selected text across the board), and a copy React draws again
+and the drag selected text across the board) — draggable from the press's
+mousedown, since Firefox chooses between a drag and a selection there, before
+the blur — and a copy React draws again
 for a teammate's write takes no focus and shows the typing (it took the focus
 from the field pressed, and closed with it at the release). Its text rides
-the write of that click, or of the drop (folded only while one of them is
+the write of that click, of the drop, or of the change a select picked from
+its own list makes, with no click ("Colour by") (folded only while one of them is
 dispatched, and the editor closes with that write: drawn on, a drop that put
 its card in a new group drew it again over the title to name the group), or
 goes alone as the press ends; never a write nobody asked for (a teammate
 joining, the timer's expiry), which every client sends from one revision and
 all but one lose — held for "the next write" for 400 ms, the text rode those
 and was lost with them. Enter, which no click follows, and a blur of the
-keyboard during a press write it at once.
+keyboard during a press write it at once. Gone back into before the press
+ends — the keyboard, or a press on the field, its release lost to a context
+menu or the button still held — the editor is typed in again, and the press
+no longer writes its text: written at the press's end, or by the next press,
+it went over the newer typing, or alone, closing the editor under it.
 `e2e/retro-touch-card-controls.spec.ts` holds it in Chromium (jsdom emulates no
 mouse for a tap and lays nothing out), counting the writes a hold and its drop
 send, on a card and on a group's own blank area, and pressing the controls a
@@ -714,6 +721,8 @@ Eleven rules:
   word selected to be typed over, and its direction — also when another
   person's write draws the card again (put in a group, moved): at the end, or
   at the start, the next keystrokes went away from the word they were fixing.
+  The selection is kept as each key goes up too: after a drag, React builds no
+  select event until the next release of the mouse, and a drag sends none.
   It is
   written as it is left only when its text changed. A card whose editor was
   opened during the search stays in view, with its group, until the search
