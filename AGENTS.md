@@ -345,14 +345,24 @@ click done again. **So does the next tap of a double tap** (`isNextTap`: half
 a second, a fingertip away) on another card or group the board claims it for,
 and the mouse a browser emulates for it on a control: the first tap took the
 focus out of the editor, which closed, and the second grouped the card that
-grew back with the one the first picked up, for everyone.
+grew back with the one the first picked up, for everyone. That mouse is told
+from the mouse itself by the touchend just before it (`isTapMouse`), and held
+to the board's half second, not to the browser's count of taps (its `detail`),
+which Chromium ends at about 400 ms and Android at 300: tapped later, the
+second tap pressed the comments, or the Delete, of the card that grew back. A
+tap or a press that does nothing still belongs to the sequence: the next one
+is measured from its time, as a browser counts its taps, and against where
+the first aimed — measured from the first tap only, the third tap of a triple
+tap at an ordinary pace fell past half a second and grouped the card.
 `e2e/retro-touch-card-controls.spec.ts` holds it in Chromium (jsdom emulates no
 mouse for a tap and lays nothing out), counting the writes a hold and its drop
 send, on a card and on a group's own blank area, pressing the controls a
 closing editor used to move, on a computer and a phone, double clicking a
-title under a closing editor, and dragging a word within a title;
+title under a closing editor, dragging a word within a title, and tapping two
+and three times on a phone where the first tap closes an editor;
 `__tests__/sessionGroupTouch.test.tsx` pins which taps cancel, and what they
-leave, on a card and on a group container, and the next tap of a double tap.
+leave, on a card and on a group container, and the next taps of a sequence,
+with the mouse emulated for them and the mouse itself.
 
 **A control shown on hover is shown on focus, and never hidden where nothing
 hovers.** A card's edit, delete and first-comment controls were `opacity-0`
@@ -520,7 +530,14 @@ Four rules:
   pointer, the held group moved — and so did words whose field a teammate's
   write drew again during their drag; and Firefox sends no dragend to a field
   React only moved during the drag of its words, so a drag from outside the
-  page was let through to the browser until the next press.
+  page was let through to the browser until the next press. **Words selected
+  in a card are no drag of that card, nor of its group** (`dragsOwnElement`:
+  a card's or a group's drag starts at the card or the group itself, and
+  nothing inside either is draggable): their drag starts at the words, and
+  went up to the card's handler, or its group's, which took it for theirs, so
+  the board performed what the keyboard held and the end of their drag put the
+  hold down. A card cannot be dragged while a group is held on a board, nor in
+  Brainstorm while it is grouped, so its words can be selected then.
 - **The "from ..." chip follows who moved the card.** A card moved by hand is
   re-homed and loses the chip (same rule as dropping one on a column in the
   Group phase); a card displaced *by its group* keeps naming the column it was

@@ -94,7 +94,13 @@ export const claimGesture = (gesture: GroupingGesture): boolean => {
 export const DOUBLE_TAP_MS = 500;
 export const DOUBLE_TAP_SLOP_PX = 24;
 
-/** Where and when a gesture aimed. */
+/**
+ * Where and when a gesture aimed. A tap that does nothing still belongs to the
+ * sequence (pass 13 of 42.1): `at` moves to it, as a browser counts its taps
+ * each from the one before, while the place stays the first's. Measured from
+ * the first tap only, the third tap of a triple tap at an ordinary pace fell
+ * past half a second and grouped the card that grew back.
+ */
 export type GestureAim = TouchPoint & { at: number };
 
 export const isNextTap = (first: GestureAim | null, at: number, point: TouchPoint): boolean =>
@@ -102,6 +108,21 @@ export const isNextTap = (first: GestureAim | null, at: number, point: TouchPoin
   && at >= first.at
   && at - first.at <= DOUBLE_TAP_MS
   && Math.hypot(point.x - first.x, point.y - first.y) <= DOUBLE_TAP_SLOP_PX;
+
+/**
+ * The mouse a browser emulates for a tap comes right after that tap's
+ * `touchend` — Chromium stamps it with the touchend's own time, a browser that
+ * waits to tell a tap from a double tap sends it later — and is how a tap on a
+ * control reaches the board (pass 13 of 42.1). It says the tap is the next of
+ * a double tap (its `detail`) only within the browser's own time, about 400 ms
+ * in Chromium and 300 on Android: the comments or the Delete of the card that
+ * grew back were pressed by a second tap the board's half second would have
+ * stopped. The touchend just before it tells it from the mouse itself.
+ */
+export const TAP_MOUSE_MS = 500;
+
+export const isTapMouse = (touchEndAt: number | null, at: number): boolean =>
+  touchEndAt !== null && at >= touchEndAt && at - touchEndAt <= TAP_MOUSE_MS;
 
 /** Forget the gesture — on `touchend`, and on `touchcancel`. */
 export const endGesture = (gesture: GroupingGesture): void => {

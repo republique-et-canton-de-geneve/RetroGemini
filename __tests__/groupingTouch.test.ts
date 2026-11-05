@@ -2,11 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   DOUBLE_TAP_MS,
   DOUBLE_TAP_SLOP_PX,
+  TAP_MOUSE_MS,
   TOUCH_SLOP_PX,
   claimGesture,
   endGesture,
   idleGesture,
   isNextTap,
+  isTapMouse,
   moveGesture,
   startGesture,
 } from '../components/session/groupingTouch';
@@ -127,5 +129,35 @@ describe('the next tap of a double tap', () => {
   it('follows no tap at all, nor one that came after it', () => {
     expect(isNextTap(null, 1000, point(50, 50))).toBe(false);
     expect(isNextTap(first, 999, point(50, 50))).toBe(false);
+  });
+
+  // Review finding (pass 13 of 42.1): what the documentation says, in its
+  // own numbers — half a second, a fingertip — and in every direction.
+  it('lasts half a second, and reaches a fingertip away in any direction', () => {
+    expect(isNextTap(first, 1450, point(50, 50))).toBe(true);
+    expect(isNextTap(first, 1500, point(50, 50))).toBe(true);
+    expect(isNextTap(first, 1501, point(50, 50))).toBe(false);
+    // 17.7 px on the diagonal, inside 24; 25.5 px outside it.
+    expect(isNextTap(first, 1000, point(63, 62))).toBe(true);
+    expect(isNextTap(first, 1000, point(68, 68))).toBe(false);
+  });
+});
+
+// Review finding (pass 13 of 42.1): the mouse a browser emulates for a tap
+// says nothing of the board's half second, and is told from the mouse itself
+// by the touchend that comes just before it.
+describe('the mouse a browser emulates for a tap', () => {
+  it('comes right after the tap\u2019s touchend', () => {
+    expect(isTapMouse(1000, 1000)).toBe(true);
+    expect(isTapMouse(1000, 1000 + TAP_MOUSE_MS)).toBe(true);
+    expect(TAP_MOUSE_MS).toBe(500);
+  });
+
+  it('is not the mouse of a tap that ended longer ago, after it, or of none', () => {
+    expect(isTapMouse(1000, 1001 + TAP_MOUSE_MS)).toBe(false);
+    expect(isTapMouse(1000, 999)).toBe(false);
+    expect(isTapMouse(null, 1000)).toBe(false);
+    // Event times count from the page's load: no touch, no tap, from its start.
+    expect(isTapMouse(null, 0)).toBe(false);
   });
 });

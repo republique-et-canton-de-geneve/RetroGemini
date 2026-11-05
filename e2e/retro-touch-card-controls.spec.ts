@@ -576,7 +576,11 @@ test('a double click whose first click closes an editor presses nothing the layo
 // card up and took the focus out of the editor above it, which closed. The
 // card grew back under the finger, and the second tap acted on it: grouped it
 // with the card picked up, or pressed one of its controls.
-test('a double tap whose first tap closes an editor does nothing the layout moved under it', async ({ browser }) => {
+// Review finding (pass 13 of 42.1): a tap that does nothing still belongs to
+// the sequence. Measured from the first tap only, the third tap of a triple
+// tap at an ordinary pace, past half a second from the first, grouped the
+// card that grew back, for everyone.
+for (const { taps, gap } of [{ taps: 2, gap: 120 }, { taps: 3, gap: 300 }]) test(`${taps} taps ${gap} ms apart, the first closing an editor, do nothing the layout moved under them`, async ({ browser }) => {
   const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
   const context = await browser.newContext({ ...phone, locale: 'en-US' });
   const page = await context.newPage();
@@ -589,11 +593,11 @@ test('a double tap whose first tap closes an editor does nothing the layout move
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: '+ New Team' }).click();
-    await page.getByPlaceholder('e.g. Design Team').fill(`${TEAM_NAME}-dbltap`);
+    await page.getByPlaceholder('e.g. Design Team').fill(`${TEAM_NAME}-tap${taps}`);
     await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
     await page.getByLabel('Recovery Email').fill('facilitator@example.com');
     await page.getByRole('button', { name: 'Create & Join' }).click();
-    await expect(page.getByText(`${TEAM_NAME}-dbltap Dashboard`)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(`${TEAM_NAME}-tap${taps} Dashboard`)).toBeVisible({ timeout: 15_000 });
     await dismissAnnouncementsIfPresent(page);
     await page.getByRole('button', { name: 'New Retrospective' }).click();
     const dialog = page.getByRole('dialog');
@@ -621,9 +625,10 @@ test('a double tap whose first tap closes an editor does nothing the layout move
     // Near the top of the card below: the editor closing pushes it down.
     const below = (await card(page, 'Late release notes').boundingBox())!;
     const at = { x: below.x + below.width / 2, y: below.y + 6 };
-    await page.touchscreen.tap(at.x, at.y);
-    await page.waitForTimeout(120);
-    await page.touchscreen.tap(at.x, at.y);
+    for (let n = 0; n < taps; n += 1) {
+      if (n > 0) await page.waitForTimeout(gap);
+      await page.touchscreen.tap(at.x, at.y);
+    }
     await page.waitForTimeout(700);
 
     await expect(editor).toHaveCount(0);

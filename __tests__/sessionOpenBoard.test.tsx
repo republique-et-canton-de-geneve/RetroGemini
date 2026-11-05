@@ -2355,6 +2355,41 @@ describe('Open board — every hold and every drop', () => {
           expect(screen.getByText('Selected - Tap to cancel')).toBeTruthy();
         });
 
+        // Review finding (pass 13 of 42.1): words selected in a card are no
+        // drag of that card. Their drag starts at the words, and it went up to
+        // the card's own handler — or its group's — which took it for theirs:
+        // the board dropped what the keyboard held (the held group moved, the
+        // held card moved, for everyone), and their drag's end put the hold
+        // down. A card cannot be dragged while a group is held on a board, nor
+        // in Brainstorm when it is grouped, so its words can be selected.
+        it.each([
+          ['OPEN_BOARD', 'a group, by words of a card', {}, /Move the group Delivery to another column/, 't-c', /move the selected group to/],
+          ['BRAINSTORM', 'a card, by words of a card whose group holds a hidden card', { revealBrainstorm: false }, /Move the card Too many meetings to another column/, 't-a', /move the selected card to/],
+          ['BRAINSTORM', 'a card, by words of a card whose group can be moved', {}, /Move the card Too many meetings to another column/, 't-a', /move the selected card to/],
+        ])('selected in a card drop nothing the keyboard holds: %s, %s', async (phase, _what, settings, hold, wordsOf, target) => {
+          const user = userEvent.setup();
+          const session = worded(5, 'Too many meetings', { phase });
+          session.settings = { ...session.settings, ...settings };
+          renderBoard(session, alice);
+          await screen.findByText('Too many meetings');
+          act(() => screen.getByRole('button', { name: hold }).focus());
+          await user.keyboard('{Enter}');
+          expect(screen.queryAllByRole('button', { name: target }).length).toBeGreaterThan(0);
+          const before = await persistedCount();
+
+          const words = within(cardById(wordsOf)).getByText(wordsOf === 't-c' ? 'Too many meetings' : 'Flaky deploys').firstChild!;
+          const transfer = dataTransfer();
+          fireEvent.mouseDown(words);
+          fireEvent.dragStart(words, { dataTransfer: transfer });
+          expect(refusedBy(columnElement('doing'), transfer)).toEqual(refused);
+          fireEvent.dragEnd(words, { dataTransfer: transfer });
+          fireEvent.mouseUp(words);
+          await tick();
+
+          expect(await persistedCount()).toBe(before);
+          expect(screen.queryAllByRole('button', { name: target }).length).toBeGreaterThan(0);
+        });
+
         // A drag the board started, its end unheard — Firefox sends none to a
         // card that left the page during its drag — is over once another
         // gesture begins: a press, another drag, a hold of the keyboard, or
