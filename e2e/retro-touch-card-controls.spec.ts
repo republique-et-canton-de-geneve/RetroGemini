@@ -389,6 +389,75 @@ test('a drag from a card\u2019s editor moves the card dragged in one write, and 
   }
 });
 
+// Review finding (pass 10 of 42.1): a board's group is draggable, and its
+// title field is inside it, so a press that selected the title's words started
+// a drag of the group instead (Firefox, in addition, put no caret there).
+test('a press in a group’s title selects its words, and drags no group', async ({ browser }) => {
+  const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  const sent: string[] = [];
+  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
+    const text = typeof payload === 'string' ? payload : payload.toString();
+    if (text.includes('"update-session"')) sent.push(text);
+  }));
+  try {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: '+ New Team' }).click();
+    await page.getByPlaceholder('e.g. Design Team').fill(`${TEAM_NAME}-title`);
+    await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+    await page.getByLabel('Recovery Email').fill('facilitator@example.com');
+    await page.getByRole('button', { name: 'Create & Join' }).click();
+    await expect(page.getByText(`${TEAM_NAME}-title Dashboard`)).toBeVisible({ timeout: 15_000 });
+    await dismissAnnouncementsIfPresent(page);
+    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
+    await dialog.getByTestId('retro-template-lean_coffee').click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
+
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    for (const text of ['Late release notes', 'Too many meetings']) {
+      await field.fill(text);
+      await page.keyboard.press('Enter');
+      await expect(card(page, text)).toBeVisible();
+    }
+    // Grouped with the keyboard, then named.
+    await page.getByRole('button', { name: /Pick up the ticket Late release notes/ }).focus();
+    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: /group the selected ticket with Too many meetings/ }).focus();
+    await page.keyboard.press('Enter');
+    const title = page.locator('.group-container input[data-group-title-id]');
+    await expect(title).toBeFocused({ timeout: 10_000 });
+    await title.fill('Delivery problems');
+    await title.press('Enter');
+    await page.waitForTimeout(700);
+    const before = sent.length;
+
+    // Pressed near the start of the title, dragged along it, released.
+    const box = (await title.boundingBox())!;
+    await page.mouse.move(box.x + 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 30, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.move(box.x + 70, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
+
+    await expect(title).toBeFocused();
+    const selected = await title.evaluate((input: HTMLInputElement) => input.value.slice(input.selectionStart ?? 0, input.selectionEnd ?? 0));
+    expect(selected.length).toBeGreaterThan(0);
+    expect('Delivery problems'.startsWith(selected)).toBe(true);
+    await expect(page.getByRole('button', { name: /move the selected group to/ })).toHaveCount(0);
+    await expect(columns(page).nth(0).locator('.group-container')).toHaveCount(1);
+    await page.waitForTimeout(500);
+    expect(sent.length - before).toBe(0);
+
+    // Anywhere else, the group is still picked up by the pointer.
+    await expect(page.locator('.group-container')).toHaveAttribute('draggable', 'true');
+  } finally {
+    await context.close();
+  }
+});
+
 test('on a computer the same controls wait for the pointer', async ({ page }) => {
   expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(true);
   await page.goto('/');

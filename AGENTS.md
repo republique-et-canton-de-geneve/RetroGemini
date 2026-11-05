@@ -304,11 +304,15 @@ read as a press. Drawn on, the editor is no longer typed in: the press can
 drag its card, or its group (still "being edited", they were not draggable,
 and the drag selected text across the board) — draggable from the press's
 mousedown, since Firefox chooses between a drag and a selection there, before
-the blur — and a copy React draws again
+the blur, but never from a press in a field: a group is not draggable while a
+press in its title lasts, where Firefox put no caret and both browsers dragged
+the group instead of selecting its words — and a copy React draws again
 for a teammate's write takes no focus and shows the typing (it took the focus
 from the field pressed, and closed with it at the release). Its text rides
 the write of that click, of the drop, or of the change a select picked from
-its own list makes, with no click ("Colour by") (folded only while one of them is
+its own list makes, with no click ("Colour by"; pressed, dragged onto the
+option and released, Firefox gives the option a mousedown of its own, which
+is the same press) (folded only while one of them is
 dispatched, and the editor closes with that write: drawn on, a drop that put
 its card in a new group drew it again over the title to name the group), or
 goes alone as the press ends; never a write nobody asked for (a teammate
@@ -319,7 +323,11 @@ keyboard during a press write it at once. Gone back into before the press
 ends — the keyboard, or a press on the field, its release lost to a context
 menu or the button still held — the editor is typed in again, and the press
 no longer writes its text: written at the press's end, or by the next press,
-it went over the newer typing, or alone, closing the editor under it.
+it went over the newer typing, or alone, closing the editor under it. A press
+on the field puts the caret where it presses, never where the draft had it
+(Firefox puts it before the focus). Closed by the write that took its text,
+the editor is no longer drawn as left: opened again before the press ends, it
+takes the focus, and the press's end leaves it open.
 `e2e/retro-touch-card-controls.spec.ts` holds it in Chromium (jsdom emulates no
 mouse for a tap and lays nothing out), counting the writes a hold and its drop
 send, on a card and on a group's own blank area, and pressing the controls a
@@ -468,7 +476,12 @@ Four rules:
   grouping must not become a second way to edit a group's composition, so a
   grouped card exposes no control of its own and the container carries every
   member. A card open for editing suspends the drag — a `draggable` ancestor
-  competes with its own textarea.
+  competes with its own textarea — and words dragged out of a field (the
+  editor, a group's title) hold no card and no group (`dragsFieldText`): the
+  board leaves their drop to the browser, which moves them within the field and
+  refuses them elsewhere. Taken as a drag of the card, they grouped the card
+  being edited with the card they were dropped on, and the board cancelled
+  their drop in the field itself, so they moved nowhere.
 - **The "from ..." chip follows who moved the card.** A card moved by hand is
   re-homed and loses the chip (same rule as dropping one on a column in the
   Group phase); a card displaced *by its group* keeps naming the column it was
