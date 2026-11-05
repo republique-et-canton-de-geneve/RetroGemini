@@ -289,19 +289,30 @@ board, and the picker stayed open over the next card to tap. What the field
 writes as it is left rides the tap's own write (`updateSession` folds it in, as
 it folds the votes number), or goes alone, at once, when the tap writes nothing
 (a hold): two writes from one revision, and the server refused the second.
-**A press of the mouse ends with its click** (`pressRef` in `Session.tsx`): a
-card's editor left for a press — of the mouse, or of the mouse a browser
-emulates for a tap on a control — stays drawn until the press ends, with its
-click, a drag's end, or the release of a press that clicks nothing. Closed at
-the press, it grew the card back by the rows it hides while edited and pushed
-everything under it down, so the release and the click landed beside the
-control pressed (its own vote, the next card's, "Move selected card here").
-Its text rides the write of that click, folded only while the click is
-dispatched, or goes alone as the press ends; never a write nobody asked for (a
-teammate joining, the timer's expiry), which every client sends from one
-revision and all but one lose — held for "the next write" for 400 ms, the text
-rode those and was lost with them. Enter, which no click follows, writes it at
-once.
+**A press of the mouse ends with its release, or its drag's end** (`pressRef`
+in `Session.tsx`): a card's editor whose focus the press's own mousedown takes
+— of the mouse, or of the mouse a browser emulates for a tap on a control —
+stays drawn until the press ends: once the task of its release is over (its
+click, and the click a label then gives its box, come first), or at its
+drag's end. Closed at the press, it grew the card back by the rows it hides
+while edited and pushed everything under it down, so the release and the
+click landed beside the control pressed (its own vote, the next card's, "Move
+selected card here"). A drag's end is sent to the element dragged, so it is
+heard there: a drop that moved its card removed that element, nothing on the
+window heard it end, and for 10 s the editor stayed drawn and every blur was
+read as a press. Drawn on, the editor is no longer typed in: the press can
+drag its card, or its group (still "being edited", they were not draggable,
+and the drag selected text across the board), and a copy React draws again
+for a teammate's write takes no focus and shows the typing (it took the focus
+from the field pressed, and closed with it at the release). Its text rides
+the write of that click, or of the drop (folded only while one of them is
+dispatched, and the editor closes with that write: drawn on, a drop that put
+its card in a new group drew it again over the title to name the group), or
+goes alone as the press ends; never a write nobody asked for (a teammate
+joining, the timer's expiry), which every client sends from one revision and
+all but one lose — held for "the next write" for 400 ms, the text rode those
+and was lost with them. Enter, which no click follows, and a blur of the
+keyboard during a press write it at once.
 `e2e/retro-touch-card-controls.spec.ts` holds it in Chromium (jsdom emulates no
 mouse for a tap and lays nothing out), counting the writes a hold and its drop
 send, on a card and on a group's own blank area, and pressing the controls a
@@ -698,18 +709,20 @@ Eleven rules:
   A card's editor is a field React fills once, as it mounts, so its draft
   lives in that field alone and the merge keeps no old text for it — kept in
   the state, the old text showed nowhere and went out with the next write.
-  Nothing typed yet, the editor shows a teammate's edit of its card, the caret
-  where it was put; typed in, it keeps the typing and its caret, also when
-  another person's write draws the card again (put in a group, moved) — at
-  the end, the caret sent a fix made mid-text after the last word. It is
+  Nothing typed yet, the editor shows a teammate's edit of its card; typed in,
+  it keeps the typing. Typed in or not, it keeps its selection — a caret, or a
+  word selected to be typed over, and its direction — also when another
+  person's write draws the card again (put in a group, moved): at the end, or
+  at the start, the next keystrokes went away from the word they were fixing.
+  It is
   written as it is left only when its text changed. A card whose editor was
   opened during the search stays in view, with its group, until the search
   changes (`searchKeptTicketIds`): a teammate's edit took it out, and the
   focus fell to the page; kept only while the editor was open, it went as it
   was left, with the control the Tab or the click was going to. An editor
-  whose card leaves the screen with no blur (a phase that draws no card, the
-  card deleted) closes and stores what was typed; came back with its card,
-  it took the focus from whatever was being typed.
+  whose card leaves the screen with no blur closes: a phase that draws no
+  card stores what was typed, a card deleted takes it with it (came back with
+  its card, the editor took the focus from whatever was being typed).
   Nothing is written: two people read one board in two orders. A group's own
   cards keep the order they were written in.
 - **The votes travel with the cards**, on a board and in the guided Group
@@ -809,7 +822,8 @@ Residuals of the board's own design (42.1), stated on purpose:
   on the stored text; a session the click itself takes off the page (signed
   out) does not write it — the exit button writes it in its own write. A
   press held longer than 10 s (`PRESS_LEAVE_SAFETY_MS`) ends without its
-  click. A word a phone keyboard is still composing when another person's
+  click, and one whose release the browser never sends ends at the next
+  press. A word a phone keyboard is still composing when another person's
   write draws the card again may be committed twice: the composition belongs
   to the field React removed.
 

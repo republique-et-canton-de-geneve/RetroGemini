@@ -310,6 +310,85 @@ for (const device of ['computer', 'phone'] as const) {
   });
 }
 
+// Review findings (pass 8 of 42.1): a drag ends with no release, at a
+// dragend sent to the element dragged — which the drop removes when it moves
+// its card, so the press never ended: for 10 s the editor stayed drawn, and a
+// click into it closed it. And the card being edited could not be dragged by
+// the press that took the focus out of its editor: it selected text instead.
+test('a drag from a card\u2019s editor moves the card dragged in one write, and the card edited too', async ({ browser }) => {
+  const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  const sent: string[] = [];
+  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
+    const text = typeof payload === 'string' ? payload : payload.toString();
+    if (text.includes('"update-session"')) sent.push(text);
+  }));
+  try {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: '+ New Team' }).click();
+    await page.getByPlaceholder('e.g. Design Team').fill(`${TEAM_NAME}-drag`);
+    await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+    await page.getByLabel('Recovery Email').fill('facilitator@example.com');
+    await page.getByRole('button', { name: 'Create & Join' }).click();
+    await expect(page.getByText(`${TEAM_NAME}-drag Dashboard`)).toBeVisible({ timeout: 15_000 });
+    await dismissAnnouncementsIfPresent(page);
+    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
+    await dialog.getByTestId('retro-template-lean_coffee').click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
+    // The facilitator's screen sends its state once, half a second after the
+    // session opens: past that, every write counted is this test's own.
+    await page.waitForTimeout(700);
+
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    for (const text of ['Late release notes', 'Too many meetings']) {
+      await field.fill(text);
+      await page.keyboard.press('Enter');
+      await expect(card(page, text)).toBeVisible();
+    }
+    const editors = page.locator('[data-ticket-id] textarea');
+    const edit = async (text: string, typed: string) => {
+      await card(page, text).getByRole('button', { name: 'Edit ticket' }).click();
+      await expect(editors).toBeFocused();
+      await editors.press('End');
+      await page.keyboard.type(typed);
+    };
+    // Dragged with the mouse, from a point of the element, to an empty part
+    // of the other column.
+    const dragToOtherColumn = async (from: { x: number; y: number }) => {
+      const target = (await columns(page).nth(1).boundingBox())!;
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await page.mouse.move(from.x + 20, from.y + 20, { steps: 4 });
+      await page.mouse.move(target.x + target.width / 2, target.y + target.height - 40, { steps: 8 });
+      await page.mouse.up();
+    };
+
+    // Another card, from an open editor: its move and the text in one write.
+    await edit('Too many meetings', ' on Mondays');
+    const before = sent.length;
+    const other = (await card(page, 'Late release notes').boundingBox())!;
+    await dragToOtherColumn({ x: other.x + other.width / 2, y: other.y + 12 });
+    await expect(columns(page).nth(1).getByText('Late release notes', { exact: true })).toBeVisible();
+    await expect(editors).toHaveCount(0, { timeout: 1_000 });
+    await expect(page.getByText('Too many meetings on Mondays', { exact: true })).toBeVisible();
+    await page.waitForTimeout(500);
+    expect(sent.length - before).toBe(1);
+    expect(sent.at(-1)).toContain('Too many meetings on Mondays');
+
+    // The card edited, by its own edge, outside its field.
+    await edit('Too many meetings on Mondays', ' again');
+    const edited = (await card(page, 'Too many meetings on Mondays').boundingBox())!;
+    await dragToOtherColumn({ x: edited.x + edited.width - 4, y: edited.y + edited.height - 4 });
+    await expect(columns(page).nth(1).getByText('Too many meetings on Mondays again', { exact: true })).toBeVisible();
+    await expect(editors).toHaveCount(0, { timeout: 1_000 });
+  } finally {
+    await context.close();
+  }
+});
+
 test('on a computer the same controls wait for the pointer', async ({ page }) => {
   expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(true);
   await page.goto('/');

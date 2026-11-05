@@ -189,8 +189,8 @@ const isRetroSession = (session: unknown): session is RetroSession => {
 const PENDING_MAX_VOTES_MS = 400;
 /**
  * The longest a press of the mouse keeps a card's editor drawn after taking
- * the focus out of it (pressRef), when neither a click, a drag's end nor the
- * release that follows a lost click ends it first.
+ * the focus out of it (pressRef), when neither its release nor its drag's end
+ * ends it first.
  */
 const PRESS_LEAVE_SAFETY_MS = 10_000;
 
@@ -486,11 +486,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // Editing Ticket State
   const [editingTicketId, setEditingTicketId] = useState<string | null>(null);
   // The card's editor is a field React fills once, as it mounts: what is
-  // typed lives in the field alone (editorDraftRef keeps a copy), and
-  // editorOpenedTextRef is the stored text the field shows while nothing is
-  // typed. Left as it shows that text, the editor writes nothing.
+  // typed lives in the field alone (editorDraftRef keeps a copy, null until
+  // something is typed, with the selection from the moment it is focused),
+  // and editorOpenedTextRef is the stored text the field shows while nothing
+  // is typed. Left as it shows that text, the editor writes nothing.
   const editorFieldRef = useRef<HTMLTextAreaElement | null>(null);
-  const editorDraftRef = useRef<{ ticketId: string; text: string; start: number; end: number } | null>(null);
+  const editorDraftRef = useRef<{
+    ticketId: string;
+    text: string | null;
+    start: number;
+    end: number;
+    direction: 'forward' | 'backward' | 'none';
+  } | null>(null);
+  // The editor a press of the mouse took the focus out of, drawn until the
+  // press ends (pressRef): that press can drag its card, or its group, and
+  // the copy React draws again meanwhile takes no focus.
+  const [leftEditorTicketId, setLeftEditorTicketId] = useState<string | null>(null);
   const editorOpenedTextRef = useRef('');
   // Enter writes the text at once: no click follows it.
   const editorCommitsNowRef = useRef(false);
@@ -616,12 +627,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const editedTicketText = editingTicketId ? session?.tickets.find(t => t.id === editingTicketId)?.text : undefined;
   useLayoutEffect(() => {
     const field = editorFieldRef.current;
-    if (!field || editedTicketText === undefined || editorDraftRef.current?.ticketId === editingTicketId) return;
+    const draft = editorDraftRef.current;
+    if (!field || editedTicketText === undefined || (draft?.ticketId === editingTicketId && draft.text !== null)) return;
     if (field.value !== editedTicketText) {
-      // The caret stays where it was put, within the new text.
-      const { selectionStart, selectionEnd } = field;
+      // The selection stays where it was put, within the new text.
+      const { selectionStart, selectionEnd, selectionDirection } = field;
       field.value = editedTicketText;
-      field.setSelectionRange(Math.min(selectionStart, field.value.length), Math.min(selectionEnd, field.value.length));
+      field.setSelectionRange(Math.min(selectionStart, field.value.length), Math.min(selectionEnd, field.value.length), selectionDirection);
     }
     editorOpenedTextRef.current = editedTicketText.trim();
   }, [editingTicketId, editedTicketText]);
@@ -639,7 +651,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     const draft = editorDraftRef.current;
     editorDraftRef.current = null;
     setEditingTicketId(null);
-    const text = draft?.ticketId === editingTicketId ? draft.text.trim() : '';
+    // Left for a press, its text is the press's to write: with that press's
+    // click, or as it ends (finishPress) — once.
+    if (pressRef.current.leave?.ticketId === editingTicketId) return;
+    const text = draft?.ticketId === editingTicketId ? (draft.text ?? '').trim() : '';
     // A card deleted meanwhile takes its text with it: nothing to write.
     if (!text || text === editorOpenedTextRef.current) return;
     if (!sessionRef.current?.tickets.some(t => t.id === editingTicketId)) return;
@@ -674,16 +689,27 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // back by its hidden rows and pushed everything under it down, so the
   // release, and the click, landed beside the control pressed (its own vote,
   // Delete, the next card's vote, "Move selected card here"). Its text rides
-  // the write of that click (updateSession folds it in, only while the click
-  // is dispatched, never a write nobody asked for), or goes alone as the press
+  // the write of that click — or of the drop that ends its drag
+  // (updateSession folds it in, only while the click or the drop is
+  // dispatched, never a write nobody asked for) — or goes alone as the press
   // ends: the two were writes from one revision, and the server refused the
   // second — the move, the phase change.
   const pressRef = useRef<{
     active: boolean;
-    dispatching: boolean;
+    // The press's own mousedown is still being handled: only the blur it
+    // causes leaves the editor for the press. A blur of the keyboard during
+    // a press writes at once.
+    leaving: boolean;
+    // The click, or the drop, of this press being dispatched — a label's
+    // click and then its box's: a write made while one is dispatched is that
+    // gesture's own (takePressLeaveWrite).
+    dispatching: Event | null;
     leave: { ticketId: string; text: string | null; folded: boolean } | null;
+    dragSource: EventTarget | null;
     safety: ReturnType<typeof setTimeout> | null;
-  }>({ active: false, dispatching: false, leave: null, safety: null });
+    // Which press this is: the end a press schedules ends that press only.
+    seq: number;
+  }>({ active: false, leaving: false, dispatching: null, leave: null, dragSource: null, safety: null, seq: 0 });
   useEffect(() => () => {
     if (pendingMaxVotesTimerRef.current) clearTimeout(pendingMaxVotesTimerRef.current);
     // A session left during a press writes nothing after: the exit button
@@ -692,7 +718,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     const press = pressRef.current;
     if (press.safety) clearTimeout(press.safety);
     press.active = false;
-    press.dispatching = false;
+    press.leaving = false;
+    press.dispatching = null;
     press.leave = null;
   }, []);
   // Local participants panel state (not synced across users)
@@ -1135,13 +1162,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     if (stored) setMaxVotesInput(String(stored));
   };
   // The text an editor left for a press holds, taken by the write of that
-  // press's click: one gesture, one write.
+  // press's click, or of its drop: one gesture, one write. That write has its
+  // target, so the editor closes with it: drawn on, a drop that put its card
+  // in a new group drew it again, focused, over the title to name the group.
   const takePressLeaveWrite = (): Array<(s: RetroSession) => void> => {
     const press = pressRef.current;
-    const leave = press.dispatching ? press.leave : null;
-    if (!leave || leave.text === null || leave.folded) return [];
+    const leave = press.leave;
+    if (!leave || leave.folded || !press.dispatching || press.dispatching.eventPhase === Event.NONE) return [];
     leave.folded = true;
-    return [writeTicketText(leave.ticketId, leave.text)];
+    setEditingTicketId(current => (current === leave.ticketId ? null : current));
+    return leave.text === null ? [] : [writeTicketText(leave.ticketId, leave.text)];
   };
   const pressLeaveWaits = () => {
     const leave = pressRef.current.leave;
@@ -1154,13 +1184,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     const press = pressRef.current;
     if (!press.active) return;
     press.active = false;
-    press.dispatching = false;
+    press.leaving = false;
+    press.dispatching = null;
     if (press.safety) clearTimeout(press.safety);
     press.safety = null;
     const leave = press.leave;
     press.leave = null;
     if (!leave) return;
     setEditingTicketId(current => (current === leave.ticketId ? null : current));
+    setLeftEditorTicketId(null);
     if (leave.text === null || leave.folded) return;
     if (!sessionRef.current?.tickets.some(t => t.id === leave.ticketId)) return;
     updateSession(writeTicketText(leave.ticketId, leave.text));
@@ -1169,34 +1201,61 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   useLayoutEffect(() => { finishPressRef.current = finishPress; });
   useEffect(() => {
     const press = pressRef.current;
-    const begin = () => {
-      press.active = true;
-      press.dispatching = false;
-      if (press.safety) clearTimeout(press.safety);
-      press.safety = setTimeout(() => finishPressRef.current(), PRESS_LEAVE_SAFETY_MS);
+    const ends = () => finishPressRef.current();
+    // The end of the press under way, and of no later one.
+    const endsThisPress = () => {
+      const seq = press.seq;
+      return () => { if (press.seq === seq) ends(); };
     };
-    const dispatchStarts = () => { if (press.active) press.dispatching = true; };
-    const dispatchEnds = () => finishPressRef.current();
-    const dropEnds = () => { press.dispatching = false; };
-    // A press that clicks nothing (released elsewhere, the click lost)
-    // ends right after its release: the click, when there is one, comes
-    // first, in the same task.
-    const released = () => { setTimeout(() => finishPressRef.current(), 0); };
+    const begin = () => {
+      // A press still under way, its end not reached yet, ends here: its
+      // text goes before this press can leave another editor.
+      if (press.active) ends();
+      press.seq += 1;
+      press.active = true;
+      press.dispatching = null;
+      press.leaving = true;
+      // The focus a mousedown moves, it moves as that mousedown's task ends.
+      setTimeout(() => { press.leaving = false; }, 0);
+      if (press.safety) clearTimeout(press.safety);
+      press.safety = setTimeout(ends, PRESS_LEAVE_SAFETY_MS);
+    };
+    const dispatchStarts = (e: Event) => { if (press.active) press.dispatching = e; };
+    // A press ends once the task of its release is over: its click, and the
+    // click a label's activation then gives its box, are dispatched first,
+    // in that task. Ended at the label's click, the press left the box's
+    // write to go alone after the text, from the same revision.
+    const released = () => { setTimeout(endsThisPress(), 0); };
+    // A drag ends with no release, at its dragend, which is sent to the
+    // element dragged and heard there: a drop that moved the card removed
+    // that element, and nothing on the window heard it end.
+    let sourceEnds: (() => void) | null = null;
+    const dragStarts = (e: Event) => {
+      const source = e.target;
+      if (!source) return;
+      if (sourceEnds) press.dragSource?.removeEventListener('dragend', sourceEnds);
+      const endsDrag = endsThisPress();
+      const heard = () => {
+        if (press.dragSource === source) press.dragSource = null;
+        endsDrag();
+      };
+      sourceEnds = heard;
+      press.dragSource = source;
+      source.addEventListener('dragend', heard, { once: true });
+    };
     window.addEventListener('mousedown', begin, true);
     window.addEventListener('click', dispatchStarts, true);
-    window.addEventListener('click', dispatchEnds);
     window.addEventListener('drop', dispatchStarts, true);
-    window.addEventListener('drop', dropEnds);
-    window.addEventListener('dragend', dispatchEnds);
+    window.addEventListener('dragstart', dragStarts, true);
     window.addEventListener('mouseup', released);
     return () => {
       window.removeEventListener('mousedown', begin, true);
       window.removeEventListener('click', dispatchStarts, true);
-      window.removeEventListener('click', dispatchEnds);
       window.removeEventListener('drop', dispatchStarts, true);
-      window.removeEventListener('drop', dropEnds);
-      window.removeEventListener('dragend', dispatchEnds);
+      window.removeEventListener('dragstart', dragStarts, true);
       window.removeEventListener('mouseup', released);
+      if (sourceEnds) press.dragSource?.removeEventListener('dragend', sourceEnds);
+      press.dragSource = null;
     };
   }, []);
   const writeTicketText = (ticketId: string, text: string) => (s: RetroSession) => {
@@ -2553,17 +2612,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const inReadableGroup = !isBoard || !t.groupId || canReadGroup(session, t.groupId, currentUser.id);
       const isPickerOpen = emojiPickerOpenId === t.id;
       const isEditing = editingTicketId === t.id;
+      // An editor a press of the mouse left is drawn until the press ends, so
+      // nothing moves under the pointer, and is no longer typed in.
+      const isTypedIn = isEditing && leftEditorTicketId !== t.id;
 
       // explicit drag styling
       const isDragTarget = regroupsCards && dragTarget?.type === 'ITEM' && dragTarget.id === t.id && draggedTicket?.id !== t.id;
       // Brainstorm moves a card between columns without grouping it, so a card
       // is never a drop target there — only a column is. A card open for
       // editing is not draggable either: a draggable element competes with the
-      // text selection its own textarea needs.
-      const isMovableCard = mode === 'BRAINSTORM' && !isGrouped && !isEditing && canMoveTicket(t);
+      // text selection its own textarea needs. The press that left its editor
+      // can drag it: still "being edited", it selected text across the board.
+      const isMovableCard = mode === 'BRAINSTORM' && !isGrouped && !isTypedIn && canMoveTicket(t);
       // On a board, never while a group is held: the column a card is dropped
       // on would take the group instead.
-      const isBoardCard = isBoard && visible && !isEditing && isLive && !movingItem;
+      const isBoardCard = isBoard && visible && !isTypedIn && isLive && !movingItem;
       // What a held card may be dropped on: on a board, only a card it can be
       // read with.
       const receivesHeldCard = regroupsCards && !movingItem && (!isBoard || (visible && inReadableGroup));
@@ -2741,48 +2804,56 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             {isEditing ? (
                  <textarea
                     ref={editorFieldRef}
+                    // Drawn again during the press that left it, it takes no
+                    // focus: it took it from the field pressed, and closed
+                    // with it at the release, so the focus fell to the page.
                     // eslint-disable-next-line jsx-a11y/no-autofocus -- the card the user just activated becomes this editor
-                    autoFocus
+                    autoFocus={isTypedIn}
                     // Drawn again while it was typed in — another person's
                     // write put its card in a group, or moved it — it shows
                     // the typing again, not the stored text.
-                    defaultValue={editorDraftRef.current?.ticketId === t.id ? editorDraftRef.current.text : t.text}
+                    defaultValue={editorDraftRef.current?.ticketId === t.id ? editorDraftRef.current.text ?? t.text : t.text}
                     onFocus={(e) => {
                         const field = e.currentTarget;
                         const draft = editorDraftRef.current;
                         if (draft?.ticketId === t.id) {
-                            // The caret where it was: at the end, the next
-                            // keystrokes landed after the last word.
-                            field.setSelectionRange(Math.min(draft.start, field.value.length), Math.min(draft.end, field.value.length));
+                            // The selection where it was, typed in or not: at
+                            // the start or the end, the next keystrokes landed
+                            // away from the word they were fixing.
+                            field.setSelectionRange(Math.min(draft.start, field.value.length), Math.min(draft.end, field.value.length), draft.direction);
                             return;
                         }
                         editorOpenedTextRef.current = field.value.trim();
+                        editorDraftRef.current = { ticketId: t.id, text: null, start: field.selectionStart, end: field.selectionEnd, direction: field.selectionDirection };
                     }}
                     onInput={(e) => {
                         const field = e.currentTarget;
-                        editorDraftRef.current = { ticketId: t.id, text: field.value, start: field.selectionStart, end: field.selectionEnd };
+                        editorDraftRef.current = { ticketId: t.id, text: field.value, start: field.selectionStart, end: field.selectionEnd, direction: field.selectionDirection };
                     }}
                     onSelect={(e) => {
                         const draft = editorDraftRef.current;
                         if (draft?.ticketId !== t.id) return;
                         draft.start = e.currentTarget.selectionStart;
                         draft.end = e.currentTarget.selectionEnd;
+                        draft.direction = e.currentTarget.selectionDirection;
                     }}
                     onBlur={(e) => {
                         const val = e.currentTarget.value.trim();
                         const now = editorCommitsNowRef.current;
                         editorCommitsNowRef.current = false;
-                        editorDraftRef.current = null;
                         // Written only when changed: left as it was opened, the
                         // editor sent its old text back over a teammate's edit.
                         const text = val && val !== editorOpenedTextRef.current ? val : null;
                         // Left for a press of the mouse: drawn until the press
-                        // ends, its text riding the click's write (pressRef).
+                        // ends, its text riding the click's write (pressRef),
+                        // and its draft kept for a copy drawn again meanwhile.
                         const press = pressRef.current;
-                        if (press.active && !now) {
+                        if (press.active && press.leaving && !now) {
                             press.leave = { ticketId: t.id, text, folded: false };
+                            setLeftEditorTicketId(t.id);
                             return;
                         }
+                        editorDraftRef.current = null;
                         setEditingTicketId(null);
                         if (text) updateSession(writeTicketText(t.id, text));
                     }}
@@ -3487,7 +3558,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           // the draggable container never competes with a textarea. On a board
           // the cards inside are held for grouping, and the group itself is
           // picked up to move it whole — never while a card is held.
-          const editingInsideGroup = editingTicketId !== null
+          const editingInsideGroup = editingTicketId !== null && editingTicketId !== leftEditorTicketId
               && session.tickets.some(t => t.groupId === g.id && t.id === editingTicketId);
           const isMovableGroup = (mode === 'BRAINSTORM' || (isBoard && !draggedTicket))
               && !editingInsideGroup && canMoveGroup(g);

@@ -548,6 +548,12 @@ describe('a click on a control right after typing in a card\u2019s editor', () =
 
     expect(within(card('inside')).getByRole('textbox')).toBe(document.activeElement);
     expect((await writes()).at(-1)?.tickets.find((t) => t.id === 'loose')?.text).toBe('Loose card again');
+
+    // The editor that press left is no longer "left": opened again, it
+    // takes the focus.
+    await user.keyboard('{Enter}');
+    await user.click(within(card('loose')).getByRole('button', { name: 'Edit ticket' }));
+    expect(within(card('loose')).getByRole('textbox')).toBe(document.activeElement);
   });
 
   it('writes the text at once on Enter, which no click follows', async () => {
