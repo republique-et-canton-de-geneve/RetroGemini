@@ -124,7 +124,6 @@ const makeWorld = (initial: RetroSession, { facilitator }: { facilitator?: strin
       {
         currentUserId: browser.userId,
         preserveIcebreaker: false,
-        editingTicketId: null,
         editingGroupId: null,
         ownChanges: browser.ownChanges
       },

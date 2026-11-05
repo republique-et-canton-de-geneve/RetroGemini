@@ -561,7 +561,11 @@ export interface RetroMergeContext {
   currentUserId: string;
   // Facilitator is actively editing the icebreaker question locally.
   preserveIcebreaker: boolean;
-  editingTicketId: string | null;
+  // A group title being typed right now keeps its local title. There is no
+  // such field for a card: its editor is a field React fills once, as it
+  // mounts, and its draft lives there alone (Session.tsx). Kept in the state,
+  // the card's old text showed nowhere and went out with the screen's next
+  // write, over a teammate's edit.
   editingGroupId: string | null;
   // Own-data slices this client changed and the server has not confirmed.
   // Required rather than optional on purpose: a call site that forgot to keep
@@ -685,10 +689,6 @@ const mergeRemoteRetroSession = (
       }
     }
 
-    // Text being edited right now: keep the local draft, no re-send.
-    if (ctx.editingTicketId === ticket.id && prevTicket.text !== next.text) {
-      next = { ...next, text: prevTicket.text };
-    }
 
     return next;
   });

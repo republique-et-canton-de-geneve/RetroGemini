@@ -120,6 +120,12 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
   const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
   const phoneContext = await browser.newContext({ ...phone, locale: 'en-US' });
   const page = await phoneContext.newPage();
+  // The session writes this page sends, counted where the test says.
+  const sent: string[] = [];
+  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
+    const text = typeof payload === 'string' ? payload : payload.toString();
+    if (text.includes('"update-session"')) sent.push(text);
+  }));
   try {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
@@ -177,24 +183,52 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
     await expect(editor).toBeFocused();
     await editor.press('End');
     await page.keyboard.type(' in staging');
-    // Holding its partner leaves the editor, and stores what it held.
+    // Holding its partner leaves the editor, and shows what it held.
+    sent.length = 0;
     await card(page, 'Slow rollbacks').tap();
     await expect(page.locator('textarea:not([placeholder])')).toHaveCount(0);
     await expect(page.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
-    // Past the server's answer: the drop below is a write of its own.
-    await page.waitForTimeout(500);
-    // Dropped on the loose card, the partner leaves the edited card alone.
+    // Dropped at once on the loose card, the partner leaves the edited card
+    // alone. The text waited for the drop's write (review finding, pass 6 of
+    // 42.1): sent alone at the hold, it made the drop a second write from the
+    // same revision, refused and healed away whenever the drop came before the
+    // server's answer.
     await card(page, 'Late release notes').tap();
     const group = page.locator('.group-container');
     await expect(group).toHaveCount(1);
     await expect(group.getByText('Late release notes', { exact: true })).toBeVisible();
     await expect(group.getByText('Slow rollbacks', { exact: true })).toBeVisible();
     await expect(group.getByText('Flaky deploys in staging', { exact: true })).toHaveCount(0);
+    await expect.poll(() => sent.length).toBe(1);
+    expect(sent[0]).toContain('Flaky deploys in staging');
     // Still there once the server has answered the drop: nothing was refused
     // and healed away.
     await page.waitForTimeout(500);
     await expect(page.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
     await expect(group).toHaveCount(1);
+    expect(sent).toHaveLength(1);
+
+    // A tap on a group's own blank area is claimed the same way (review
+    // finding, pass 6 of 42.1): with a card held and another one's editor
+    // typed in, it leaves the editor and drops the card, in one write.
+    await card(page, 'Flaky deploys in staging').tap();
+    await expect(page.getByRole('button', { name: /Selected for grouping/ })).toBeVisible();
+    await card(page, 'Slow rollbacks').getByRole('button', { name: 'Edit ticket' }).tap();
+    const inGroup = card(page, 'Slow rollbacks').locator('textarea');
+    await expect(inGroup).toBeFocused();
+    await inGroup.press('End');
+    await page.keyboard.type(' again');
+    sent.length = 0;
+    const box = (await group.boundingBox())!;
+    await group.tap({ position: { x: box.width - 6, y: box.height - 6 } });
+    await expect(group.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
+    await expect(page.getByText('Slow rollbacks again', { exact: true })).toBeVisible();
+    await expect(page.locator('textarea:not([placeholder])')).toHaveCount(0);
+    await expect.poll(() => sent.length).toBe(1);
+    expect(sent[0]).toContain('Slow rollbacks again');
+    await page.waitForTimeout(500);
+    await expect(page.getByText('Slow rollbacks again', { exact: true })).toBeVisible();
+    await expect(group.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
   } finally {
     await phoneContext.close();
   }

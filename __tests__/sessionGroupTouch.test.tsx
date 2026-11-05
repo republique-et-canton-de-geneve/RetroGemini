@@ -275,27 +275,45 @@ describe('a tap the board acts on, and the field it leaves', () => {
     expect((idea as HTMLTextAreaElement).value).toBe('A draft');
   });
 
-  it('stores what an open card editor holds before the tap breaks up its group', async () => {
+  it('stores what an open card editor holds with the drop that breaks up its group', async () => {
     const user = userEvent.setup();
     renderBoard();
     await screen.findByText('Flaky deploys');
     await user.click(within(card('ta')).getByRole('button', { name: 'Edit ticket' }));
     await user.type(within(card('ta')).getByRole('textbox'), ' in staging');
+    const before = (await writes()).length;
 
-    // Hold its partner: a hold writes nothing, so the text goes alone, now.
+    // Hold its partner: a hold writes nothing, so the text waits for the next
+    // write, and the card shows it at once.
     tap(card('tb'));
-    expect((await writes()).at(-1)?.tickets.find((t) => t.id === 'ta')?.text).toBe('Flaky deploys in staging');
-    // Then drop it on a loose card: the group dissolves.
+    expect(within(card('ta')).queryByRole('textbox')).toBeNull();
+    expect(within(card('ta')).getByText('Flaky deploys in staging')).toBeTruthy();
+    // Then drop it on a loose card, at once: the group dissolves. Review
+    // finding (pass 6 of 42.1): the text went alone at the hold, and a drop
+    // tapped before the server answered was a second write from the same
+    // revision, refused and healed away.
     tap(card('tc'));
 
-    await waitFor(async () => {
-      const last = (await writes()).at(-1)!;
-      expect(last.tickets.find((t) => t.id === 'tb')?.groupId).toBe(last.tickets.find((t) => t.id === 'tc')?.groupId);
-    });
-    const last = (await writes()).at(-1)!;
-    expect(last.tickets.find((t) => t.id === 'ta')?.text).toBe('Flaky deploys in staging');
-    // The editor is closed: what it held is stored, not waiting.
-    expect(within(card('ta')).queryByRole('textbox')).toBeNull();
+    const after = (await writes()).slice(before);
+    expect(after).toHaveLength(1);
+    expect(after[0].tickets.find((t) => t.id === 'tb')?.groupId).toBe(after[0].tickets.find((t) => t.id === 'tc')?.groupId);
+    expect(after[0].tickets.find((t) => t.id === 'ta')?.text).toBe('Flaky deploys in staging');
+  });
+
+  it('writes what the editor held alone a moment after a hold that writes nothing', async () => {
+    const user = userEvent.setup();
+    renderBoard();
+    await screen.findByText('Flaky deploys');
+    await user.click(within(card('ta')).getByRole('button', { name: 'Edit ticket' }));
+    await user.type(within(card('ta')).getByRole('textbox'), ' in staging');
+    const before = (await writes()).length;
+
+    tap(card('tb'));
+
+    expect((await writes()).slice(before)).toHaveLength(0);
+    await waitFor(async () => expect((await writes()).slice(before)).toHaveLength(1));
+    expect((await writes()).at(-1)?.tickets.find((t) => t.id === 'ta')?.text).toBe('Flaky deploys in staging');
+    expect(held('tb')).toBeTruthy();
   });
 
   it('sends the field it leaves with its own write: one gesture, one write', async () => {
@@ -333,6 +351,80 @@ describe('a tap the board acts on, and the field it leaves', () => {
     expect(held('tc')).toBeTruthy();
   });
 
+  // Review finding (pass 6 of 42.1): every case above taps a card. The group
+  // container claims its taps through the same helper, and put back to a bare
+  // preventDefault it kept every test green while an open editor lost its
+  // text to the drop that broke its card's group up.
+  describe('on a group container', () => {
+    const renderTwoGroups = (phase: RetroSession['phase'] = 'OPEN_BOARD') => renderGroupPhase({
+      phase,
+      tickets: [
+        { id: 'ta', colId: 'col-1', text: 'Flaky deploys', authorId: 'facilitator-1', groupId: 'g1', votes: [] },
+        { id: 'tb', colId: 'col-1', text: 'Slow rollbacks', authorId: 'facilitator-1', groupId: 'g1', votes: [] },
+        { id: 'tc', colId: 'col-1', text: 'Too many meetings', authorId: 'facilitator-1', groupId: 'g2', votes: [] },
+        { id: 'td', colId: 'col-1', text: 'Standups', authorId: 'facilitator-1', groupId: 'g2', votes: [] },
+        { id: 'te', colId: 'col-1', text: 'Loose card', authorId: 'facilitator-1', groupId: null, votes: [] },
+      ],
+      groups: [
+        { id: 'g1', title: 'Delivery', colId: 'col-1', votes: [], anchorTicketId: 'ta' },
+        { id: 'g2', title: 'Meetings', colId: 'col-1', votes: [], anchorTicketId: 'tc' },
+      ],
+    });
+    const containerOf = (ticketId: string) => card(ticketId).closest('.group-container') as HTMLElement;
+    const editTyped = async (user: ReturnType<typeof userEvent.setup>, id: string, typed: string) => {
+      await user.click(within(card(id)).getByRole('button', { name: 'Edit ticket' }));
+      const field = within(card(id)).getByRole('textbox');
+      await user.type(field, typed);
+      return field;
+    };
+
+    it('stores an open editor\u2019s text with the drop into the group, in one write', async () => {
+      const user = userEvent.setup();
+      renderTwoGroups();
+      await screen.findByText('Flaky deploys');
+      tap(card('tb'));
+      held('tb');
+      const field = await editTyped(user, 'ta', ' in staging');
+      const before = (await writes()).length;
+
+      expect(tap(containerOf('tc'))).toBe(false);
+
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(1);
+      expect(after[0].tickets.find((t) => t.id === 'tb')?.groupId).toBe('g2');
+      expect(after[0].tickets.find((t) => t.id === 'ta')?.text).toBe('Flaky deploys in staging');
+      expect(document.activeElement).not.toBe(field);
+      expect(within(card('ta')).queryByRole('textbox')).toBeNull();
+    });
+
+    it.each([
+      ['on the open board, with nothing held', 'OPEN_BOARD' as const],
+      ['in Brainstorm', 'BRAINSTORM' as const],
+    ])('takes the focus out of an open editor and stores its text as it picks a group up %s', async (_where, phase) => {
+      const user = userEvent.setup();
+      renderTwoGroups(phase);
+      await screen.findByText('Loose card');
+      const field = await editTyped(user, 'te', ' again');
+
+      expect(tap(containerOf('tc'))).toBe(false);
+
+      expect(document.activeElement).not.toBe(field);
+      await waitFor(async () => expect((await writes()).at(-1)?.tickets.find((t) => t.id === 'te')?.text).toBe('Loose card again'));
+    });
+
+    it('closes the reaction picker', async () => {
+      const user = userEvent.setup();
+      renderTwoGroups();
+      await screen.findByText('Loose card');
+      await user.click(within(card('te')).getByRole('button', { name: 'Add reaction' }));
+      expect(screen.getAllByTestId('emoji-option').length).toBeGreaterThan(0);
+
+      tap(containerOf('tc'));
+
+      expect(screen.queryAllByTestId('emoji-option')).toHaveLength(0);
+    });
+  });
+
   // Review finding (pass 5 of 42.1): no test held the pick-up of a group by
   // touch to the rule above.
   it.each([
@@ -345,5 +437,99 @@ describe('a tap the board acts on, and the field it leaves', () => {
     expect(fireEvent.touchStart(groupContainer(), touch(50, 50))).toBe(true);
     expect(fireEvent.touchEnd(groupContainer(), touch(50, 50))).toBe(false);
     await waitFor(() => expect(groupContainer().querySelector('button[aria-pressed="true"]')).toBeTruthy());
+  });
+});
+
+// Review finding (pass 6 of 42.1, the critic): a click on a control is not a
+// tap the board claims, so the browser's own mousedown takes the focus out of
+// an open card editor. Its text went out at once and the click's write came
+// a moment later from the same revision: the server refused it, and the move
+// or the phase change was undone with nothing said. Held for the click's own
+// write, the gesture is one write.
+describe('a click on a control right after typing in a card\u2019s editor', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ json: () => Promise.resolve({ enabled: false }) }),
+    ) as unknown as typeof fetch;
+  });
+
+  const writes = async () => {
+    const { dataService } = await import('../services/dataService');
+    return (dataService.updateSession as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([, s]) => s as RetroSession);
+  };
+  const card = (id: string) => document.querySelector(`[data-ticket-id="${id}"]`) as HTMLElement;
+  const editTyped = async (user: ReturnType<typeof userEvent.setup>, id: string, typed: string) => {
+    await user.click(within(card(id)).getByRole('button', { name: 'Edit ticket' }));
+    await user.type(within(card(id)).getByRole('textbox'), typed);
+  };
+
+  it('moves a held card with the text in one write', async () => {
+    const user = userEvent.setup();
+    renderGroupPhase({
+      phase: 'OPEN_BOARD',
+      columns: [
+        { id: 'col-1', title: 'What Went Well', color: 'bg-emerald-500', border: 'border-emerald-500', icon: 'sentiment_satisfied', text: 'text-emerald-700', ring: 'ring-emerald-300' },
+        { id: 'col-2', title: 'To Improve', color: 'bg-rose-500', border: 'border-rose-500', icon: 'sentiment_dissatisfied', text: 'text-rose-700', ring: 'ring-rose-300' },
+      ],
+    });
+    await screen.findByText('Loose card');
+    fireEvent.touchStart(card('loose'), touch(50, 50));
+    fireEvent.touchEnd(card('loose'), touch(50, 50));
+    await screen.findByRole('button', { name: /Selected for grouping: Loose card/ });
+    await editTyped(user, 'inside', ' again');
+    const before = (await writes()).length;
+
+    await user.click(screen.getByRole('button', { name: /Move selected card here: out of its group, into To Improve/ }));
+
+    const after = (await writes()).slice(before);
+    expect(after).toHaveLength(1);
+    expect(after[0].tickets.find((t) => t.id === 'loose')?.colId).toBe('col-2');
+    expect(after[0].tickets.find((t) => t.id === 'inside')?.text).toBe('Grouped card again');
+  });
+
+  it('opens the next phase with the text in one write', async () => {
+    const user = userEvent.setup();
+    renderGroupPhase({ phase: 'BRAINSTORM' });
+    await screen.findByText('Loose card');
+    await editTyped(user, 'loose', ' again');
+    const before = (await writes()).length;
+
+    await user.click(screen.getByRole('button', { name: 'Next Phase' }));
+
+    const after = (await writes()).slice(before);
+    expect(after).toHaveLength(1);
+    expect(after[0].phase).toBe('GROUP');
+    expect(after[0].tickets.find((t) => t.id === 'loose')?.text).toBe('Loose card again');
+  });
+
+  it('leaves the session with the text in its last save', async () => {
+    const user = userEvent.setup();
+    renderGroupPhase({ phase: 'BRAINSTORM' });
+    await screen.findByText('Loose card');
+    await editTyped(user, 'loose', ' again');
+
+    await user.click(screen.getByRole('button', { name: /Leave/ }));
+
+    // The save and the live session alike: held for the button's own write,
+    // the text would otherwise reach the team's record and no one in the room.
+    expect((await writes()).at(-1)?.tickets.find((t) => t.id === 'loose')?.text).toBe('Loose card again');
+    const { syncService } = await import('../services/syncService');
+    const sent = (syncService.updateSession as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([s]) => s as RetroSession);
+    expect(sent.at(-1)?.tickets.find((t) => t.id === 'loose')?.text).toBe('Loose card again');
+  });
+
+  it('writes the text at once on Enter, which no click follows', async () => {
+    const user = userEvent.setup();
+    renderGroupPhase({ phase: 'BRAINSTORM' });
+    await screen.findByText('Loose card');
+    await editTyped(user, 'loose', ' again');
+    const before = (await writes()).length;
+
+    await user.keyboard('{Enter}');
+
+    const after = (await writes()).slice(before);
+    expect(after).toHaveLength(1);
+    expect(after[0].tickets.find((t) => t.id === 'loose')?.text).toBe('Loose card again');
   });
 });

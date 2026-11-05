@@ -92,7 +92,6 @@ const noClaims = (): OwnChangeLedger => new Map();
 const ctx = (overrides: Record<string, unknown> = {}) => ({
   currentUserId: ME,
   preserveIcebreaker: false,
-  editingTicketId: null as string | null,
   editingGroupId: null as string | null,
   ownChanges: noClaims(),
   now: NOW,
@@ -519,16 +518,14 @@ describe('mergeRemoteRetroSession', () => {
     expect(divergent).toBe(true);
   });
 
-  it('keeps the ticket text being edited without flagging divergence', () => {
+  // Review finding (pass 6 of 42.1): a card's text is shared content, even
+  // while this screen has the card's editor open — the draft lives in that
+  // field. Kept here, the old text went out with the next write.
+  it('takes the incoming text of a card, without flagging divergence', () => {
     const incoming = makeSession({ tickets: [makeTicket('t1', { text: 'server text' })] });
-    const prev = makeSession({ tickets: [makeTicket('t1', { text: 'my draft' })] });
-    const { merged, divergent } = mergeRemoteRetroSession(
-      incoming,
-      prev,
-      ctx({ editingTicketId: 't1' }),
-      noPending()
-    );
-    expect(merged.tickets[0].text).toBe('my draft');
+    const prev = makeSession({ tickets: [makeTicket('t1', { text: 'my old text' })] });
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+    expect(merged.tickets[0].text).toBe('server text');
     expect(divergent).toBe(false);
   });
 

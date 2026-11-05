@@ -287,11 +287,16 @@ typed when one broke up its card's group, a group title stayed "being typed"
 and a teammate's rename was sent back, the phone's keyboard stayed over the
 board, and the picker stayed open over the next card to tap. What the field
 writes as it is left rides the tap's own write (`updateSession` folds it in, as
-it folds the votes number), or goes alone when the tap writes nothing (a hold):
-two writes from one revision, and the server refused the second.
+it folds the votes number), or a moment later when the tap writes nothing (a
+hold), so the drop tapped right after still carries it
+(`holdLeftFieldWrites`): two writes from one revision, and the server refused
+the second. The same holds for a click: a card's text left for a control (a
+move, Next Phase, a vote) waits for that control's write, and shows at once;
+Enter, which no click follows, writes it at once.
 `e2e/retro-touch-card-controls.spec.ts` holds it in Chromium (jsdom emulates no
-mouse for a tap); `__tests__/sessionGroupTouch.test.tsx` pins which taps cancel,
-and what they leave.
+mouse for a tap), counting the writes a hold and its drop send, on a card and
+on a group's own blank area; `__tests__/sessionGroupTouch.test.tsx` pins which
+taps cancel, and what they leave, on a card and on a group container.
 
 **A control shown on hover is shown on focus, and never hidden where nothing
 hovers.** A card's edit, delete and first-comment controls were `opacity-0`
@@ -675,10 +680,21 @@ Eleven rules:
   every rename and sent it back with that screen's next write. A title is
   "being typed" from its first keystroke, not from the focus: a new group's
   title takes the focus to be named, and a name a teammate gave it meanwhile
-  was kept off the screen and erased by its next write. A card's editor
-  follows the same rule (keeps its text over a teammate's edit once typed in),
-  and is written as it is left only when its text changed: left as it was
-  opened, it sent the old text back.
+  was kept off the screen and erased by its next write. It is the very field
+  typed in that is "being typed": a field React draws again (the cards shown
+  again, the group moved, the phase back) is another one, typed in by no one,
+  where a field React only moves, re-sorted, keeps its typing.
+  A card's editor is a field React fills once, as it mounts, so its draft
+  lives in that field alone and the merge keeps no old text for it — kept in
+  the state, the old text showed nowhere and went out with the next write.
+  Nothing typed yet, the editor shows a teammate's edit of its card; typed
+  in, it keeps the typing, also when another person's write draws the card
+  again (put in a group, moved); it is written as it is left only when its
+  text changed, and it stays in view, with its group, whatever the search
+  finds — a teammate's edit took it out, and the focus fell to the page. An
+  editor whose card leaves the screen with no blur (the board turned guided,
+  a phase that draws no card) closes and stores what was typed; came back
+  with its card, it took the focus from whatever was being typed.
   Nothing is written: two people read one board in two orders. A group's own
   cards keep the order they were written in.
 - **The votes travel with the cards**, on a board and in the guided Group
@@ -772,6 +788,11 @@ Residuals of the board's own design (42.1), stated on purpose:
   another one between the moment it is aimed at and the click or the drop.
   Oldest first, the guided phases' order, only ever adds below. EasyRetro has
   the same; freezing the order under the pointer is not built.
+- **A card's text left for a click waits 400 ms for that click's write**
+  (`holdLeftFieldWrites`), in a guided retro too. The session's own exit
+  button writes it; a session left otherwise in that moment (signed out,
+  expired) does not, and neither does a connection that drops in it, as no
+  edit made offline is kept.
 
 Found by the review of the board and left as they are, because they predate it
 (the board only makes them likelier: everyone votes, groups and moves on one
@@ -783,6 +804,14 @@ screen at once):
   `reviewSummary`'s would close the group-title case.
 - **A vote on a group in the instant someone dissolves it is lost**: the
   group it was for is gone.
+- **Two writes of one screen inside one round trip still lose the second**
+  when no gesture joins them: the server keeps one write per revision. A
+  hold's text written alone 400 ms after the hold, then a drop tapped before
+  the server answered, is one case; the shared timer's editor left for Next
+  Phase or the play button is another (the timer is saved as its container is
+  left, in both session types) — pressed again, the click goes. Holding the
+  next write behind the one in flight would close the rest; it changes the
+  sync protocol and is not built.
 - **A board kept for weeks keeps every card in one session blob.** Past the
   1 MB socket message (`SOCKET_MAX_BUFFER_SIZE`) and the 1 MiB JSON body, its
   writes stop going through: start a new board instead.
@@ -819,15 +848,18 @@ the voter has*, and *the facilitator's own settings are claimed*),
 the switch, the panel, every hold and every drop — *with the cards hidden*
 too, every hold as the cards are hidden — and *sort, search, votes and the
 facilitator's settings*, the vote control's focus, the votes field and the
-hidden cards' words included, and a title or a card's editor only focused
-taking a teammate's word), `sessionGroupTouch.test.tsx` (the taps that
-cancel the emulated mouse, and the field and the picker they leave),
+hidden cards' words included, a title or a card's editor only focused
+taking a teammate's word, and *the card editor*), `sessionGroupTouch.test.tsx`
+(the taps that cancel the emulated mouse, on a card and on a group
+container, the field and the picker they leave, and a click on a control
+right after typing in a card's editor),
 `hiddenCardFiller.test.ts`, `i18nOpenBoard.test.tsx`,
 `dashboardOpenBoard.test.tsx` (the board type, and the lists' statuses
 measured at 4.5:1), `e2e/i18n.spec.ts` (the action bars),
 `e2e/retro-touch-card-controls.spec.ts` (a card's controls on a phone and on a
 computer, the pencil over no text on either, a grouping tap that clicks
-nothing else, and an editor left open through the taps keeping its text), and
+nothing else, and an editor left open through the taps keeping its text in the
+one write of the drop, on a card and on a group's blank area), and
 `e2e/retro-open-board.spec.ts` (two browsers, the presence panel, the settings
 and their axe audit, hidden cards reaching the participant, a search, a round
 trip through the guided retro, and the axe audit of the board).
