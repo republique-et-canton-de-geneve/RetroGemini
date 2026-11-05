@@ -194,6 +194,12 @@ const PENDING_MAX_VOTES_MS = 400;
  * ends it first.
  */
 const PRESS_LEAVE_SAFETY_MS = 10_000;
+/** What a press of the mouse presses: the control around its target, or the target itself. */
+const pressedControl = (target: Element | null) =>
+  target?.closest('button, a[href], input, textarea, select, label, summary, [role="button"]') ?? target;
+/** A field, whose words a drag carries: never its card, or its group. */
+const isFieldText = (target: EventTarget | null): target is HTMLInputElement | HTMLTextAreaElement =>
+  target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 
 // Lowering the number takes back the votes above it (utils/voteBudget.ts).
 // With unlimited votes the number waits, unused, and caps nothing.
@@ -712,7 +718,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     seq: number;
     // What the press began on.
     target: Element | null;
-  }>({ active: false, leaving: false, dispatching: null, leave: null, dragSource: null, safety: null, seq: 0, target: null });
+    // The press ended last closed the editor it left: the card grew back,
+    // and what lies under the pointer moved. A press under way never has.
+    closedEditor: boolean;
+    // A press that presses nothing (begin): its click clicks nothing either.
+    stopped: boolean;
+  }>({ active: false, leaving: false, dispatching: null, leave: null, dragSource: null, safety: null, seq: 0, target: null, closedEditor: false, stopped: false });
   // A press in a group's title is the field's: the group is not dragged from
   // there while it lasts (begin).
   const [pressedTitleGroupId, setPressedTitleGroupId] = useState<string | null>(null);
@@ -1213,6 +1224,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // took the focus out of is typed in again.
     setLeftEditorTicketId(null);
     setPressedTitleGroupId(null);
+    // Closed here, or by the write of its click.
+    press.closedEditor = !!leave;
     if (!leave) return;
     setEditingTicketId(current => (current === leave.ticketId ? null : current));
     if (leave.text === null || leave.folded) return;
@@ -1229,8 +1242,29 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const seq = press.seq;
       return () => { if (press.seq === seq) ends(); };
     };
+    // The drag's source listens for its own end (dragStarts).
+    let sourceEnds: (() => void) | null = null;
     const begin = (e: MouseEvent) => {
       const target = e.target instanceof Element ? e.target : null;
+      // The next press of a double click, once the press before closed the
+      // editor it left: the card grew back by the rows the editor hides, and
+      // what lies under the pointer is no longer what that press pressed —
+      // the card's Delete, its vote, where a word of a group's title was
+      // being selected. On another control it presses nothing; on the same
+      // one, it is the browser's.
+      if (e.detail > 1 && press.closedEditor && pressedControl(target) !== pressedControl(press.target)) {
+        press.stopped = true;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      press.stopped = false;
+      // No drag is under way at a mousedown: a source whose end was never
+      // heard — Firefox sends none to a field that left the page — is no
+      // longer one.
+      if (sourceEnds) press.dragSource?.removeEventListener('dragend', sourceEnds);
+      sourceEnds = null;
+      press.dragSource = null;
       // Firefox gives a select picked by pressing it, dragging onto an option
       // and releasing a mousedown of its own on that option: the same press,
       // whose change still takes the text. Ended there, the text went alone
@@ -1246,6 +1280,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // A press still under way, its end not reached yet, ends here: its
       // text goes before this press can leave another editor.
       if (press.active) ends();
+      press.closedEditor = false;
       press.seq += 1;
       press.active = true;
       press.dispatching = null;
@@ -1286,7 +1321,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // A drag ends with no release, at its dragend, which is sent to the
     // element dragged and heard there: a drop that moved the card removed
     // that element, and nothing on the window heard it end.
-    let sourceEnds: (() => void) | null = null;
     const dragStarts = (e: Event) => {
       const source = e.target;
       if (!source) return;
@@ -1300,6 +1334,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       press.dragSource = source;
       source.addEventListener('dragend', heard, { once: true });
     };
+    // The click of a press that presses nothing clicks nothing either. A
+    // click of the keyboard is no part of it: it has no detail.
+    const stopsClick = (e: MouseEvent) => {
+      if (!press.stopped || e.detail === 0) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    // First, so that nothing after hears it.
+    window.addEventListener('click', stopsClick, true);
     window.addEventListener('mousedown', begin, true);
     window.addEventListener('click', dispatchStarts, true);
     // A select picked from its own list writes in its change, with no click.
@@ -1308,6 +1351,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     window.addEventListener('dragstart', dragStarts, true);
     window.addEventListener('mouseup', released);
     return () => {
+      window.removeEventListener('click', stopsClick, true);
       window.removeEventListener('mousedown', begin, true);
       window.removeEventListener('click', dispatchStarts, true);
       window.removeEventListener('change', dispatchStarts, true);
@@ -2136,12 +2180,28 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // Words dragged out of a field — a card's editor, a group's title — hold no
   // card and no group, and the browser drops them: moved within the field, put
-  // in another, or refused anywhere else. Taken as a drag of the card, they
+  // in another field that takes them (no title does: refusesFieldText), or
+  // refused anywhere else. Taken as a drag of the card, they
   // grouped the card being edited with the one they were dropped on, and the
   // board cancelled their drop in the field itself, so they moved nowhere.
+  // A field that left the page drags nothing: Firefox sends it no dragend,
+  // and every later drag read as its words.
   const dragsFieldText = () => {
       const source = pressRef.current.dragSource;
-      return source instanceof HTMLInputElement || source instanceof HTMLTextAreaElement;
+      return isFieldText(source) && source.isConnected;
+  };
+  // A title writes on every keystroke, and the browser drops words as two
+  // edits — they leave where they were, then arrive — from one revision: the
+  // server kept the first alone, and the words were gone for everyone, moved
+  // within a title or into it. Words from a field, its own included, are
+  // refused there; a drop from outside the page is the column's.
+  const refusesFieldText = {
+      onDragOver: (e: React.DragEvent) => {
+          if (!dragsFieldText()) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'none';
+      },
+      onDrop: (e: React.DragEvent) => { if (dragsFieldText()) e.preventDefault(); },
   };
 
   const handleDragStart = (e: React.DragEvent, ticket: Ticket) => {
@@ -2802,7 +2862,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 }
                 handleDragStart(e, t);
             }}
-            onDragEnd={() => { resetDragState(); resetBrainstormMove(); }}
+            // The end of a drag of its field's words, heard as it goes up,
+            // puts down nothing the keyboard or a tap holds.
+            onDragEnd={(e) => {
+                if (isFieldText(e.target)) return;
+                resetDragState();
+                resetBrainstormMove();
+            }}
             // A group held on a board is not dropped on a card: the event goes
             // on to the column, which moves the group there.
             onDragOver={(e) => (receivesHeldCard && !dragsFieldText()) ? handleDragOverItem(e, t.id) : undefined}
@@ -3646,9 +3712,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           // picked up to move it whole — never while a card is held.
           const editingInsideGroup = editingTicketId !== null && editingTicketId !== leftEditorTicketId
               && session.tickets.some(t => t.groupId === g.id && t.id === editingTicketId);
-          // Nor from its own title, pressed to be typed in (begin).
           const isMovableGroup = (mode === 'BRAINSTORM' || (isBoard && !draggedTicket))
-              && !editingInsideGroup && pressedTitleGroupId !== g.id && canMoveGroup(g);
+              && !editingInsideGroup && canMoveGroup(g);
+          // Nor by the pointer from its own title, pressed to be typed in
+          // (begin); its keyboard control stays — a right click's release
+          // goes to the context menu, and the press lasted 10 s.
+          const isDraggableGroup = isMovableGroup && pressedTitleGroupId !== g.id;
           const isGroupSelected = (mode === 'BRAINSTORM' || isBoard) && movingItem?.kind === 'group' && movingItem.id === g.id;
           // A card of this group, held and released over the group itself, is
           // put down where it was. A group that takes no card (one in it is
@@ -3665,18 +3734,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             // The keyboard's place once a vote is taken back
                                             // from a group that takes no vote (BoardVoteControl).
                                             {...(isBoard && groupTakeBackOnly ? { 'data-vote-focus-host': '', tabIndex: -1 } : {})}
-                                            draggable={isMovableGroup}
+                                            draggable={isDraggableGroup}
                                             onDragStart={(e) => {
-                                                if (!isMovableGroup || dragsFieldText()) return;
+                                                if (!isDraggableGroup || dragsFieldText()) return;
                                                 handleBrainstormDragStart(e, { kind: 'group', id: g.id });
                                             }}
-                                            onDragEnd={() => { if (mode === 'BRAINSTORM' || isBoard) resetBrainstormMove(); }}
+                                            onDragEnd={(e) => {
+                                                if (isFieldText(e.target)) return;
+                                                if (mode === 'BRAINSTORM' || isBoard) resetBrainstormMove();
+                                            }}
                                             // The whole row of the column's grid: a group grows
                                             // with every card put in it, and beside one short
                                             // card it would leave a hole the height of the group.
                                             className={`col-span-full bg-indigo-50/50 p-3 rounded-xl border-2 relative group-container transition-all
                                                 ${isGroupDragTarget ? 'border-indigo-500 ring-4 ring-indigo-200 z-20 scale-105' : isGroupSelected ? 'border-blue-500 ring-4 ring-blue-200 z-10' : 'border-dashed border-indigo-300'}
-                                                ${isMovableGroup ? 'cursor-grab active:cursor-grabbing' : ''}
+                                                ${isDraggableGroup ? 'cursor-grab active:cursor-grabbing' : ''}
                                             `}
                                             onDragOver={(e) => (receivesCards && !dragsFieldText()) ? handleDragOverItem(e, g.id) : undefined}
                                             // A group held on a board is dropped on its column, not
@@ -3758,6 +3830,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                             // eslint-disable-next-line jsx-a11y/no-autofocus -- conditional: only the group the user asked to name
                                                             autoFocus={focusGroupId === g.id}
                                                             data-group-title-id={g.id}
+                                                            {...refusesFieldText}
                                                             // The focus is given once, to name a new group: a
                                                             // field that comes back later (cards shown again)
                                                             // must not take it from whatever is being typed.
@@ -4008,7 +4081,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             `}
                             onDragOver={(e) => {
                                 // Words from a field are the browser's to
-                                // drop, and it refuses them here.
+                                // drop: moved within their field, put in
+                                // another, refused here.
                                 if (dragsFieldText()) return;
                                 if (receivesCard || isMoveDropTarget) {
                                     handleDragOverColumn(e, col.id);
@@ -4061,6 +4135,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 {isEditingColumns ? (
                                     <input
                                         data-column-title
+                                        {...refusesFieldText}
                                         value={col.title}
                                         // eslint-disable-next-line jsx-a11y/no-autofocus -- conditional: only the column the user asked to name
                                         autoFocus={focusColumnId === col.id}

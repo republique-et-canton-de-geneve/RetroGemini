@@ -415,6 +415,10 @@ test('a press in a group’s title selects its words, and drags no group', async
     await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
     await dialog.getByTestId('retro-template-lean_coffee').click();
     await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
+    // The facilitator's screen sends its state once, half a second after the
+    // session opens: past that, every write counted is this test's own, and
+    // none of the setup's loses its race to it.
+    await page.waitForTimeout(700);
 
     const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
     for (const text of ['Late release notes', 'Too many meetings']) {
@@ -453,6 +457,116 @@ test('a press in a group’s title selects its words, and drags no group', async
 
     // Anywhere else, the group is still picked up by the pointer.
     await expect(page.locator('.group-container')).toHaveAttribute('draggable', 'true');
+
+    // Review finding (pass 11 of 42.1): a word of the title moved by a drag
+    // within it was two writes from one revision — its deletion, then its
+    // insertion — and the server kept the deletion alone: the word was gone
+    // for everyone. A title takes no words dragged from a field.
+    await title.press('End');
+    await page.keyboard.press('Shift+Control+ArrowLeft');
+    expect(await title.evaluate((input: HTMLInputElement) => input.value.slice(input.selectionStart ?? 0, input.selectionEnd ?? 0))).toBe('problems');
+    const word = await title.evaluate((input: HTMLInputElement) => {
+      const context = document.createElement('canvas').getContext('2d')!;
+      context.font = getComputedStyle(input).font;
+      const box = input.getBoundingClientRect();
+      const start = context.measureText('Delivery ').width;
+      const end = context.measureText('Delivery problems').width;
+      return { x: box.left + (start + end) / 2, y: box.top + box.height / 2, left: box.left };
+    });
+    const moved = sent.length;
+    await page.mouse.move(word.x, word.y);
+    await page.mouse.down();
+    await page.mouse.move(word.x - 10, word.y, { steps: 4 });
+    await page.mouse.move(word.left + 1, word.y, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(500);
+    await expect(title).toHaveValue('Delivery problems');
+    expect(sent.length - moved).toBe(0);
+  } finally {
+    await context.close();
+  }
+});
+
+// Review finding (pass 11 of 42.1): a double click on a word of a group's
+// title, with a card above it open for editing. The first click closed the
+// editor, the card grew back by the rows the editor hides, and the second
+// press landed on what came under the pointer: the card's Delete (asking
+// nothing), its vote, its comments. jsdom lays nothing out.
+test('a double click whose first click closes an editor presses nothing the layout moved under it', async ({ browser }) => {
+  const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  const sent: string[] = [];
+  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
+    const text = typeof payload === 'string' ? payload : payload.toString();
+    if (text.includes('"update-session"')) sent.push(text);
+  }));
+  try {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: '+ New Team' }).click();
+    await page.getByPlaceholder('e.g. Design Team').fill(`${TEAM_NAME}-dblclick`);
+    await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+    await page.getByLabel('Recovery Email').fill('facilitator@example.com');
+    await page.getByRole('button', { name: 'Create & Join' }).click();
+    await expect(page.getByText(`${TEAM_NAME}-dblclick Dashboard`)).toBeVisible({ timeout: 15_000 });
+    await dismissAnnouncementsIfPresent(page);
+    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
+    await dialog.getByTestId('retro-template-lean_coffee').click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(700);
+
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    for (const text of ['Late release notes', 'Too many meetings']) {
+      await field.fill(text);
+      await page.keyboard.press('Enter');
+      await expect(card(page, text)).toBeVisible();
+    }
+    await page.getByRole('button', { name: /Pick up the ticket Late release notes/ }).focus();
+    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: /group the selected ticket with Too many meetings/ }).focus();
+    await page.keyboard.press('Enter');
+    const title = page.locator('.group-container input[data-group-title-id]');
+    await expect(title).toBeFocused({ timeout: 10_000 });
+    await title.fill('Delivery problems');
+    await title.press('Enter');
+    // Newest first: written last, it sits above the group, and its four lines
+    // are two rows of an editor.
+    const long = 'Release notes are written the evening before, nobody reads them, and support learns about every change from the customers who call to ask';
+    await field.fill(long);
+    await page.keyboard.press('Enter');
+    await expect(card(page, long)).toBeVisible();
+    const above = (await card(page, long).boundingBox())!;
+    expect(above.y).toBeLessThan((await title.boundingBox())!.y);
+    await card(page, long).getByRole('button', { name: 'Edit ticket' }).click();
+    const editor = page.locator('[data-ticket-id] textarea');
+    await expect(editor).toBeFocused();
+    // The end of the text, not of its first line.
+    await editor.press('Control+End');
+    await page.keyboard.type(' too');
+    await page.waitForTimeout(700);
+    const before = sent.length;
+
+    // A person's double click: two presses on the first word, a moment
+    // apart. Playwright's own sends the second before the first has ended.
+    const box = (await title.boundingBox())!;
+    await page.mouse.move(box.x + 12, box.y + box.height / 2);
+    await page.mouse.down({ clickCount: 1 });
+    await page.mouse.up({ clickCount: 1 });
+    await page.waitForTimeout(150);
+    await page.mouse.down({ clickCount: 2 });
+    await page.mouse.up({ clickCount: 2 });
+    await page.waitForTimeout(700);
+
+    await expect(editor).toHaveCount(0);
+    await expect(card(page, `${long} too`)).toBeVisible();
+    await expect(page.locator('[data-ticket-id]')).toHaveCount(3);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(card(page, `${long} too`).getByRole('button', { name: /^0 votes/ })).toBeVisible();
+    expect(sent.length - before).toBe(1);
+    expect(sent.at(-1)).toContain(`${long} too`);
+    await expect(title).toBeFocused();
   } finally {
     await context.close();
   }
