@@ -524,7 +524,10 @@ describe('mergeRemoteRetroSession', () => {
   it('takes the incoming text of a card, without flagging divergence', () => {
     const incoming = makeSession({ tickets: [makeTicket('t1', { text: 'server text' })] });
     const prev = makeSession({ tickets: [makeTicket('t1', { text: 'my old text' })] });
-    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx(), noPending());
+    // Even told an editor is open on it, as the context used to say: the
+    // signal is gone, and a merge that still read it fails here (review
+    // finding, pass 7 of 42.1: the test passed on the old merge).
+    const { merged, divergent } = mergeRemoteRetroSession(incoming, prev, ctx({ editingTicketId: 't1' }), noPending());
     expect(merged.tickets[0].text).toBe('server text');
     expect(divergent).toBe(false);
   });

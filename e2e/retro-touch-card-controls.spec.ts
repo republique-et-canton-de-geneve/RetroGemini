@@ -183,30 +183,31 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
     await expect(editor).toBeFocused();
     await editor.press('End');
     await page.keyboard.type(' in staging');
-    // Holding its partner leaves the editor, and shows what it held.
+    // Holding its partner leaves the editor and writes what it held, alone
+    // and at once: a hold writes nothing of its own, and held for a later
+    // write the text rode one that could lose (review finding, pass 7 of 42.1).
     sent.length = 0;
     await card(page, 'Slow rollbacks').tap();
     await expect(page.locator('textarea:not([placeholder])')).toHaveCount(0);
     await expect(page.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
-    // Dropped at once on the loose card, the partner leaves the edited card
-    // alone. The text waited for the drop's write (review finding, pass 6 of
-    // 42.1): sent alone at the hold, it made the drop a second write from the
-    // same revision, refused and healed away whenever the drop came before the
-    // server's answer.
+    await expect.poll(() => sent.length).toBe(1);
+    expect(sent[0]).toContain('Flaky deploys in staging');
+    // Past the server's answer: the drop below is a write of its own.
+    await page.waitForTimeout(500);
+    // Dropped on the loose card, the partner leaves the edited card alone.
     await card(page, 'Late release notes').tap();
     const group = page.locator('.group-container');
     await expect(group).toHaveCount(1);
     await expect(group.getByText('Late release notes', { exact: true })).toBeVisible();
     await expect(group.getByText('Slow rollbacks', { exact: true })).toBeVisible();
     await expect(group.getByText('Flaky deploys in staging', { exact: true })).toHaveCount(0);
-    await expect.poll(() => sent.length).toBe(1);
-    expect(sent[0]).toContain('Flaky deploys in staging');
+    await expect.poll(() => sent.length).toBe(2);
     // Still there once the server has answered the drop: nothing was refused
     // and healed away.
     await page.waitForTimeout(500);
     await expect(page.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
     await expect(group).toHaveCount(1);
-    expect(sent).toHaveLength(1);
+    expect(sent).toHaveLength(2);
 
     // A tap on a group's own blank area is claimed the same way (review
     // finding, pass 6 of 42.1): with a card held and another one's editor
@@ -233,6 +234,81 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
     await phoneContext.close();
   }
 });
+
+// Review findings (pass 7 of 42.1): a card's editor closed at the press that
+// left it, and the card grew back by the rows it hides while edited, pushing
+// everything under it down. The release, and the click, landed beside the
+// control pressed: its own vote, the next card's, the column's "Move selected
+// card here". jsdom lays nothing out, so only a browser can hold this.
+for (const device of ['computer', 'phone'] as const) {
+  test(`a press that leaves a card's editor lands on the control pressed, on a ${device}`, async ({ browser }) => {
+    const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
+    const context = await browser.newContext(device === 'phone' ? { ...phone, locale: 'en-US' } : { locale: 'en-US', viewport: { width: 1280, height: 900 } });
+    const page = await context.newPage();
+    const press = (target: Locator) => (device === 'phone' ? target.tap() : target.click());
+    try {
+      await page.goto('/');
+      await page.waitForLoadState('networkidle');
+      await page.getByRole('button', { name: '+ New Team' }).click();
+      await page.getByPlaceholder('e.g. Design Team').fill(`${TEAM_NAME}-press-${device}`);
+      await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+      await page.getByLabel('Recovery Email').fill('facilitator@example.com');
+      await page.getByRole('button', { name: 'Create & Join' }).click();
+      await expect(page.getByText(`${TEAM_NAME}-press-${device} Dashboard`)).toBeVisible({ timeout: 15_000 });
+      await dismissAnnouncementsIfPresent(page);
+      await page.getByRole('button', { name: 'New Retrospective' }).click();
+      const dialog = page.getByRole('dialog');
+      await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
+      await dialog.getByTestId('retro-template-lean_coffee').click();
+      await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
+
+      // Newest first: the card written last sits on top of its column.
+      const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+      for (const text of ['Late release notes', 'Too many meetings']) {
+        await field.fill(text);
+        await page.keyboard.press('Enter');
+        await expect(card(page, text)).toBeVisible();
+      }
+      const voteOn = (text: string) => card(page, text).getByRole('button', { name: /add a vote to this ticket/ });
+      const edit = async (text: string, typed: string) => {
+        await press(card(page, text).getByRole('button', { name: 'Edit ticket' }));
+        const editor = card(page, text).locator('textarea');
+        await expect(editor).toBeFocused();
+        await editor.press('End');
+        await page.keyboard.type(typed);
+      };
+
+      // Its own vote.
+      await edit('Too many meetings', ' on Mondays');
+      await press(voteOn('Too many meetings'));
+      await expect(card(page, 'Too many meetings on Mondays').getByRole('button', { name: /^1 vote/ })).toBeVisible();
+      // The vote of the card under it.
+      await edit('Too many meetings on Mondays', ' again');
+      await press(voteOn('Late release notes'));
+      await expect(card(page, 'Late release notes').getByRole('button', { name: /^1 vote/ })).toBeVisible();
+      await expect(page.getByText('Too many meetings on Mondays again', { exact: true })).toBeVisible();
+
+      // The column's "Move selected card here", under the edited card.
+      await columns(page).nth(1).getByPlaceholder('Add an idea...').fill('Slow rollbacks');
+      await page.keyboard.press('Enter');
+      await expect(card(page, 'Slow rollbacks')).toBeVisible();
+      // Held through its keyboard control, the same on both screens.
+      await page.getByRole('button', { name: /Pick up the ticket Slow rollbacks/ }).focus();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('button', { name: /Selected for grouping/ })).toBeVisible();
+      await edit('Late release notes', ' too');
+      await press(columns(page).nth(0).getByRole('button', { name: /Move selected card here/ }));
+      await expect(columns(page).nth(0).getByText('Slow rollbacks', { exact: true })).toBeVisible();
+      await expect(page.getByText('Late release notes too', { exact: true })).toBeVisible();
+      // And all of it after the server answered.
+      await page.waitForTimeout(500);
+      await expect(columns(page).nth(0).getByText('Slow rollbacks', { exact: true })).toBeVisible();
+      await expect(card(page, 'Late release notes too').getByRole('button', { name: /^1 vote/ })).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  });
+}
 
 test('on a computer the same controls wait for the pointer', async ({ page }) => {
   expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(true);

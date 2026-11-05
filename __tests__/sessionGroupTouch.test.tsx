@@ -275,7 +275,7 @@ describe('a tap the board acts on, and the field it leaves', () => {
     expect((idea as HTMLTextAreaElement).value).toBe('A draft');
   });
 
-  it('stores what an open card editor holds with the drop that breaks up its group', async () => {
+  it('stores what an open card editor holds before the tap breaks up its group', async () => {
     const user = userEvent.setup();
     renderBoard();
     await screen.findByText('Flaky deploys');
@@ -283,37 +283,24 @@ describe('a tap the board acts on, and the field it leaves', () => {
     await user.type(within(card('ta')).getByRole('textbox'), ' in staging');
     const before = (await writes()).length;
 
-    // Hold its partner: a hold writes nothing, so the text waits for the next
-    // write, and the card shows it at once.
+    // Hold its partner: a hold writes nothing, so the text goes alone, now —
+    // never held for a later write. Review finding (pass 7 of 42.1): held, it
+    // rode whatever write came next, the ones every client sends from the
+    // same revision included, and was lost with it.
     tap(card('tb'));
-    expect(within(card('ta')).queryByRole('textbox')).toBeNull();
-    expect(within(card('ta')).getByText('Flaky deploys in staging')).toBeTruthy();
-    // Then drop it on a loose card, at once: the group dissolves. Review
-    // finding (pass 6 of 42.1): the text went alone at the hold, and a drop
-    // tapped before the server answered was a second write from the same
-    // revision, refused and healed away.
-    tap(card('tc'));
-
-    const after = (await writes()).slice(before);
-    expect(after).toHaveLength(1);
-    expect(after[0].tickets.find((t) => t.id === 'tb')?.groupId).toBe(after[0].tickets.find((t) => t.id === 'tc')?.groupId);
-    expect(after[0].tickets.find((t) => t.id === 'ta')?.text).toBe('Flaky deploys in staging');
-  });
-
-  it('writes what the editor held alone a moment after a hold that writes nothing', async () => {
-    const user = userEvent.setup();
-    renderBoard();
-    await screen.findByText('Flaky deploys');
-    await user.click(within(card('ta')).getByRole('button', { name: 'Edit ticket' }));
-    await user.type(within(card('ta')).getByRole('textbox'), ' in staging');
-    const before = (await writes()).length;
-
-    tap(card('tb'));
-
-    expect((await writes()).slice(before)).toHaveLength(0);
-    await waitFor(async () => expect((await writes()).slice(before)).toHaveLength(1));
+    expect((await writes()).slice(before)).toHaveLength(1);
     expect((await writes()).at(-1)?.tickets.find((t) => t.id === 'ta')?.text).toBe('Flaky deploys in staging');
     expect(held('tb')).toBeTruthy();
+    // Then drop it on a loose card: the group dissolves.
+    tap(card('tc'));
+
+    await waitFor(async () => {
+      const last = (await writes()).at(-1)!;
+      expect(last.tickets.find((t) => t.id === 'tb')?.groupId).toBe(last.tickets.find((t) => t.id === 'tc')?.groupId);
+    });
+    const last = (await writes()).at(-1)!;
+    expect(last.tickets.find((t) => t.id === 'ta')?.text).toBe('Flaky deploys in staging');
+    expect(within(card('ta')).queryByRole('textbox')).toBeNull();
   });
 
   it('sends the field it leaves with its own write: one gesture, one write', async () => {
@@ -505,18 +492,62 @@ describe('a click on a control right after typing in a card\u2019s editor', () =
 
   it('leaves the session with the text in its last save', async () => {
     const user = userEvent.setup();
-    renderGroupPhase({ phase: 'BRAINSTORM' });
+    // Left for real: the session goes from the page, and nothing it waited
+    // for is written after.
+    const session = createSession({ phase: 'BRAINSTORM' });
+    let leave = () => {};
+    const rendered = render(
+      <Session team={createTeam(session)} sessionId={session.id} currentUser={facilitator} onExit={() => leave()} />
+    );
+    leave = () => rendered.unmount();
     await screen.findByText('Loose card');
     await editTyped(user, 'loose', ' again');
 
     await user.click(screen.getByRole('button', { name: /Leave/ }));
 
-    // The save and the live session alike: held for the button's own write,
-    // the text would otherwise reach the team's record and no one in the room.
+    // The save and the live session alike, before the session is left:
+    // written after, it would reach a room this screen is no longer in.
     expect((await writes()).at(-1)?.tickets.find((t) => t.id === 'loose')?.text).toBe('Loose card again');
     const { syncService } = await import('../services/syncService');
-    const sent = (syncService.updateSession as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([s]) => s as RetroSession);
-    expect(sent.at(-1)?.tickets.find((t) => t.id === 'loose')?.text).toBe('Loose card again');
+    const update = syncService.updateSession as unknown as ReturnType<typeof vi.fn>;
+    const leaveOrder = (syncService.leaveSession as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder.at(-1)!;
+    const carrying = update.mock.calls
+      .map(([s], i) => ({ s: s as RetroSession, order: update.mock.invocationCallOrder[i] }))
+      .filter(({ s }) => s.tickets.find((t) => t.id === 'loose')?.text === 'Loose card again');
+    expect(carrying.length).toBeGreaterThan(0);
+    expect(carrying[0].order).toBeLessThan(leaveOrder);
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    expect(update.mock.invocationCallOrder.every((order) => order < leaveOrder)).toBe(true);
+  });
+
+  it('writes nothing once the session is gone from the page during the press', async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderGroupPhase({ phase: 'BRAINSTORM' });
+    await screen.findByText('Loose card');
+    await editTyped(user, 'loose', ' again');
+    const { syncService } = await import('../services/syncService');
+    const update = syncService.updateSession as unknown as ReturnType<typeof vi.fn>;
+    const before = update.mock.calls.length;
+
+    // A click that takes the session off the page and writes nothing (a
+    // sign-out): the press's end, after its release, comes too late.
+    document.body.addEventListener('click', () => unmount(), { once: true });
+    await user.click(screen.getByText('What Went Well'));
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    expect(update.mock.calls.length).toBe(before);
+  });
+
+  it('opens the editor of the card whose pencil leaves the other one', async () => {
+    const user = userEvent.setup();
+    renderGroupPhase({ phase: 'BRAINSTORM' });
+    await screen.findByText('Loose card');
+    await editTyped(user, 'loose', ' again');
+
+    await user.click(within(card('inside')).getByRole('button', { name: 'Edit ticket' }));
+
+    expect(within(card('inside')).getByRole('textbox')).toBe(document.activeElement);
+    expect((await writes()).at(-1)?.tickets.find((t) => t.id === 'loose')?.text).toBe('Loose card again');
   });
 
   it('writes the text at once on Enter, which no click follows', async () => {

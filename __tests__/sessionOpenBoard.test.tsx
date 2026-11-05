@@ -23,6 +23,7 @@ import { effectivePair } from './helpers/tailwindTheme';
 let rosterListener: ((roster: { id: string; name: string }[]) => void) | null = null;
 let connectionListener: ((connected: boolean) => void) | null = null;
 let sessionUpdateListener: ((session: RetroSession) => void) | null = null;
+let memberJoinedListener: ((member: { userId: string; userName: string }) => void) | null = null;
 
 vi.mock('../services/dataService', () => ({
   dataService: {
@@ -45,7 +46,10 @@ vi.mock('../services/syncService', () => ({
       sessionUpdateListener = listener;
       return () => {};
     }),
-    onMemberJoined: vi.fn(() => () => {}),
+    onMemberJoined: vi.fn((listener: (member: { userId: string; userName: string }) => void) => {
+      memberJoinedListener = listener;
+      return () => {};
+    }),
     onMemberLeft: vi.fn(() => () => {}),
     onRoster: vi.fn((listener: (roster: { id: string; name: string }[]) => void) => {
       rosterListener = listener;
@@ -858,6 +862,48 @@ describe('Open board — every hold and every drop', () => {
         expect(editor()?.value).toBe('Too many standups');
       });
 
+      // Review finding (pass 7 of 42.1): kept only while its editor was open,
+      // the card went as it was left — the Tab to its Delete, the press of
+      // its own vote — and took that control with it.
+      it('stays in view once left, until the search changes, with the control the keyboard goes to', async () => {
+        const user = userEvent.setup();
+        renderBoard(worded(5, 'Too many meetings'), alice);
+        await screen.findByText('Too many meetings');
+        const searchbox = screen.getByRole('searchbox', { name: 'Search the cards' });
+        await user.type(searchbox, 'meetings');
+        await openEditor(user, 'Too many meetings');
+        act(() => sessionUpdateListener?.(worded(6, 'Too many standups')));
+
+        await user.tab();
+
+        expect(screen.getByText('Too many standups')).toBeTruthy();
+        const card = cardElement('Too many standups');
+        expect(card.contains(document.activeElement)).toBe(true);
+        await user.click(within(card).getByRole('button', { name: /add a vote/ }));
+        expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.votes).toEqual(['alice', 'alice']);
+
+        // A new search finds what it finds.
+        await user.type(searchbox, 's');
+        expect(screen.queryByText('Too many standups')).toBeNull();
+      });
+
+      it('keeps no card its reader can no longer read in a search\u2019s view', async () => {
+        const user = userEvent.setup();
+        const board = (rev: number, reveal: boolean) => {
+          const next = createBoard({ _rev: rev });
+          return { ...next, settings: { ...next.settings, revealBrainstorm: reveal } };
+        };
+        renderBoard(board(5, true), facilitator);
+        await screen.findByText('Slow rollbacks');
+        await user.type(screen.getByRole('searchbox', { name: 'Search the cards' }), 'slow');
+        await openEditor(user, 'Slow rollbacks');
+        await user.keyboard('{Enter}');
+
+        act(() => sessionUpdateListener?.(board(6, false)));
+
+        expect(document.querySelector('[data-ticket-id="t-b"]')).toBeNull();
+      });
+
       it('keeps in view the group a search found only through the card being edited', async () => {
         const user = userEvent.setup();
         renderBoard(groupedBoard({ _rev: 5 }), alice);
@@ -939,27 +985,89 @@ describe('Open board — every hold and every drop', () => {
         expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings on Mondays!');
       });
 
-      // Held a moment for the click that left it, its text goes when the
-      // session drops meanwhile, as every edit made offline does: kept, the
-      // first write after the reconnect would apply it over the state the
-      // reconnect brought.
-      it('drops the text it held for a click when the session drops before writing it', async () => {
-        const user = userEvent.setup();
-        renderBoard(worded(5, 'Too many meetings'), alice);
-        await screen.findByText('Too many meetings');
-        await openEditor(user, 'Too many meetings');
-        await user.keyboard('{End} on Mondays');
-        await user.click(screen.getByRole('searchbox', { name: 'Search the cards' }));
-        const before = await persistedCount();
+      // Review findings (pass 7 of 42.1): the text an editor leaves for a
+      // press of the mouse rides that press's click, or goes alone as the
+      // press ends — never later, and never with a write nobody asked for.
+      describe('left for a press of the mouse', () => {
+        const search = () => screen.getByRole('searchbox', { name: 'Search the cards' });
 
-        act(() => connectionListener?.(false));
-        await act(() => new Promise<void>((resolve) => setTimeout(resolve, 500)));
-        expect(await persistedCount()).toBe(before);
-        act(() => connectionListener?.(true));
-        act(() => sessionUpdateListener?.(worded(6, 'Too many meetings')));
-        await user.click(within(screen.getByDisplayValue('Delivery').closest('.group-container') as HTMLElement).getByRole('button', { name: /add a vote to this group/ }));
+        it('writes the text as the press ends, not a moment later, and draws the editor until then', async () => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings'), alice);
+          await screen.findByText('Too many meetings');
+          await openEditor(user, 'Too many meetings');
+          await user.keyboard('{End} on Mondays');
+          const before = await persistedCount();
 
-        expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings');
+          await user.pointer({ keys: '[MouseLeft>]', target: search() });
+          // Pressed: the editor is still drawn, so the release and the click
+          // land on what was pressed.
+          expect(editor()).not.toBeNull();
+          expect(await persistedCount()).toBe(before);
+          await user.pointer({ keys: '[/MouseLeft]', target: search() });
+
+          expect(await persistedCount()).toBe(before + 1);
+          expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings on Mondays');
+          expect(editor()).toBeNull();
+        });
+
+        it('lets no write nobody asked for take the text: a teammate joining during the press', async () => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings'), alice);
+          await screen.findByText('Too many meetings');
+          await openEditor(user, 'Too many meetings');
+          await user.keyboard('{End} on Mondays');
+          const before = await persistedCount();
+
+          await user.pointer({ keys: '[MouseLeft>]', target: search() });
+          act(() => memberJoinedListener?.({ userId: 'carol', userName: 'Carol Dupont' }));
+          const joined = (await persistedCount()) - before;
+          expect(joined).toBe(1);
+          // Every client writes the join from the same revision, and all but
+          // one lose: the text must not be in the one that may lose.
+          expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings');
+          await user.pointer({ keys: '[/MouseLeft]', target: search() });
+
+          expect(await persistedCount()).toBe(before + 2);
+          expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings on Mondays');
+        });
+
+        it('drops the text, and shows the stored one, when the session drops before the press ends', async () => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings'), alice);
+          await screen.findByText('Too many meetings');
+          await openEditor(user, 'Too many meetings');
+          await user.keyboard('{End} on Mondays');
+          const before = await persistedCount();
+
+          await user.pointer({ keys: '[MouseLeft>]', target: search() });
+          act(() => connectionListener?.(false));
+          await user.pointer({ keys: '[/MouseLeft]', target: search() });
+
+          expect(await persistedCount()).toBe(before);
+          expect(editor()).toBeNull();
+          expect(screen.getByText('Too many meetings')).toBeTruthy();
+          expect(screen.queryByText('Too many meetings on Mondays')).toBeNull();
+          act(() => connectionListener?.(true));
+          await user.click(within(screen.getByDisplayValue('Delivery').closest('.group-container') as HTMLElement).getByRole('button', { name: /add a vote to this group/ }));
+          expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings');
+        });
+
+        it('casts the vote on its own card with the text, in one write', async () => {
+          const user = userEvent.setup();
+          renderBoard(worded(5, 'Too many meetings'), alice);
+          await screen.findByText('Too many meetings');
+          await openEditor(user, 'Too many meetings');
+          await user.keyboard('{End} on Mondays');
+          const before = await persistedCount();
+
+          await user.click(within(cardElement('Too many meetings')).getByRole('button', { name: /add a vote/ }));
+
+          expect(await persistedCount()).toBe(before + 1);
+          const written = (await lastPersisted())!.tickets.find((t) => t.id === 't-c')!;
+          expect(written.text).toBe('Too many meetings on Mondays');
+          expect(written.votes).toEqual(['alice', 'alice']);
+        });
       });
 
       it('writes nothing when a teammate deletes the card being typed', async () => {
@@ -997,6 +1105,69 @@ describe('Open board — every hold and every drop', () => {
         await openEditor(user, 'Slow rollbacks');
 
         expect(editor()?.value).toBe('Slow rollbacks');
+      });
+
+      // Review findings (pass 7 of 42.1): the redrawn editor put the caret at
+      // the end, so a fix in the middle of the text went on after its last
+      // word; and nothing pinned that it is written when left at once.
+      it('keeps the caret where it was when another person\u2019s write draws its card again', async () => {
+        const user = userEvent.setup();
+        renderBoard(worded(5, 'Too many meetings'), alice);
+        await screen.findByText('Too many meetings');
+        await openEditor(user, 'Too many meetings');
+        editor()!.setSelectionRange(8, 8);
+        await user.keyboard(' lon');
+
+        const grouped = worded(6, 'Too many meetings');
+        grouped.tickets = grouped.tickets.map((t) => (t.id === 't-c' ? { ...t, groupId: 'g1' } : t));
+        act(() => sessionUpdateListener?.(grouped));
+        await user.keyboard('g{Enter}');
+
+        expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many long meetings');
+      });
+
+      it('writes what was typed when it is left at once after another person\u2019s write drew its card again', async () => {
+        const user = userEvent.setup();
+        renderBoard(worded(5, 'Too many meetings'), alice);
+        await screen.findByText('Too many meetings');
+        await openEditor(user, 'Too many meetings');
+        await user.keyboard('{End} on Mondays');
+
+        const grouped = worded(6, 'Too many meetings');
+        grouped.tickets = grouped.tickets.map((t) => (t.id === 't-c' ? { ...t, groupId: 'g1' } : t));
+        act(() => sessionUpdateListener?.(grouped));
+        await user.keyboard('{Enter}');
+
+        expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings on Mondays');
+      });
+
+      it('keeps the caret where it was moved after the typing when its card is drawn again', async () => {
+        const user = userEvent.setup();
+        renderBoard(worded(5, 'Too many meetings'), alice);
+        await screen.findByText('Too many meetings');
+        await openEditor(user, 'Too many meetings');
+        await user.keyboard('{End} on Mondays{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}');
+
+        const grouped = worded(6, 'Too many meetings');
+        grouped.tickets = grouped.tickets.map((t) => (t.id === 't-c' ? { ...t, groupId: 'g1' } : t));
+        act(() => sessionUpdateListener?.(grouped));
+        await user.keyboard(' long{Enter}');
+
+        expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many meetings long on Mondays');
+      });
+
+      it('keeps the caret where it was put when it takes a teammate\u2019s edit', async () => {
+        const user = userEvent.setup();
+        renderBoard(worded(5, 'Too many meetings'), alice);
+        await screen.findByText('Too many meetings');
+        await openEditor(user, 'Too many meetings');
+        editor()!.setSelectionRange(8, 8);
+
+        act(() => sessionUpdateListener?.(worded(6, 'Too many meetings on Tuesdays')));
+        expect(editor()?.selectionStart).toBe(8);
+        await user.keyboard(' long{Enter}');
+
+        expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.text).toBe('Too many long meetings on Tuesdays');
       });
 
       // A field React removes runs no blur: an editor whose card left the
@@ -1061,6 +1232,32 @@ describe('Open board — every hold and every drop', () => {
       act(() => sessionUpdateListener?.(group('GROUP', 8, 'Release train')));
 
       await waitFor(() => expect(titleField()?.value).toBe('Release train'));
+    });
+
+    // Review finding (pass 7 of 42.1): leaving the field ends its typing,
+    // and nothing pinned it: typed, left, then only focused again, the title
+    // kept its old text over a teammate's rename.
+    it('takes a later rename once it is focused again, without typing, after its typing was left', async () => {
+      const user = userEvent.setup();
+      const group = (rev: number, title: string) => {
+        const session = groupedBoard({ _rev: rev });
+        session.groups = session.groups.map((g) => ({ ...g, title }));
+        return session;
+      };
+      renderBoard(group(5, 'Delivery'), alice);
+      const field = await screen.findByDisplayValue('Delivery') as HTMLInputElement;
+      await user.click(field);
+      await user.keyboard('{End} team');
+      await voteOnMeetings(user);
+      act(() => sessionUpdateListener?.(group(7, 'Delivery team')));
+
+      await user.click(titleField()!);
+      expect(titleField()).toBe(field);
+      act(() => sessionUpdateListener?.(group(8, 'Release train')));
+
+      expect(titleField()?.value).toBe('Release train');
+      await voteOnMeetings(user);
+      expect((await lastPersisted())?.groups[0].title).toBe('Release train');
     });
 
     // The same with the field drawn again where the group went: Bob moved it

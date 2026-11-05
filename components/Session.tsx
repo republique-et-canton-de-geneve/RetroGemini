@@ -182,12 +182,17 @@ const isRetroSession = (session: unknown): session is RetroSession => {
 
 
 /**
- * How long what a field writes as it is left — a number typed in the votes
- * field (commitMaxVotesInput), a card's text (holdLeftFieldWrites) — waits
- * for the write of the click that left it before it is written alone.
+ * How long a number typed in the votes field and left by a click waits for
+ * that click's own write before it is written alone (commitMaxVotesInput).
  * Longer than a click takes from the press to its release.
  */
-const LEFT_FIELD_WRITE_WAIT_MS = 400;
+const PENDING_MAX_VOTES_MS = 400;
+/**
+ * The longest a press of the mouse keeps a card's editor drawn after taking
+ * the focus out of it (pressRef), when neither a click, a drag's end nor the
+ * release that follows a lost click ends it first.
+ */
+const PRESS_LEAVE_SAFETY_MS = 10_000;
 
 // Lowering the number takes back the votes above it (utils/voteBudget.ts).
 // With unlimited votes the number waits, unused, and caps nothing.
@@ -485,7 +490,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // editorOpenedTextRef is the stored text the field shows while nothing is
   // typed. Left as it shows that text, the editor writes nothing.
   const editorFieldRef = useRef<HTMLTextAreaElement | null>(null);
-  const editorDraftRef = useRef<{ ticketId: string; text: string } | null>(null);
+  const editorDraftRef = useRef<{ ticketId: string; text: string; start: number; end: number } | null>(null);
   const editorOpenedTextRef = useRef('');
   // Enter writes the text at once: no click follows it.
   const editorCommitsNowRef = useRef(false);
@@ -567,9 +572,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // field had the focus, at the blur — the press of a click on its own vote
   // button, or the Tab to its next control, which went with it.
   const [searchKeptGroupIds, setSearchKeptGroupIds] = useState<ReadonlySet<string>>(() => new Set());
+  // The same for the cards whose editor was opened on the board during the
+  // search: kept only while the editor was open, a card a teammate's edit
+  // took out of the search went as it was left — the Tab to its Delete, the
+  // press of its own vote — with the control the focus or the click was going to.
+  const [searchKeptTicketIds, setSearchKeptTicketIds] = useState<ReadonlySet<string>>(() => new Set());
   const searchBoard = (query: string) => {
     setBoardSearch(query);
     setSearchKeptGroupIds(kept => (kept.size === 0 ? kept : new Set()));
+    setSearchKeptTicketIds(kept => (kept.size === 0 ? kept : new Set()));
   };
   // The settings belong to the board: a board turned into a guided retro from
   // another facilitator tab closes them here too, with the confirmation opened
@@ -606,7 +617,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   useLayoutEffect(() => {
     const field = editorFieldRef.current;
     if (!field || editedTicketText === undefined || editorDraftRef.current?.ticketId === editingTicketId) return;
-    if (field.value !== editedTicketText) field.value = editedTicketText;
+    if (field.value !== editedTicketText) {
+      // The caret stays where it was put, within the new text.
+      const { selectionStart, selectionEnd } = field;
+      field.value = editedTicketText;
+      field.setSelectionRange(Math.min(selectionStart, field.value.length), Math.min(selectionEnd, field.value.length));
+    }
     editorOpenedTextRef.current = editedTicketText.trim();
   }, [editingTicketId, editedTicketText]);
   // React runs no blur for a field it removes. An editor whose card left the
@@ -644,19 +660,40 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // a spent budget, the button the click was aimed at was still off at the
   // release, and the click cast nothing.
   const [pendingMaxVotes, setPendingMaxVotes] = useState<number | null>(null);
-  // What a field writes as it is left (an open card editor storing its
-  // text), held for the write of the click or the tap that left it: the two
-  // were writes from one revision, and the server refused the second — the
-  // move, the drop, the phase change. Shown at once, folded into the next
-  // write by updateSession, or written alone a moment later
-  // (holdLeftFieldWrites). A claimed tap collects what any field writes while
-  // it takes the focus out of it (actOnClaimedTap).
-  const collectingLeftFieldWritesRef = useRef<Array<(s: RetroSession) => void> | null>(null);
-  const leftFieldWritesRef = useRef<Array<(s: RetroSession) => void>>([]);
-  const leftFieldWritesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // What the field a tap leaves writes in its blur (an open card editor
+  // storing its text), held for the tap's own write (actOnClaimedTap): two
+  // writes from one revision, the server refused the second, and the drop or
+  // the text was lost. Collected while the tap takes the focus out of the
+  // field, folded into the next write by updateSession.
+  const collectingTapBlurWritesRef = useRef<Array<(s: RetroSession) => void> | null>(null);
+  const tapBlurWritesRef = useRef<Array<(s: RetroSession) => void>>([]);
+  // A press of the mouse — or of the mouse a browser emulates for a tap on a
+  // control — that takes the focus out of a card's editor. The editor stays
+  // drawn until the press ends, with its click, a drag's end, or the release
+  // of a press that clicks nothing: closed at the press, it grew the card
+  // back by its hidden rows and pushed everything under it down, so the
+  // release, and the click, landed beside the control pressed (its own vote,
+  // Delete, the next card's vote, "Move selected card here"). Its text rides
+  // the write of that click (updateSession folds it in, only while the click
+  // is dispatched, never a write nobody asked for), or goes alone as the press
+  // ends: the two were writes from one revision, and the server refused the
+  // second — the move, the phase change.
+  const pressRef = useRef<{
+    active: boolean;
+    dispatching: boolean;
+    leave: { ticketId: string; text: string | null; folded: boolean } | null;
+    safety: ReturnType<typeof setTimeout> | null;
+  }>({ active: false, dispatching: false, leave: null, safety: null });
   useEffect(() => () => {
     if (pendingMaxVotesTimerRef.current) clearTimeout(pendingMaxVotesTimerRef.current);
-    if (leftFieldWritesTimerRef.current) clearTimeout(leftFieldWritesTimerRef.current);
+    // A session left during a press writes nothing after: the exit button
+    // carries the text in its own write (handleExit), and a write sent once
+    // the session was left would reach a room this screen is no longer in.
+    const press = pressRef.current;
+    if (press.safety) clearTimeout(press.safety);
+    press.active = false;
+    press.dispatching = false;
+    press.leave = null;
   }, []);
   // Local participants panel state (not synced across users)
   const [localParticipantsPanelCollapsed, setLocalParticipantsPanelCollapsed] = useState(!isFacilitator);
@@ -1097,32 +1134,71 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     const stored = sessionRef.current?.settings.maxVotes;
     if (stored) setMaxVotesInput(String(stored));
   };
-  const takeLeftFieldWrites = (): Array<(s: RetroSession) => void> => {
-    const writes = leftFieldWritesRef.current;
-    leftFieldWritesRef.current = [];
-    if (leftFieldWritesTimerRef.current) clearTimeout(leftFieldWritesTimerRef.current);
-    leftFieldWritesTimerRef.current = null;
-    return writes;
+  // The text an editor left for a press holds, taken by the write of that
+  // press's click: one gesture, one write.
+  const takePressLeaveWrite = (): Array<(s: RetroSession) => void> => {
+    const press = pressRef.current;
+    const leave = press.dispatching ? press.leave : null;
+    if (!leave || leave.text === null || leave.folded) return [];
+    leave.folded = true;
+    return [writeTicketText(leave.ticketId, leave.text)];
   };
-  // What a field writes as it is left waits for the write of the click that
-  // left it (updateSession folds it in) or, when that click writes nothing, a
-  // moment. It shows at once: the editor closes on the card's new text.
-  // Offline it goes, as every edit made offline does.
-  const holdLeftFieldWrites = (writes: Array<(s: RetroSession) => void>) => {
-    if (writes.length === 0 || !isLiveRef.current) return;
-    leftFieldWritesRef.current.push(...writes);
-    setSession(prev => {
-      if (!prev) return prev;
-      const shown = JSON.parse(JSON.stringify(prev)) as RetroSession;
-      writes.forEach(write => write(shown));
-      return shown;
-    });
-    if (leftFieldWritesTimerRef.current) clearTimeout(leftFieldWritesTimerRef.current);
-    leftFieldWritesTimerRef.current = setTimeout(() => {
-      leftFieldWritesTimerRef.current = null;
-      if (leftFieldWritesRef.current.length > 0) updateSession(() => {});
-    }, LEFT_FIELD_WRITE_WAIT_MS);
+  const pressLeaveWaits = () => {
+    const leave = pressRef.current.leave;
+    return !!leave && leave.text !== null && !leave.folded;
   };
+  // The press is over: the editor it left closes, and its text goes alone
+  // when no write of the click took it. Offline it goes, as every edit made
+  // offline does — and it was never shown as stored.
+  const finishPress = () => {
+    const press = pressRef.current;
+    if (!press.active) return;
+    press.active = false;
+    press.dispatching = false;
+    if (press.safety) clearTimeout(press.safety);
+    press.safety = null;
+    const leave = press.leave;
+    press.leave = null;
+    if (!leave) return;
+    setEditingTicketId(current => (current === leave.ticketId ? null : current));
+    if (leave.text === null || leave.folded) return;
+    if (!sessionRef.current?.tickets.some(t => t.id === leave.ticketId)) return;
+    updateSession(writeTicketText(leave.ticketId, leave.text));
+  };
+  const finishPressRef = useRef(finishPress);
+  useLayoutEffect(() => { finishPressRef.current = finishPress; });
+  useEffect(() => {
+    const press = pressRef.current;
+    const begin = () => {
+      press.active = true;
+      press.dispatching = false;
+      if (press.safety) clearTimeout(press.safety);
+      press.safety = setTimeout(() => finishPressRef.current(), PRESS_LEAVE_SAFETY_MS);
+    };
+    const dispatchStarts = () => { if (press.active) press.dispatching = true; };
+    const dispatchEnds = () => finishPressRef.current();
+    const dropEnds = () => { press.dispatching = false; };
+    // A press that clicks nothing (released elsewhere, the click lost)
+    // ends right after its release: the click, when there is one, comes
+    // first, in the same task.
+    const released = () => { setTimeout(() => finishPressRef.current(), 0); };
+    window.addEventListener('mousedown', begin, true);
+    window.addEventListener('click', dispatchStarts, true);
+    window.addEventListener('click', dispatchEnds);
+    window.addEventListener('drop', dispatchStarts, true);
+    window.addEventListener('drop', dropEnds);
+    window.addEventListener('dragend', dispatchEnds);
+    window.addEventListener('mouseup', released);
+    return () => {
+      window.removeEventListener('mousedown', begin, true);
+      window.removeEventListener('click', dispatchStarts, true);
+      window.removeEventListener('click', dispatchEnds);
+      window.removeEventListener('drop', dispatchStarts, true);
+      window.removeEventListener('drop', dropEnds);
+      window.removeEventListener('dragend', dispatchEnds);
+      window.removeEventListener('mouseup', released);
+    };
+  }, []);
   const writeTicketText = (ticketId: string, text: string) => (s: RetroSession) => {
     const ticket = s.tickets.find(x => x.id === ticketId);
     if (ticket) ticket.text = text;
@@ -1139,11 +1215,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // the reconnect, a teammate joining included, applied it and took the
       // votes above it back.
       if (takePendingMaxVotes() !== null) resetMaxVotesDraft();
-      takeLeftFieldWrites();
+      tapBlurWritesRef.current = [];
       return null;
     }
-    if (collectingLeftFieldWritesRef.current) {
-      collectingLeftFieldWritesRef.current.push(updater);
+    if (collectingTapBlurWritesRef.current) {
+      collectingTapBlurWritesRef.current.push(updater);
       return sessionRef.current;
     }
     const baseSession = sessionRef.current
@@ -1179,12 +1255,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // settings it writes — while the votes it took back were: a lost race
     // healed the number away and kept the cut.
     const pendingMaxVotes = takePendingMaxVotes();
-    // And so is what a field left for this write wrote, folded in the same way.
-    const leftFieldWrites = takeLeftFieldWrites();
+    // And so is what the field a tap left wrote, and the text an editor left
+    // for the press of this write's click, folded in the same way.
+    const tapBlurWrites = [...tapBlurWritesRef.current, ...takePressLeaveWrite()];
+    tapBlurWritesRef.current = [];
     let updaterBase: RetroSession = baseSession;
-    if (pendingMaxVotes !== null || leftFieldWrites.length > 0) {
+    if (pendingMaxVotes !== null || tapBlurWrites.length > 0) {
       if (pendingMaxVotes !== null) applyMaxVotes(newSession, pendingMaxVotes);
-      leftFieldWrites.forEach(write => write(newSession));
+      tapBlurWrites.forEach(write => write(newSession));
       claimOwnChanges(baseSession, newSession);
       updaterBase = JSON.parse(JSON.stringify(newSession));
     }
@@ -1205,23 +1283,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // being typed — an open card editor stored its text, a group title stopped
   // being "typed", the phone's keyboard closed — and closed the reaction
   // picker. What the field writes as it is left rides the tap's own write, or
-  // a moment later when the tap writes nothing (a hold), so that the drop
-  // tapped right after carries it (holdLeftFieldWrites).
+  // goes alone when the tap writes nothing (a hold).
   const actOnClaimedTap = (e: React.TouchEvent, perform: () => void) => {
     e.preventDefault();
     if (emojiPickerOpenId && !emojiPickerRef.current?.contains(e.target as Node)) setEmojiPickerOpenId(null);
     const active = document.activeElement;
     if (active instanceof HTMLElement && active !== document.body) {
       const collected: Array<(s: RetroSession) => void> = [];
-      collectingLeftFieldWritesRef.current = collected;
+      collectingTapBlurWritesRef.current = collected;
       try {
         active.blur();
       } finally {
-        collectingLeftFieldWritesRef.current = null;
+        collectingTapBlurWritesRef.current = null;
       }
-      holdLeftFieldWrites(collected);
+      tapBlurWritesRef.current.push(...collected);
     }
     perform();
+    if (tapBlurWritesRef.current.length > 0) updateSession(() => {});
   };
 
   // Handle icebreaker question change with debounce to prevent sync conflicts
@@ -1560,7 +1638,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const handleExit = () => {
       // A number or a card's text just left for this button is written first,
       // through the session's own write, so the exit's save below carries it.
-      const leaving = (pendingMaxVotesRef.current !== null || leftFieldWritesRef.current.length > 0
+      const leaving = (pendingMaxVotesRef.current !== null || pressLeaveWaits()
           ? updateSession(() => {})
           : null) ?? session;
       dataService.persistParticipants(team.id, getParticipants());
@@ -2671,25 +2749,42 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     defaultValue={editorDraftRef.current?.ticketId === t.id ? editorDraftRef.current.text : t.text}
                     onFocus={(e) => {
                         const field = e.currentTarget;
-                        if (editorDraftRef.current?.ticketId === t.id) {
-                            field.setSelectionRange(field.value.length, field.value.length);
+                        const draft = editorDraftRef.current;
+                        if (draft?.ticketId === t.id) {
+                            // The caret where it was: at the end, the next
+                            // keystrokes landed after the last word.
+                            field.setSelectionRange(Math.min(draft.start, field.value.length), Math.min(draft.end, field.value.length));
                             return;
                         }
                         editorOpenedTextRef.current = field.value.trim();
                     }}
-                    onInput={(e) => { editorDraftRef.current = { ticketId: t.id, text: e.currentTarget.value }; }}
+                    onInput={(e) => {
+                        const field = e.currentTarget;
+                        editorDraftRef.current = { ticketId: t.id, text: field.value, start: field.selectionStart, end: field.selectionEnd };
+                    }}
+                    onSelect={(e) => {
+                        const draft = editorDraftRef.current;
+                        if (draft?.ticketId !== t.id) return;
+                        draft.start = e.currentTarget.selectionStart;
+                        draft.end = e.currentTarget.selectionEnd;
+                    }}
                     onBlur={(e) => {
                         const val = e.currentTarget.value.trim();
                         const now = editorCommitsNowRef.current;
                         editorCommitsNowRef.current = false;
                         editorDraftRef.current = null;
-                        setEditingTicketId(null);
                         // Written only when changed: left as it was opened, the
                         // editor sent its old text back over a teammate's edit.
-                        if (!val || val === editorOpenedTextRef.current) return;
-                        const write = writeTicketText(t.id, val);
-                        if (now) updateSession(write);
-                        else holdLeftFieldWrites([write]);
+                        const text = val && val !== editorOpenedTextRef.current ? val : null;
+                        // Left for a press of the mouse: drawn until the press
+                        // ends, its text riding the click's write (pressRef).
+                        const press = pressRef.current;
+                        if (press.active && !now) {
+                            press.leave = { ticketId: t.id, text, folded: false };
+                            return;
+                        }
+                        setEditingTicketId(null);
+                        if (text) updateSession(writeTicketText(t.id, text));
                     }}
                     onKeyDown={(e) => {
                         if(e.key === 'Enter' && !e.shiftKey) {
@@ -2725,7 +2820,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     </div>
                     {canEditText && (
                         <button
-                            onClick={(e) => { e.stopPropagation(); setEditingTicketId(t.id); }}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingTicketId(t.id);
+                                if (isBoard) setSearchKeptTicketIds(kept => (kept.has(t.id) ? kept : new Set([...kept, t.id])));
+                            }}
                             // The card's own measured text colour on a coloured
                             // card, as the comment button: an icon a phone always
                             // shows must be seen (1.4.11), and slate-300 measured
@@ -3042,7 +3141,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       pendingMaxVotesTimerRef.current = setTimeout(() => {
           pendingMaxVotesTimerRef.current = null;
           if (pendingMaxVotesRef.current !== null) updateSession(() => {});
-      }, LEFT_FIELD_WRITE_WAIT_MS);
+      }, PENDING_MAX_VOTES_MS);
   };
 
   // The number of votes per person: the Vote phase's bar shows it after
@@ -3128,17 +3227,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // the bar's status, which says it to a screen reader too. The card or
       // group held right now stays in view whatever the search finds: its own
       // control is the way to put it down, and a hold on something off screen
-      // would go on offering targets for it. So does the card being edited,
-      // and its group: a teammate's edit took it out of the search, its field
-      // with the focus. So does a group whose title was
+      // would go on offering targets for it. So does a card whose editor was
+      // opened during the search, and its group, until the search changes
+      // (searchKeptTicketIds): a teammate's edit took it out of the search,
+      // its field with the focus. So does a group whose title was
       // focused during the search, until the search changes, while its reader
       // can read it (searchKeptGroupIds).
+      const keptCard = (ticket: RetroSession['tickets'][number]) => ticket.id === draggedTicket?.id
+          || ticket.id === editingTicketId
+          || (searchKeptTicketIds.has(ticket.id) && canReadCard(session, ticket, currentUser.id));
       const isHeldEntry = (entry: ColumnEntry) => entry.kind === 'ticket'
-          ? entry.ticket.id === draggedTicket?.id || entry.ticket.id === editingTicketId
+          ? keptCard(entry.ticket)
           : (movingItem?.kind === 'group' && movingItem.id === entry.group.id)
               || (searchKeptGroupIds.has(entry.group.id) && canReadGroup(session, entry.group.id, currentUser.id))
-              || session.tickets.some(t => t.groupId === entry.group.id
-                  && (t.id === draggedTicket?.id || t.id === editingTicketId));
+              || session.tickets.some(t => t.groupId === entry.group.id && keptCard(t));
       let boardSearchFound = 0;
       const entriesByColumn = new Map(session.columns.map(col => {
           const entries = getColumnEntries(session, col.id);
