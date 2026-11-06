@@ -1698,6 +1698,160 @@ describe('a tap the board acts on, and the field it leaves', () => {
     });
   });
 
+  // Review finding (pass 18 of 42.1): the rules of the pass before reached too
+  // far, or not far enough.
+  describe('the next press or tap, as far as what moved reaches', () => {
+    const onBoard = (id: string) => document.querySelector(`[data-ticket-id="${id}"]`) !== null;
+    const press = (element: HTMLElement, detail: number, touched: boolean) => {
+      if (touched) expect(tap(element)).toBe(true);
+      return pressOf(element, detail);
+    };
+
+    // The card's Edit goes with its click, and its editor comes there: the
+    // next press selected the word under it, and the next keystroke replaced
+    // it for everyone.
+    it.each([['a double click', false], ['a double tap', true]])('selects nothing in the editor with %s on a card’s Edit', async (_how, touched) => {
+      renderBoard();
+      await screen.findByText('Too many meetings');
+
+      const clock = heldClock();
+      try {
+        expect(press(within(card('tc')).getByRole('button', { name: 'Edit ticket' }), 1, touched)).toEqual(pressedAndClicked);
+        const editor = within(card('tc')).getByRole('textbox');
+        clock.at(150);
+        expect(press(editor, 2, touched).pressed).toBe(false);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    // A press on no control brought nothing with it: the retry of a missed
+    // "+" is the user's own, though the browser counts it.
+    it('adds the vote with a tap the browser counts after a tap on the count beside the "+"', async () => {
+      renderGroupPhase({
+        phase: 'VOTE',
+        tickets: [{ id: 'tc', colId: 'col-1', text: 'Too many meetings', authorId: 'facilitator-1', groupId: null, votes: [] }],
+        groups: [],
+      });
+      await screen.findByText('Too many meetings');
+      const before = (await writes()).length;
+      const add = within(card('tc')).getByRole('button', { name: 'Add a vote to this ticket' });
+      const count = add.previousElementSibling as HTMLElement;
+
+      const clock = heldClock();
+      try {
+        expect(press(count, 1, true)).toEqual(pressedAndClicked);
+        clock.at(150);
+        expect(press(add, 2, true)).toEqual(pressedAndClicked);
+      } finally {
+        clock.restore();
+      }
+
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(1);
+      expect(after[0].tickets[0].votes).toEqual(['facilitator-1']);
+    });
+
+    // A group picked up takes a ring, and nothing moves: its own vote is the
+    // next tap's to press.
+    it('votes for a group with a tap on its vote right after a tap that picked the group up', async () => {
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(tap(groupContainer())).toBe(false);
+        clock.at(450);
+        const vote = within(groupContainer()).getAllByTestId('vote-add')[0];
+        expect(press(vote, 1, true)).toEqual(pressedAndClicked);
+      } finally {
+        clock.restore();
+      }
+
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(1);
+      expect(after[0].groups[0].votes).toEqual(['facilitator-1']);
+    });
+
+    // The backdrop goes with the dialog its tap closed, and the next tap
+    // reached the card under it, which the board claims: it dropped the held
+    // card there, for everyone.
+    it('drops nothing with the next tap on a card, once a tap on a dialog’s backdrop closed the dialog', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      expect(tap(card('td'))).toBe(false);
+      await user.click(within(card('tc')).getByTestId('ticket-comment-btn'));
+      const backdrop = (await screen.findByRole('dialog')).parentElement as HTMLElement;
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(press(backdrop, 1, true)).toEqual(pressedAndClicked);
+        expect(screen.queryByRole('dialog')).toBeNull();
+        clock.at(150);
+        expect(tap(card('tc'))).toBe(false);
+      } finally {
+        clock.restore();
+      }
+
+      expect((await writes()).slice(before)).toHaveLength(0);
+      expect(held('td')).toBeTruthy();
+    });
+
+    // In a browser that lays the page out, a pick-up in the Group phase drew
+    // the hint above the board a line longer, and the card above came under
+    // the finger: the next tap dropped the held card on it.
+    it('drops nothing with the next tap on the card that came under the point the pick-up aimed at', async () => {
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(tap(card('td'))).toBe(false);
+        Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => card('tc') });
+        clock.at(150);
+        expect(tap(card('tc'))).toBe(false);
+        expect(within(card('tc')).queryByRole('button', { name: /Selected for grouping/ })).toBeNull();
+      } finally {
+        delete (document as { elementFromPoint?: unknown }).elementFromPoint;
+        clock.restore();
+      }
+
+      expect((await writes()).slice(before)).toHaveLength(0);
+      expect(held('td')).toBeTruthy();
+    });
+
+    // A mark belongs to the gesture after the one that made it: kept past a
+    // tap the board claims, an earlier drop cut the next pick-up and drop.
+    it('groups with a pick-up and a drop at an ordinary pace a second after an earlier drop', async () => {
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(tap(card('td'))).toBe(false);
+        clock.at(300);
+        expect(tap(card('tc'))).toBe(false);
+        // The new pair's card, picked up and dropped into the other group.
+        clock.at(1300);
+        expect(tap(card('tc'))).toBe(false);
+        clock.at(1600);
+        expect(tap(card('ta'), 52, 50)).toBe(false);
+      } finally {
+        clock.restore();
+      }
+
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(2);
+      expect(after[1].tickets.find((t) => t.id === 'tc')?.groupId).toBe('g1');
+      expect(onBoard('td')).toBe(true);
+    });
+  });
+
   // Review finding (pass 6 of 42.1): every case above taps a card. The group
   // container claims its taps through the same helper, and put back to a bare
   // preventDefault it kept every test green while an open editor lost its

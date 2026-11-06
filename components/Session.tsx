@@ -69,7 +69,7 @@ import {
     moveGesture,
     startGesture,
 } from './session/groupingTouch';
-import { boardMovedSince, pressedControl, useDoubleGestureGuard } from './session/doubleGestureGuard';
+import { aimDisplaced, aimGone, boardMovedSince, pressedControl, useDoubleGestureGuard } from './session/doubleGestureGuard';
 import {
   BrainstormSelection,
   canMoveGroupInBrainstorm,
@@ -1493,8 +1493,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // nothing, and after an editor closed the next is measured from it; on
     // the same card or group it is a tap again. Measured from its touch, as a
     // browser counts the next tap: held a moment, it lifted past the half
-    // second, and grouped the card (pass 15 of 42.1).
-    if (boardMovedSince(gesture) && gesture.aim && gesture.aim.key !== aimedAt && isNextTap(gesture.aim, gesture.tapStartedAt ?? e.timeStamp, point)) {
+    // second, and grouped the card (pass 15 of 42.1). So it is once what the
+    // tap before aimed at left the page — a dialog's backdrop, closed by it:
+    // the next tap reached the card under it and dropped the held card there
+    // — or is no longer under its point: a pick-up in the Group phase drew
+    // the hint above the board a line longer, and the next tap dropped the
+    // card on the one above (pass 18).
+    const movedUnder = !!boardMovedSince(gesture) || aimGone(gesture.aim) || aimDisplaced(gesture.aim);
+    if (movedUnder && gesture.aim && gesture.aim.key !== aimedAt && isNextTap(gesture.aim, gesture.tapStartedAt ?? e.timeStamp, point)) {
       if (gesture.boardMoved === 'editor') gesture.aim = { ...gesture.aim, at: e.timeStamp };
       return;
     }
@@ -1506,7 +1512,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // content down, and the next tap pressed what came under the finger —
     // its vote, its comments, its Delete (pass 17 of 42.1).
     const reached = e.target instanceof Element ? e.target : null;
-    gesture.aim = { key: aimedAt, under: pressedControl(reached), at: e.timeStamp, x: point.x, y: point.y, relaid: true };
+    gesture.aim = {
+      key: aimedAt, under: pressedControl(reached), at: e.timeStamp, x: point.x, y: point.y,
+      relaid: aimedAt.matches('[data-ticket-id]'),
+    };
     gesture.boardMoved = !!active && active === editorFieldRef.current ? 'editor' : null;
     // A tap that puts down what was held — into a group, onto a card, back
     // where it was — lays the board out again under the finger: the card it

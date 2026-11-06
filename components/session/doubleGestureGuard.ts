@@ -16,23 +16,32 @@ export const pressedControl = (target: Element | null) => target?.closest(CONTRO
 
 const TEXT_INPUT_TYPES = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number']);
 /**
- * A field a press only puts the caret in, or selects the words of: a press
- * there does nothing else, so the next press of a double click is its own — a
- * proposal's text, a press opening its field where the text was, selects a
- * word with a double click as it always did.
+ * A field a press puts the caret in — or, the next of a double click, selects
+ * a word of, and a triple click its whole text, for the next keystroke to
+ * replace. It is the next press's own only where the first pressed text that
+ * became that field (guardsPress): a proposal's text opens its field where the
+ * text was, and a double click there selects a word as it always did.
  */
 export const isTextField = (target: Element | null) =>
   target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(target.type));
 
 /**
  * Where and when the gesture before aimed, and what it pressed: the control
- * around its target (key), and what lay under the pointer there (under). For
- * a tap the board claims, key is its card or group and under what the finger
- * reached in it. relaid: that tap changed what is held, and the card it
- * reached was drawn again around the finger (its "Selected" banner pushed
- * its content down).
+ * around its target (key), what lay under the pointer there (under), and where
+ * that control was drawn (box). For a tap the board claims, key is its card or
+ * group and under what the finger reached in it. relaid: that tap was on a
+ * card, which it picked up or put down, and drew again around the finger (its
+ * "Selected" banner pushed its content down) — a group's ring moves nothing.
  */
-export type GuardAim = GestureAim & { key: Element | null; under: Element | null; relaid?: boolean };
+export type GuardAim = GestureAim & { key: Element | null; under: Element | null; box?: Box | null; relaid?: boolean };
+type Box = { left: number; top: number; width: number; height: number };
+export const boxOf = (element: Element | null): Box | null => {
+  if (!element) return null;
+  const r = element.getBoundingClientRect();
+  return { left: r.left, top: r.top, width: r.width, height: r.height };
+};
+// Moved or resized by more than this, the control is not where the press found it.
+const SHIFT_PX = 2;
 
 export interface GestureGuardState {
   aim: GuardAim | null;
@@ -79,6 +88,37 @@ export const underMoved = (aim: GuardAim | null) => {
 };
 
 /**
+ * The control the gesture before pressed is still on the page, but moved or
+ * resized: its own click shrank the badge beside it, and the box it sits in
+ * moved. The point it was pressed at may still lie on it — a proposal's thumb
+ * is wide, and the vote box moved 36 px — while a finger that drifts a few
+ * pixels reaches the neutral vote that came there (pass 18 of 42.1). jsdom
+ * lays nothing out: every box is empty, and nothing moves.
+ */
+export const aimShifted = (aim: GuardAim | null) => {
+  const now = aim?.key?.isConnected ? boxOf(aim.key) : null;
+  if (!now || !aim?.box) return false;
+  return Math.abs(now.left - aim.box.left) > SHIFT_PX || Math.abs(now.top - aim.box.top) > SHIFT_PX
+    || Math.abs(now.width - aim.box.width) > SHIFT_PX || Math.abs(now.height - aim.box.height) > SHIFT_PX;
+};
+
+/** What the gesture before pressed, a control or not, left the page: a dialog's backdrop gone with its click. */
+export const aimGone = (aim: GuardAim | null) => !!aim?.key && !aim.key.isConnected;
+
+/**
+ * What the gesture before aimed at is no longer under the point it aimed at
+ * — covered by a dialog that closed or opened, or moved away with the board:
+ * a pick-up in the Group phase drew the hint above the board a line longer,
+ * and the card above came under the finger. For the taps the board claims;
+ * jsdom has no elementFromPoint, and there it says nothing.
+ */
+export const aimDisplaced = (aim: GuardAim | null) => {
+  if (!aim?.key || typeof document.elementFromPoint !== 'function') return false;
+  const now = document.elementFromPoint(aim.x, aim.y);
+  return !!now && !aim.key.contains(now);
+};
+
+/**
  * The control of the gesture before went with its click: an act, whatever
  * editor its press closed too — taken as the reason, it stopped every tap of
  * a steady pace on the Delete that came up (pass 16 of 42.1). Asked when the
@@ -95,15 +135,25 @@ export const boardMovedSince = (state: GestureGuardState) => {
  * for a tap on a control — and answers whether it presses nothing.
  *
  * The browser's own count (detail) says a press is the next of a double click:
- * at the same point, a moment later. On another control than the first, what
- * lies under the pointer changed with the first click, whatever changed it —
- * a row moved, a chip appeared, a dialog opened or closed — and the press
- * landed on what came there: it presses nothing (pass 17 of 42.1). For a tap
- * the browser counts each tap from the one before, and far (100 dp on
- * Android): counted, it is the next only a fingertip from where the first
- * aimed (isNearAim). Past the browser's count, the board's own half second
- * (isNextTap) still makes a tap the next once something moved under it
- * (boardMovedSince, underMoved, a claimed tap that drew its card again).
+ * at the same point, a moment later. After a press on a control, another
+ * control there came with the first click, whatever changed it — a row moved,
+ * a chip appeared, a dialog opened or closed — and the press landed on what
+ * came there: it presses nothing (pass 17 of 42.1). After a press on no
+ * control (a vote's count, missed for its "+"), nothing came with it unless
+ * something moved: the retry is the user's own (pass 18). For a tap the
+ * browser counts each tap from the one before, and far (100 dp on Android):
+ * counted, it is the next only a fingertip from where the first aimed
+ * (isNearAim). Past the browser's count, the board's own half second
+ * (isNextTap) still makes a tap the next once something moved under it: a
+ * mark (boardMovedSince), a claimed tap that drew its card again (relaid),
+ * what it pressed gone, moved (aimShifted) or no longer under its point
+ * (underMoved).
+ *
+ * A text field is the next press's own only where the first pressed text
+ * that became that field, nothing marked: after the card's Edit went with its
+ * click, the next press of a double click selected the word under it in the
+ * editor that came there, and the next keystroke replaced it for everyone
+ * (pass 18).
  */
 export const guardsPress = (state: GestureGuardState, e: MouseEvent): boolean => {
   const target = e.target instanceof Element ? e.target : null;
@@ -112,9 +162,12 @@ export const guardsPress = (state: GestureGuardState, e: MouseEvent): boolean =>
   const tapMouse = isTapMouse(state.touchEndAt, e.timeStamp);
   const counted = e.detail > 1 && (!tapMouse || isNearAim(aim, point));
   const nextTap = tapMouse && isNextTap(aim, state.tapStartedAt ?? e.timeStamp, point);
-  if (aim && (counted || nextTap) && pressedControl(target) !== aim.key && !isTextField(target)) {
-    const moved = !!boardMovedSince(state) || !!aim.relaid || underMoved(aim);
-    if (counted || moved) {
+  if (aim && (counted || nextTap) && pressedControl(target) !== aim.key) {
+    const marked = boardMovedSince(state);
+    const onControl = !!aim.key?.matches(CONTROL_SELECTOR);
+    const moved = !!marked || !!aim.relaid || aimGone(aim) || aimShifted(aim) || underMoved(aim);
+    const ownField = isTextField(target) && !onControl && !marked;
+    if (!ownField && ((counted && onControl) || moved)) {
       state.stopped = true;
       // The half second after a closed editor runs on from each press it
       // stops; an act's runs from the act alone: from its stops, at a steady
@@ -127,7 +180,7 @@ export const guardsPress = (state: GestureGuardState, e: MouseEvent): boolean =>
   }
   state.stopped = false;
   const key = pressedControl(target);
-  state.aim = { key, under: key, at: e.timeStamp, x: e.clientX, y: e.clientY };
+  state.aim = { key, under: key, box: boxOf(key), at: e.timeStamp, x: e.clientX, y: e.clientY };
   state.boardMoved = null;
   return false;
 };

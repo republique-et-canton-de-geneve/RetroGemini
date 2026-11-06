@@ -66,7 +66,10 @@ const createSession = (): HealthCheckSessionType => ({
   dimensions: [{ id: 'dim-1', name: 'Communication', goodDescription: 'People collaborate well', badDescription: 'People work in silos' }],
   participants: [facilitator, alice],
   settings: { isAnonymous: false, revealRoti: false, showParticipantVotes: false },
-  ratings: { p1: { 'dim-1': { rating: 2, comment: 'Needs more clarity' } } },
+  ratings: {
+    p1: { 'dim-1': { rating: 2, comment: 'Needs more clarity' } },
+    'facilitator-1': { 'dim-1': { rating: 3, comment: 'We ship late but we ship' } }
+  },
   actions: [
     proposal('a1', 'Write the notes the day before'),
     proposal('a2', 'Ask support to review the notes'),
@@ -152,6 +155,24 @@ describe('the health check’s next press or tap, once the first took its own co
 
     expect(screen.getByText('Write the notes the day before')).toBeTruthy();
     expect(writes()).toBe(before);
+  });
+
+  // Review finding (pass 18 of 42.1): the comment's Edit goes with its click
+  // and its field comes there: the next press of a double click selected a
+  // word of the comment, and the next keystroke replaced it.
+  it.each(ways)('selects nothing in the comment’s field with %s on its Edit', async (_how, touched, detail) => {
+    renderSession();
+    const edit = await screen.findByRole('button', { name: 'Edit comment' });
+
+    const clock = heldClock();
+    try {
+      expect(press(edit, 1, touched)).toEqual(pressedAndClicked);
+      const field = screen.getByDisplayValue('We ship late but we ship');
+      clock.at(150);
+      expect(press(field, detail, touched).pressed).toBe(false);
+    } finally {
+      clock.restore();
+    }
   });
 
   it.each(ways)('deletes one proposal with %s on its Delete', async (_how, touched, detail) => {

@@ -3709,21 +3709,50 @@ describe('Open board — every hold and every drop', () => {
   // card is a coloured card. A fixed slate-500 measured 1.0 to 1.6:1 there,
   // worse than the slate-300 it replaced; and the test above measures a white
   // card only. Measured against the card's own colour, as the pencil is.
+  // Review finding (pass 18 of 42.1): those colours all take white text, so a
+  // control painted white whatever the card passed; the light ones — the
+  // first column of every custom template (#10B981), amber, lime, cyan —
+  // take black. The open state is measured on its own background, laid over
+  // the card's, and the card's other controls the same way.
   it.each([
     ['#475569'], ['#D97706'], ['#059669'], ['#64748B'], ['#E11D48'], ['#2563EB'],
-  ])('draws the add-reaction control at a contrast that can be seen on a card coloured %s, closed and open', async (customColor) => {
+    ['#10B981'], ['#F59E0B'], ['#84CC16'], ['#06B6D4'],
+  ])('draws the card’s controls at a contrast that can be seen on a card coloured %s, Add reaction closed and open', async (customColor) => {
     const user = userEvent.setup();
     renderBoard(createBoard({ columns: [{ ...column('todo', 'To Discuss'), customColor }, column('doing', 'Discussing')] }));
     const cardEl = cardElement('Too many meetings');
-    const background = cardEl.style.backgroundColor.match(/\d+/g)!.map(Number);
-    const bg = rgbToHex(background[0], background[1], background[2]);
+    const [r, g, b] = cardEl.style.backgroundColor.match(/\d+/g)!.map(Number);
+    const bg = rgbToHex(r, g, b);
+    // bg-black/10 over the card: a tenth of black laid over its colour.
+    const opened = rgbToHex(Math.round(r * 0.9), Math.round(g * 0.9), Math.round(b * 0.9));
     const fgOf = (control: HTMLElement) => (control.className.includes('text-white') ? '#FFFFFF' : control.className.includes('text-black') ? '#000000' : null);
+    const measured = (control: HTMLElement, surface: string) => {
+      const fg = fgOf(control);
+      expect(fg).not.toBeNull();
+      return contrastRatio(fg!, surface);
+    };
 
     const add = within(cardEl).getByRole('button', { name: 'Add reaction' });
-    expect(fgOf(add)).not.toBeNull();
-    expect(contrastRatio(fgOf(add)!, bg)).toBeGreaterThanOrEqual(3);
+    expect(measured(add, bg)).toBeGreaterThanOrEqual(3);
+    expect(measured(within(cardEl).getByRole('button', { name: 'Edit ticket' }), bg)).toBeGreaterThanOrEqual(3);
+    expect(measured(within(cardEl).getByTestId('ticket-comment-btn'), bg)).toBeGreaterThanOrEqual(3);
     await user.click(add);
-    expect(contrastRatio(fgOf(within(cardEl).getByRole('button', { name: 'Add reaction' }))!, bg)).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByTestId('emoji-option').length).toBeGreaterThan(0);
+    const open = within(cardEl).getByRole('button', { name: 'Add reaction' });
+    // Its own background, a token of its own — not the hover's.
+    expect(open.className.split(/\s+/)).toContain('bg-black/10');
+    expect(open.className.split(/\s+/).filter((token) => /^bg-/.test(token))).toEqual(['bg-black/10']);
+    expect(measured(open, opened)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('draws the add-reaction control open at a contrast that can be seen on a white card', async () => {
+    const user = userEvent.setup();
+    renderBoard(groupedBoard());
+    await screen.findByText('Too many meetings');
+    await user.click(within(cardElement('Too many meetings')).getByRole('button', { name: 'Add reaction' }));
+
+    expect(screen.getAllByTestId('emoji-option').length).toBeGreaterThan(0);
+    expect(effectivePair(within(cardElement('Too many meetings')).getByRole('button', { name: 'Add reaction' })).ratio).toBeGreaterThanOrEqual(3);
   });
 
   it('draws the add-reaction control at a contrast that can be seen', async () => {

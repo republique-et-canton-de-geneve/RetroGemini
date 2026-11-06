@@ -336,12 +336,18 @@ double click presses nothing on another control than the first pressed**
 the health check's proposal rows deleted two proposals, or the one being
 edited, until pass 17 of 42.1; its click is stopped too, never the
 keyboard's, which has no detail). The browser counts that press (its
-`detail`) at the point of the first, a moment later: another control there
-came with the first click, whatever brought it — no editor need close — and a
-press there landed on what came there. It presses nothing on another control
-except a text field (`isTextField`), where it only places the caret: a
-proposal's text opens its field where the text was, and a double click there
-still selects a word. What came there: the card that grew back as an editor
+`detail`) at the point of the first, a moment later: after a press on a
+control, another control there came with the first click, whatever brought
+it — no editor need close — and a press there landed on what came there. It
+presses nothing there. After a press on no control (a vote's count, missed
+for its "+") nothing came with it unless something moved, and the retry is
+the user's own (pass 18 of 42.1). A text field (`isTextField`) is the next
+press's own only where the first pressed text that became it, nothing
+marked: a proposal's text opens its field where the text was, and a double
+click there still selects a word; but the card's Edit, or a health-check
+comment's, goes with its click and its field comes there, and the next press
+of a double click selected the word under it — a triple click, the whole
+text — for the next keystroke to replace, for everyone. What came there: the card that grew back as an editor
 closed after the press before was aimed — at that press's end, by its click's
 write, or by ending, at its own mousedown, a press whose release Chromium
 kept for a context menu or a select's list — its Delete, which asks nothing,
@@ -366,13 +372,15 @@ everyone (two comments, two proposals and their votes, two columns and the
 places of their cards), deleted the card under the picker, gave the next
 badge's reaction, deleted the proposal or the comment being edited, or
 accepted two follow-ups. A press on text that becomes a field (a proposal's)
-is not one: the field comes where the text was. Nor is a press that leaves its
-control where it was, though what is under the pointer changed: that one only a
-browser that lays the page out can see — what lies at the point the gesture
-before aimed is no longer what it pressed there (`underMoved`), the next tap
-landing on what came there; jsdom has no `elementFromPoint`, and
-`e2e/retro-touch-card-controls.spec.ts` holds it, a double tap past the
-browser's count on a dialog's backdrop. A control that comes back
+is not one: the field comes where the text was. Past the browser's count, a
+tap is also the next once what the one before pressed left the page, a
+control or not (`aimGone`: a dialog's backdrop gone with its click), or, in a
+browser that lays the page out, moved (`aimShifted`: a proposal's thumb, its
+vote box moved 36 px by the badge beside it, while still under the point a
+finger drifted a few pixels from) or is no longer under its point
+(`underMoved`: a label pushed aside). jsdom lays nothing out, so
+`__tests__/doubleGestureGuard.test.ts` lays the page out by hand and
+`e2e/retro-touch-card-controls.spec.ts` double taps a dialog's backdrop. A control that comes back
 where it went is another control: the card's Edit, back once its editor
 closed, presses nothing when tapped again a fingertip from the first within
 half a second, and does after it. So does a tap that puts down
@@ -381,10 +389,17 @@ laid out again under the finger, and the next tap deleted the card just
 dropped. Such an act is the reason, whatever editor its press closed too —
 but for a tap the board claims, where an editor it closed stays the reason
 and its half second runs on (it kept the third tap of a triple tap off the
-card that grew back). And a tap the board claims draws the card it reached
-again around the finger (`relaid`): picked up, its *Selected* banner pushed
-its content down, and the mouse of the next tap pressed its vote, its
-comments, its Delete. Two controls side by side, nearer than the browser
+card that grew back), at the cost of a steady pace: the taps after such a
+drop press nothing until a pause of half a second. And a tap the board
+claims on a card draws it again around the finger (`relaid`): picked up, its
+*Selected* banner pushed its content down, and the mouse of the next tap
+pressed its vote, its comments, its Delete — a group picked up takes a ring
+and moves nothing, and its own vote is the next tap's. The next tap the
+board claims is ignored too once what the one before aimed at left the page
+— a dialog's backdrop, the next tap dropping the held card on the card under
+it — or is no longer under its point (`aimDisplaced`: a pick-up in the Group
+phase drew the hint above the board a line longer, and the next tap dropped
+the card on the card above). Two controls side by side, nearer than the browser
 counts a double click from, pressed one after the other that quickly: the
 second presses nothing, and does pressed again. A
 press it stops aims at nothing, so the third press of a triple click is stopped too.
@@ -411,7 +426,8 @@ press that does nothing still belongs to the sequence: the next one is
 measured from its time, as a browser counts its taps, and against where the
 first aimed — measured from the first tap only, the third tap of a triple tap
 at an ordinary pace fell past half a second and grouped the card. After an
-act — a deletion, any control gone with its click, a drop — the half second
+act — a deletion, any control gone with its click, a drop that closed no
+editor — the half second
 runs from the act alone, and past it only the browser's count stops a tap: run
 on from every tap it stopped, it deleted the first card and nothing after it
 for a facilitator clearing cards at two taps a second, for as long as the pace
