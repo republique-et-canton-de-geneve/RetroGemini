@@ -761,6 +761,12 @@ test('taps after one on a group’s title that closes an editor press nothing th
     // Inside the board's fingertip (24 px), with room to spare.
     expect(pair.distance).toBeLessThanOrEqual(18);
     const { first, next: at } = pair;
+    // The editor took its Edit off the page when it opened: a tap on the Edit
+    // that came back, at the same point within half a second of the first, is
+    // the next of a double tap, and presses nothing (aimLeftPage). A person
+    // closes the editor with a gesture of their own, which starts over; the
+    // test closed it with none.
+    await page.waitForTimeout(600);
     await openEditor(`${long} too`, ' again');
     expect(await rectOf(title)).toEqual(titleRect);
     await page.waitForTimeout(700);
@@ -915,6 +921,73 @@ test('taps at a steady pace on the Delete that comes up under the finger delete 
     await expect(page.locator('[data-ticket-id]')).toHaveCount(3);
     for (const text of ['Card 1', 'Card 2', 'Card 3']) await expect(card(page, text)).toBeVisible();
     expect(sent.length - before).toBe(2);
+  } finally {
+    await context.close();
+  }
+});
+
+// Review finding (pass 16 of 42.1): a Delete is not the only control a press
+// takes off the page with its own click. An editor's Cancel goes with its
+// editor, and the row's Delete, which asks nothing, comes back where it was: a
+// double click, or a double tap, on the Cancel of a comment's editor deleted
+// the comment being edited, for everyone.
+for (const device of ['phone', 'computer'] as const) test(`a double ${device === 'phone' ? 'tap' : 'click'} on the Cancel of a comment’s editor deletes no comment, on a ${device}`, async ({ browser }) => {
+  const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
+  const context = await browser.newContext(device === 'phone'
+    ? { ...phone, locale: 'en-US' }
+    : { locale: 'en-US', viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  try {
+    const sent = await startOpenBoard(page, `${TEAM_NAME}-cmtcancel-${device}`);
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    await field.fill('Card with remarks');
+    await page.keyboard.press('Enter');
+    await expect(card(page, 'Card with remarks')).toBeVisible();
+    await field.blur();
+    await card(page, 'Card with remarks').getByTestId('ticket-comment-btn').click();
+    const dialog = page.getByRole('dialog');
+    for (const text of ['First remark', 'Second remark']) {
+      await dialog.getByTestId('add-comment-input').fill(text);
+      await dialog.getByTestId('submit-comment-btn').click();
+      await expect(dialog.getByText(text)).toBeVisible();
+    }
+    await page.waitForTimeout(700);
+
+    // The first remark's Delete is drawn where its editor's Cancel was: the
+    // point pressed lies in both, measured, never assumed.
+    const deleteBox = (await dialog.getByRole('button', { name: 'Delete comment' }).first().boundingBox())!;
+    if (device === 'computer') await dialog.getByText('First remark').hover();
+    await dialog.getByRole('button', { name: 'Edit comment' }).first().click();
+    const cancelBox = (await dialog.getByRole('button', { name: 'Cancel editing comment' }).boundingBox())!;
+    const left = Math.max(deleteBox.x, cancelBox.x);
+    const right = Math.min(deleteBox.x + deleteBox.width, cancelBox.x + cancelBox.width);
+    const top = Math.max(deleteBox.y, cancelBox.y);
+    const bottom = Math.min(deleteBox.y + deleteBox.height, cancelBox.y + cancelBox.height);
+    expect(right - left).toBeGreaterThan(2);
+    expect(bottom - top).toBeGreaterThan(2);
+    const at = { x: (left + right) / 2, y: (top + bottom) / 2 };
+    const before = sent.length;
+
+    if (device === 'phone') {
+      await page.touchscreen.tap(at.x, at.y);
+      await page.waitForTimeout(150);
+      await page.touchscreen.tap(at.x, at.y);
+    } else {
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down({ clickCount: 1 });
+      await page.mouse.up({ clickCount: 1 });
+      await page.waitForTimeout(150);
+      await page.mouse.down({ clickCount: 2 });
+      await page.mouse.up({ clickCount: 2 });
+    }
+    await page.waitForTimeout(700);
+
+    await expect(dialog.getByRole('button', { name: 'Cancel editing comment' })).toHaveCount(0);
+    await expect(dialog.getByText('First remark')).toBeVisible();
+    await expect(dialog.getByText('Second remark')).toBeVisible();
+    expect(sent.length - before).toBe(0);
+    // The second reached the Delete of the remark whose editor closed.
+    expect((await controlAt(page, at)).label).toBe('Delete comment');
   } finally {
     await context.close();
   }

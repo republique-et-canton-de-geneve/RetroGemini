@@ -2517,6 +2517,44 @@ describe('Open board — every hold and every drop', () => {
             expect(await persistedCount()).toBe(before);
           });
 
+          // Review finding (pass 16 of 42.1): nothing pinned the ordinary
+          // end once it moved from React's onDragEnd to the source's own
+          // listener — a drag that dropped nothing (Escape, released outside
+          // every target, refused), its card still on the page. Only the
+          // card that left the page was tested, and the card stayed held
+          // after every other drag, for the next keyboard activation to
+          // group for everyone.
+          it.each([
+            ['OPEN_BOARD', cardTargets],
+            ['GROUP', cardTargets],
+            ['BRAINSTORM', () => screen.queryAllByRole('button', { name: /move the selected card to/ })],
+          ])('puts down what it held at the end of a drag that dropped nothing, its card still on the page: %s', async (phase, targets) => {
+            renderBoard(worded(5, 'Too many meetings', { phase }), alice);
+            await screen.findByText('Too many meetings');
+            const source = cardById('t-c');
+            fireEvent.dragStart(source, { dataTransfer: dataTransfer() });
+            expect(targets().length).toBeGreaterThan(0);
+            fireEvent.dragEnd(source, { dataTransfer: dataTransfer() });
+            await tick();
+
+            expect(source.isConnected).toBe(true);
+            expect(targets()).toHaveLength(0);
+            expect(screen.queryByText('Selected - Tap to cancel')).toBeNull();
+          });
+
+          it('puts down a group at the end of a drag that dropped nothing, still on the page', async () => {
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            const source = groupElement('Delivery');
+            fireEvent.dragStart(source, { dataTransfer: dataTransfer() });
+            expect(groupTargets().length).toBeGreaterThan(0);
+            fireEvent.dragEnd(source, { dataTransfer: dataTransfer() });
+            await tick();
+
+            expect(source.isConnected).toBe(true);
+            expect(groupTargets()).toHaveLength(0);
+          });
+
           // Review finding (pass 15 of 42.1): React heard none of that end,
           // and what the drag held stayed held after it — the card's
           // "Selected" banner and every target to drop it on, a group's ring
@@ -3355,6 +3393,45 @@ describe('Open board — every hold and every drop', () => {
     expect(await persistedCount()).toBe(before);
   });
 
+  // Review finding (pass 16 of 42.1): a grouped card released over its own
+  // group, or over a card of its group, was put down where it was, and its
+  // write changed nothing but the revision: every client paid a broadcast for
+  // it, and a teammate's write from the revision before lost its race — a
+  // move, the last keystrokes of a title, healed away.
+  it.each(['OPEN_BOARD', 'GROUP'] as const)('a grouped card dropped on its own group, or on a card of its group, writes nothing: %s', async (phase) => {
+    renderBoard(groupedBoard({ phase }));
+    await screen.findByText('Flaky deploys');
+    const before = await persistedCount();
+    // Each drag start puts a copy of the card on the page for its image,
+    // gone a frame later.
+    const nextFrame = () => act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+
+    drag(cardElement('Flaky deploys'), groupElement('Delivery'));
+    await nextFrame();
+    drag(cardElement('Flaky deploys'), cardById('t-b'));
+
+    expect(await persistedCount()).toBe(before);
+    expect(cardTargets()).toHaveLength(0);
+  });
+
+  it.each([
+    /Group here: group the selected ticket with Slow rollbacks/,
+    /Add selected card to this group: Delivery/,
+  ])('writes nothing for the keyboard’s drop of a grouped card in its own group: %s', async (target) => {
+    const user = userEvent.setup();
+    renderBoard(groupedBoard());
+    await screen.findByText('Flaky deploys');
+    act(() => screen.getByRole('button', { name: /Pick up the ticket Flaky deploys/ }).focus());
+    await user.keyboard('{Enter}');
+    const before = await persistedCount();
+
+    act(() => screen.getByRole('button', { name: target }).focus());
+    await user.keyboard('{Enter}');
+
+    expect(await persistedCount()).toBe(before);
+    expect(cardTargets()).toHaveLength(0);
+  });
+
   it('a grouped card dropped on another group joins it, and the pair it left hands its votes to its last card', async () => {
     renderBoard(groupedBoard({
       tickets: [
@@ -3603,7 +3680,22 @@ describe('Open board — every hold and every drop', () => {
     expect(controls.className).toContain('[@media(hover:hover)]:opacity-0');
     expect(controls.className).toContain('group-hover:opacity-100');
     expect(controls.className).toContain('focus-within:opacity-100');
-    for (const control of [remove, edit]) expect(control.className).not.toContain('text-slate-300');
+    // Measured, not a class refused: slate-400 passed a check that only
+    // refused slate-300, at 2.63:1 (pass 16 of 42.1). An icon is non-text,
+    // 3:1 (1.4.11).
+    for (const control of [remove, edit]) expect(effectivePair(control).ratio).toBeGreaterThanOrEqual(3);
+  });
+
+  // Review finding (pass 16 of 42.1): the card's add-reaction control, always
+  // shown on every screen, was slate-300 on the card's white, 1.49:1 — the
+  // colour pass 15 took off the comment controls. axe skips icon ligatures,
+  // so no audit could report it.
+  it('draws the add-reaction control at a contrast that can be seen', async () => {
+    renderBoard(groupedBoard());
+    await screen.findByText('Too many meetings');
+
+    const add = within(cardElement('Too many meetings')).getByRole('button', { name: 'Add reaction' });
+    expect(effectivePair(add).ratio).toBeGreaterThanOrEqual(3);
   });
 
   it('keeps the first line clear of the edit control, on every screen', async () => {

@@ -289,6 +289,16 @@ describe('a tap the board acts on, and the field it leaves', () => {
   };
   const nothingPressed = { pressed: false, clicked: false };
   const pressedAndClicked = { pressed: true, clicked: true };
+  // A press whose mousedown takes the focus to the control, as a browser's
+  // does: the card editor open elsewhere is left for the press, and its text
+  // rides the click's write. jsdom moves no focus on a mousedown.
+  const pressLeaving = (element: HTMLElement, detail: number, x = 50, y = 50) => {
+    const pressed = fireEvent.mouseDown(element, { detail, clientX: x, clientY: y });
+    if (pressed) act(() => element.focus());
+    fireEvent.mouseUp(element, { detail, clientX: x, clientY: y });
+    const clicked = fireEvent.click(element, { detail, clientX: x, clientY: y });
+    return { pressed, clicked };
+  };
 
   it('takes the focus out of the field being typed, as the mousedown it cancels did', async () => {
     const user = userEvent.setup();
@@ -842,6 +852,41 @@ describe('a tap the board acts on, and the field it leaves', () => {
       expect(document.activeElement).toBe(title);
     });
 
+    // Review finding (pass 16 of 42.1): nothing pinned the half second run on
+    // from each tap it stops when the editor closed with its click's write,
+    // the third way an editor closes. Run from the first tap alone, the third
+    // tap of a triple tap at an ordinary pace deleted the card that grew back.
+    it('presses no control with the taps after one whose click’s write closed the editor, at an ordinary pace', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await editTyped(user);
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        const vote = within(card('td')).getByTestId('vote-add');
+        expect(tap(vote)).toBe(true);
+        expect(pressLeaving(vote, 1)).toEqual(pressedAndClicked);
+        expect(within(card('tc')).queryByRole('textbox')).toBeNull();
+        const remove = within(card('tc')).getByRole('button', { name: 'Delete ticket' });
+        clock.at(300);
+        expect(tap(remove)).toBe(true);
+        expect(pressOf(remove, 1)).toEqual(nothingPressed);
+        clock.at(600);
+        expect(tap(remove)).toBe(true);
+        expect(pressOf(remove, 1)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      expect(document.querySelector('[data-ticket-id="tc"]')).not.toBeNull();
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(1);
+      expect(after[0].tickets.find((t) => t.id === 'tc')?.text).toBe('Too many meetings on Mondays');
+      expect(after[0].tickets.find((t) => t.id === 'td')?.votes).toContain('facilitator-1');
+    });
+
     it('does nothing on a card once the first, on a group’s title, closed the editor', async () => {
       const user = userEvent.setup();
       renderBoard();
@@ -1127,6 +1172,291 @@ describe('a tap the board acts on, and the field it leaves', () => {
 
       expect(screen.getByRole('button', { name: 'Remove the Keep column' })).toBeTruthy();
       expect((await writes()).slice(before)).toHaveLength(1);
+    });
+
+    // Review finding (pass 16 of 42.1): the press that deleted a card also
+    // closed an editor open on another one, and the editor was taken as the
+    // reason — its half second ran on from every tap it stopped, and at a
+    // steady pace of two taps a second no tap after the first deleted, for as
+    // long as the pace lasted: the defect pass 15 fixed, back with an editor
+    // open. A deletion is the reason, whatever else its press closed.
+    it.each([
+      ['its end reached before the next', true],
+      ['the next coming before its end', false],
+    ])('deletes the next card with the tap after the one it stopped, at a steady pace, when the first also closed an editor: %s', async (_how, settles) => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await user.click(within(card('ta')).getByRole('button', { name: 'Edit ticket' }));
+      await user.type(within(card('ta')).getByRole('textbox'), ' in staging');
+      const before = (await writes()).length;
+      const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+      const clock = heldClock();
+      try {
+        expect(tap(removeOf('td'))).toBe(true);
+        expect(pressLeaving(removeOf('td'), 1)).toEqual(pressedAndClicked);
+        if (settles) await settle();
+        expect(within(card('ta')).queryByRole('textbox')).toBeNull();
+        clock.at(450);
+        expect(tap(removeOf('tc'))).toBe(true);
+        expect(pressLeaving(removeOf('tc'), 1)).toEqual(nothingPressed);
+        if (settles) await settle();
+        clock.at(900);
+        expect(tap(removeOf('tc'))).toBe(true);
+        expect(pressLeaving(removeOf('tc'), 1)).toEqual(pressedAndClicked);
+      } finally {
+        clock.restore();
+      }
+
+      expect(onBoard('tc')).toBe(false);
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(2);
+      expect(after[0].tickets.find((t) => t.id === 'ta')?.text).toBe('Flaky deploys in staging');
+    });
+  });
+
+  // Review finding (pass 16 of 42.1): a Delete is not the only control a
+  // press takes off the page with its own click. The picker closes on the
+  // emoji it was given, over the card's Delete; a reaction badge goes with
+  // the last reaction to it, and the next badge slides into its place; an
+  // editor's Cancel goes with its editor, and the row's Delete comes back
+  // there; a follow-up's Accept moves it to the list below, and the next
+  // follow-up comes up. The next press of a double click, or the next tap of
+  // a double tap, pressed what came there, for everyone. So did the next tap
+  // after one that dropped a held card: the board is laid out again under the
+  // finger, and it deleted the card just dropped.
+  describe('the next press or tap, once the first took its own control off the page', () => {
+    const removeOf = (id: string) => within(card(id)).getByRole('button', { name: 'Delete ticket' });
+    const onBoard = (id: string) => document.querySelector(`[data-ticket-id="${id}"]`) !== null;
+    // A tap on a control: the browser emulates the mouse for it.
+    const press = (element: HTMLElement, detail: number, touched: boolean) => {
+      if (touched) expect(tap(element)).toBe(true);
+      return pressOf(element, detail);
+    };
+    const ways: Array<[string, boolean]> = [['a double tap', true], ['a double click', false]];
+
+    it.each(ways)('deletes nothing with %s on an emoji of the picker, over the card’s Delete', async (_how, touched) => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await user.click(within(card('tc')).getByRole('button', { name: 'Add reaction' }));
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(press(screen.getAllByTestId('emoji-option')[1], 1, touched)).toEqual(pressedAndClicked);
+        expect(screen.queryAllByTestId('emoji-option')).toHaveLength(0);
+        clock.at(150);
+        expect(press(removeOf('tc'), 2, touched)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      expect(onBoard('tc')).toBe(true);
+      expect((await writes()).slice(before)).toHaveLength(1);
+    });
+
+    it.each(ways)('gives no reaction with %s on one’s own badge, the next sliding into its place', async (_how, touched) => {
+      renderGroupPhase({
+        phase: 'OPEN_BOARD',
+        tickets: [{
+          id: 'tc', colId: 'col-1', text: 'Too many meetings', authorId: 'facilitator-1', groupId: null, votes: [],
+          reactions: { '👍': ['facilitator-1'], '🎉': ['bob'] },
+        }],
+        groups: [],
+      });
+      await screen.findByText('Too many meetings');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(press(screen.getAllByTestId('ticket-reaction')[0], 1, touched)).toEqual(pressedAndClicked);
+        expect(screen.getAllByTestId('ticket-reaction')).toHaveLength(1);
+        clock.at(150);
+        expect(press(screen.getAllByTestId('ticket-reaction')[0], 2, touched)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(1);
+      expect(after[0].tickets[0].reactions).toEqual({ '🎉': ['bob'] });
+    });
+
+    it.each(ways)('deletes no proposal with %s on the Cancel of its editor', async (_how, touched) => {
+      const user = userEvent.setup();
+      // The Discuss phase brings its topic into view; jsdom lays nothing out.
+      Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+      const proposal = (id: string, text: string) => ({ id, text, assigneeId: null, done: false, type: 'proposal' as const, linkedTicketId: 'tc', proposalVotes: {} });
+      renderGroupPhase({
+        phase: 'DISCUSS',
+        tickets: [{ id: 'tc', colId: 'col-1', text: 'Late release notes', authorId: 'facilitator-1', groupId: null, votes: ['facilitator-1'] }],
+        groups: [],
+        discussionFocusId: 'tc',
+        actions: [proposal('p1', 'Write the notes the day before'), proposal('p2', 'Ask support to review the notes')],
+      });
+      await user.click(await screen.findByText('Write the notes the day before'));
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(press(screen.getByRole('button', { name: 'Cancel the edit' }), 1, touched)).toEqual(pressedAndClicked);
+        expect(screen.queryByRole('button', { name: 'Cancel the edit' })).toBeNull();
+        clock.at(150);
+        expect(press(screen.getAllByRole('button', { name: 'Delete proposal' })[0], 2, touched)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      expect(screen.getByText('Write the notes the day before')).toBeTruthy();
+      expect((await writes()).slice(before)).toHaveLength(0);
+    });
+
+    // Text that becomes a field is not a control gone: the field comes where
+    // the text was, and a double click on a proposal opens its editor and
+    // selects a word, as it always did.
+    it('leaves the next press of a double click on a proposal’s text to the field that came there', async () => {
+      Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+      const proposal = (id: string, text: string) => ({ id, text, assigneeId: null, done: false, type: 'proposal' as const, linkedTicketId: 'tc', proposalVotes: {} });
+      renderGroupPhase({
+        phase: 'DISCUSS',
+        tickets: [{ id: 'tc', colId: 'col-1', text: 'Late release notes', authorId: 'facilitator-1', groupId: null, votes: ['facilitator-1'] }],
+        groups: [],
+        discussionFocusId: 'tc',
+        actions: [proposal('p1', 'Write the notes the day before')],
+      });
+      const text = await screen.findByText('Write the notes the day before');
+
+      const clock = heldClock();
+      try {
+        expect(pressOf(text, 1)).toEqual(pressedAndClicked);
+        const field = screen.getByDisplayValue('Write the notes the day before');
+        clock.at(150);
+        expect(pressOf(field, 2).pressed).toBe(true);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    it.each(ways)('deletes no comment with %s on the Cancel of its editor', async (_how, touched) => {
+      const user = userEvent.setup();
+      const comment = (id: string, text: string) => ({ id, authorId: 'facilitator-1', authorName: 'Facilitator', text, createdAt: '2026-11-01T10:00:00.000Z' });
+      renderGroupPhase({
+        phase: 'OPEN_BOARD',
+        tickets: [{
+          id: 'tc', colId: 'col-1', text: 'Too many meetings', authorId: 'facilitator-1', groupId: null, votes: [],
+          comments: [comment('c1', 'First remark'), comment('c2', 'Second remark')],
+        }],
+        groups: [],
+      });
+      await user.click(within(card('tc')).getByTestId('ticket-comment-btn'));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getAllByRole('button', { name: 'Edit comment' })[0]);
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(press(within(dialog).getByRole('button', { name: 'Cancel editing comment' }), 1, touched)).toEqual(pressedAndClicked);
+        clock.at(150);
+        expect(press(within(dialog).getAllByRole('button', { name: 'Delete comment' })[0], 2, touched)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      expect(within(dialog).getByText('First remark')).toBeTruthy();
+      expect((await writes()).slice(before)).toHaveLength(0);
+    });
+
+    it.each(ways)('accepts one follow-up with %s on its Accept, the next coming up into its place', async (_how, touched) => {
+      const followUp = (id: string, text: string) => ({ id, text, assigneeId: null, done: false, type: 'proposal' as const, linkedTicketId: '__roti_follow_up__', proposalVotes: {} });
+      renderGroupPhase({
+        phase: 'CLOSE',
+        settings: { ...createSession().settings, revealRoti: true },
+        roti: { 'facilitator-1': 4 },
+        tickets: [],
+        groups: [],
+        actions: [followUp('r1', 'Shorter retros'), followUp('r2', 'Start on time'), followUp('r3', 'Rotate the facilitator')],
+      });
+      await screen.findByText('Shorter retros');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(press(screen.getAllByRole('button', { name: 'Accept' })[0], 1, touched)).toEqual(pressedAndClicked);
+        clock.at(150);
+        expect(press(screen.getAllByRole('button', { name: 'Accept' })[0], 2, touched)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(1);
+      expect(after[0].actions.map((a) => [a.id, a.type])).toEqual([['r1', 'new'], ['r2', 'proposal'], ['r3', 'proposal']]);
+    });
+
+    it.each([
+      ['on a card', () => card('tc')],
+      ['on a group', () => groupContainer()],
+    ])('deletes nothing with the next tap once a tap dropped the held card %s, and deletes with a tap past the drop’s half second', async (_how, target) => {
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(tap(card('td'))).toBe(false);
+        clock.at(600);
+        expect(tap(target())).toBe(false);
+        expect(within(card('td')).queryByRole('button', { name: /Selected for grouping/ })).toBeNull();
+        clock.at(750);
+        expect(press(removeOf('td'), 2, true)).toEqual(nothingPressed);
+        expect(onBoard('td')).toBe(true);
+        // The drop's half second runs from the drop alone, never from the tap
+        // it stopped, as a deletion's does.
+        clock.at(1200);
+        expect(press(removeOf('td'), 1, true)).toEqual(pressedAndClicked);
+      } finally {
+        clock.restore();
+      }
+
+      expect(onBoard('td')).toBe(false);
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(2);
+      expect(after[0].tickets.find((t) => t.id === 'td')?.groupId).toBeTruthy();
+    });
+
+    // A group held to move is put down the same way: the targets it offered
+    // in every other column go, and the board is laid out again.
+    it('deletes nothing with the next tap once a tap put down the group it held', async () => {
+      const board = createSession();
+      renderGroupPhase({
+        phase: 'OPEN_BOARD',
+        columns: [...board.columns, { ...board.columns[0], id: 'col-2', title: 'To Improve' }],
+        tickets: [
+          { id: 'ta', colId: 'col-1', text: 'Flaky deploys', authorId: 'facilitator-1', groupId: 'g1', votes: [] },
+          { id: 'tb', colId: 'col-1', text: 'Slow rollbacks', authorId: 'facilitator-1', groupId: 'g1', votes: [] },
+        ],
+        groups: [{ id: 'g1', title: 'Delivery', colId: 'col-1', votes: [], anchorTicketId: 'ta' }],
+      });
+      await screen.findByText('Flaky deploys');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(tap(groupContainer())).toBe(false);
+        expect(screen.queryAllByRole('button', { name: /move the selected group to/ }).length).toBeGreaterThan(0);
+        clock.at(600);
+        expect(tap(groupContainer())).toBe(false);
+        expect(screen.queryAllByRole('button', { name: /move the selected group to/ })).toHaveLength(0);
+        clock.at(750);
+        expect(press(removeOf('ta'), 2, true)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      expect(onBoard('ta')).toBe(true);
+      expect((await writes()).slice(before)).toHaveLength(0);
     });
   });
 

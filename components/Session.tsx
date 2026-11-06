@@ -199,9 +199,32 @@ const PENDING_MAX_VOTES_MS = 400;
  * ends it first.
  */
 const PRESS_LEAVE_SAFETY_MS = 10_000;
+const CONTROL_SELECTOR = 'button, a[href], input, textarea, select, label, summary, [role="button"]';
 /** What a press of the mouse presses: the control around its target, or the target itself. */
-const pressedControl = (target: Element | null) =>
-  target?.closest('button, a[href], input, textarea, select, label, summary, [role="button"]') ?? target;
+const pressedControl = (target: Element | null) => target?.closest(CONTROL_SELECTOR) ?? target;
+/**
+ * The control a press aimed at went with its own click: a Delete that asks
+ * nothing with its card, its group, its comment, its proposal, its column; the
+ * picker's emoji with the picker; a reaction badge with the last reaction to
+ * it; an editor's Cancel or Save with its editor; a follow-up's Accept with
+ * its row. What came up there lies under the pointer now — the next card's
+ * Delete, the next badge, the row's Delete, the next follow-up's Accept — and
+ * the next press of a double click, or the next tap of a double tap, pressed
+ * it, for everyone (passes 14 to 16 of 42.1). A press on text that becomes a
+ * field (a proposal's) is not one: the field comes where the text was.
+ */
+const aimLeftPage = (aim: { key: Element | null } | null) =>
+  !!aim?.key && !aim.key.isConnected && aim.key.matches(CONTROL_SELECTOR);
+/**
+ * What lies under the pointer moved since the gesture before aimed (pressRef):
+ * asked when the next one comes, before or after the end of that press — on a
+ * slow machine the next press comes before it — and the act wins over an
+ * editor that press closed too.
+ */
+const boardMovedSince = (press: { aim: { key: Element | null } | null; boardMoved: 'editor' | 'act' | null }) => {
+  if (aimLeftPage(press.aim)) press.boardMoved = 'act';
+  return press.boardMoved;
+};
 /** A field, whose words a drag carries: never its card, or its group. */
 const isFieldText = (target: EventTarget | null): target is HTMLInputElement | HTMLTextAreaElement =>
   target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
@@ -737,9 +760,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // What lies under the pointer moved after that gesture aimed: an editor
     // closed — at its press's end, by its click's write, or by ending a press
     // before it, at its own mousedown — and the card grew back ('editor'); or
-    // this screen deleted what it aimed at, and the next came up
-    // ('deletion', deletionMovesBoard).
-    boardMoved: 'editor' | 'deletion' | null;
+    // the gesture's own act moved it: the control it pressed went with its
+    // click (aimLeftPage), or the tap put down what was held, and the board
+    // was laid out again under the finger ('act', boardMovedSince). An act is
+    // the reason, whatever editor the same gesture closed.
+    boardMoved: 'editor' | 'act' | null;
     // When the touch of the last tap began: a browser counts the next tap of
     // a double tap from the lift before it to that touch (touchStarts).
     tapStartedAt: number | null;
@@ -1258,16 +1283,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     }
     return closes;
   };
-  // What this screen deletes with a control that asks nothing — a card, a
-  // group, a comment, a proposal, a column — moves the board under the
-  // pointer: the next comes up there, under its own Delete, and the next
-  // press of a double click, or the next tap of a double tap, deleted that
-  // one too, for everyone (passes 14 and 15 of 42.1). Any later first press
-  // starts over; an editor the same press leaves closes after this, with its
-  // click's write, and is then the reason.
-  const deletionMovesBoard = () => {
-    pressRef.current.boardMoved = 'deletion';
-  };
   const finishPressRef = useRef(finishPress);
   useLayoutEffect(() => { finishPressRef.current = finishPress; });
   // What the end of the board's own drag puts down (dragStarts): a card held
@@ -1329,12 +1344,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const nextGesture = isTapMouse(touchEndAt, e.timeStamp)
         ? isNextTap(press.aim, press.tapStartedAt ?? e.timeStamp, point) || (e.detail > 1 && isNearAim(press.aim, point))
         : e.detail > 1;
-      if (nextGesture && press.boardMoved && press.aim && pressedControl(target) !== press.aim.key) {
+      if (nextGesture && boardMovedSince(press) && press.aim && pressedControl(target) !== press.aim.key) {
         press.stopped = true;
         // The half second after a closed editor runs on from each press it
-        // stops; a deletion's runs from the deletion alone: from its stops,
-        // at a steady pace of two taps a second on the Delete that came up,
-        // every tap after the first pressed nothing (pass 15 of 42.1).
+        // stops; an act's runs from the act alone: from its stops, at a
+        // steady pace of two taps a second on the Delete that came up, every
+        // tap after the first pressed nothing (pass 15 of 42.1).
         if (press.boardMoved === 'editor') press.aim = { ...press.aim, at: e.timeStamp };
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -1569,7 +1584,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // the same card or group it is a tap again. Measured from its touch, as a
     // browser counts the next tap: held a moment, it lifted past the half
     // second, and grouped the card (pass 15 of 42.1).
-    if (press.boardMoved && press.aim && press.aim.key !== aimedAt && isNextTap(press.aim, press.tapStartedAt ?? e.timeStamp, point)) {
+    if (boardMovedSince(press) && press.aim && press.aim.key !== aimedAt && isNextTap(press.aim, press.tapStartedAt ?? e.timeStamp, point)) {
       if (press.boardMoved === 'editor') press.aim = { ...press.aim, at: e.timeStamp };
       return;
     }
@@ -1578,6 +1593,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // Left, the card's editor closes, and what lies under the finger moves.
     press.aim = { key: aimedAt, at: e.timeStamp, x: point.x, y: point.y };
     press.boardMoved = !!active && active === editorFieldRef.current ? 'editor' : null;
+    // A tap that puts down what was held — into a group, onto a card, back
+    // where it was — lays the board out again under the finger: the card it
+    // dropped came there, its own Delete under the next tap, which deleted it
+    // for everyone (pass 16 of 42.1).
+    const putsHoldDown = !!draggedTicket || !!movingItem;
     if (active instanceof HTMLElement && active !== document.body) {
       const collected: Array<(s: RetroSession) => void> = [];
       collectingTapBlurWritesRef.current = collected;
@@ -1589,6 +1609,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       tapBlurWritesRef.current.push(...collected);
     }
     perform();
+    if (putsHoldDown) press.boardMoved = 'act';
     if (tapBlurWritesRef.current.length > 0) updateSession(() => {});
   };
 
@@ -2493,6 +2514,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           return;
       }
       if (!allowsRegrouping(session)) return;
+      // Released over a card of its own group, it stays where it was: write
+      // nothing, as a card dropped back on its own column does — the write
+      // changed nothing but the revision, every client paid a broadcast, and
+      // a teammate's write from the revision before lost its race (pass 16).
+      const heldGroupId = session.tickets.find(t => t.id === draggedTicket.id)?.groupId;
+      if (heldGroupId && heldGroupId === session.tickets.find(t => t.id === targetTicket.id)?.groupId) {
+          resetDragState();
+          return;
+      }
 
       let createdGroupId: string | null = null;
       let mergedIntoUntitledGroupId: string | null = null;
@@ -2536,6 +2566,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           return;
       }
       if (!allowsRegrouping(session)) return;
+      // Released over its own group: as over a card of it (performDropOnTicket).
+      if (session.tickets.find(t => t.id === draggedTicket.id)?.groupId === targetGroup.id) {
+          resetDragState();
+          return;
+      }
 
       let didMove = false;
       updateSession(s => {
@@ -2811,7 +2846,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const handleDeleteProposal = (actionId: string) => {
-      deletionMovesBoard();
       updateSession(s => {
           s.actions = s.actions.filter(a => a.id !== actionId);
       });
@@ -2879,7 +2913,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const handleDeleteComment = (ticketId: string, commentId: string) => {
-      deletionMovesBoard();
       updateSession(s => {
           const tk = s.tickets.find(x => x.id === ticketId);
           if (!tk?.comments) return;
@@ -2965,7 +2998,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           || (!boardVotingOff && (visible || myVotesOnThis > 0));
       const deleteCard = (e: React.MouseEvent) => {
           e.stopPropagation();
-          deletionMovesBoard();
           updateSession(s => {
               deleteTicket(s, t.id);
           });
@@ -3275,7 +3307,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 e.stopPropagation();
                                 setEmojiPickerOpenId(isPickerOpen ? null : t.id);
                             }}
-                            className={`text-slate-300 hover:text-slate-500 hover:bg-slate-100 rounded-full w-8 h-8 flex items-center justify-center transition ${isPickerOpen ? 'bg-slate-100 text-slate-500' : ''}`}
+                            className={`hover:text-slate-700 hover:bg-slate-100 rounded-full w-8 h-8 flex items-center justify-center transition ${isPickerOpen ? 'bg-slate-100 text-slate-700' : 'text-slate-500'}`}
                             aria-label={tr('session.ticket.addReaction')}
                         >
                             <span className="material-symbols-outlined text-base">add_reaction</span>
@@ -4031,7 +4063,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                     read: its cards would be regrouped blind. */}
                                                 {(mode === 'GROUP' || (isBoard && groupReadable)) && isFacilitator && (
                                                     <button onClick={() => {
-                                                        deletionMovesBoard();
                                                         updateSession(s => {
                                                             deleteGroup(s, g.id);
                                                         });
@@ -4340,7 +4371,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 column is not offered while something is in it. */}
                             {isEditingColumns && (session.columns.length > 1 || tickets.length + groups.length === 0) && (
                                 <button
-                                    onClick={() => { deletionMovesBoard(); updateSession(s => { removeColumn(s, col.id); }); }}
+                                    onClick={() => updateSession(s => { removeColumn(s, col.id); })}
                                     className="absolute top-2 right-2 z-10 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-sm hover:bg-red-600"
                                     aria-label={columnLabels.remove}
                                 >

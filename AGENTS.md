@@ -339,12 +339,26 @@ ending, at its own mousedown, a press whose release Chromium kept for a context
 menu or a select's list. The card grew back under the pointer, and the next
 press landed on what came there — its Delete, which asks nothing, its vote,
 its comments — instead of the word of a title being selected. So it does once
-the press before deleted something with a control that asks nothing — a card,
-a group, a comment, a proposal, a column (`deletionMovesBoard`): the next came
-up into its place, its own Delete under the pointer, and a double click, or a
-double tap, on a Delete deleted two cards for everyone (two comments, two
-proposals and their votes, two columns and the places of their cards). A press
-it stops aims at nothing, so the third press of a triple click is stopped too.
+the control the press before pressed went with its own click (`aimLeftPage`,
+asked by `boardMovedSince` when the next gesture comes, before or after the
+end of that press): a Delete that asks nothing with its card, its group, its
+comment, its proposal, its column; the picker's emoji with the picker, over the
+card's own Delete; a reaction badge with the last reaction to it; an editor's
+Cancel or Save with its editor — a proposal's, a comment's —, the row's Delete
+back in its place; a follow-up's Accept with its row. What came up there lay
+under the pointer, and a double click, or a double tap, deleted two cards for
+everyone (two comments, two proposals and their votes, two columns and the
+places of their cards), deleted the card under the picker, gave the next
+badge's reaction, deleted the proposal or the comment being edited, or
+accepted two follow-ups. A press on text that becomes a field (a proposal's)
+is not one: the field comes where the text was. A control that comes back
+where it went is another control: the card's Edit, back once its editor
+closed, presses nothing when tapped again a fingertip from the first within
+half a second, and does after it. So does a tap that puts down
+what was held — onto a card, into a group, back where it was: the board is
+laid out again under the finger, and the next tap deleted the card just
+dropped. Such an act is the reason, whatever editor its press closed too. A
+press it stops aims at nothing, so the third press of a triple click is stopped too.
 On the same control it is the browser's, and the word is selected by a double
 click done again. **So does the next tap of a double tap** (`isNextTap`: begun
 within half a second of the lift before it, a fingertip away) on another card
@@ -367,12 +381,16 @@ double click later than half a second. After an editor closed, a tap or a
 press that does nothing still belongs to the sequence: the next one is
 measured from its time, as a browser counts its taps, and against where the
 first aimed — measured from the first tap only, the third tap of a triple tap
-at an ordinary pace fell past half a second and grouped the card. After a
-deletion the half second runs from the deletion alone, and past it only the
-browser's count stops a tap: run on from every tap it stopped, it deleted the
-first card and nothing after it for a facilitator clearing cards at two taps a
-second, for as long as the pace lasted. At that pace every other tap deletes;
-a pause of half a second, every tap.
+at an ordinary pace fell past half a second and grouped the card. After an
+act — a deletion, any control gone with its click, a drop — the half second
+runs from the act alone, and past it only the browser's count stops a tap: run
+on from every tap it stopped, it deleted the first card and nothing after it
+for a facilitator clearing cards at two taps a second, for as long as the pace
+lasted — also when that first press closed an editor open on another card,
+which was taken as the reason. At that pace every other tap deletes; a pause
+of half a second, every tap. On a computer whose system counts the clicks of a
+sequence without a bound (macOS), every click after a deletion that comes
+within its double-click interval is stopped, until a pause.
 `e2e/retro-touch-card-controls.spec.ts` holds it in Chromium (jsdom emulates no
 mouse for a tap and lays nothing out), counting the writes a hold and its drop
 send, on a card and on a group's own blank area, pressing the controls a
@@ -382,13 +400,17 @@ and three times on a phone where the first tap closes an editor, tapping three
 times past the browser's count after a tap on a group's title that closes an
 editor (where the browser emulates the mouse for every tap the board could
 stop: it emulates none for a tap the board claims), double tapping and double
-clicking a card's Delete, and tapping it at a steady pace;
+clicking a card's Delete, tapping it at a steady pace, and double tapping and
+double clicking the Cancel of a comment's editor, the remark's Delete drawn
+back under it;
 `__tests__/sessionGroupTouch.test.tsx` pins which taps cancel, and what they
 leave, on a card and on a group container, and the next taps of a sequence,
 with the mouse emulated for them and the mouse itself — the ones whose time
 matters on an event clock of their own (jsdom stamps every event with
 `Date.now()`, so a time read from the wrong clock went unseen) — after a
-closed editor and after each Delete that asks nothing.
+closed editor (at its press's end, by its click's write, under a title's tap),
+after each Delete that asks nothing, an emoji picked, a badge emptied, an
+editor's Cancel, a follow-up accepted and a tap's drop.
 
 **A control shown on hover is shown on focus, and never hidden where nothing
 hovers.** A card's edit, delete and first-comment controls were `opacity-0`
@@ -405,10 +427,18 @@ measured 1.48:1), a float of its size (`ticket-edit-room`) ends the first line
 before it on every screen — kept on a computer too, where the pencil used to
 appear over the last words of the line under the pointer — and the corner
 delete is not drawn while the card is edited, where it would lie over the
-field.
-`__tests__/sessionOpenBoard.test.tsx` pins the classes and
-`e2e/retro-touch-card-controls.spec.ts` the layout, on an emulated phone and a
-computer: jsdom applies no media query.
+field. So must every icon control shown at rest, hover or not: the card's
+*Add reaction*, a comment's edit and delete, and an action row's done circle
+(open and checked) and trash, in Review, Open Actions, the health check's
+Review and the Dashboard's Actions tab, were slate-300 on white (1.49:1) or a
+check in emerald-500 (2.54:1); they are slate-500 (4.76:1) and emerald-600, and
+the tests measure what each paints (`effectivePair`), never a class refused:
+slate-400, 2.63:1, passed a check that only refused slate-300. axe-core skips
+icon ligatures, so no audit reports them.
+`__tests__/sessionOpenBoard.test.tsx` pins the classes and measures the
+colours, `__tests__/sessionActionControlsContrast.test.tsx` the action rows,
+and `e2e/retro-touch-card-controls.spec.ts` the layout, on an emulated phone
+and a computer: jsdom applies no media query.
 
 **An icon is not a name, and `title` does not rescue it (audit H52).** A button
 whose only content is `<span className="material-symbols-outlined">delete</span>`
@@ -722,7 +752,9 @@ Eleven rules:
   hold on a card that becomes hidden is put down; a card released over itself,
   or anywhere in its own group, is put down where it was — a group that takes
   no card would otherwise hand the drop on to its column, which took the card
-  out of the group; a tap or a keyboard target is offered on a card only
+  out of the group — and writes nothing, by a drag or the keyboard, as a card
+  dropped back on its own column does: the write changed nothing but the
+  revision, and a teammate's write from the revision before lost its race; a tap or a keyboard target is offered on a card only
   where the held card can go — offered and refused, the drop put the hold
   down with nothing said; *Delete group* and the title field are offered on a
   group its viewer can read only (its title is still shown); the comments and

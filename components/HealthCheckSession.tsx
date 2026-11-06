@@ -1515,7 +1515,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         <div key={action.id} data-action-id={action.id} className="px-4 py-3 flex items-center hover:bg-slate-50 gap-3">
                           <button
                             onClick={() => setReviewActionDone(action)}
-                            className={`shrink-0 ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-500'}`}
+                            className={`shrink-0 ${action.done ? 'text-emerald-600' : 'text-slate-500 hover:text-emerald-600'}`}
                             aria-label={action.done ? t('healthCheck.review.markNotDone') : t('healthCheck.review.markDone')}
                           >
                             <span className="material-symbols-outlined">

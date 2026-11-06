@@ -7,6 +7,7 @@ import ts from 'typescript';
 import type { ActionItem, HealthCheckSession as HealthCheckSessionType, Team, User } from '../types';
 import { JIRA_NOTE_STORAGE_KEY } from '../components/jira/JiraDiscoveryNote';
 import { statusWith } from './helpers/jiraClientFetch';
+import { effectivePair } from './helpers/tailwindTheme';
 
 /**
  * Finding A-10, against the real data layer. The health check's Review wrote
@@ -161,6 +162,27 @@ describe('a done toggle in the health check Review reaches the team record', () 
     expect(await screen.findByRole('button', { name: 'Create in Jira (1)' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create in Jira, Talk to ops' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Create in Jira, Pair on deploys' })).toBeInTheDocument();
+  });
+
+  // Review finding (pass 16 of 42.1): the circle was slate-300 on the row's
+  // white, 1.49:1, always shown — the glyph is the control and its state, so
+  // it needs 3:1 (1.4.11), and axe-core skips icon ligatures.
+  it('draws the done circle, open and checked, at a contrast that can be seen', async () => {
+    render(
+      <HealthCheckSession
+        team={structuredClone(dataService.getTeam('team-1')!)}
+        currentUser={facilitator}
+        sessionId="hc-1"
+        onExit={() => {}}
+      />
+    );
+    const row = (await screen.findByText('Talk to ops')).closest('[data-action-id]') as HTMLElement;
+
+    const open = within(row).getByRole('button', { name: 'Mark action as done' });
+    expect(effectivePair(open).ratio).toBeGreaterThanOrEqual(3);
+    // Checked, its check is the only sign of its state too.
+    fireEvent.click(open);
+    expect(effectivePair(within(row).getByRole('button', { name: 'Mark action as not done' })).ratio).toBeGreaterThanOrEqual(3);
   });
 
   it('keeps an assignee chosen in Review in the cached team', async () => {
