@@ -65,11 +65,10 @@ import {
     claimGesture,
     endGesture,
     idleGesture,
-    isNextTap,
     moveGesture,
     startGesture,
 } from './session/groupingTouch';
-import { aimDisplaced, aimGone, boardMovedSince, pressedControl, useDoubleGestureGuard } from './session/doubleGestureGuard';
+import { aimClaimedTap, ignoresClaimedTap, useDoubleGestureGuard } from './session/doubleGestureGuard';
 import {
   BrainstormSelection,
   canMoveGroupInBrainstorm,
@@ -1486,36 +1485,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     e.preventDefault();
     const gesture = gestureRef.current;
     const aimedAt = e.currentTarget as Element;
-    // The next tap of a double tap, once an editor closed after the tap
-    // before was aimed: the card grew back under the finger, and what this
-    // one reaches is not what the first aimed at. It grouped that card with
-    // the one the first tap picked up, for everyone. Elsewhere it does
-    // nothing, and after an editor closed the next is measured from it; on
-    // the same card or group it is a tap again. Measured from its touch, as a
-    // browser counts the next tap: held a moment, it lifted past the half
-    // second, and grouped the card (pass 15 of 42.1). So it is once what the
-    // tap before aimed at left the page — a dialog's backdrop, closed by it:
-    // the next tap reached the card under it and dropped the held card there
-    // — or is no longer under its point: a pick-up in the Group phase drew
-    // the hint above the board a line longer, and the next tap dropped the
-    // card on the one above (pass 18).
-    const movedUnder = !!boardMovedSince(gesture) || aimGone(gesture.aim) || aimDisplaced(gesture.aim);
-    if (movedUnder && gesture.aim && gesture.aim.key !== aimedAt && isNextTap(gesture.aim, gesture.tapStartedAt ?? e.timeStamp, point)) {
-      if (gesture.boardMoved === 'editor') gesture.aim = { ...gesture.aim, at: e.timeStamp };
-      return;
-    }
+    // The next tap of a double tap, once the tap before moved what this one
+    // reaches — an editor it closed, a dialog's backdrop it took away, a hint
+    // it drew a line longer — is ignored (ignoresClaimedTap).
+    if (ignoresClaimedTap(gesture, aimedAt, point, e.timeStamp)) return;
     if (emojiPickerOpenId && !emojiPickerRef.current?.contains(e.target as Node)) setEmojiPickerOpenId(null);
     const active = document.activeElement;
     // Left, the card's editor closes, and what lies under the finger moves.
-    // The tap changes what is held, and draws the card it reached again
-    // around the finger (relaid): picked up, its "Selected" banner pushed its
-    // content down, and the next tap pressed what came under the finger —
-    // its vote, its comments, its Delete (pass 17 of 42.1).
-    const reached = e.target instanceof Element ? e.target : null;
-    gesture.aim = {
-      key: aimedAt, under: pressedControl(reached), at: e.timeStamp, x: point.x, y: point.y,
-      relaid: aimedAt.matches('[data-ticket-id]'),
-    };
+    aimClaimedTap(gesture, aimedAt, point, e.timeStamp);
     gesture.boardMoved = !!active && active === editorFieldRef.current ? 'editor' : null;
     // A tap that puts down what was held — into a group, onto a card, back
     // where it was — lays the board out again under the finger: the card it

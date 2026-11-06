@@ -1752,8 +1752,9 @@ describe('a tap the board acts on, and the field it leaves', () => {
       expect(after[0].tickets[0].votes).toEqual(['facilitator-1']);
     });
 
-    // A group picked up takes a ring, and nothing moves: its own vote is the
-    // next tap's to press.
+    // A group picked up takes a ring: past the browser's count, its own vote
+    // is the next tap's to press when nothing moved it (a phone's hint that
+    // changes height moves it, which the guard's own suite lays out).
     it('votes for a group with a tap on its vote right after a tap that picked the group up', async () => {
       renderBoard();
       await screen.findByText('Flaky deploys');
@@ -1808,20 +1809,96 @@ describe('a tap the board acts on, and the field it leaves', () => {
       await screen.findByText('Flaky deploys');
       const before = (await writes()).length;
 
+      // jsdom lays nothing out: the two cards are drawn here, the one above
+      // and the one the tap reaches, and the pick-up moves the one above
+      // down under the point.
+      const boxes = new Map<Element, { left: number; top: number; width: number; height: number }>([
+        [card('tc'), { left: 0, top: 0, width: 200, height: 30 }],
+        [card('td'), { left: 0, top: 40, width: 200, height: 30 }],
+      ]);
+      const layout = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+        const b = boxes.get(this) ?? { left: 0, top: 0, width: 0, height: 0 };
+        return { ...b, x: b.left, y: b.top, right: b.left + b.width, bottom: b.top + b.height, toJSON: () => b } as DOMRect;
+      });
       const clock = heldClock();
       try {
         expect(tap(card('td'))).toBe(false);
-        Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => card('tc') });
+        boxes.set(card('tc'), { left: 0, top: 36, width: 200, height: 30 });
         clock.at(150);
         expect(tap(card('tc'))).toBe(false);
         expect(within(card('tc')).queryByRole('button', { name: /Selected for grouping/ })).toBeNull();
       } finally {
-        delete (document as { elementFromPoint?: unknown }).elementFromPoint;
+        layout.mockRestore();
         clock.restore();
       }
 
       expect((await writes()).slice(before)).toHaveLength(0);
       expect(held('td')).toBeTruthy();
+    });
+
+    // Review finding (pass 19 of 42.1): the board acted on the tap before —
+    // it picked the group up — and a double tap whose second touch landed a
+    // fingertip away, inside the browser's count, dissolved the group for
+    // everyone, or voted for it.
+    it.each([['its Delete group', 'delete'], ['its vote', 'vote']])('presses nothing with a press the browser counts on %s, right after a tap that picked the group up', async (_name, which) => {
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(tap(groupContainer())).toBe(false);
+        clock.at(150);
+        const control = which === 'delete'
+          ? within(groupContainer()).getByRole('button', { name: 'Delete group' })
+          : within(groupContainer()).getAllByTestId('vote-add')[0];
+        expect(press(control, 2, true)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      expect((await writes()).slice(before)).toHaveLength(0);
+      expect(screen.getByText('Flaky deploys').closest('.group-container')).toBeTruthy();
+    });
+
+    // Review finding (pass 19 of 42.1): a field was the next press's own after
+    // any press on no control: a double click on a dialog's backdrop selected
+    // the word of the group title under it, and the next keystroke renamed
+    // the group for everyone.
+    it('selects nothing in a group’s title with a double click on a dialog’s backdrop over it', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await user.click(within(card('tc')).getByTestId('ticket-comment-btn'));
+      const backdrop = (await screen.findByRole('dialog')).parentElement as HTMLElement;
+
+      const clock = heldClock();
+      try {
+        expect(pressOf(backdrop, 1)).toEqual(pressedAndClicked);
+        expect(screen.queryByRole('dialog')).toBeNull();
+        const title = document.querySelector('[data-group-title-id="g1"]') as HTMLElement;
+        clock.at(150);
+        expect(pressOf(title, 2)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    // Nor after a tap that picked a card up: the card is drawn again around
+    // the finger, and a group's title came under the next touch.
+    it('focuses no group title with the next tap the browser counts, right after a tap that picked a card up', async () => {
+      renderBoard();
+      await screen.findByText('Too many meetings');
+
+      const clock = heldClock();
+      try {
+        expect(tap(card('tc'))).toBe(false);
+        clock.at(150);
+        const title = document.querySelector('[data-group-title-id="g1"]') as HTMLElement;
+        expect(press(title, 2, true)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
     });
 
     // A mark belongs to the gesture after the one that made it: kept past a

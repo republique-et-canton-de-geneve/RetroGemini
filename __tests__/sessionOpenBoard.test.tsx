@@ -5,7 +5,7 @@ import React from 'react';
 import Session from '../components/Session';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { RetroSession, Team, User } from '../types';
-import { effectivePair } from './helpers/tailwindTheme';
+import { classColor, effectivePair } from './helpers/tailwindTheme';
 import { contrastRatio, rgbToHex } from '../utils/colorUtils';
 
 /**
@@ -3725,7 +3725,11 @@ describe('Open board — every hold and every drop', () => {
     const bg = rgbToHex(r, g, b);
     // bg-black/10 over the card: a tenth of black laid over its colour.
     const opened = rgbToHex(Math.round(r * 0.9), Math.round(g * 0.9), Math.round(b * 0.9));
-    const fgOf = (control: HTMLElement) => (control.className.includes('text-white') ? '#FFFFFF' : control.className.includes('text-black') ? '#000000' : null);
+    // The colour it is painted in at rest: its one text colour with no variant
+    // and no opacity (a hover's, or a translucent one, is not what is seen).
+    // Review finding (pass 19 of 42.1): read as a substring of the class list,
+    // slate-500 at rest with a white hover, and white at 40%, read as white.
+    const fgOf = (control: HTMLElement) => ({ white: '#FFFFFF', black: '#000000' } as Record<string, string>)[classColor(control.className, 'text') ?? ''] ?? null;
     const measured = (control: HTMLElement, surface: string) => {
       const fg = fgOf(control);
       expect(fg).not.toBeNull();

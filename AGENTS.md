@@ -336,18 +336,23 @@ double click presses nothing on another control than the first pressed**
 the health check's proposal rows deleted two proposals, or the one being
 edited, until pass 17 of 42.1; its click is stopped too, never the
 keyboard's, which has no detail). The browser counts that press (its
-`detail`) at the point of the first, a moment later: after a press on a
-control, another control there came with the first click, whatever brought
-it — no editor need close — and a press there landed on what came there. It
-presses nothing there. After a press on no control (a vote's count, missed
-for its "+") nothing came with it unless something moved, and the retry is
-the user's own (pass 18 of 42.1). A text field (`isTextField`) is the next
-press's own only where the first pressed text that became it, nothing
-marked: a proposal's text opens its field where the text was, and a double
-click there still selects a word; but the card's Edit, or a health-check
-comment's, goes with its click and its field comes there, and the next press
-of a double click selected the word under it — a triple click, the whole
-text — for the next keystroke to replace, for everyone. What came there: the card that grew back as an editor
+`detail`) at the point of the first, a moment later: after a gesture that
+acted — it pressed a control, the board acted on its tap (a card or a group
+picked up, a card dropped), or what it pressed went with its click (a
+dialog's backdrop) — another element there is the same gesture gone astray,
+whatever brought it — no editor need close — and it presses nothing there:
+a double tap on a group's head whose second touch landed a fingertip away
+on its *Delete group* dissolved the group for everyone (pass 19 of 42.1).
+After a press that did nothing (a vote's count, missed for its "+") the
+retry is the user's own (pass 18). A text field (`isTextField`) is the next
+press's own only where the first pressed text a click turns into that very
+field, where it is (`data-edits-in-place`: a proposal's text, the only
+one), nothing marked: a double click there still selects a word; but the
+card's Edit, or a health-check comment's, goes with its click and its field
+comes there, and the next press of a double click selected the word under
+it — a triple click, the whole text — for the next keystroke to replace,
+for everyone; so did one on a dialog's backdrop over a group's title, which
+the next keystroke renamed for everyone (pass 19). What came there: the card that grew back as an editor
 closed after the press before was aimed — at that press's end, by its click's
 write, or by ending, at its own mousedown, a press whose release Chromium
 kept for a context menu or a select's list — its Delete, which asks nothing,
@@ -375,12 +380,21 @@ accepted two follow-ups. A press on text that becomes a field (a proposal's)
 is not one: the field comes where the text was. Past the browser's count, a
 tap is also the next once what the one before pressed left the page, a
 control or not (`aimGone`: a dialog's backdrop gone with its click), or, in a
-browser that lays the page out, moved (`aimShifted`: a proposal's thumb, its
-vote box moved 36 px by the badge beside it, while still under the point a
-finger drifted a few pixels from) or is no longer under its point
-(`underMoved`: a label pushed aside). jsdom lays nothing out, so
-`__tests__/doubleGestureGuard.test.ts` lays the page out by hand and
-`e2e/retro-touch-card-controls.spec.ts` double taps a dialog's backdrop. A control that comes back
+browser that lays the page out, once what this one reaches came under it
+(`came`). At each press the guard records every control, card and group
+drawn within 32 px of it, where, and whether it could be pressed there
+(`drawnNear`); what came is one not drawn there then (an emoji of the
+picker the first opened, the cross a vote drew beside its thumb), one a
+dialog's backdrop lay over, or one drawn elsewhere that did not lie under
+the point (a proposal's neutral vote, its box moved 36 px by the badge
+beside it; a label pushed aside). One drawn where it was is the user's to
+press, whatever else changed: the ROTI or survey score beside the one a tap
+chose, which is drawn larger (`scale-110`), and the controls beside one
+whose label grew (*Edit Layout* → *Done Editing*) — taken for moved, a
+quick correction was lost, the mistaken score stored (pass 19). jsdom lays
+nothing out, so `__tests__/doubleGestureGuard.test.ts` lays the page out by
+hand and `e2e/retro-touch-card-controls.spec.ts` double taps a dialog's
+backdrop and a card's vote. A control that comes back
 where it went is another control: the card's Edit, back once its editor
 closed, presses nothing when tapped again a fingertip from the first within
 half a second, and does after it. So does a tap that puts down
@@ -393,13 +407,19 @@ card that grew back), at the cost of a steady pace: the taps after such a
 drop press nothing until a pause of half a second. And a tap the board
 claims on a card draws it again around the finger (`relaid`): picked up, its
 *Selected* banner pushed its content down, and the mouse of the next tap
-pressed its vote, its comments, its Delete — a group picked up takes a ring
-and moves nothing, and its own vote is the next tap's. The next tap the
-board claims is ignored too once what the one before aimed at left the page
-— a dialog's backdrop, the next tap dropping the held card on the card under
-it — or is no longer under its point (`aimDisplaced`: a pick-up in the Group
-phase drew the hint above the board a line longer, and the next tap dropped
-the card on the card above). Two controls side by side, nearer than the browser
+pressed its vote, its comments, its Delete. A group picked up takes a ring:
+past the browser's count its own vote is the next tap's, unless something
+moved it — on a phone the hint above the board changes height with its
+text, and the board, the group with it, moves 16 to 32 px; in Brainstorm the
+next tap pressed the Edit of a card in the group, which came there (`came`).
+The next tap the board claims is ignored too once what the one before aimed
+at left the page — a dialog's backdrop, the next tap dropping the held card
+on the card under it — or once the card or group it reaches came under it
+(`came`: a pick-up in the Group phase drew the hint above the board a line
+longer, and the next tap dropped the card on the card above), judged by where
+that card was drawn, never by what lies at the raw point of a touch the
+browser gave to the nearest card: a deliberate drop on the card beside a
+pick-up that landed in the gap was ignored (pass 19). Two controls side by side, nearer than the browser
 counts a double click from, pressed one after the other that quickly: the
 second presses nothing, and does pressed again. A
 press it stops aims at nothing, so the third press of a triple click is stopped too.

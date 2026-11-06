@@ -1055,6 +1055,76 @@ test('a double tap past the browser’s count on a dialog’s backdrop deletes n
   }
 });
 
+// Review finding (pass 19 of 42.1): a vote draws its dots and the cross that
+// takes it back beside the thumb, which stays where it is. The next tap a few
+// pixels off, past the browser's count, pressed the cross, and the vote meant
+// was taken back. What lies under a point only a browser can say: jsdom lays
+// nothing out.
+test('a double tap past the browser’s count on a card’s vote keeps the vote, the cross it drew beside the thumb under the second touch', async ({ browser }) => {
+  const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
+  const context = await browser.newContext({ ...phone, locale: 'en-US' });
+  await context.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const style = document.createElement('style');
+      style.textContent = "body { font-family: 'DejaVu Sans', sans-serif !important; }";
+      document.head.appendChild(style);
+    });
+  });
+  await context.addInitScript(() => {
+    const seen: Array<{ type: string; at: number; detail: number }> = [];
+    (window as unknown as { __taps: typeof seen }).__taps = seen;
+    for (const type of ['touchend', 'mousedown']) {
+      window.addEventListener(type, (e) => seen.push({ type, at: e.timeStamp, detail: (e as MouseEvent).detail ?? 0 }), true);
+    }
+  });
+  const page = await context.newPage();
+  try {
+    const sent = await startOpenBoard(page, `${TEAM_NAME}-thumb`);
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    await field.fill('Voted card');
+    await page.keyboard.press('Enter');
+    await expect(card(page, 'Voted card')).toBeVisible();
+    await field.blur();
+    await page.waitForTimeout(700);
+
+    const takeBack = card(page, 'Voted card').getByRole('button', { name: 'Take back one of your votes on this ticket' });
+    await expect(takeBack).toHaveCount(0);
+    const thumb = (await card(page, 'Voted card').getByTestId('vote-add').boundingBox())!;
+    const first = { x: thumb.x + thumb.width * 0.2, y: thumb.y + thumb.height / 2 };
+    const before = sent.length;
+    await page.evaluate(() => { (window as unknown as { __taps: unknown[] }).__taps.length = 0; });
+
+    await page.touchscreen.tap(first.x, first.y);
+    await expect(takeBack).toBeVisible();
+    // The point of the cross nearest the first touch, a pixel inside it: a
+    // finger that drifted toward the icon.
+    const cross = (await takeBack.boundingBox())!;
+    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+    const second = { x: clamp(first.x, cross.x + 1, cross.x + cross.width - 1), y: clamp(first.y, cross.y + 1, cross.y + cross.height - 1) };
+    expect(Math.hypot(second.x - first.x, second.y - first.y)).toBeLessThanOrEqual(24);
+    await page.evaluate((target) => new Promise<void>((resolve) => {
+      const seen = (window as unknown as { __taps: Array<{ type: string; at: number }> }).__taps;
+      const lift = [...seen].reverse().find((t) => t.type === 'touchend');
+      setTimeout(resolve, Math.max(0, target - (performance.now() - (lift?.at ?? 0))));
+    }), 430);
+    await page.touchscreen.tap(second.x, second.y);
+    await page.waitForTimeout(700);
+
+    const taps = await page.evaluate(() => (window as unknown as { __taps: Array<{ type: string; at: number; detail: number }> }).__taps);
+    const presses = taps.filter((t) => t.type === 'mousedown');
+    const lifts = taps.filter((t) => t.type === 'touchend');
+    expect(presses.map((t) => t.detail)).toEqual([1, 1]);
+    expect(presses[1].at - lifts[0].at).toBeLessThanOrEqual(500);
+    // The vote, and nothing after it: the cross the second touch reached
+    // came there with the first.
+    expect(sent.length - before).toBe(1);
+    await expect(takeBack).toBeVisible();
+    expect((await controlAt(page, second)).label).toBe('Take back one of your votes on this ticket');
+  } finally {
+    await context.close();
+  }
+});
+
 test('on a computer the same controls wait for the pointer', async ({ page }) => {
   expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(true);
   await page.goto('/');

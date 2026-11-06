@@ -175,6 +175,24 @@ describe('the health check’s next press or tap, once the first took its own co
     }
   });
 
+  // A proposal's text becomes its own field where it is: the next press of a
+  // double click selects a word of it, as it always did (pass 19 of 42.1:
+  // that is the one text the guard leaves its field to).
+  it('leaves the next press of a double click on a proposal’s text to the field it becomes', async () => {
+    renderSession();
+    const text = await screen.findByText('Write the notes the day before');
+
+    const clock = heldClock();
+    try {
+      expect(press(text, 1, false)).toEqual(pressedAndClicked);
+      const field = screen.getByDisplayValue('Write the notes the day before');
+      clock.at(150);
+      expect(press(field, 2, false)).toEqual(pressedAndClicked);
+    } finally {
+      clock.restore();
+    }
+  });
+
   it.each(ways)('deletes one proposal with %s on its Delete', async (_how, touched, detail) => {
     renderSession();
     await screen.findByText('Write the notes the day before');

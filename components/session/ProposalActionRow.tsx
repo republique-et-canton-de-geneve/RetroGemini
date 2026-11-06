@@ -3,6 +3,7 @@ import { useTranslation } from '../../i18n/I18nContext';
 import { ActionItem, User } from '../../types';
 import ProposalNumber from './ProposalNumber';
 import { participantColorClass } from '../../utils/participantColors';
+import { EDITS_IN_PLACE_ATTRIBUTE } from './doubleGestureGuard';
 
 const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: number): React.CSSProperties => {
   const total = upVotes + neutralVotes + downVotes;
@@ -317,6 +318,9 @@ const ProposalActionRow: React.FC<Props> = ({
             {number !== undefined && <ProposalNumber number={number} surface={surface} />}
             <span
               className={`${proposalTextClass} grow wrap-break-word`}
+              // A click turns it into its own field, where it is: the next
+              // press of a double click selects a word of it (doubleGestureGuard).
+              {...(isFacilitator ? { [EDITS_IN_PLACE_ATTRIBUTE]: '' } : {})}
               onClick={() => isFacilitator && onStartEdit()}
               title={isFacilitator ? t('phases.proposal.clickToEdit') : ''}
             >
