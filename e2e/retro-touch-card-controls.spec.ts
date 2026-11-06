@@ -684,6 +684,15 @@ const controlAt = (page: Page, at: { x: number; y: number }) => page.evaluate(({
 test('taps after one on a group’s title that closes an editor press nothing the layout moved under them, past the browser’s count', async ({ browser }) => {
   const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
   const context = await browser.newContext({ ...phone, locale: 'en-US' });
+  // The font CI renders in (it has no Inter), so that a run here lays the
+  // board out as CI does: the points below are measured, never assumed.
+  await context.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const style = document.createElement('style');
+      style.textContent = "body { font-family: 'DejaVu Sans', sans-serif !important; }";
+      document.head.appendChild(style);
+    });
+  });
   // Before the board's own listeners: a press it stops goes no further.
   await context.addInitScript(() => {
     const seen: Array<{ type: string; at: number; detail: number }> = [];
@@ -726,18 +735,31 @@ test('taps after one on a group’s title that closes an editor press nothing th
       await page.keyboard.type(typed);
     };
 
-    // Where to tap: on the title while the editor is open, and on a control
-    // of the card once the editor has closed and the card grown back.
+    // Where to tap: first on the title while the editor is open, then, a few
+    // pixels away, on a control of the card once the editor has closed and the
+    // card grown back — the closest pair of points between the two, so that
+    // the next taps are a fingertip from the first whatever the font lays out.
     await openEditor(long, ' too');
     const titleRect = await rectOf(title);
     await editor.evaluate((el) => (el as HTMLElement).blur());
     await expect(editor).toHaveCount(0);
-    const overlaps = await card(page, `${long} too`).evaluate((cardEl, t) => [...cardEl.querySelectorAll('button')]
-      .map((control) => control.getBoundingClientRect())
-      .map((r) => ({ left: Math.max(r.left, t.left), right: Math.min(r.right, t.right), top: Math.max(r.top, t.top), bottom: Math.min(r.bottom, t.bottom) }))
-      .filter((r) => r.right - r.left > 4 && r.bottom - r.top > 4), titleRect);
-    expect(overlaps.length).toBeGreaterThan(0);
-    const at = { x: (overlaps[0].left + overlaps[0].right) / 2, y: (overlaps[0].top + overlaps[0].bottom) / 2 };
+    const pair = await card(page, `${long} too`).evaluate((cardEl, t) => {
+      const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+      const inset = (r: { left: number; right: number; top: number; bottom: number }) => ({ left: r.left + 3, right: r.right - 3, top: r.top + 3, bottom: r.bottom - 3 });
+      const titleIn = inset(t);
+      return [...cardEl.querySelectorAll('button')]
+        .map((control) => inset(control.getBoundingClientRect()))
+        .filter((c) => c.right > c.left && c.bottom > c.top)
+        .map((c) => {
+          const first = { x: clamp((c.left + c.right) / 2, titleIn.left, titleIn.right), y: clamp((c.top + c.bottom) / 2, titleIn.top, titleIn.bottom) };
+          const next = { x: clamp(first.x, c.left, c.right), y: clamp(first.y, c.top, c.bottom) };
+          return { first, next, distance: Math.hypot(next.x - first.x, next.y - first.y) };
+        })
+        .sort((a, b) => a.distance - b.distance)[0];
+    }, titleRect);
+    // Inside the board's fingertip (24 px), with room to spare.
+    expect(pair.distance).toBeLessThanOrEqual(18);
+    const { first, next: at } = pair;
     await openEditor(`${long} too`, ' again');
     expect(await rectOf(title)).toEqual(titleRect);
     await page.waitForTimeout(700);
@@ -756,7 +778,7 @@ test('taps after one on a group’s title that closes an editor press nothing th
       }), ms);
       await page.touchscreen.tap(at.x, at.y);
     };
-    await page.touchscreen.tap(at.x, at.y);
+    await page.touchscreen.tap(first.x, first.y);
     await tapAfterLift(430);
     await tapAfterLift(430);
     await page.waitForTimeout(700);
