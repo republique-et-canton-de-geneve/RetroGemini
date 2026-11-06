@@ -331,17 +331,32 @@ on the field puts the caret where it presses, never where the draft had it
 (Firefox puts it before the focus). Closed by the write that took its text,
 the editor is no longer drawn as left: opened again before the press ends, it
 takes the focus, and the press's end leaves it open. **The next press of a
-double click presses nothing on another control once an editor closed after
-the press before was aimed** (`pressedControl`, `aim`; its click is stopped
-too, never the keyboard's, which has no detail): at that press's end, by its
-click's write — on a slow machine the next press comes before the end — or by
-ending, at its own mousedown, a press whose release Chromium kept for a context
-menu or a select's list. The card grew back under the pointer, and the next
-press landed on what came there — its Delete, which asks nothing, its vote,
-its comments — instead of the word of a title being selected. So it does once
-the control the press before pressed went with its own click (`aimLeftPage`,
-asked by `boardMovedSince` when the next gesture comes, before or after the
-end of that press): a Delete that asks nothing with its card, its group, its
+double click presses nothing on another control than the first pressed**
+(`components/session/doubleGestureGuard.ts`, mounted by both session types:
+the health check's proposal rows deleted two proposals, or the one being
+edited, until pass 17 of 42.1; its click is stopped too, never the
+keyboard's, which has no detail). The browser counts that press (its
+`detail`) at the point of the first, a moment later: another control there
+came with the first click, whatever brought it — no editor need close — and a
+press there landed on what came there. It presses nothing on another control
+except a text field (`isTextField`), where it only places the caret: a
+proposal's text opens its field where the text was, and a double click there
+still selects a word. What came there: the card that grew back as an editor
+closed after the press before was aimed — at that press's end, by its click's
+write, or by ending, at its own mousedown, a press whose release Chromium
+kept for a context menu or a select's list — its Delete, which asks nothing,
+its vote, its comments, instead of the word of a title being selected; the
+votes left drawn in front of the Vote bar's *Unlimited votes* as it was
+unticked, *1 vote/item* under the pointer, which took every second vote
+back; a proposal's vote badge that shrank, its neutral vote under the thumb;
+the next participant's row as one was marked as having left; an action
+accepted directly, its *Undo accept* under the button; a dialog opened over
+the Comments button, its comment's Delete under the pointer; a dialog's
+backdrop gone with its click, the card under it there. The board's own marks
+(below) are what a tap needs, past the browser's count: the control the
+gesture before pressed went with its own click (`aimLeftPage`, asked by
+`boardMovedSince` when the next gesture comes, before or after the end of
+that press — on a slow machine the next press comes first): a Delete that asks nothing with its card, its group, its
 comment, its proposal, its column; the picker's emoji with the picker, over the
 card's own Delete; a reaction badge with the last reaction to it; an editor's
 Cancel or Save with its editor — a proposal's, a comment's —, the row's Delete
@@ -351,13 +366,27 @@ everyone (two comments, two proposals and their votes, two columns and the
 places of their cards), deleted the card under the picker, gave the next
 badge's reaction, deleted the proposal or the comment being edited, or
 accepted two follow-ups. A press on text that becomes a field (a proposal's)
-is not one: the field comes where the text was. A control that comes back
+is not one: the field comes where the text was. Nor is a press that leaves its
+control where it was, though what is under the pointer changed: that one only a
+browser that lays the page out can see — what lies at the point the gesture
+before aimed is no longer what it pressed there (`underMoved`), the next tap
+landing on what came there; jsdom has no `elementFromPoint`, and
+`e2e/retro-touch-card-controls.spec.ts` holds it, a double tap past the
+browser's count on a dialog's backdrop. A control that comes back
 where it went is another control: the card's Edit, back once its editor
 closed, presses nothing when tapped again a fingertip from the first within
 half a second, and does after it. So does a tap that puts down
 what was held — onto a card, into a group, back where it was: the board is
 laid out again under the finger, and the next tap deleted the card just
-dropped. Such an act is the reason, whatever editor its press closed too. A
+dropped. Such an act is the reason, whatever editor its press closed too —
+but for a tap the board claims, where an editor it closed stays the reason
+and its half second runs on (it kept the third tap of a triple tap off the
+card that grew back). And a tap the board claims draws the card it reached
+again around the finger (`relaid`): picked up, its *Selected* banner pushed
+its content down, and the mouse of the next tap pressed its vote, its
+comments, its Delete. Two controls side by side, nearer than the browser
+counts a double click from, pressed one after the other that quickly: the
+second presses nothing, and does pressed again. A
 press it stops aims at nothing, so the third press of a triple click is stopped too.
 On the same control it is the browser's, and the word is selected by a double
 click done again. **So does the next tap of a double tap** (`isNextTap`: begun
@@ -400,9 +429,10 @@ and three times on a phone where the first tap closes an editor, tapping three
 times past the browser's count after a tap on a group's title that closes an
 editor (where the browser emulates the mouse for every tap the board could
 stop: it emulates none for a tap the board claims), double tapping and double
-clicking a card's Delete, tapping it at a steady pace, and double tapping and
+clicking a card's Delete, tapping it at a steady pace, double tapping and
 double clicking the Cancel of a comment's editor, the remark's Delete drawn
-back under it;
+back under it, and double tapping a dialog's backdrop past the browser's
+count;
 `__tests__/sessionGroupTouch.test.tsx` pins which taps cancel, and what they
 leave, on a card and on a group container, and the next taps of a sequence,
 with the mouse emulated for them and the mouse itself — the ones whose time
@@ -410,7 +440,10 @@ matters on an event clock of their own (jsdom stamps every event with
 `Date.now()`, so a time read from the wrong clock went unseen) — after a
 closed editor (at its press's end, by its click's write, under a title's tap),
 after each Delete that asks nothing, an emoji picked, a badge emptied, an
-editor's Cancel, a follow-up accepted and a tap's drop.
+editor's Cancel, a follow-up accepted, a tap's drop and pick-up, and after
+the Vote bar's *Unlimited votes*, a dialog opened or closed, a proposal's
+thumb and *Directly Accept Action*; `__tests__/healthCheckDoubleGesture.test.tsx`
+the health check's proposal Cancel and Delete.
 
 **A control shown on hover is shown on focus, and never hidden where nothing
 hovers.** A card's edit, delete and first-comment controls were `opacity-0`
@@ -434,7 +467,14 @@ Review and the Dashboard's Actions tab, were slate-300 on white (1.49:1) or a
 check in emerald-500 (2.54:1); they are slate-500 (4.76:1) and emerald-600, and
 the tests measure what each paints (`effectivePair`), never a class refused:
 slate-400, 2.63:1, passed a check that only refused slate-300. axe-core skips
-icon ligatures, so no audit reports them.
+icon ligatures, so no audit reports them. **Measure a card's control on a
+coloured card**: every column a template or Edit Layout makes has a colour,
+and cards are coloured by topic by default, so the white card is the rare
+one. *Add reaction* took slate-500 there too, at 1.0 to 1.6:1 on the columns'
+colours, worse than the slate-300 it replaced: it takes the card's measured
+text colour, as the pencil and the comment button do, and its test measures it
+against the card's own background, which `effectivePair` cannot read (an
+inline style).
 `__tests__/sessionOpenBoard.test.tsx` pins the classes and measures the
 colours, `__tests__/sessionActionControlsContrast.test.tsx` the action rows,
 and `e2e/retro-touch-card-controls.spec.ts` the layout, on an emulated phone
@@ -1188,6 +1228,16 @@ change to it lands in both.**
   participant's "ran out" claim is exactly the ping-pong the ledger exists to
   prevent. Add a timer behaviour to the shared files, never to one session
   type.
+
+- **One double-gesture guard** — `components/session/doubleGestureGuard.ts`
+  (`useDoubleGestureGuard`). The next press of a double click, or the next tap
+  of a double tap, presses nothing on another control than the first (see
+  *Accessibility*, the press paragraph). It lived in `Session.tsx` alone, and
+  the health check, which renders the same proposal rows, deleted the proposal
+  being edited with a double click on its Cancel, and two with one on its
+  Delete. Both screens mount it before anything that listens for a press; the
+  retrospective adds its card editor's mark and its claimed taps through the
+  state the guard returns.
 
 What is deliberately **not** shared yet: the session headers themselves (the
 retro's carries the tips and counts different things, and both are pinned by the

@@ -26,6 +26,7 @@ import {
 import { getAssignableMembers } from './session/assignableMembers';
 import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessionRoster';
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
+import { useDoubleGestureGuard } from './session/doubleGestureGuard';
 import SyncStalledBanner from './session/SyncStalledBanner';
 import { JOIN_DENIED_REVOKED, SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
 import { isSessionLive, useSessionRevoked } from './session/useSessionRevoked';
@@ -136,6 +137,11 @@ const isHealthCheckSession = (session: unknown): session is HealthCheckSessionTy
 
 const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
   const { t, tp, locale } = useTranslation();
+  // The next press of a double click, or the next tap of a double tap, presses
+  // nothing on another control than the first: the retrospective's guard, the
+  // same module (pass 17 of 42.1). A double click on a proposal's Cancel
+  // deleted it, one on its Delete deleted the next one too, for everyone.
+  useDoubleGestureGuard();
   const [session, setSession] = useState<HealthCheckSessionType | undefined>(
     team.healthChecks?.find(h => h.id === sessionId)
   );

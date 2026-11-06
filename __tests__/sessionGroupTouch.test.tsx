@@ -1426,6 +1426,93 @@ describe('a tap the board acts on, and the field it leaves', () => {
       expect(after[0].tickets.find((t) => t.id === 'td')?.groupId).toBeTruthy();
     });
 
+    // A tap that drops what was held while an editor closes keeps the editor
+    // as the reason: its half second runs on from every tap it stops, which
+    // kept the third tap of a triple tap off the card that grew back (pass
+    // 13 of 42.1); an act would have let it through.
+    it('presses no control with the taps after a drop that closed an editor, at an ordinary pace', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      expect(tap(card('td'))).toBe(false);
+      expect(held('td')).toBeTruthy();
+      await user.click(within(card('tc')).getByRole('button', { name: 'Edit ticket' }));
+      await user.type(within(card('tc')).getByRole('textbox'), ' on Mondays');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(tap(card('tb'))).toBe(false);
+        expect(within(card('tc')).queryByRole('textbox')).toBeNull();
+        const remove = removeOf('tc');
+        clock.at(300);
+        expect(press(remove, 1, true)).toEqual(nothingPressed);
+        clock.at(600);
+        expect(press(remove, 1, true)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      expect(onBoard('tc')).toBe(true);
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(1);
+      expect(after[0].tickets.find((t) => t.id === 'td')?.groupId).toBe('g1');
+      expect(after[0].tickets.find((t) => t.id === 'tc')?.text).toBe('Too many meetings on Mondays');
+    });
+
+    // The card it drops onto is drawn again in the new group: its element
+    // leaves the page. No control went with the tap — a card is none — and
+    // the editor the tap closed stays the reason.
+    it('presses no control with the taps after a drop that made a group and closed an editor, at an ordinary pace', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      expect(tap(card('td'))).toBe(false);
+      await user.click(within(card('ta')).getByRole('button', { name: 'Edit ticket' }));
+      await user.type(within(card('ta')).getByRole('textbox'), ' in staging');
+
+      const clock = heldClock();
+      try {
+        const target = card('tc');
+        expect(tap(target)).toBe(false);
+        expect(target.isConnected).toBe(false);
+        expect(within(card('ta')).queryByRole('textbox')).toBeNull();
+        const remove = removeOf('tb');
+        clock.at(300);
+        expect(press(remove, 1, true)).toEqual(nothingPressed);
+        clock.at(600);
+        expect(press(remove, 1, true)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      expect(onBoard('tb')).toBe(true);
+    });
+
+    // A tap the board claims right after a drop, on the card the drop put
+    // under the finger, picks nothing up: its half second runs from the drop.
+    it('picks up nothing with the next tap on the card a tap just dropped, and does past the drop’s half second', async () => {
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+
+      const clock = heldClock();
+      try {
+        expect(tap(card('td'))).toBe(false);
+        clock.at(600);
+        expect(tap(card('tc'))).toBe(false);
+        expect(within(card('td')).queryByRole('button', { name: /Selected for grouping/ })).toBeNull();
+        clock.at(750);
+        expect(tap(card('td'))).toBe(false);
+        expect(within(card('td')).queryByRole('button', { name: /Selected for grouping/ })).toBeNull();
+        clock.at(1400);
+        expect(tap(card('td'))).toBe(false);
+      } finally {
+        clock.restore();
+      }
+
+      expect(held('td')).toBeTruthy();
+    });
+
     // A group held to move is put down the same way: the targets it offered
     // in every other column go, and the board is laid out again.
     it('deletes nothing with the next tap once a tap put down the group it held', async () => {
@@ -1457,6 +1544,157 @@ describe('a tap the board acts on, and the field it leaves', () => {
 
       expect(onBoard('ta')).toBe(true);
       expect((await writes()).slice(before)).toHaveLength(0);
+    });
+  });
+
+  // Review finding (pass 17 of 42.1): a control that stays on the page moves,
+  // or is covered, as well as one that goes. The votes left came in front of
+  // "Unlimited votes" as it was unticked, and "1 vote/item" came under the
+  // pointer; a dialog opened over the Comments button, its comment's Delete
+  // under the pointer; a dialog's backdrop closed it, the card under it there;
+  // a proposal's vote badge shrank, its neutral vote under the thumb; an
+  // action accepted directly drew its row where the field was, its Undo under
+  // the button. The browser counts the next press of a double click at the
+  // point of the first: on another control there, whatever brought it, it
+  // presses nothing. And a tap that picks a card up draws the card again
+  // around the finger, its banner pushing its content down.
+  describe('the next press of a double click on another control, whatever moved it under the pointer', () => {
+    const removeOf = (id: string) => within(card(id)).getByRole('button', { name: 'Delete ticket' });
+    const onBoard = (id: string) => document.querySelector(`[data-ticket-id="${id}"]`) !== null;
+    const lastWrite = async () => (await writes()).at(-1);
+
+    it.each([
+      ['a double click on its words', false, () => screen.getByText('1 vote/item')],
+      ['a double click on the next box itself, which is no text field', false, () => screen.getByRole('checkbox', { name: '1 vote/item' })],
+      ['a double tap as Chromium counts it, the next a fingertip from the first', true, () => screen.getByText('1 vote/item')],
+    ])('ticks nothing else on the Vote bar’s Unlimited votes, the next label come under it: %s', async (_how, touched, next) => {
+      renderGroupPhase({
+        phase: 'VOTE',
+        settings: { ...createSession().settings, unlimitedVotes: true },
+        tickets: [
+          { id: 'tc', colId: 'col-1', text: 'Too many meetings', authorId: 'facilitator-1', groupId: null, votes: ['facilitator-1', 'facilitator-1', 'bob'] },
+        ],
+        groups: [],
+      });
+      await screen.findByText('Too many meetings');
+      const before = (await writes()).length;
+
+      const first = screen.getByText('Unlimited votes');
+      if (touched) expect(tap(first)).toBe(true);
+      expect(pressOf(first, 1)).toEqual(pressedAndClicked);
+      const second = next();
+      if (touched) expect(tap(second)).toBe(true);
+      expect(pressOf(second, 2)).toEqual(nothingPressed);
+
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(1);
+      expect(after[0].settings).toMatchObject({ unlimitedVotes: false, oneVotePerTicket: false });
+      expect(after[0].tickets[0].votes).toEqual(['facilitator-1', 'facilitator-1', 'bob']);
+    });
+
+    it('deletes no comment with a double click on the Comments button, the dialog opened over it', async () => {
+      const comment = (id: string, text: string) => ({ id, authorId: 'facilitator-1', authorName: 'Facilitator', text, createdAt: '2026-11-01T10:00:00.000Z' });
+      renderGroupPhase({
+        phase: 'OPEN_BOARD',
+        tickets: [{
+          id: 'tc', colId: 'col-1', text: 'Too many meetings', authorId: 'facilitator-1', groupId: null, votes: [],
+          comments: [comment('c1', 'First remark')],
+        }],
+        groups: [],
+      });
+      await screen.findByText('Too many meetings');
+      const before = (await writes()).length;
+
+      expect(pressOf(within(card('tc')).getByTestId('ticket-comment-btn'), 1)).toEqual(pressedAndClicked);
+      const dialog = await screen.findByRole('dialog');
+      expect(pressOf(within(dialog).getByRole('button', { name: 'Delete comment' }), 2)).toEqual(nothingPressed);
+
+      expect(within(dialog).getByText('First remark')).toBeTruthy();
+      expect((await writes()).slice(before)).toHaveLength(0);
+    });
+
+    it('deletes no card with a double click on a dialog’s backdrop, the card under it there', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await user.click(within(card('tc')).getByTestId('ticket-comment-btn'));
+      const backdrop = (await screen.findByRole('dialog')).parentElement as HTMLElement;
+      const before = (await writes()).length;
+
+      expect(pressOf(backdrop, 1)).toEqual(pressedAndClicked);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(pressOf(removeOf('td'), 2)).toEqual(nothingPressed);
+
+      expect(onBoard('td')).toBe(true);
+      expect((await writes()).slice(before)).toHaveLength(0);
+    });
+
+    it('votes up, not neutral, with a double click on a proposal’s thumb, its badge shrunk', async () => {
+      Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+      renderGroupPhase({
+        phase: 'DISCUSS',
+        tickets: [{ id: 'tc', colId: 'col-1', text: 'Late release notes', authorId: 'facilitator-1', groupId: null, votes: ['facilitator-1'] }],
+        groups: [],
+        discussionFocusId: 'tc',
+        actions: [{ id: 'p1', text: 'Write the notes the day before', assigneeId: null, done: false, type: 'proposal', linkedTicketId: 'tc', proposalVotes: {} }],
+      });
+      await screen.findByText('Write the notes the day before');
+      const before = (await writes()).length;
+
+      const voteButton = (icon: string) => screen.getAllByText(icon).map((el) => el.closest('button')).filter((b): b is HTMLButtonElement => !!b)[0];
+      expect(pressOf(voteButton('thumb_up'), 1)).toEqual(pressedAndClicked);
+      expect(pressOf(voteButton('remove'), 2)).toEqual(nothingPressed);
+
+      expect((await writes()).slice(before)).toHaveLength(1);
+      expect((await lastWrite())?.actions[0].proposalVotes).toEqual({ 'facilitator-1': 'up' });
+    });
+
+    it('keeps an action accepted with a double click on Directly Accept Action, its Undo come under it', async () => {
+      const user = userEvent.setup();
+      Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+      renderGroupPhase({
+        phase: 'DISCUSS',
+        tickets: [{ id: 'tc', colId: 'col-1', text: 'Late release notes', authorId: 'facilitator-1', groupId: null, votes: ['facilitator-1'] }],
+        groups: [],
+        discussionFocusId: 'tc',
+        actions: [],
+      });
+      await user.type(await screen.findByPlaceholderText('Propose an action...'), 'Write the notes the day before');
+      const before = (await writes()).length;
+
+      expect(pressOf(screen.getByRole('button', { name: 'Directly Accept Action' }), 1)).toEqual(pressedAndClicked);
+      expect(pressOf(screen.getByRole('button', { name: 'Undo accept' }), 2)).toEqual(nothingPressed);
+
+      expect((await writes()).slice(before)).toHaveLength(1);
+      expect((await lastWrite())?.actions.map((a) => [a.text, a.type])).toEqual([['Write the notes the day before', 'new']]);
+    });
+
+    // The tap's own mouse, past the browser's count: the card it picked up
+    // was drawn again under the finger.
+    it('votes nothing with the next tap on a card it picked up, the banner having pushed the vote under the finger', async () => {
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(tap(card('td'))).toBe(false);
+        expect(held('td')).toBeTruthy();
+        clock.at(150);
+        const vote = within(card('td')).getByTestId('vote-add');
+        expect(tap(vote)).toBe(true);
+        expect(pressOf(vote, 1)).toEqual(nothingPressed);
+        // Past the half second, a tap of its own votes.
+        clock.at(900);
+        expect(tap(vote)).toBe(true);
+        expect(pressOf(vote, 1)).toEqual(pressedAndClicked);
+      } finally {
+        clock.restore();
+      }
+
+      const after = (await writes()).slice(before);
+      expect(after).toHaveLength(1);
+      expect(after[0].tickets.find((t) => t.id === 'td')?.votes).toEqual(['facilitator-1']);
     });
   });
 

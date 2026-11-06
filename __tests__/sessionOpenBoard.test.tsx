@@ -6,6 +6,7 @@ import Session from '../components/Session';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { RetroSession, Team, User } from '../types';
 import { effectivePair } from './helpers/tailwindTheme';
+import { contrastRatio, rgbToHex } from '../utils/colorUtils';
 
 /**
  * The open board (utils/openBoard.ts): every card activity of a retrospective
@@ -1986,21 +1987,27 @@ describe('Open board — every hold and every drop', () => {
           });
 
           // The press before it not over yet — its end comes a task after its
-          // release — has closed nothing here (its click wrote nothing that
-          // took the editor's text): only an older press did.
-          it('lets the next press of a double click through while the press before it has not ended', async () => {
+          // release — is the press it is the next of: on what that press
+          // pressed, it is the browser's; on another control, it presses
+          // nothing, though that press closed nothing.
+          it('decides the next press of a double click against the press before it, while that press has not ended', async () => {
             const user = userEvent.setup();
             renderBoard(worded(5, 'Too many meetings'), alice);
             await screen.findByText('Too many meetings');
             await openEditor(user, 'Too many meetings');
             expect(await clickOnce(groupTitle(), 1)).toBe(true);
             expect(editor()).toBeNull();
+            const vote = () => within(cardById('t-c')).getByRole('button', { name: /add a vote to this ticket/ });
 
             fireEvent.mouseDown(groupTitle(), { detail: 1 });
             fireEvent.mouseUp(groupTitle(), { detail: 1 });
             fireEvent.click(groupTitle(), { detail: 1 });
-            expect(await clickOnce(within(cardById('t-c')).getByRole('button', { name: /add a vote to this ticket/ }), 2)).toBe(true);
-            expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.votes).toEqual(['alice', 'alice']);
+            expect(await clickOnce(vote(), 2)).toBe(false);
+            fireEvent.mouseDown(groupTitle(), { detail: 1 });
+            fireEvent.mouseUp(groupTitle(), { detail: 1 });
+            fireEvent.click(groupTitle(), { detail: 1 });
+            expect(await clickOnce(groupTitle(), 2)).toBe(true);
+            expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.votes).toEqual(['alice']);
           });
 
           // Nothing hears it: the reaction picker its first click opened
@@ -2020,20 +2027,27 @@ describe('Open board — every hold and every drop', () => {
             expect(screen.queryAllByTestId('emoji-option').length).toBeGreaterThan(0);
           });
 
-          it('lets the next click of a double click through on what the first pressed, or when no editor closed', async () => {
+          // Review finding (pass 17 of 42.1): the browser counts the next
+          // press of a double click at the point of the first. Another control
+          // there came with the first click, whatever brought it — no editor
+          // need close: a chip that appeared, a row that moved, a dialog
+          // opened or closed. It presses nothing; a click of its own does.
+          it('lets the next click of a double click through on what the first pressed, and on another control presses nothing though no editor closed', async () => {
             const user = userEvent.setup();
             renderBoard(worded(5, 'Too many meetings'), alice);
             await screen.findByText('Too many meetings');
             await openEditor(user, 'Too many meetings');
             await user.keyboard('{End} on Mondays');
             const before = await persistedCount();
+            const vote = () => within(cardById('t-c')).getByRole('button', { name: /add a vote to this ticket/ });
 
             expect(await clickOnce(groupTitle(), 1)).toBe(true);
             expect(await clickOnce(groupTitle(), 2)).toBe(true);
             expect(await textsSince(before)).toEqual(['Too many meetings on Mondays']);
-            // No editor open: a double click is the browser's.
+            // No editor open.
             expect(await clickOnce(groupTitle(), 1)).toBe(true);
-            expect(await clickOnce(within(cardById('t-c')).getByRole('button', { name: /add a vote to this ticket/ }), 2)).toBe(true);
+            expect(await clickOnce(vote(), 2)).toBe(false);
+            expect(await clickOnce(vote(), 1)).toBe(true);
             expect((await lastPersisted())?.tickets.find((t) => t.id === 't-c')?.votes).toEqual(['alice', 'alice']);
           });
 
@@ -3690,6 +3704,28 @@ describe('Open board — every hold and every drop', () => {
   // shown on every screen, was slate-300 on the card's white, 1.49:1 — the
   // colour pass 15 took off the comment controls. axe skips icon ligatures,
   // so no audit could report it.
+  // Review finding (pass 17 of 42.1): every column a template or Edit Layout
+  // makes has a colour, and cards are coloured by topic by default, so every
+  // card is a coloured card. A fixed slate-500 measured 1.0 to 1.6:1 there,
+  // worse than the slate-300 it replaced; and the test above measures a white
+  // card only. Measured against the card's own colour, as the pencil is.
+  it.each([
+    ['#475569'], ['#D97706'], ['#059669'], ['#64748B'], ['#E11D48'], ['#2563EB'],
+  ])('draws the add-reaction control at a contrast that can be seen on a card coloured %s, closed and open', async (customColor) => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({ columns: [{ ...column('todo', 'To Discuss'), customColor }, column('doing', 'Discussing')] }));
+    const cardEl = cardElement('Too many meetings');
+    const background = cardEl.style.backgroundColor.match(/\d+/g)!.map(Number);
+    const bg = rgbToHex(background[0], background[1], background[2]);
+    const fgOf = (control: HTMLElement) => (control.className.includes('text-white') ? '#FFFFFF' : control.className.includes('text-black') ? '#000000' : null);
+
+    const add = within(cardEl).getByRole('button', { name: 'Add reaction' });
+    expect(fgOf(add)).not.toBeNull();
+    expect(contrastRatio(fgOf(add)!, bg)).toBeGreaterThanOrEqual(3);
+    await user.click(add);
+    expect(contrastRatio(fgOf(within(cardEl).getByRole('button', { name: 'Add reaction' }))!, bg)).toBeGreaterThanOrEqual(3);
+  });
+
   it('draws the add-reaction control at a contrast that can be seen', async () => {
     renderBoard(groupedBoard());
     await screen.findByText('Too many meetings');

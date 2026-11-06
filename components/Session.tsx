@@ -60,18 +60,16 @@ import {
   resolveGroupingActivation
 } from './session/groupingKeyboard';
 import {
-    GestureAim,
     GroupingGesture,
     TouchPoint,
     claimGesture,
     endGesture,
     idleGesture,
-    isNearAim,
     isNextTap,
-    isTapMouse,
     moveGesture,
     startGesture,
 } from './session/groupingTouch';
+import { boardMovedSince, pressedControl, useDoubleGestureGuard } from './session/doubleGestureGuard';
 import {
   BrainstormSelection,
   canMoveGroupInBrainstorm,
@@ -199,32 +197,6 @@ const PENDING_MAX_VOTES_MS = 400;
  * ends it first.
  */
 const PRESS_LEAVE_SAFETY_MS = 10_000;
-const CONTROL_SELECTOR = 'button, a[href], input, textarea, select, label, summary, [role="button"]';
-/** What a press of the mouse presses: the control around its target, or the target itself. */
-const pressedControl = (target: Element | null) => target?.closest(CONTROL_SELECTOR) ?? target;
-/**
- * The control a press aimed at went with its own click: a Delete that asks
- * nothing with its card, its group, its comment, its proposal, its column; the
- * picker's emoji with the picker; a reaction badge with the last reaction to
- * it; an editor's Cancel or Save with its editor; a follow-up's Accept with
- * its row. What came up there lies under the pointer now — the next card's
- * Delete, the next badge, the row's Delete, the next follow-up's Accept — and
- * the next press of a double click, or the next tap of a double tap, pressed
- * it, for everyone (passes 14 to 16 of 42.1). A press on text that becomes a
- * field (a proposal's) is not one: the field comes where the text was.
- */
-const aimLeftPage = (aim: { key: Element | null } | null) =>
-  !!aim?.key && !aim.key.isConnected && aim.key.matches(CONTROL_SELECTOR);
-/**
- * What lies under the pointer moved since the gesture before aimed (pressRef):
- * asked when the next one comes, before or after the end of that press — on a
- * slow machine the next press comes before it — and the act wins over an
- * editor that press closed too.
- */
-const boardMovedSince = (press: { aim: { key: Element | null } | null; boardMoved: 'editor' | 'act' | null }) => {
-  if (aimLeftPage(press.aim)) press.boardMoved = 'act';
-  return press.boardMoved;
-};
 /** A field, whose words a drag carries: never its card, or its group. */
 const isFieldText = (target: EventTarget | null): target is HTMLInputElement | HTMLTextAreaElement =>
   target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
@@ -750,27 +722,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     seq: number;
     // What the press began on.
     target: Element | null;
-    // What the gesture before the next one aimed at, where and when: a press
-    // of the mouse (the control around its target), or a tap the board
-    // claimed (its card or group). A press that presses nothing, or a tap
-    // that does nothing, aims at nothing: the next of the sequence is still
-    // measured against what the first aimed at, and where — from the time of
-    // the one before, as a browser counts its taps (isNextTap).
-    aim: (GestureAim & { key: Element | null }) | null;
-    // What lies under the pointer moved after that gesture aimed: an editor
-    // closed — at its press's end, by its click's write, or by ending a press
-    // before it, at its own mousedown — and the card grew back ('editor'); or
-    // the gesture's own act moved it: the control it pressed went with its
-    // click (aimLeftPage), or the tap put down what was held, and the board
-    // was laid out again under the finger ('act', boardMovedSince). An act is
-    // the reason, whatever editor the same gesture closed.
-    boardMoved: 'editor' | 'act' | null;
-    // When the touch of the last tap began: a browser counts the next tap of
-    // a double tap from the lift before it to that touch (touchStarts).
-    tapStartedAt: number | null;
-    // A press that presses nothing (begin): its click clicks nothing either.
-    stopped: boolean;
-  }>({ active: false, leaving: false, dispatching: null, leave: null, dragSource: null, boardDrag: false, safety: null, seq: 0, target: null, aim: null, boardMoved: null, tapStartedAt: null, stopped: false });
+  }>({ active: false, leaving: false, dispatching: null, leave: null, dragSource: null, boardDrag: false, safety: null, seq: 0, target: null });
+  // What the gesture before the next one aimed at, and whether what lies
+  // under the pointer moved since: the next press of a double click, or the
+  // next tap of a double tap, presses nothing on another control. Mounted
+  // before the press below, which it stops (components/session/
+  // doubleGestureGuard.ts, shared with the health check). The press marks the
+  // card editor it closes there ('editor'), and the taps the board claims
+  // aim there.
+  const gestureRef = useDoubleGestureGuard();
   // A press in a group's title is the field's: the group is not dragged from
   // there while it lasts (begin).
   const [pressedTitleGroupId, setPressedTitleGroupId] = useState<string | null>(null);
@@ -1243,7 +1203,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     const leave = press.leave;
     if (!leave || leave.folded || !press.dispatching || press.dispatching.eventPhase === Event.NONE) return [];
     leave.folded = true;
-    press.boardMoved = 'editor';
+    gestureRef.current.boardMoved = 'editor';
     setEditingTicketId(current => (current === leave.ticketId ? null : current));
     // Closed, it is no longer drawn as left: opened again before the press
     // ends — the keyboard's click took the text while a popup kept the
@@ -1276,7 +1236,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     if (!leave) return false;
     // Closed here, or already by the write of its click.
     const closes = !leave.folded;
-    if (closes) press.boardMoved = 'editor';
+    if (closes) gestureRef.current.boardMoved = 'editor';
     setEditingTicketId(current => (current === leave.ticketId ? null : current));
     if (leave.text !== null && closes && sessionRef.current?.tickets.some(t => t.id === leave.ticketId)) {
       updateSession(writeTicketText(leave.ticketId, leave.text));
@@ -1316,46 +1276,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     };
     // The drag's source listens for its own end (dragStarts).
     let sourceEnds: (() => void) | null = null;
-    // When the last touch ended: the mouse a browser emulates for a tap
-    // follows it (isTapMouse).
-    let touchEndAt: number | null = null;
-    // And when the last touch began: every touch ends after its own start.
-    let touchStartAt: number | null = null;
-    const touchStarts = (e: Event) => { touchStartAt = e.timeStamp; };
-    const touchEnds = (e: Event) => {
-      touchEndAt = e.timeStamp;
-      press.tapStartedAt = touchStartAt;
-    };
+    // A press the double-gesture guard stopped never reaches this one: the
+    // guard is mounted first, and stops it there (useDoubleGestureGuard).
     const begin = (e: MouseEvent) => {
       const target = e.target instanceof Element ? e.target : null;
-      // The next press of a double click, once an editor closed after the
-      // press before was aimed: the card grew back by the rows the editor
-      // hides, and what lies under the pointer is no longer what that press
-      // pressed — the card's Delete, its vote, where a word of a group's
-      // title was being selected — or the press's own click deleted a card,
-      // and the next one came up under it. On another control it presses
-      // nothing; on the same one, it is the browser's. The mouse a browser
-      // emulates for a tap is the next of a double tap by the board's own time
-      // too, from the touch of its tap, as the browser stops counting its taps
-      // sooner, or by the browser's count, only a fingertip from where the
-      // first aimed, as the browser counts each tap from the one before, and
-      // further (isTapMouse).
-      const point = { x: e.clientX, y: e.clientY };
-      const nextGesture = isTapMouse(touchEndAt, e.timeStamp)
-        ? isNextTap(press.aim, press.tapStartedAt ?? e.timeStamp, point) || (e.detail > 1 && isNearAim(press.aim, point))
-        : e.detail > 1;
-      if (nextGesture && boardMovedSince(press) && press.aim && pressedControl(target) !== press.aim.key) {
-        press.stopped = true;
-        // The half second after a closed editor runs on from each press it
-        // stops; an act's runs from the act alone: from its stops, at a
-        // steady pace of two taps a second on the Delete that came up, every
-        // tap after the first pressed nothing (pass 15 of 42.1).
-        if (press.boardMoved === 'editor') press.aim = { ...press.aim, at: e.timeStamp };
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        return;
-      }
-      press.stopped = false;
       // No drag is under way at a mousedown: a source whose end was never
       // heard — Firefox sends none to a field that left the page — is no
       // longer one.
@@ -1377,12 +1301,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       }
       // A press still under way, its end not reached yet, ends here: its
       // text goes before this press can leave another editor. The editor it
-      // closes closes under this press, after it was aimed: Chromium keeps
-      // the release a context menu or a select's list took, and the next
-      // press of a double click landed on the card that grew back.
-      const closesUnder = press.active ? ends() : false;
-      press.aim = { key: pressedControl(target), at: e.timeStamp, x: e.clientX, y: e.clientY };
-      press.boardMoved = closesUnder ? 'editor' : null;
+      // closes closes under this press, after the guard aimed it, and marks
+      // it so (finishPress): Chromium keeps the release a context menu or a
+      // select's list took, and the next press of a double click landed on
+      // the card that grew back.
+      if (press.active) ends();
       press.seq += 1;
       press.active = true;
       press.dispatching = null;
@@ -1450,15 +1373,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       press.dragSource = source;
       source.addEventListener('dragend', heard, { once: true });
     };
-    // The click of a press that presses nothing clicks nothing either. A
-    // click of the keyboard is no part of it: it has no detail.
-    const stopsClick = (e: MouseEvent) => {
-      if (!press.stopped || e.detail === 0) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    };
-    // First, so that nothing after hears it.
-    window.addEventListener('click', stopsClick, true);
     window.addEventListener('mousedown', begin, true);
     window.addEventListener('click', dispatchStarts, true);
     // A select picked from its own list writes in its change, with no click,
@@ -1470,10 +1384,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     window.addEventListener('drop', dispatchStarts, true);
     window.addEventListener('dragstart', dragStarts, true);
     window.addEventListener('mouseup', released);
-    window.addEventListener('touchstart', touchStarts, { capture: true, passive: true });
-    window.addEventListener('touchend', touchEnds, { capture: true, passive: true });
     return () => {
-      window.removeEventListener('click', stopsClick, true);
       window.removeEventListener('mousedown', begin, true);
       window.removeEventListener('click', dispatchStarts, true);
       window.removeEventListener('change', dispatchStarts, true);
@@ -1481,12 +1392,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       window.removeEventListener('drop', dispatchStarts, true);
       window.removeEventListener('dragstart', dragStarts, true);
       window.removeEventListener('mouseup', released);
-      window.removeEventListener('touchstart', touchStarts, true);
-      window.removeEventListener('touchend', touchEnds, true);
       if (sourceEnds) press.dragSource?.removeEventListener('dragend', sourceEnds);
       press.dragSource = null;
     };
-  }, []);
+    // The guard's state is a ref of its own, stable for the life of the screen.
+  }, [gestureRef]);
   const writeTicketText = (ticketId: string, text: string) => (s: RetroSession) => {
     const ticket = s.tickets.find(x => x.id === ticketId);
     if (ticket) ticket.text = text;
@@ -1574,7 +1484,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // goes alone when the tap writes nothing (a hold).
   const actOnClaimedTap = (e: React.TouchEvent, point: TouchPoint, perform: () => void) => {
     e.preventDefault();
-    const press = pressRef.current;
+    const gesture = gestureRef.current;
     const aimedAt = e.currentTarget as Element;
     // The next tap of a double tap, once an editor closed after the tap
     // before was aimed: the card grew back under the finger, and what this
@@ -1584,19 +1494,26 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // the same card or group it is a tap again. Measured from its touch, as a
     // browser counts the next tap: held a moment, it lifted past the half
     // second, and grouped the card (pass 15 of 42.1).
-    if (boardMovedSince(press) && press.aim && press.aim.key !== aimedAt && isNextTap(press.aim, press.tapStartedAt ?? e.timeStamp, point)) {
-      if (press.boardMoved === 'editor') press.aim = { ...press.aim, at: e.timeStamp };
+    if (boardMovedSince(gesture) && gesture.aim && gesture.aim.key !== aimedAt && isNextTap(gesture.aim, gesture.tapStartedAt ?? e.timeStamp, point)) {
+      if (gesture.boardMoved === 'editor') gesture.aim = { ...gesture.aim, at: e.timeStamp };
       return;
     }
     if (emojiPickerOpenId && !emojiPickerRef.current?.contains(e.target as Node)) setEmojiPickerOpenId(null);
     const active = document.activeElement;
     // Left, the card's editor closes, and what lies under the finger moves.
-    press.aim = { key: aimedAt, at: e.timeStamp, x: point.x, y: point.y };
-    press.boardMoved = !!active && active === editorFieldRef.current ? 'editor' : null;
+    // The tap changes what is held, and draws the card it reached again
+    // around the finger (relaid): picked up, its "Selected" banner pushed its
+    // content down, and the next tap pressed what came under the finger —
+    // its vote, its comments, its Delete (pass 17 of 42.1).
+    const reached = e.target instanceof Element ? e.target : null;
+    gesture.aim = { key: aimedAt, under: pressedControl(reached), at: e.timeStamp, x: point.x, y: point.y, relaid: true };
+    gesture.boardMoved = !!active && active === editorFieldRef.current ? 'editor' : null;
     // A tap that puts down what was held — into a group, onto a card, back
     // where it was — lays the board out again under the finger: the card it
     // dropped came there, its own Delete under the next tap, which deleted it
-    // for everyone (pass 16 of 42.1).
+    // for everyone (pass 16 of 42.1). An editor it closed too stays the
+    // reason: its half second runs on from every tap it stops, which kept the
+    // third tap of a triple tap off the card that grew back (pass 13).
     const putsHoldDown = !!draggedTicket || !!movingItem;
     if (active instanceof HTMLElement && active !== document.body) {
       const collected: Array<(s: RetroSession) => void> = [];
@@ -1609,7 +1526,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       tapBlurWritesRef.current.push(...collected);
     }
     perform();
-    if (putsHoldDown) press.boardMoved = 'act';
+    if (putsHoldDown && gesture.boardMoved !== 'editor') gesture.boardMoved = 'act';
     if (tapBlurWritesRef.current.length > 0) updateSession(() => {});
   };
 
@@ -3307,7 +3224,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 e.stopPropagation();
                                 setEmojiPickerOpenId(isPickerOpen ? null : t.id);
                             }}
-                            className={`hover:text-slate-700 hover:bg-slate-100 rounded-full w-8 h-8 flex items-center justify-center transition ${isPickerOpen ? 'bg-slate-100 text-slate-700' : 'text-slate-500'}`}
+                            // The card's own measured text colour on a coloured
+                            // card, as the pencil and the comment button: a
+                            // fixed slate-500 measured 1.0 to 1.6:1 on the
+                            // columns' colours, every card's default look
+                            // (pass 17 of 42.1).
+                            className={`rounded-full w-8 h-8 flex items-center justify-center transition ${
+                                cardBgHex
+                                    ? `${cardTextColor} hover:bg-black/10 ${isPickerOpen ? 'bg-black/10' : ''}`
+                                    : isPickerOpen ? 'bg-slate-100 text-slate-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+                            }`}
                             aria-label={tr('session.ticket.addReaction')}
                         >
                             <span className="material-symbols-outlined text-base">add_reaction</span>

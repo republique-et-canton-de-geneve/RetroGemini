@@ -993,6 +993,68 @@ for (const device of ['phone', 'computer'] as const) test(`a double ${device ===
   }
 });
 
+// Review finding (pass 17 of 42.1): a dialog's backdrop is no control, and it
+// goes with its own click: the first tap of a double tap closed the comments
+// dialog, and the second pressed what lay under the backdrop — a card's
+// Delete, which asks nothing. Past the browser's count (430 ms after the lift,
+// each emulated mouse says 1), only what lies under the point, laid out by a
+// real browser, says the board moved there (underMoved): jsdom has no layout.
+test('a double tap past the browser’s count on a dialog’s backdrop deletes no card under it', async ({ browser }) => {
+  const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1280, height: 900 }, hasTouch: true });
+  await context.addInitScript(() => {
+    const seen: Array<{ type: string; at: number; detail: number }> = [];
+    (window as unknown as { __taps: typeof seen }).__taps = seen;
+    for (const type of ['touchend', 'mousedown']) {
+      window.addEventListener(type, (e) => seen.push({ type, at: e.timeStamp, detail: (e as MouseEvent).detail ?? 0 }), { capture: true });
+    }
+  });
+  const page = await context.newPage();
+  try {
+    const sent = await startOpenBoard(page, `${TEAM_NAME}-backdrop`);
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    for (const text of ['First card', 'Second card']) {
+      await field.fill(text);
+      await page.keyboard.press('Enter');
+      await expect(card(page, text)).toBeVisible();
+    }
+    await field.blur();
+    await card(page, 'First card').getByTestId('ticket-comment-btn').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await page.waitForTimeout(700);
+
+    // A card's Delete that the backdrop covers, outside the dialog's panel.
+    const box = (await card(page, 'Second card').getByRole('button', { name: 'Delete ticket' }).boundingBox())!;
+    const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const panel = (await dialog.boundingBox())!;
+    expect(at.x < panel.x || at.x > panel.x + panel.width || at.y < panel.y || at.y > panel.y + panel.height).toBe(true);
+    const before = sent.length;
+    await page.evaluate(() => { (window as unknown as { __taps: unknown[] }).__taps.length = 0; });
+
+    await page.touchscreen.tap(at.x, at.y);
+    await page.evaluate((target) => new Promise<void>((resolve) => {
+      const seen = (window as unknown as { __taps: Array<{ type: string; at: number }> }).__taps;
+      const lift = [...seen].reverse().find((t) => t.type === 'touchend');
+      setTimeout(resolve, Math.max(0, target - (performance.now() - (lift?.at ?? 0))));
+    }), 430);
+    await page.touchscreen.tap(at.x, at.y);
+    await page.waitForTimeout(700);
+
+    const taps = await page.evaluate(() => (window as unknown as { __taps: Array<{ type: string; at: number; detail: number }> }).__taps);
+    const presses = taps.filter((t) => t.type === 'mousedown');
+    const lifts = taps.filter((t) => t.type === 'touchend');
+    expect(presses.map((t) => t.detail)).toEqual([1, 1]);
+    expect(presses[1].at - lifts[0].at).toBeLessThanOrEqual(500);
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator('[data-ticket-id]')).toHaveCount(2);
+    expect(sent.length - before).toBe(0);
+    // The second tap reached the Delete the backdrop had covered.
+    expect((await controlAt(page, at)).label).toBe('Delete ticket');
+  } finally {
+    await context.close();
+  }
+});
+
 test('on a computer the same controls wait for the pointer', async ({ page }) => {
   expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(true);
   await page.goto('/');
