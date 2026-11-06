@@ -103,11 +103,15 @@ export const DOUBLE_TAP_SLOP_PX = 24;
  */
 export type GestureAim = TouchPoint & { at: number };
 
+/** A fingertip from where the sequence first aimed. */
+export const isNearAim = (first: GestureAim | null, point: TouchPoint): boolean =>
+  !!first && Math.hypot(point.x - first.x, point.y - first.y) <= DOUBLE_TAP_SLOP_PX;
+
 export const isNextTap = (first: GestureAim | null, at: number, point: TouchPoint): boolean =>
   !!first
   && at >= first.at
   && at - first.at <= DOUBLE_TAP_MS
-  && Math.hypot(point.x - first.x, point.y - first.y) <= DOUBLE_TAP_SLOP_PX;
+  && isNearAim(first, point);
 
 /**
  * The mouse a browser emulates for a tap comes right after that tap's
@@ -118,6 +122,14 @@ export const isNextTap = (first: GestureAim | null, at: number, point: TouchPoin
  * in Chromium and 300 on Android: the comments or the Delete of the card that
  * grew back were pressed by a second tap the board's half second would have
  * stopped. The touchend just before it tells it from the mouse itself.
+ *
+ * Its `detail` measures neither from where the sequence first aimed nor as far
+ * (pass 14): Chromium compares each tap with the one before, 20 px on a
+ * computer and 100 dp on Android, so a tap a fingertip further than the first
+ * was still counted, and pressed nothing on the control it aimed at. Counted
+ * by the browser, it is the next only within a fingertip of the first
+ * (isNearAim); the browser's count still lasts past the board's half second
+ * after a long press, measured from the lift to the next touch.
  */
 export const TAP_MOUSE_MS = 500;
 

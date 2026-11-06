@@ -7,6 +7,7 @@ import {
   claimGesture,
   endGesture,
   idleGesture,
+  isNearAim,
   isNextTap,
   isTapMouse,
   moveGesture,
@@ -140,6 +141,25 @@ describe('the next tap of a double tap', () => {
     // 17.7 px on the diagonal, inside 24; 25.5 px outside it.
     expect(isNextTap(first, 1000, point(63, 62))).toBe(true);
     expect(isNextTap(first, 1000, point(68, 68))).toBe(false);
+  });
+});
+
+// Review finding (pass 14 of 42.1): a browser counts each tap from the one
+// before, and further than a fingertip; the board's place is the first's.
+describe('a fingertip from where the sequence first aimed', () => {
+  const first = { at: 1000, x: 50, y: 50 };
+
+  it('reaches a fingertip away in any direction, whenever', () => {
+    expect(isNearAim(first, point(50, 50))).toBe(true);
+    expect(isNearAim(first, point(50 + DOUBLE_TAP_SLOP_PX, 50))).toBe(true);
+    expect(isNearAim(first, point(63, 62))).toBe(true);
+  });
+
+  it('reaches no further, and from no aim at all', () => {
+    expect(isNearAim(first, point(50 + DOUBLE_TAP_SLOP_PX, 51))).toBe(false);
+    expect(isNearAim(first, point(68, 68))).toBe(false);
+    expect(isNearAim(first, point(90, 50))).toBe(false);
+    expect(isNearAim(null, point(50, 50))).toBe(false);
   });
 });
 

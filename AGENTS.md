@@ -338,7 +338,10 @@ click's write — on a slow machine the next press comes before the end — or b
 ending, at its own mousedown, a press whose release Chromium kept for a context
 menu or a select's list. The card grew back under the pointer, and the next
 press landed on what came there — its Delete, which asks nothing, its vote,
-its comments — instead of the word of a title being selected. A press it
+its comments — instead of the word of a title being selected. So it does once
+the press before deleted a card or a group (`deletionMovesBoard`): the next
+card came up into its place, its own Delete under the pointer, and a double
+click, or a double tap, on a Delete deleted two cards for everyone. A press it
 stops aims at nothing, so the third press of a triple click is stopped too.
 On the same control it is the browser's, and the word is selected by a double
 click done again. **So does the next tap of a double tap** (`isNextTap`: half
@@ -349,8 +352,14 @@ grew back with the one the first picked up, for everyone. That mouse is told
 from the mouse itself by the touchend just before it (`isTapMouse`), and held
 to the board's half second, not to the browser's count of taps (its `detail`),
 which Chromium ends at about 400 ms and Android at 300: tapped later, the
-second tap pressed the comments, or the Delete, of the card that grew back. A
-tap or a press that does nothing still belongs to the sequence: the next one
+second tap pressed the comments, or the Delete, of the card that grew back.
+Nor is its `detail` enough on its own: a browser counts each tap from the one
+before, 20 px on a computer and 100 dp on Android, so a tap it counts is the
+next only a fingertip from where the first aimed (`isNearAim`) — counted
+alone, a tap two fingertips away pressed nothing on the control it meant — and
+it still is, a little past the half second, after a long press. The mouse
+itself is judged by its `detail` alone: a system can count a double click
+later than half a second. A tap or a press that does nothing still belongs to the sequence: the next one
 is measured from its time, as a browser counts its taps, and against where
 the first aimed — measured from the first tap only, the third tap of a triple
 tap at an ordinary pace fell past half a second and grouped the card.
@@ -358,11 +367,17 @@ tap at an ordinary pace fell past half a second and grouped the card.
 mouse for a tap and lays nothing out), counting the writes a hold and its drop
 send, on a card and on a group's own blank area, pressing the controls a
 closing editor used to move, on a computer and a phone, double clicking a
-title under a closing editor, dragging a word within a title, and tapping two
-and three times on a phone where the first tap closes an editor;
+title under a closing editor, dragging a word within a title, tapping two
+and three times on a phone where the first tap closes an editor, tapping three
+times past the browser's count after a tap on a group's title that closes an
+editor (the one case where the browser emulates the mouse for every tap: it
+emulates none for a tap the board claims), and double tapping and double
+clicking a card's Delete;
 `__tests__/sessionGroupTouch.test.tsx` pins which taps cancel, and what they
 leave, on a card and on a group container, and the next taps of a sequence,
-with the mouse emulated for them and the mouse itself.
+with the mouse emulated for them and the mouse itself, on an event clock of
+their own (jsdom stamps every event with `Date.now()`, so a time read from the
+wrong clock went unseen).
 
 **A control shown on hover is shown on focus, and never hidden where nothing
 hovers.** A card's edit, delete and first-comment controls were `opacity-0`
@@ -532,12 +547,19 @@ Four rules:
   React only moved during the drag of its words, so a drag from outside the
   page was let through to the browser until the next press. **Words selected
   in a card are no drag of that card, nor of its group** (`dragsOwnElement`:
-  a card's or a group's drag starts at the card or the group itself, and
-  nothing inside either is draggable): their drag starts at the words, and
+  a card's or a group's own drag starts at that element, while it can be
+  dragged; a card in a group is a drag of its own, whose start stops at the
+  card, and its end, heard as it goes up, is not the group's): their drag
+  starts at the words — or, pressed on its padding inside the selection, at
+  the card itself, or at a group that cannot be moved, in both browsers — and
   went up to the card's handler, or its group's, which took it for theirs, so
   the board performed what the keyboard held and the end of their drag put the
-  hold down. A card cannot be dragged while a group is held on a board, nor in
-  Brainstorm while it is grouped, so its words can be selected then.
+  hold down. A card's words can be selected where nothing around them can be
+  dragged: on a board while a group is held, and in Brainstorm on a grouped
+  card whose group cannot be moved (a card in it hidden from its reader). A
+  group that can be moved drags itself from its cards' words, and only
+  Firefox, under a selection made some other way first, starts a drag of the
+  words themselves.
 - **The "from ..." chip follows who moved the card.** A card moved by hand is
   re-homed and loses the chip (same rule as dropping one on a column in the
   Group phase); a card displaced *by its group* keeps naming the column it was

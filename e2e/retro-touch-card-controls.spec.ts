@@ -644,6 +644,199 @@ for (const { taps, gap } of [{ taps: 2, gap: 120 }, { taps: 3, gap: 300 }]) test
   }
 });
 
+/** Creates a team and opens a Lean Coffee board on it; answers what the page sends. */
+const startOpenBoard = async (page: Page, teamName: string) => {
+  const sent: string[] = [];
+  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
+    const text = typeof payload === 'string' ? payload : payload.toString();
+    if (text.includes('"update-session"')) sent.push(text);
+  }));
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  await page.getByRole('button', { name: '+ New Team' }).click();
+  await page.getByPlaceholder('e.g. Design Team').fill(teamName);
+  await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+  await page.getByLabel('Recovery Email').fill('facilitator@example.com');
+  await page.getByRole('button', { name: 'Create & Join' }).click();
+  await expect(page.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 15_000 });
+  await dismissAnnouncementsIfPresent(page);
+  await page.getByRole('button', { name: 'New Retrospective' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
+  await dialog.getByTestId('retro-template-lean_coffee').click();
+  await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
+  await page.waitForTimeout(700);
+  return sent;
+};
+
+/** The control under a point, and the card it belongs to. */
+const controlAt = (page: Page, at: { x: number; y: number }) => page.evaluate(({ x, y }) => {
+  const control = document.elementFromPoint(x, y)?.closest('button');
+  return { label: control?.getAttribute('aria-label') ?? null, card: control?.closest('[data-ticket-id]')?.textContent ?? null };
+}, at);
+
+// Review finding (pass 14 of 42.1): every tap above is one the board claims,
+// so Chromium emulated no mouse for any of them, and the half of the rule that
+// judges that mouse was held by jsdom alone — whose events carry Date.now(),
+// the very clock a mistake would read. A tap on a group's title is the
+// title's: the browser emulates the mouse for it, and for every tap on a
+// control after it. 450 ms apart, past the browser's own count of taps.
+test('taps after one on a group’s title that closes an editor press nothing the layout moved under them, past the browser’s count', async ({ browser }) => {
+  const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
+  const context = await browser.newContext({ ...phone, locale: 'en-US' });
+  // Before the board's own listeners: a press it stops goes no further.
+  await context.addInitScript(() => {
+    const seen: Array<{ type: string; at: number; detail: number }> = [];
+    (window as unknown as { __taps: typeof seen }).__taps = seen;
+    for (const type of ['touchend', 'mousedown']) {
+      window.addEventListener(type, (e) => seen.push({ type, at: e.timeStamp, detail: (e as MouseEvent).detail ?? 0 }), true);
+    }
+  });
+  const page = await context.newPage();
+  try {
+    const sent = await startOpenBoard(page, `${TEAM_NAME}-tapmouse`);
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    for (const text of ['Late release notes', 'Too many meetings']) {
+      await field.fill(text);
+      await page.keyboard.press('Enter');
+      await expect(card(page, text)).toBeVisible();
+    }
+    await page.getByRole('button', { name: /Pick up the ticket Late release notes/ }).focus();
+    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: /group the selected ticket with Too many meetings/ }).focus();
+    await page.keyboard.press('Enter');
+    const title = page.locator('.group-container input[data-group-title-id]');
+    await expect(title).toBeFocused({ timeout: 10_000 });
+    await title.fill('Delivery problems');
+    await title.press('Enter');
+    // Newest first: written last, it sits above the group.
+    const long = 'Release notes are written the evening before, nobody reads them, and support learns about every change from the customers who call to ask';
+    await field.fill(long);
+    await page.keyboard.press('Enter');
+    await expect(card(page, long)).toBeVisible();
+    const editor = page.locator('[data-ticket-id] textarea');
+    const rectOf = (target: Locator) => target.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    });
+    const openEditor = async (text: string, typed: string) => {
+      await card(page, text).getByRole('button', { name: 'Edit ticket' }).tap();
+      await expect(editor).toBeFocused();
+      await editor.press('Control+End');
+      await page.keyboard.type(typed);
+    };
+
+    // Where to tap: on the title while the editor is open, and on a control
+    // of the card once the editor has closed and the card grown back.
+    await openEditor(long, ' too');
+    const titleRect = await rectOf(title);
+    await editor.evaluate((el) => (el as HTMLElement).blur());
+    await expect(editor).toHaveCount(0);
+    const overlaps = await card(page, `${long} too`).evaluate((cardEl, t) => [...cardEl.querySelectorAll('button')]
+      .map((control) => control.getBoundingClientRect())
+      .map((r) => ({ left: Math.max(r.left, t.left), right: Math.min(r.right, t.right), top: Math.max(r.top, t.top), bottom: Math.min(r.bottom, t.bottom) }))
+      .filter((r) => r.right - r.left > 4 && r.bottom - r.top > 4), titleRect);
+    expect(overlaps.length).toBeGreaterThan(0);
+    const at = { x: (overlaps[0].left + overlaps[0].right) / 2, y: (overlaps[0].top + overlaps[0].bottom) / 2 };
+    await openEditor(`${long} too`, ' again');
+    expect(await rectOf(title)).toEqual(titleRect);
+    await page.waitForTimeout(700);
+    const before = sent.length;
+    await page.evaluate(() => { (window as unknown as { __taps: unknown[] }).__taps.length = 0; });
+
+    // Each next tap 430 ms after the lift before it, on the page's own clock:
+    // past the browser's count (about 400 ms from a lift to the next touch),
+    // inside the board's half second. A wait in the test would add the time
+    // the first tap's write takes to answer.
+    const tapAfterLift = async (ms: number) => {
+      await page.evaluate((target) => new Promise<void>((resolve) => {
+        const seen = (window as unknown as { __taps: Array<{ type: string; at: number }> }).__taps;
+        const lift = [...seen].reverse().find((t) => t.type === 'touchend');
+        setTimeout(resolve, Math.max(0, target - (performance.now() - (lift?.at ?? 0))));
+      }), ms);
+      await page.touchscreen.tap(at.x, at.y);
+    };
+    await page.touchscreen.tap(at.x, at.y);
+    await tapAfterLift(430);
+    await tapAfterLift(430);
+    await page.waitForTimeout(700);
+
+    // The browser emulated the mouse for each tap, and counted none after the
+    // first as the next (detail 1): only the board's half second stops them.
+    const taps = await page.evaluate(() => (window as unknown as { __taps: Array<{ type: string; at: number; detail: number }> }).__taps);
+    const presses = taps.filter((t) => t.type === 'mousedown');
+    const lifts = taps.filter((t) => t.type === 'touchend');
+    expect(presses.map((t) => t.detail)).toEqual([1, 1, 1]);
+    expect(lifts).toHaveLength(3);
+    for (const n of [1, 2]) expect(presses[n].at - lifts[n - 1].at).toBeLessThanOrEqual(500);
+
+    const edited = `${long} too again`;
+    // What the later taps reached: a control of the card that grew back.
+    expect((await controlAt(page, at)).card).toContain(edited);
+    await expect(editor).toHaveCount(0);
+    await expect(card(page, edited)).toBeVisible();
+    await expect(page.locator('[data-ticket-id]')).toHaveCount(3);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(card(page, edited).getByRole('button', { name: /^0 votes/ })).toBeVisible();
+    expect(sent.length - before).toBe(1);
+    expect(sent.at(-1)).toContain(edited);
+    await expect(title).toBeFocused();
+  } finally {
+    await context.close();
+  }
+});
+
+// Review finding (pass 14 of 42.1): a Delete asks nothing, and the card below
+// comes up into the place of the one it deletes, its own Delete under the
+// finger or the pointer. A double tap, or a double click, deleted two cards
+// for everyone.
+for (const device of ['phone', 'computer'] as const) test(`a double ${device === 'phone' ? 'tap' : 'click'} on a card’s Delete deletes that card alone, on a ${device}`, async ({ browser }) => {
+  const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
+  const context = await browser.newContext(device === 'phone'
+    ? { ...phone, locale: 'en-US' }
+    : { locale: 'en-US', viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  try {
+    const sent = await startOpenBoard(page, `${TEAM_NAME}-dbldelete-${device}`);
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    for (const text of ['First card', 'Second card', 'Third card']) {
+      await field.fill(text);
+      await page.keyboard.press('Enter');
+      await expect(card(page, text)).toBeVisible();
+    }
+    await field.blur();
+    await page.waitForTimeout(700);
+    const before = sent.length;
+
+    // Newest first: the third card is on top, the second right under it.
+    const remove = card(page, 'Third card').getByRole('button', { name: 'Delete ticket' });
+    if (device === 'computer') await card(page, 'Third card').hover();
+    const box = (await remove.boundingBox())!;
+    const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    if (device === 'phone') {
+      await page.touchscreen.tap(at.x, at.y);
+      await page.waitForTimeout(120);
+      await page.touchscreen.tap(at.x, at.y);
+    } else {
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down({ clickCount: 1 });
+      await page.mouse.up({ clickCount: 1 });
+      await page.waitForTimeout(120);
+      await page.mouse.down({ clickCount: 2 });
+      await page.mouse.up({ clickCount: 2 });
+    }
+    await page.waitForTimeout(700);
+
+    // The second reached the Delete of the card that came up.
+    expect(await controlAt(page, at)).toEqual({ label: 'Delete ticket', card: expect.stringContaining('Second card') });
+    await expect(page.locator('[data-ticket-id]')).toHaveCount(2);
+    await expect(card(page, 'Second card')).toBeVisible();
+    expect(sent.length - before).toBe(1);
+  } finally {
+    await context.close();
+  }
+});
+
 test('on a computer the same controls wait for the pointer', async ({ page }) => {
   expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(true);
   await page.goto('/');

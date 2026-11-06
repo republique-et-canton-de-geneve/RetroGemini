@@ -2361,12 +2361,19 @@ describe('Open board — every hold and every drop', () => {
         // the board dropped what the keyboard held (the held group moved, the
         // held card moved, for everyone), and their drag's end put the hold
         // down. A card cannot be dragged while a group is held on a board, nor
-        // in Brainstorm when it is grouped, so its words can be selected.
+        // in Brainstorm when it is grouped. Review finding (pass 14): pressed
+        // on the card's padding inside the selection, their drag starts at the
+        // card itself, in both browsers — a card that cannot be dragged.
+        const wordsIn = (id: string) => within(cardById(id)).getByText(id === 't-c' ? 'Too many meetings' : 'Flaky deploys').firstChild as HTMLElement;
+        const boardHold = /Move the group Delivery to another column/;
+        const cardHold = /Move the card Too many meetings to another column/;
         it.each([
-          ['OPEN_BOARD', 'a group, by words of a card', {}, /Move the group Delivery to another column/, 't-c', /move the selected group to/],
-          ['BRAINSTORM', 'a card, by words of a card whose group holds a hidden card', { revealBrainstorm: false }, /Move the card Too many meetings to another column/, 't-a', /move the selected card to/],
-          ['BRAINSTORM', 'a card, by words of a card whose group can be moved', {}, /Move the card Too many meetings to another column/, 't-a', /move the selected card to/],
-        ])('selected in a card drop nothing the keyboard holds: %s, %s', async (phase, _what, settings, hold, wordsOf, target) => {
+          ['OPEN_BOARD', 'a group, by words of a card', 'its words', {}, boardHold, 't-c', /move the selected group to/],
+          ['OPEN_BOARD', 'a group, by words of a card', 'the card around them', {}, boardHold, 't-c', /move the selected group to/],
+          ['BRAINSTORM', 'a card, by words of a card whose group holds a hidden card', 'its words', { revealBrainstorm: false }, cardHold, 't-a', /move the selected card to/],
+          ['BRAINSTORM', 'a card, by words of a card whose group holds a hidden card', 'the card around them', { revealBrainstorm: false }, cardHold, 't-a', /move the selected card to/],
+          ['BRAINSTORM', 'a card, by words of a card whose group can be moved, selected in Firefox first', 'its words', {}, cardHold, 't-a', /move the selected card to/],
+        ])('selected in a card drop nothing the keyboard holds: %s, %s, from %s', async (phase, _what, from, settings, hold, wordsOf, target) => {
           const user = userEvent.setup();
           const session = worded(5, 'Too many meetings', { phase });
           session.settings = { ...session.settings, ...settings };
@@ -2377,17 +2384,46 @@ describe('Open board — every hold and every drop', () => {
           expect(screen.queryAllByRole('button', { name: target }).length).toBeGreaterThan(0);
           const before = await persistedCount();
 
-          const words = within(cardById(wordsOf)).getByText(wordsOf === 't-c' ? 'Too many meetings' : 'Flaky deploys').firstChild!;
+          const start = from === 'its words' ? wordsIn(wordsOf) : cardById(wordsOf);
           const transfer = dataTransfer();
-          fireEvent.mouseDown(words);
-          fireEvent.dragStart(words, { dataTransfer: transfer });
+          fireEvent.mouseDown(start);
+          fireEvent.dragStart(start, { dataTransfer: transfer });
           expect(refusedBy(columnElement('doing'), transfer)).toEqual(refused);
-          fireEvent.dragEnd(words, { dataTransfer: transfer });
-          fireEvent.mouseUp(words);
+          fireEvent.dragEnd(start, { dataTransfer: transfer });
+          fireEvent.mouseUp(start);
           await tick();
 
           expect(await persistedCount()).toBe(before);
           expect(screen.queryAllByRole('button', { name: target }).length).toBeGreaterThan(0);
+        });
+
+        // Review finding (pass 14 of 42.1): a group that cannot be moved — one
+        // of its cards hidden from its reader — starts the drag of words
+        // selected over it at itself, pressed on its padding. Its start was
+        // refused, and its end put the keyboard's hold down.
+        it('selected over a group that cannot be moved drop nothing the keyboard holds, and put nothing down', async () => {
+          const user = userEvent.setup();
+          const session = worded(5, 'Too many meetings', { phase: 'BRAINSTORM' });
+          session.settings = { ...session.settings, revealBrainstorm: false };
+          renderBoard(session, alice);
+          await screen.findByText('Too many meetings');
+          act(() => screen.getByRole('button', { name: cardHold }).focus());
+          await user.keyboard('{Enter}');
+          expect(screen.queryAllByRole('button', { name: /move the selected card to/ }).length).toBeGreaterThan(0);
+          const before = await persistedCount();
+
+          const group = document.querySelector<HTMLElement>('.group-container')!;
+          expect(group.draggable).toBe(false);
+          const transfer = dataTransfer();
+          fireEvent.mouseDown(group);
+          fireEvent.dragStart(group, { dataTransfer: transfer });
+          expect(refusedBy(columnElement('doing'), transfer)).toEqual(refused);
+          fireEvent.dragEnd(group, { dataTransfer: transfer });
+          fireEvent.mouseUp(group);
+          await tick();
+
+          expect(await persistedCount()).toBe(before);
+          expect(screen.queryAllByRole('button', { name: /move the selected card to/ }).length).toBeGreaterThan(0);
         });
 
         // A drag the board started, its end unheard — Firefox sends none to a

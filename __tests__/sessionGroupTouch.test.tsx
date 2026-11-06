@@ -260,6 +260,35 @@ describe('a tap the board acts on, and the field it leaves', () => {
     return (dataService.updateSession as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([, s]) => s as RetroSession);
   };
   const held = (id: string) => within(card(id)).getByRole('button', { name: /Selected for grouping/ });
+  // A browser stamps an event from the page's load (its timeStamp), a clock
+  // of its own; jsdom stamps it with Date.now(). Both are held here, from two
+  // origins, so that a time read from the wrong clock is seen (pass 14 of
+  // 42.1). Nothing that waits on the clock (waitFor) runs while it is held.
+  const heldClock = () => {
+    const start = Date.now();
+    const EVENT_ORIGIN = 1000;
+    let eventTime = EVENT_ORIGIN;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
+    const stamp = vi.spyOn(Event.prototype, 'timeStamp', 'get').mockImplementation(() => eventTime);
+    return {
+      at: (ms: number) => {
+        clock.mockReturnValue(start + ms);
+        eventTime = EVENT_ORIGIN + ms;
+      },
+      restore: () => {
+        clock.mockRestore();
+        stamp.mockRestore();
+      },
+    };
+  };
+  const pressOf = (element: HTMLElement, detail: number, x = 50, y = 50) => {
+    const pressed = fireEvent.mouseDown(element, { detail, clientX: x, clientY: y });
+    fireEvent.mouseUp(element, { detail, clientX: x, clientY: y });
+    const clicked = fireEvent.click(element, { detail, clientX: x, clientY: y });
+    return { pressed, clicked };
+  };
+  const nothingPressed = { pressed: false, clicked: false };
+  const pressedAndClicked = { pressed: true, clicked: true };
 
   it('takes the focus out of the field being typed, as the mousedown it cancels did', async () => {
     const user = userEvent.setup();
@@ -350,21 +379,7 @@ describe('a tap the board acts on, and the field it leaves', () => {
       await user.type(within(card('tc')).getByRole('textbox'), ' on Mondays');
     };
     const groupOfTc = async () => (await writes()).at(-1)?.tickets.find((t) => t.id === 'tc')?.groupId ?? null;
-    // jsdom stamps every event with Date.now(): the taps' times are set here.
-    // Nothing that waits on the clock (waitFor) runs while it is held.
-    const heldClock = () => {
-      const start = Date.now();
-      const clock = vi.spyOn(Date, 'now').mockReturnValue(start);
-      return { at: (ms: number) => clock.mockReturnValue(start + ms), restore: () => clock.mockRestore() };
-    };
     const inGroup = (id: string) => !!card(id).closest('.group-container');
-    const pressOf = (element: HTMLElement, detail: number) => {
-      const pressed = fireEvent.mouseDown(element, { detail, clientX: 50, clientY: 50 });
-      fireEvent.mouseUp(element, { detail });
-      const clicked = fireEvent.click(element, { detail });
-      return { pressed, clicked };
-    };
-    const nothingPressed = { pressed: false, clicked: false };
 
     it('does nothing on another card', async () => {
       const user = userEvent.setup();
@@ -520,14 +535,13 @@ describe('a tap the board acts on, and the field it leaves', () => {
       renderBoard();
       await screen.findByText('Flaky deploys');
       await editTyped(user);
-      const now = Date.now();
-      const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+      const clock = heldClock();
       try {
         tap(card('td'));
-        clock.mockReturnValue(now + 501);
+        clock.at(501);
         tap(card('tc'));
       } finally {
-        clock.mockRestore();
+        clock.restore();
       }
 
       await waitFor(async () => expect(await groupOfTc()).toBeTruthy());
@@ -584,8 +598,15 @@ describe('a tap the board acts on, and the field it leaves', () => {
     });
 
     // Where the sequence aimed stays the first tap's for the mouse of a tap
-    // too: a fingertip further than the first, it presses its control.
-    it('lets the mouse of a tap a fingertip further than the first press its control, whatever the taps between', async () => {
+    // too: a fingertip further than the first, it presses its control —
+    // whatever the browser counts. Review finding (pass 14 of 42.1): Chromium
+    // counts each tap from the one before (20 px on a computer), so these
+    // taps' mice say 2, then 3, and the browser's count alone stopped the
+    // third, 40 px from the first. Firefox says 1 each time.
+    it.each([
+      ['as Firefox counts them, each a first', 1, 1],
+      ['as Chromium counts them, from the one before', 2, 3],
+    ])('lets the mouse of a tap a fingertip further than the first press its control, whatever the taps between: %s', async (_how, second, third) => {
       const user = userEvent.setup();
       renderBoard();
       await screen.findByText('Flaky deploys');
@@ -597,20 +618,64 @@ describe('a tap the board acts on, and the field it leaves', () => {
         const comments = within(card('tc')).getByTestId('ticket-comment-btn');
         clock.at(300);
         expect(tap(comments, 70, 50)).toBe(true);
-        expect(fireEvent.mouseDown(comments, { detail: 1, clientX: 70, clientY: 50 })).toBe(false);
-        fireEvent.mouseUp(comments, { detail: 1 });
-        fireEvent.click(comments, { detail: 1 });
+        expect(pressOf(comments, second, 70, 50)).toEqual(nothingPressed);
         expect(screen.queryByRole('dialog')).toBeNull();
         clock.at(600);
         expect(tap(comments, 90, 50)).toBe(true);
-        expect(fireEvent.mouseDown(comments, { detail: 1, clientX: 90, clientY: 50 })).toBe(true);
-        fireEvent.mouseUp(comments, { detail: 1 });
-        fireEvent.click(comments, { detail: 1 });
+        expect(pressOf(comments, third, 90, 50)).toEqual(pressedAndClicked);
       } finally {
         clock.restore();
       }
 
       expect(await screen.findByRole('dialog')).toBeTruthy();
+    });
+
+    // Review finding (pass 14 of 42.1): Android counts a tap as the next of
+    // a double tap up to 100 dp from the one before. One tap on another
+    // control, two fingertips from the first, was the next by the browser's
+    // count alone, and pressed nothing.
+    it('lets the mouse of one tap a fingertip further than the first press its control, though the browser counts it', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await editTyped(user);
+
+      const clock = heldClock();
+      try {
+        tap(card('td'), 50, 50);
+        const comments = within(card('tc')).getByTestId('ticket-comment-btn');
+        clock.at(250);
+        expect(tap(comments, 110, 50)).toBe(true);
+        expect(pressOf(comments, 2, 110, 50)).toEqual(pressedAndClicked);
+      } finally {
+        clock.restore();
+      }
+
+      expect(await screen.findByRole('dialog')).toBeTruthy();
+    });
+
+    // A browser measures its count from the lift to the next touch, the board
+    // from lift to lift: after a long press the browser still counts a tap a
+    // little past the board's half second. Under the finger, it is the next.
+    it('presses no control with the mouse of a tap the browser still counts past the board’s half second, a fingertip from the first', async () => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await editTyped(user);
+
+      const clock = heldClock();
+      try {
+        tap(card('td'), 50, 50);
+        const comments = within(card('tc')).getByTestId('ticket-comment-btn');
+        clock.at(530);
+        expect(tap(comments, 55, 50)).toBe(true);
+        expect(pressOf(comments, 2, 55, 50)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(held('td')).toBeTruthy();
     });
 
     it('presses no control either once a tap on a group’s title closed the editor, with the mouse emulated for each', async () => {
@@ -644,8 +709,47 @@ describe('a tap the board acts on, and the field it leaves', () => {
     });
 
     // The mouse itself is the mouse: what it presses is a first press unless
-    // the browser counts it as the next of a double click (detail).
-    it('leaves a press of the mouse the browser counts as a first to the control it presses, however soon', async () => {
+    // the browser counts it as the next of a double click (detail) — on a
+    // screen touched a moment before too, as a laptop with a touch screen is:
+    // only the mouse that follows a touch's end is a tap's.
+    it.each([
+      ['on a screen never touched', false],
+      ['on a screen touched a second before', true],
+    ])('leaves a press of the mouse the browser counts as a first to the control it presses, however soon: %s', async (_how, touchedBefore) => {
+      const user = userEvent.setup();
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      await editTyped(user);
+      const title = screen.getByDisplayValue('Delivery');
+
+      const clock = heldClock();
+      try {
+        if (touchedBefore) {
+          const header = screen.getByRole('heading', { level: 2 });
+          expect(tap(header)).toBe(true);
+          clock.at(1000);
+        }
+        fireEvent.mouseDown(title, { detail: 1, clientX: 50, clientY: 50 });
+        act(() => title.focus());
+        fireEvent.mouseUp(title, { detail: 1 });
+        fireEvent.click(title, { detail: 1 });
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+        expect(within(card('tc')).queryByRole('textbox')).toBeNull();
+        clock.at(touchedBefore ? 1300 : 300);
+        expect(pressOf(within(card('tc')).getByRole('button', { name: 'Delete ticket' }), 1)).toEqual(pressedAndClicked);
+      } finally {
+        clock.restore();
+      }
+
+      expect(document.querySelector('[data-ticket-id="tc"]')).toBeNull();
+    });
+
+    // Review finding (pass 14 of 42.1): every double click above pressed
+    // twice in the same instant. A system can be set to count a double click
+    // later than half a second (Windows allows 900 ms, an accessibility
+    // setting): the browser's count is the rule for the mouse, not the
+    // board's half second.
+    it('presses nothing on another control with the next press of a double click the browser counts late', async () => {
       const user = userEvent.setup();
       renderBoard();
       await screen.findByText('Flaky deploys');
@@ -660,13 +764,14 @@ describe('a tap the board acts on, and the field it leaves', () => {
         fireEvent.click(title, { detail: 1 });
         await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
         expect(within(card('tc')).queryByRole('textbox')).toBeNull();
-        clock.at(300);
-        expect(pressOf(within(card('tc')).getByRole('button', { name: 'Delete ticket' }), 1)).toEqual({ pressed: true, clicked: true });
+        clock.at(700);
+        expect(pressOf(within(card('tc')).getByRole('button', { name: 'Delete ticket' }), 2)).toEqual(nothingPressed);
       } finally {
         clock.restore();
       }
 
-      expect(document.querySelector('[data-ticket-id="tc"]')).toBeNull();
+      expect(document.querySelector('[data-ticket-id="tc"]')).not.toBeNull();
+      expect(document.activeElement).toBe(title);
     });
 
     it('does nothing on a card once the first, on a group’s title, closed the editor', async () => {
@@ -689,6 +794,81 @@ describe('a tap the board acts on, and the field it leaves', () => {
 
       expect(within(card('tc')).queryByRole('button', { name: /Selected for grouping/ })).toBeNull();
       expect(document.activeElement).toBe(title);
+    });
+  });
+
+  // Review finding (pass 14 of 42.1): a Delete asks nothing, and the card
+  // under the deleted one comes up into its place, its own Delete under the
+  // finger or the pointer. A double tap, or a double click, deleted two cards
+  // for everyone: only an editor closing marked the board as moved.
+  describe('the next press or tap, once the first deleted a card or a group', () => {
+    const removeOf = (id: string) => within(card(id)).getByRole('button', { name: 'Delete ticket' });
+    const onBoard = (id: string) => document.querySelector(`[data-ticket-id="${id}"]`) !== null;
+
+    it.each([
+      ['as Firefox counts it, a first', 1],
+      ['as Chromium counts it, the next', 2],
+    ])('deletes one card with a double tap on its Delete: %s', async (_how, detail) => {
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        const first = removeOf('td');
+        expect(tap(first)).toBe(true);
+        expect(pressOf(first, 1)).toEqual(pressedAndClicked);
+        expect(onBoard('td')).toBe(false);
+        clock.at(120);
+        const next = removeOf('tc');
+        expect(tap(next)).toBe(true);
+        expect(pressOf(next, detail)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      expect(onBoard('tc')).toBe(true);
+      expect((await writes()).slice(before)).toHaveLength(1);
+    });
+
+    it('deletes one card with a double click on its Delete, and the next with a click of its own', async () => {
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(pressOf(removeOf('td'), 1)).toEqual(pressedAndClicked);
+        clock.at(120);
+        expect(pressOf(removeOf('tc'), 2)).toEqual(nothingPressed);
+        expect(onBoard('tc')).toBe(true);
+        clock.at(1500);
+        expect(pressOf(removeOf('tc'), 1)).toEqual(pressedAndClicked);
+      } finally {
+        clock.restore();
+      }
+
+      expect(onBoard('tc')).toBe(false);
+      expect((await writes()).slice(before)).toHaveLength(2);
+    });
+
+    it('presses nothing on a card’s Delete with the next press of a double click on Delete group', async () => {
+      renderBoard();
+      await screen.findByText('Flaky deploys');
+      const before = (await writes()).length;
+
+      const clock = heldClock();
+      try {
+        expect(pressOf(screen.getByRole('button', { name: 'Delete group' }), 1)).toEqual(pressedAndClicked);
+        expect(document.querySelector('.group-container')).toBeNull();
+        clock.at(120);
+        expect(pressOf(removeOf('tc'), 2)).toEqual(nothingPressed);
+      } finally {
+        clock.restore();
+      }
+
+      expect(onBoard('tc')).toBe(true);
+      expect((await writes()).slice(before)).toHaveLength(1);
     });
   });
 
