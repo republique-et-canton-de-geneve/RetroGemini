@@ -89,17 +89,23 @@ export const claimGesture = (gesture: GroupingGesture): boolean => {
  *
  * Half a second, as a mouse's double click allows, and a fingertip: what lies
  * that close under the finger that soon was never aimed at once the board
- * moved there, so the window can be generous without taking a real tap.
+ * moved there, so the window can be generous without taking a real tap. `at`
+ * is when the next tap's touch began, as a browser measures its count, from
+ * the lift before to the next touch (pass 15): from lift to lift, a tap held a
+ * moment lifted past the half second, and grouped the card that grew back.
  */
 export const DOUBLE_TAP_MS = 500;
 export const DOUBLE_TAP_SLOP_PX = 24;
 
 /**
- * Where and when a gesture aimed. A tap that does nothing still belongs to the
- * sequence (pass 13 of 42.1): `at` moves to it, as a browser counts its taps
- * each from the one before, while the place stays the first's. Measured from
- * the first tap only, the third tap of a triple tap at an ordinary pace fell
- * past half a second and grouped the card that grew back.
+ * Where and when a gesture aimed. After an editor closed, a tap that does
+ * nothing still belongs to the sequence (pass 13 of 42.1): `at` moves to it,
+ * as a browser counts its taps each from the one before, while the place stays
+ * the first's. Measured from the first tap only, the third tap of a triple tap
+ * at an ordinary pace fell past half a second and grouped the card that grew
+ * back. After a deletion `at` stays the deletion's (pass 15): moved to every
+ * tap it stopped, a steady pace of taps on the Delete that came up deleted
+ * nothing past the first.
  */
 export type GestureAim = TouchPoint & { at: number };
 
@@ -119,17 +125,18 @@ export const isNextTap = (first: GestureAim | null, at: number, point: TouchPoin
  * waits to tell a tap from a double tap sends it later — and is how a tap on a
  * control reaches the board (pass 13 of 42.1). It says the tap is the next of
  * a double tap (its `detail`) only within the browser's own time, about 400 ms
- * in Chromium and 300 on Android: the comments or the Delete of the card that
- * grew back were pressed by a second tap the board's half second would have
- * stopped. The touchend just before it tells it from the mouse itself.
+ * in Chromium and 300 on Android, from the lift to the next touch: the
+ * comments or the Delete of the card that grew back were pressed by a second
+ * tap the board's half second would have stopped. The touchend just before it
+ * tells it from the mouse itself.
  *
  * Its `detail` measures neither from where the sequence first aimed nor as far
  * (pass 14): Chromium compares each tap with the one before, 20 px on a
- * computer and 100 dp on Android, so a tap a fingertip further than the first
- * was still counted, and pressed nothing on the control it aimed at. Counted
- * by the browser, it is the next only within a fingertip of the first
- * (isNearAim); the browser's count still lasts past the board's half second
- * after a long press, measured from the lift to the next touch.
+ * computer and 100 dp on Android (Firefox counts each tap as a first), so a
+ * tap a fingertip further than the first was still counted, and pressed
+ * nothing on the control it aimed at. Counted by the browser, it is the next
+ * only within a fingertip of the first (isNearAim) — which matters once a
+ * deletion's half second is over, where the board's own time no longer runs.
  */
 export const TAP_MOUSE_MS = 500;
 

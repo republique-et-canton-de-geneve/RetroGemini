@@ -675,12 +675,13 @@ const controlAt = (page: Page, at: { x: number; y: number }) => page.evaluate(({
   return { label: control?.getAttribute('aria-label') ?? null, card: control?.closest('[data-ticket-id]')?.textContent ?? null };
 }, at);
 
-// Review finding (pass 14 of 42.1): every tap above is one the board claims,
-// so Chromium emulated no mouse for any of them, and the half of the rule that
-// judges that mouse was held by jsdom alone — whose events carry Date.now(),
-// the very clock a mistake would read. A tap on a group's title is the
-// title's: the browser emulates the mouse for it, and for every tap on a
-// control after it. 450 ms apart, past the browser's own count of taps.
+// Review finding (pass 14 of 42.1): the taps above whose mouse the board
+// could stop are taps it claims, for which Chromium emulates no mouse: the
+// half of the rule that judges the mouse of a tap was held by jsdom alone —
+// whose events carry Date.now(), the very clock a mistake would read. A tap on
+// a group's title is the title's: the browser emulates the mouse for it, and
+// for every tap on a control after it. 430 ms after each lift, past the
+// browser's own count of taps.
 test('taps after one on a group’s title that closes an editor press nothing the layout moved under them, past the browser’s count', async ({ browser }) => {
   const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
   const context = await browser.newContext({ ...phone, locale: 'en-US' });
@@ -854,6 +855,66 @@ for (const device of ['phone', 'computer'] as const) test(`a double ${device ===
     await expect(page.locator('[data-ticket-id]')).toHaveCount(2);
     await expect(card(page, 'Second card')).toBeVisible();
     expect(sent.length - before).toBe(1);
+  } finally {
+    await context.close();
+  }
+});
+
+// Review finding (pass 15 of 42.1): the half second a deletion starts ran on
+// from every tap it stopped. A facilitator clearing cards at two taps a second
+// deleted the first and nothing after it, however long the pace lasted, though
+// the browser counted none of those taps as the next of a double tap.
+test('taps at a steady pace on the Delete that comes up under the finger delete every other card, on a phone', async ({ browser }) => {
+  const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
+  const context = await browser.newContext({ ...phone, locale: 'en-US' });
+  await context.addInitScript(() => {
+    const seen: Array<{ type: string; at: number; detail: number }> = [];
+    (window as unknown as { __taps: typeof seen }).__taps = seen;
+    for (const type of ['touchend', 'mousedown']) {
+      window.addEventListener(type, (e) => seen.push({ type, at: e.timeStamp, detail: (e as MouseEvent).detail ?? 0 }), { capture: true });
+    }
+  });
+  const page = await context.newPage();
+  try {
+    const sent = await startOpenBoard(page, `${TEAM_NAME}-steadydelete`);
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    for (const text of ['Card 1', 'Card 2', 'Card 3', 'Card 4', 'Card 5']) {
+      await field.fill(text);
+      await page.keyboard.press('Enter');
+      await expect(card(page, text)).toBeVisible();
+    }
+    await field.blur();
+    await page.waitForTimeout(700);
+    const before = sent.length;
+    await page.evaluate(() => { (window as unknown as { __taps: unknown[] }).__taps.length = 0; });
+
+    // Newest first: the fifth card is on top, each one under it the same height.
+    const box = (await card(page, 'Card 5').getByRole('button', { name: 'Delete ticket' }).boundingBox())!;
+    const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    // Each next tap 450 ms after the lift before it, on the page's own clock:
+    // past the browser's count, inside the board's half second.
+    const tapAfterLift = async (ms: number) => {
+      await page.evaluate((target) => new Promise<void>((resolve) => {
+        const seen = (window as unknown as { __taps: Array<{ type: string; at: number }> }).__taps;
+        const lift = [...seen].reverse().find((t) => t.type === 'touchend');
+        setTimeout(resolve, Math.max(0, target - (performance.now() - (lift?.at ?? 0))));
+      }), ms);
+      await page.touchscreen.tap(at.x, at.y);
+    };
+    await page.touchscreen.tap(at.x, at.y);
+    for (let n = 0; n < 3; n += 1) await tapAfterLift(450);
+    await page.waitForTimeout(700);
+
+    const taps = await page.evaluate(() => (window as unknown as { __taps: Array<{ type: string; at: number; detail: number }> }).__taps);
+    const presses = taps.filter((t) => t.type === 'mousedown');
+    const lifts = taps.filter((t) => t.type === 'touchend');
+    expect(presses.map((t) => t.detail)).toEqual([1, 1, 1, 1]);
+    for (const n of [1, 2, 3]) expect(presses[n].at - lifts[n - 1].at).toBeLessThanOrEqual(500);
+    // The first and the third deleted the card under the finger; the second
+    // and the fourth, the next of the one before by the board's time, nothing.
+    await expect(page.locator('[data-ticket-id]')).toHaveCount(3);
+    for (const text of ['Card 1', 'Card 2', 'Card 3']) await expect(card(page, text)).toBeVisible();
+    expect(sent.length - before).toBe(2);
   } finally {
     await context.close();
   }

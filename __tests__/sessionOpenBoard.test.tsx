@@ -2372,7 +2372,7 @@ describe('Open board — every hold and every drop', () => {
           ['OPEN_BOARD', 'a group, by words of a card', 'the card around them', {}, boardHold, 't-c', /move the selected group to/],
           ['BRAINSTORM', 'a card, by words of a card whose group holds a hidden card', 'its words', { revealBrainstorm: false }, cardHold, 't-a', /move the selected card to/],
           ['BRAINSTORM', 'a card, by words of a card whose group holds a hidden card', 'the card around them', { revealBrainstorm: false }, cardHold, 't-a', /move the selected card to/],
-          ['BRAINSTORM', 'a card, by words of a card whose group can be moved, selected in Firefox first', 'its words', {}, cardHold, 't-a', /move the selected card to/],
+          ['BRAINSTORM', 'a card, by words of a card whose group can be moved, under a selection made first', 'its words', {}, cardHold, 't-a', /move the selected card to/],
         ])('selected in a card drop nothing the keyboard holds: %s, %s, from %s', async (phase, _what, from, settings, hold, wordsOf, target) => {
           const user = userEvent.setup();
           const session = worded(5, 'Too many meetings', { phase });
@@ -2420,6 +2420,47 @@ describe('Open board — every hold and every drop', () => {
           expect(refusedBy(columnElement('doing'), transfer)).toEqual(refused);
           fireEvent.dragEnd(group, { dataTransfer: transfer });
           fireEvent.mouseUp(group);
+          await tick();
+
+          expect(await persistedCount()).toBe(before);
+          expect(screen.queryAllByRole('button', { name: /move the selected card to/ }).length).toBeGreaterThan(0);
+        });
+
+        // Review finding (pass 15 of 42.1): the end of their drag was read as
+        // the board's own by what the element was at the end — draggable, a
+        // teammate's write having made it movable during the drag — not by
+        // whether the board took its start: the keyboard's hold was put down,
+        // with nothing said. Only the end of a drag the board took is its own.
+        it.each([
+          ['a group whose hidden card a write reveals', (session: RetroSession) => { session.settings = { ...session.settings, revealBrainstorm: true }; }, () => document.querySelector<HTMLElement>('.group-container')!],
+          ['a teammate\u2019s hidden card a write reveals', (session: RetroSession) => { session.settings = { ...session.settings, revealBrainstorm: true }; }, () => cardById('t-d')],
+        ])('selected over %s put nothing down, its start refused', async (_what, write, element) => {
+          const user = userEvent.setup();
+          const hidden = (rev: number) => {
+            const session = worded(rev, 'Too many meetings', { phase: 'BRAINSTORM' });
+            session.settings = { ...session.settings, revealBrainstorm: false };
+            session.tickets = [...session.tickets, ticket('t-d', 'Release notes late', { authorId: 'bob' })];
+            return session;
+          };
+          renderBoard(hidden(5), alice);
+          await screen.findByText('Too many meetings');
+          act(() => screen.getByRole('button', { name: cardHold }).focus());
+          await user.keyboard('{Enter}');
+          expect(screen.queryAllByRole('button', { name: /move the selected card to/ }).length).toBeGreaterThan(0);
+          const before = await persistedCount();
+
+          const start = element();
+          expect(start.draggable).toBe(false);
+          const transfer = dataTransfer();
+          fireEvent.mouseDown(start);
+          fireEvent.dragStart(start, { dataTransfer: transfer });
+          const revealed = hidden(6);
+          write(revealed);
+          act(() => sessionUpdateListener?.(revealed));
+          expect(element()).toBe(start);
+          expect(start.draggable).toBe(true);
+          fireEvent.dragEnd(start, { dataTransfer: transfer });
+          fireEvent.mouseUp(start);
           await tick();
 
           expect(await persistedCount()).toBe(before);
@@ -2474,6 +2515,50 @@ describe('Open board — every hold and every drop', () => {
 
             expect(refusedBy(columnElement('doing'), dataTransfer())).toEqual(refused);
             expect(await persistedCount()).toBe(before);
+          });
+
+          // Review finding (pass 15 of 42.1): React heard none of that end,
+          // and what the drag held stayed held after it — the card's
+          // "Selected" banner and every target to drop it on, a group's ring
+          // and its columns — until a keyboard activation dropped it for
+          // everyone. The end of the board's own drag puts it down where it
+          // is heard, at its source.
+          it.each([
+            ['OPEN_BOARD', 'into a group', { groupId: 'g1' }, cardTargets],
+            ['GROUP', 'into a group', { groupId: 'g1' }, cardTargets],
+            ['BRAINSTORM', 'to another column', { colId: 'doing' }, () => screen.queryAllByRole('button', { name: /move the selected card to/ })],
+          ])('puts down what it held once its card left the page, moved by a teammate: %s, %s', async (phase, _how, teammate, targets) => {
+            renderBoard(worded(5, 'Too many meetings', { phase }), alice);
+            await screen.findByText('Too many meetings');
+            const source = cardById('t-c');
+            fireEvent.dragStart(source, { dataTransfer: dataTransfer() });
+            expect(targets().length).toBeGreaterThan(0);
+            const moved = worded(6, 'Too many meetings', { phase });
+            moved.tickets = moved.tickets.map((t) => (t.id === 't-c' ? { ...t, ...teammate } : t));
+            act(() => sessionUpdateListener?.(moved));
+            expect(source.isConnected).toBe(false);
+            fireEvent.dragEnd(source, { dataTransfer: dataTransfer() });
+            await tick();
+
+            expect(targets()).toHaveLength(0);
+            expect(screen.queryByText('Selected - Tap to cancel')).toBeNull();
+          });
+
+          it('puts down a group, moved to another column by a teammate during its drag', async () => {
+            renderBoard(worded(5, 'Too many meetings'), alice);
+            await screen.findByText('Too many meetings');
+            const source = groupElement('Delivery');
+            fireEvent.dragStart(source, { dataTransfer: dataTransfer() });
+            expect(groupTargets().length).toBeGreaterThan(0);
+            const moved = worded(6, 'Too many meetings');
+            moved.groups = moved.groups.map((g) => ({ ...g, colId: 'doing' }));
+            moved.tickets = moved.tickets.map((t) => (t.groupId === 'g1' ? { ...t, colId: 'doing' } : t));
+            act(() => sessionUpdateListener?.(moved));
+            expect(source.isConnected).toBe(false);
+            fireEvent.dragEnd(source, { dataTransfer: dataTransfer() });
+            await tick();
+
+            expect(groupTargets()).toHaveLength(0);
           });
 
           it('refuses a drag from outside the page once its drop was performed', async () => {
@@ -3493,6 +3578,32 @@ describe('Open board — every hold and every drop', () => {
     expect(commentControl.className).not.toMatch(bareOpacity0);
     expect(commentControl.className).toContain('[@media(hover:hover)]:opacity-0');
     expect(commentControl.className).toContain('focus-within:opacity-100');
+  });
+
+  // Review finding (pass 15 of 42.1): a comment's edit and Delete were
+  // hidden by a bare opacity-0 until hovered: on a phone, where nothing
+  // hovers, the Delete was invisible yet tapped, and a keyboard user tabbed
+  // onto controls nobody could see.
+  it('shows a comment\u2019s hover-only controls on focus, and on touch screens, in a colour that can be seen', async () => {
+    const user = userEvent.setup();
+    renderBoard(groupedBoard({
+      tickets: [{
+        id: 'tc', colId: 'todo', text: 'Too many meetings', authorId: 'fac', groupId: null, votes: [],
+        comments: [{ id: 'c1', authorId: 'fac', authorName: 'Facilitator', text: 'First remark', createdAt: '2026-11-01T10:00:00.000Z' }],
+      }],
+      groups: [],
+    }));
+    await user.click(within(cardElement('Too many meetings')).getByTestId('ticket-comment-btn'));
+    const dialog = await screen.findByRole('dialog');
+
+    const remove = within(dialog).getByRole('button', { name: 'Delete comment' });
+    const edit = within(dialog).getByRole('button', { name: 'Edit comment' });
+    const controls = remove.parentElement!;
+    expect(controls.className).not.toMatch(/(^|\s)opacity-0(\s|$)/);
+    expect(controls.className).toContain('[@media(hover:hover)]:opacity-0');
+    expect(controls.className).toContain('group-hover:opacity-100');
+    expect(controls.className).toContain('focus-within:opacity-100');
+    for (const control of [remove, edit]) expect(control.className).not.toContain('text-slate-300');
   });
 
   it('keeps the first line clear of the edit control, on every screen', async () => {
