@@ -837,6 +837,148 @@ must accompany the fix.
 > **Of that set, H39, H47, H48, H50 and H42's measurement half have since
 > closed** — look for them in *Recently closed* rather than here.
 
+### H54 — [P2] The double-gesture guard is a heuristic: replace it with a bounded rule (deferred 2026-11-07)
+
+**Opened 2026-11-07**, at the end of PR republique-et-canton-de-geneve/retrogemini#540
+(the open board). The work was stopped there after twenty review passes, by the
+maintainer's decision; this entry keeps what was learned so another session can
+pick it up without redoing it. AGENTS.md → *Accessibility* → *The double-gesture
+guard* states today's rules and points here.
+
+**The problem.** The second press of a double click, or the second tap of a
+double tap, can land on something the first one brought under the pointer: the
+first click deletes a card, closes an editor or opens a dialog, the layout
+moves, and the second presses the next card's *Delete* (which asks nothing), a
+vote, *Undo accept*, the next participant's row — for everyone. The review found
+many real cases, in retrospectives and health checks.
+
+**What is in the code** (`4df8579`): `components/session/doubleGestureGuard.ts`,
+`useDoubleGestureGuard()`, mounted first by `Session.tsx` and
+`HealthCheckSession.tsx` (window capture listeners on `mousedown`, `click`,
+`touchstart`, `touchend`).
+
+- *Which press counts as "the next"*: the browser's count (`detail > 1`; for a
+  tap only within 24 px of the first, `isNearAim`), or the board's own window
+  for taps (`isNextTap`: 500 ms from the lift, 24 px; `isTapMouse` tells the
+  emulated mouse from the real one). The keyboard's click is never stopped.
+- *Inside the count*: after a gesture that acted (it pressed a control, or the
+  board claimed its tap), a press on another element is stopped.
+- *Past the count*: stopped only once something moved under it:
+  - a mark: `boardMoved` `'editor'` (an editor closed, its card grew back) or
+    `'act'` (the control pressed went with its click, or a claimed tap put down
+    what was held);
+  - `relaid`: the board drew a card again around the finger;
+  - `aimGone`: what the first press pressed left the page;
+  - `came`: the element the press reaches came there. `drawnNear` records, at
+    each press, every control, card and group within 32 px, its box and
+    whether it could be pressed there.
+- *Text fields*: the next press's own only where a click turns the pressed text
+  into that field in place (`data-edits-in-place`, a proposal's text), with
+  nothing marked.
+- *Claimed taps* (`actOnClaimedTap`): `ignoresClaimedTap` and `aimClaimedTap`.
+
+The tests that hold it:
+- `__tests__/doubleGestureGuard.test.ts`: a page laid out by hand (a box map
+  and a topmost hit test); jsdom lays nothing out.
+- `__tests__/sessionGroupTouch.test.tsx`: an event clock of its own, since
+  jsdom stamps events with `Date.now()`.
+- `__tests__/healthCheckDoubleGesture.test.tsx` and
+  `__tests__/sessionOpenBoard.test.tsx`.
+- `e2e/retro-touch-card-controls.spec.ts`: real layout in Chromium, on a phone
+  and a computer.
+
+**Why twenty passes did not converge.**
+- Passes 11–16 added marks and the board's half second.
+- Pass 17 made it one module for both session types, stopped any other control
+  inside the count, and compared what lay at the first point (`underMoved`).
+- Pass 18 narrowed the exemptions, and added `aimShifted` (the pressed
+  control's box) and `aimDisplaced` (claimed taps).
+- Pass 19 replaced those three heuristics with one rule, `came` over
+  `drawnNear`.
+- Pass 20 found the thirteen issues below, several created by pass 19.
+
+A rule of this kind has no exact solution across browsers, phones, fonts and
+layouts: each heuristic moved the problem rather than removing it, and jsdom
+cannot see layout, so most of the behaviour needs real browsers. Each pass ran
+as a multi-agent review with real Chromium and Firefox, cost about three
+million tokens of agents, and kept finding about ten minor issues.
+
+**Open findings of review 20** (all minor; *new* = introduced by `4df8579`).
+
+- **A. A round control reads as covered** (new). `pressableNear` clamps the first
+  point into a neighbour's box and calls `elementFromPoint` there. On a
+  `rounded-full` control that corner lies outside the circle: the board vote's
+  take-back cross, the ROTI and survey score buttons. Browsers hit-test
+  `border-radius`, so the parent is returned and the neighbour is recorded
+  `seen: false`. A quick correction to the score beside the one just tapped, or
+  taking back the vote just cast, is then lost unless the finger lands near the
+  centre line (about ±9 px on a 40 px circle). Fix suggested:
+  `return !hit || element.contains(hit) || hit.contains(element)`. An ancestor
+  shows through a rounded corner; a backdrop or a picker is never an ancestor of
+  what it covers.
+- **B. A dialog's backdrop is invisible to `came`** (new). A double tap on a
+  card's *Comments* opens the dialog, and the second tap closes it again from
+  its backdrop (past Chromium's count; at any pace in Firefox, which reports
+  `detail 1` for taps). The backdrop matches none of `AIMED_SELECTOR`. Fix
+  suggested: mark `ModalDialog`'s overlay (`data-dialog-overlay`) and add it to
+  `AIMED_SELECTOR`.
+- **C. `drawnNear` scans the whole page at every press** (new): every control,
+  card and group, on every mousedown and claimed tap, before the press's own
+  handlers. Measured 15–37 ms per press on 300 cards at 4× CPU throttling, and
+  85–150 ms on 1000 cards on a throttled phone (`5e800bd`: 3 ms or less). The
+  board is kept for weeks, so this grows with use. Fix suggested: sample
+  `document.elementsFromPoint` on a small grid within ±32 px, or scope the query
+  to the column, group or dialog holding the point.
+- **D. The group case is overstated** (new). ACCESSIBILITY.md and the PR body
+  say a double tap on a group just picked up presses neither its *Delete group*
+  nor its vote. That holds only inside the browser's count. Past it, *Delete
+  group* was drawn there all along and is pressed, so the group is dissolved for
+  everyone. Qualify the docs, or treat a destructive control right after a
+  claimed tap on its own group as "the next".
+- **E. Test gaps** (new, and one older):
+  - `ownField`'s `isTextField(target)` is pinned by no test;
+  - `SHIFT_PX` can be 1 to 9, or `>=`, with every test green (older);
+  - surviving mutants: `hit === element` in `pressableNear`; a claimed tap's
+    `contains` judged at the first point; targets outside any control, card or
+    group.
+- **F. The coloured-card contrast test ignores `opacity-*`** (older). A control at
+  `opacity-40` on a coloured card (1.7–2.6:1) passes the 3:1 assertion. Refuse
+  a rest `opacity-N` below 100, as `effectivePair` does on white cards.
+- **G. Text that acts on a click is invisible to `came`** (new). A Discuss topic
+  header (and a health check's dimension header) is a plain `div` with
+  `onClick`. A double click on another topic's header scrolls it into view, and
+  the second press opens the editor of a proposal that came under the pointer.
+  The next keystrokes and Enter then change that proposal for everyone. Fix
+  suggested: add `[data-edits-in-place]` to `AIMED_SELECTOR`, and make those
+  headers real controls, which also helps the keyboard.
+- **H. The in-place exemption reaches any field** (older). A double click on the
+  lower lines of a long, wrapped proposal shrinks its row, and the topic's
+  *Propose an action…* input moves up under the pointer. A word of the draft is
+  then selected for the next keystroke to replace. Fix suggested: tie the
+  exemption to the same row (`target.closest('[data-proposal-row]')` equal to
+  the row recorded at the press).
+
+**Acceptance criteria for the next session.**
+1. Replace the heuristic with a simpler, bounded rule: judge only the element
+   pressed and its immediate neighbours, never scan the page (C). Write its
+   limits in AGENTS.md instead of chasing every edge case.
+2. Or remove the root cause, alone or with that rule: the worst harm comes from
+   controls that act at once and ask nothing (the *Delete* of a card, a group, a
+   comment or a proposal; *Directly Accept*). An undo for a few seconds after
+   such an action would make a mis-press recoverable and let the guard stay
+   coarse. It is user-visible: it bumps `X`.
+3. If `came` is kept, fix A, B, C, G and H together (one mechanism), then E and F,
+   and correct D.
+4. Bound the verification: one review, real browsers only where layout matters,
+   fix what is serious, and stop. Repeated multi-agent review loops on this
+   subject do not converge.
+
+Accepted residuals (AGENTS.md): two controls nearer than the browser's
+double-click distance pressed that quickly (the second presses nothing until
+pressed again); at two taps a second on a *Delete* that comes up, every other
+tap deletes; on macOS, every click within the double-click interval after a
+deletion is stopped until a pause.
+
 ### H51 — [CLOSED 2026-08-25] The focus ring left on a dialog's opener
 
 Closed. Kept as a pointer because the *distinction* it turns on is the reusable

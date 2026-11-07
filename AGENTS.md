@@ -388,7 +388,9 @@ throttled phone; a proposal's in-place text and wrapped proposals escape the
 field rule; several mutants survive. The next session should **replace the
 rule by a simpler, bounded one** (judge only the element pressed and its
 neighbours, never scan the page), keep its limits written down here, and
-stop after one verified fix. The tests that hold today's behaviour:
+stop after one verified fix. The full account — every finding, the history
+of what was tried and the acceptance criteria — is `HARDENING_STATUS.md` →
+*H54*. The tests that hold today's behaviour:
 `__tests__/doubleGestureGuard.test.ts` (the rules on a page laid out by hand —
 jsdom lays nothing out), `__tests__/sessionGroupTouch.test.tsx` (the taps and
 presses on the board, with an event clock of their own, since jsdom stamps
