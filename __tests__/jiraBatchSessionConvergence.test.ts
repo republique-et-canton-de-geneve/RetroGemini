@@ -168,7 +168,7 @@ describe('a Jira batch while the facilitator types the review summary', () => {
       const { merged, divergent } = mergeRemoteRetroSession(
         clone(incoming),
         screen,
-        { currentUserId: FACILITATOR, preserveIcebreaker: false, editingTicketId: null, editingGroupId: null, ownChanges },
+        { currentUserId: FACILITATOR, preserveIcebreaker: false, editingGroupId: null, ownChanges },
         pendingCreations
       );
       screen = merged;

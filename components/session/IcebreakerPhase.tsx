@@ -11,6 +11,13 @@ interface Props {
   onQuestionChange: (value: string) => void;
   onRandom: () => void;
   onStart: () => void;
+  /**
+   * Turn the retro into an open board (utils/openBoard.ts). Passed only to a
+   * facilitator whose retro is still going: this is the first screen after
+   * creating one, so it is where choosing the wrong type is noticed.
+   */
+  onSwitchToOpenBoard?: () => void;
+  isLive?: boolean;
 }
 
 const IcebreakerPhase: React.FC<Props> = ({
@@ -19,7 +26,9 @@ const IcebreakerPhase: React.FC<Props> = ({
   localIcebreakerQuestion,
   onQuestionChange,
   onRandom,
-  onStart
+  onStart,
+  onSwitchToOpenBoard,
+  isLive = true
 }) => {
   const { t } = useTranslation();
   const templateLanguage = toLanguage(session.templateLanguage, 'en');
@@ -72,6 +81,20 @@ const IcebreakerPhase: React.FC<Props> = ({
             <div className="text-slate-500 italic animate-pulse">{t('phases.icebreaker.waiting')}</div>
           )}
         </div>
+
+        {onSwitchToOpenBoard && (
+          <div className="shrink-0 mt-4 flex justify-center">
+            <button
+              type="button"
+              onClick={onSwitchToOpenBoard}
+              disabled={!isLive}
+              title={t('session.openBoard.switchToBoardHint')}
+              className="text-indigo-200 hover:text-white text-sm font-bold flex items-center px-4 py-2 rounded-lg border border-slate-600 hover:bg-slate-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span className="material-symbols-outlined mr-2" aria-hidden="true">view_kanban</span> {t('session.openBoard.switchToBoard')}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

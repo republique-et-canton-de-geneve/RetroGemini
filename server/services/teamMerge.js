@@ -191,12 +191,15 @@ const REVISION_KEYS = new Set(['_rev', '_updatedAt']);
 // walking back from "View Summary" moves `phase` and resets the timer in
 // `settings`, a rolling update re-runs all of it for every open tab, and a
 // rename belongs to the record anyway. Counting any of it made a merge source
-// read as "changed since the merge" after the first look.
+// read as "changed since the merge" after the first look. Turning a retro into
+// an open board and back is a phase change too: `guidedPhase` only says where
+// the board resumes (utils/openBoard.ts), and the cards it holds still count.
 const NAVIGATION_KEYS = new Set([
   'participants',
   'leftUsers',
   'invitedUsers',
   'phase',
+  'guidedPhase',
   'status',
   'settings',
   'name',

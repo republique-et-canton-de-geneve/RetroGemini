@@ -54,6 +54,7 @@ const PHASE_KEYS: Record<string, MessageKey> = {
   DISCUSS: 'common.phase.DISCUSS',
   REVIEW: 'common.phase.REVIEW',
   CLOSE: 'common.phase.CLOSE',
+  OPEN_BOARD: 'common.phase.OPEN_BOARD',
   SURVEY: 'common.phase.SURVEY'
 };
 const FEEDBACK_STATUS_KEYS: Record<TeamFeedback['status'], MessageKey> = {

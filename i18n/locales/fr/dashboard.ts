@@ -43,6 +43,13 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.newRetro.title': 'Démarrer une nouvelle rétrospective',
   'dashboard.newRetro.close': 'Fermer la fenêtre de nouvelle rétrospective',
   'dashboard.newRetro.anonymousHint': 'Masquer le nom des auteurs sur les cartes de cette rétro.',
+  'dashboard.newRetro.boardTypeLabel': 'Type de tableau',
+  'dashboard.newRetro.boardTypeGuided': 'Rétrospective guidée',
+  'dashboard.newRetro.boardTypeOpen': 'Tableau ouvert',
+  'dashboard.newRetro.boardTypeGuidedHint':
+    'Étape par étape\u00a0: brise-glace, brainstorming, regroupement, vote, discussion et actions.',
+  'dashboard.newRetro.boardTypeOpenHint':
+    'Tout sur un seul écran, et il reste ouvert\u00a0: ajoutez, regroupez, déplacez et votez sur les cartes à tout moment. Idéal pour un Lean Coffee. Vous pourrez le passer en rétrospective guidée plus tard, et inversement.',
   'dashboard.newRetro.savedTemplates': 'Modèles enregistrés',
   'dashboard.newRetro.createCustom': 'Créer un modèle personnalisé',
   'dashboard.newRetro.customTemplateName': "Nom du modèle (facultatif, pour l'enregistrer)",
@@ -91,6 +98,7 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.session.resume': 'Reprendre',
   'dashboard.retroStatus.IN_PROGRESS': 'EN COURS',
   'dashboard.retroStatus.CLOSED': 'CLÔTURÉE',
+  'dashboard.retroStatus.OPEN_BOARD': 'TABLEAU OUVERT',
   'dashboard.healthCheckStatus.IN_PROGRESS': 'EN COURS',
   'dashboard.healthCheckStatus.CLOSED': 'CLÔTURÉ',
 

@@ -143,7 +143,7 @@ const OpenActionsPhase: React.FC<Props> = ({
                         }, action);
                         setRefreshTick((tick) => tick + 1);
                       }}
-                      className={`mr-3 transition ${action.done ? 'text-emerald-500 scale-110' : 'text-slate-300 hover:text-emerald-500'} ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`mr-3 transition ${action.done ? 'text-emerald-600 scale-110' : 'text-slate-500 hover:text-emerald-600'} ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
                       aria-label={action.done ? t('phases.actions.markNotDone') : t('phases.actions.markDone')}
                     >
                       <span className="material-symbols-outlined text-2xl">

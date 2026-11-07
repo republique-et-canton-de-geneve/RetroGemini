@@ -162,8 +162,11 @@ test.describe('Participants panel & cross-column grouping', () => {
     await expect(columns.nth(0)).toContainText('Pairing sessions');
     await expect(columns.nth(2)).not.toContainText('Pairing sessions');
     await expect(facilitator.getByTestId('ticket-origin-badge')).toHaveCount(0);
-    // And the other participant's board agrees.
-    await expect(participant.locator('[data-column-id]').nth(0)).toContainText('Pairing sessions', { timeout: 10_000 });
+    // And the other participant's board agrees. They cannot read the card
+    // ("Reveal cards" is off), so it is found by its id.
+    const pairingId = await facilitator.locator('[data-ticket-id]', { hasText: 'Pairing sessions' }).getAttribute('data-ticket-id');
+    await expect(participant.locator('[data-column-id]').nth(0).locator(`[data-ticket-id="${pairingId}"]`))
+      .toHaveCount(1, { timeout: 10_000 });
 
     // Group phase: drag the "Stop" ticket onto the "Start" ticket
     await facilitator.locator('.phase-nav-btn', { hasText: 'GROUP' }).click();

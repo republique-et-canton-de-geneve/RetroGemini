@@ -49,6 +49,8 @@ interface Props {
   memberStatus: (member: User) => ParticipantRowStatus | null;
   /** The progress line under the roster. */
   footer: React.ReactNode;
+  /** The panel's title, when "Participants (n)" is not what the list is. */
+  heading?: string;
   onToggleCollapse: () => void;
   onInvite: () => void;
   /** Facilitator marks a participant as having left (or as returned). */
@@ -162,6 +164,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
   contributionCounts,
   memberStatus,
   footer,
+  heading,
   onToggleCollapse,
   onInvite,
   onToggleLeft,
@@ -186,7 +189,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
         {!isCollapsed && (
           <h3 className="text-sm font-bold text-slate-700 flex items-center">
             <span className="material-symbols-outlined mr-2 text-lg" aria-hidden="true">groups</span>
-            {t('phases.participants.title', { count: activeParticipants.length })}
+            {heading ?? t('phases.participants.title', { count: activeParticipants.length })}
           </h3>
         )}
         <button

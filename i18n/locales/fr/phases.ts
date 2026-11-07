@@ -16,6 +16,7 @@ const phases: Record<keyof typeof en, string> = {
   'phases.header.expandParticipants': 'Cliquer pour déployer le panneau des participants',
   'phases.header.progressFinished': 'ont terminé',
   'phases.header.progressVoted': 'ont voté',
+  'phases.header.progressConnected': 'connectés',
   'phases.header.user': 'Utilisateur',
   'phases.header.invite': 'Inviter / Rejoindre',
 
@@ -88,6 +89,9 @@ const phases: Record<keyof typeof en, string> = {
   'phases.tips.close.label': 'Clôture',
   'phases.tips.close.purpose':
     "Concluez la rétrospective par un vote ROTI rapide et clôturez proprement la session. Si les retours montrent que la rétro n'a pas semblé être un bon usage du temps, profitez de cette étape pour définir des actions qui amélioreront les prochaines rétrospectives.",
+  'phases.tips.openBoard.label': 'Tableau ouvert',
+  'phases.tips.openBoard.purpose':
+    "Chacun ajoute des sujets, regroupe ceux qui se ressemblent et vote, le tout sur un seul écran. Pour un Lean Coffee, placez le sujet le plus voté dans la colonne de discussion, limitez sa durée avec le minuteur, puis passez au suivant quand le groupe en a assez dit.",
 
   'phases.icebreaker.title': 'Brise-glace',
   'phases.icebreaker.placeholder': 'Saisissez ou générez une question…',
@@ -222,6 +226,8 @@ const phases: Record<keyof typeof en, string> = {
   'phases.participants.ticketsAdded_one': '{count} carte ajoutée',
   'phases.participants.ticketsAdded_other': '{count} cartes ajoutées',
   'phases.participants.title': 'Participants ({count})',
+  'phases.participants.connectedTitle': 'Connectés en ce moment ({count})',
+  'phases.participants.footerConnected': 'Seules les personnes connectées en ce moment sont affichées.',
   'phases.participants.expand': 'Déployer le panneau',
   'phases.participants.collapse': 'Réduire le panneau',
   'phases.participants.online': 'En ligne',
