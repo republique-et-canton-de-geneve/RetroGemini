@@ -694,9 +694,15 @@ An open board is a retrospective whose every card activity — writing, voting,
 grouping, moving — happens on one screen, with no phases to go through, and
 which stays open for as long as the team keeps it (a Lean Coffee, a board kept
 for weeks). The facilitator chooses it in *Start New Retrospective* (board type:
-guided or open; an open board starts anonymous, with its cards shown, one vote
-per card and no limit on votes — `dataService.createSession` — and every one of
-those is changed from the board's *Settings* dialog, `BoardSettingsDialog`), and
+guided or open; an open board starts as a guided retro's Brainstorm does —
+its authors named unless the facilitator makes it anonymous, each person
+reading only their own cards, five votes each and several per card — and with
+voting off and its counts hidden until the facilitator opens the vote
+(`CARD_AND_VOTE_START_SETTINGS` and `BOARD_START_SETTINGS` in
+`utils/openBoard.ts`, which `dataService.createSession` applies; tester
+feedback, 42.2 — it used to start anonymous, its cards shown, one vote per card
+and no limit); every one of those is changed from the board's *Settings*
+dialog, `BoardSettingsDialog`, and the creation dialog says where), and
 can turn a retro in progress into a board and back from the session. The rules
 are pure and coverage-gated in `utils/openBoard.ts`, `utils/boardView.ts` and
 `utils/voteBudget.ts`; `renderColumns('BOARD')` in `Session.tsx` draws it.
@@ -719,10 +725,10 @@ Eleven rules:
   (`canSwitchBoardType`). Before any card is written, switching is choosing
   the type again — the Icebreaker offers it to a facilitator who chose wrong —
   so the session takes the new type's card and vote settings, as if it had
-  been created that way: a board shows its cards and takes one vote per card
-  with no limit, a guided retro hides them in Brainstorm and counts several
-  votes per card (`recordBoardTypeChange`); anonymity is its own choice and
-  stays. The switch is offered on the board's bar, the
+  been created that way: both hide the cards and count five votes each,
+  several per card, and a board also turns voting off and hides its counts
+  (`recordBoardTypeChange`); anonymity and the colour are their own choices and
+  stay. A retro that already holds a card keeps its settings either way. The switch is offered on the board's bar, the
   Icebreaker screen and the Brainstorm, Group and Vote bars — never in the
   session header, which the header-fit e2e already measures to the pixel. The
   bars wrap rather than overflow (French labels pushed *Next Phase* off a
@@ -762,9 +768,9 @@ Eleven rules:
   *Suggest groups with AI* is not offered, a group of one's own hidden cards
   gets no title from it (the title would say what they hold, to everyone), and
   its suggestions close when the cards are hidden. A board is created with
-  its cards shown, and one entered from a phase that showed every card (Group,
-  Vote, Discuss, Review) shows them (`recordBoardTypeChange`): switching never
-  hides what everyone was reading.
+  its cards hidden, as a guided Brainstorm is, and one entered from a phase
+  that showed every card (Group, Vote, Discuss, Review) shows them
+  (`recordBoardTypeChange`): switching never hides what everyone was reading.
 - **A board is voted on with one button per card or group**
   (`BoardVoteControl`, EasyRetro's shape): a thumb that adds a vote and carries
   the total (its name starts with the number, WCAG 2.5.3), the voter's own
@@ -799,8 +805,8 @@ Eleven rules:
   and then typed in again, where the field holds the number. `unlimitedVotes`, `votingDisabled` and
   `voteCountHidden` are facilitator-only in `sessionGuard.js`; the last two are
   read on a board only. An own vote that loses its race is re-sent under one
-  vote per item too — a board's default, so never re-sending made every lost
-  vote silent. Only a **tighter** vote model lets the server win
+  vote per item too (a board's default until 42.2): never re-sending made every
+  lost vote silent there. Only a **tighter** vote model lets the server win
   (`mergeRemoteSession.ts`: one vote per item turned on, a lower budget —
   unlimited votes turned off included — or voting turned off): its state is
   then the cleanup, or votes are closed. A looser one took nothing back, so a
@@ -940,7 +946,9 @@ open board tab after deploying over 42.0. A pod from before 42.1 protects none
 of `unlimitedVotes`, `votingDisabled` and `voteCountHidden`. And a board 42.0
 created stored `revealBrainstorm: false` (42.0 showed a board's cards whatever
 it said), so it opens with its cards hidden: untick *Hide cards* in its
-settings.
+settings. A board created before 42.2 keeps the settings it started with
+(anonymous, its cards shown, one vote per card and no limit): nothing is
+migrated, and its facilitator changes them in its settings.
 
 Residuals of the board's own design (42.1), stated on purpose:
 
@@ -3394,7 +3402,8 @@ of type before any card takes the new type's defaults, and entering the board
 from Group shows the cards (`recordBoardTypeChange`), in the phase change's
 own write. The phase is navigation, where the server wins, so a phase change
 that loses its race is healed away whole; claimed, its settings outlived it,
-and a guided Brainstorm took the board's defaults — every card shown. A number
+and a guided Brainstorm took the board's defaults — every card shown, as a
+board then started (today, voting off and its counts hidden). A number
 typed and left for the phase change's button is not one of them:
 `updateSession` claims it as a write of its own before the phase change runs.
 

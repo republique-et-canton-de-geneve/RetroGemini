@@ -46,6 +46,19 @@ const measureCard = async (target: Locator) =>
 
 const opacityOf = (target: Locator) => target.evaluate((el) => getComputedStyle(el).opacity);
 
+/**
+ * Opens the vote from the board's settings, and closes them: a board starts
+ * with voting off and its counts hidden.
+ */
+const openTheVote = async (page: Page) => {
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settings = page.getByRole('dialog', { name: 'Board settings' });
+  await settings.getByRole('checkbox', { name: 'Disable voting' }).uncheck();
+  await settings.getByRole('checkbox', { name: 'Hide vote count' }).uncheck();
+  await settings.getByRole('button', { name: 'Close' }).click();
+  await expect(settings).toBeHidden();
+};
+
 /** Sets the board's anonymity from its settings, and closes them. */
 const setAnonymous = async (page: Page, anonymous: boolean) => {
   await page.getByRole('button', { name: 'Settings' }).click();
@@ -84,8 +97,8 @@ test('a card shows its controls on a phone, and its edit control lies over none 
     await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
     await dialog.getByTestId('retro-template-lean_coffee').click();
     await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
-    // Named authors, so the avatar takes the corner beside the edit control.
-    await setAnonymous(page, false);
+    // Named authors, as a board starts, so the avatar takes the corner beside
+    // the edit control.
 
     const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
     await field.fill(LONG_CARD);
@@ -261,6 +274,7 @@ for (const device of ['computer', 'phone'] as const) {
       await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
       await dialog.getByTestId('retro-template-lean_coffee').click();
       await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
+      await openTheVote(page);
 
       // Newest first: the card written last sits on top of its column.
       const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
@@ -515,6 +529,8 @@ test('a double click whose first click closes an editor presses nothing the layo
     await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
     await dialog.getByTestId('retro-template-lean_coffee').click();
     await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
+    // The vote under the pointer is what the second press must not press.
+    await openTheVote(page);
     await page.waitForTimeout(700);
 
     const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
@@ -644,8 +660,12 @@ for (const { taps, gap } of [{ taps: 2, gap: 120 }, { taps: 3, gap: 300 }]) test
   }
 });
 
-/** Creates a team and opens a Lean Coffee board on it; answers what the page sends. */
-const startOpenBoard = async (page: Page, teamName: string) => {
+/**
+ * Creates a team and opens a Lean Coffee board on it, its vote open when the
+ * test presses a vote (a board starts with voting off); answers what the page
+ * sends.
+ */
+const startOpenBoard = async (page: Page, teamName: string, { withVote = false } = {}) => {
   const sent: string[] = [];
   page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
     const text = typeof payload === 'string' ? payload : payload.toString();
@@ -665,6 +685,7 @@ const startOpenBoard = async (page: Page, teamName: string) => {
   await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
   await dialog.getByTestId('retro-template-lean_coffee').click();
   await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
+  if (withVote) await openTheVote(page);
   await page.waitForTimeout(700);
   return sent;
 };
@@ -704,7 +725,7 @@ test('taps after one on a group’s title that closes an editor press nothing th
   });
   const page = await context.newPage();
   try {
-    const sent = await startOpenBoard(page, `${TEAM_NAME}-tapmouse`);
+    const sent = await startOpenBoard(page, `${TEAM_NAME}-tapmouse`, { withVote: true });
     const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
     for (const text of ['Late release notes', 'Too many meetings']) {
       await field.fill(text);
@@ -1079,7 +1100,7 @@ test('a double tap past the browser’s count on a card’s vote keeps the vote,
   });
   const page = await context.newPage();
   try {
-    const sent = await startOpenBoard(page, `${TEAM_NAME}-thumb`);
+    const sent = await startOpenBoard(page, `${TEAM_NAME}-thumb`, { withVote: true });
     const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
     await field.fill('Voted card');
     await page.keyboard.press('Enter');
@@ -1163,14 +1184,14 @@ test('on a computer the same controls wait for the pointer', async ({ page }) =>
   await expect.poll(() => opacityOf(remove)).toBe('1');
 
   // Under the pointer, the edit control covers none of the text: it used to
-  // appear over the last words of the first line. Anonymous (a board's
-  // default), then with the author's avatar beside it.
+  // appear over the last words of the first line. With the author's avatar
+  // beside it (a board starts with its authors named), then anonymous.
   await field.fill(LONG_CARD);
   await page.keyboard.press('Enter');
   const longCard = card(page, LONG_CARD);
   await expect(longCard).toBeVisible();
-  for (const anonymous of [true, false]) {
-    if (!anonymous) await setAnonymous(page, false);
+  for (const anonymous of [false, true]) {
+    if (anonymous) await setAnonymous(page, true);
     await longCard.hover();
     await expect.poll(() => opacityOf(longCard.getByRole('button', { name: 'Edit ticket' }))).toBe('1');
     const hovered = await measureCard(longCard);

@@ -257,13 +257,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
     setShowNewRetroModal(true);
   };
 
-  // An open board is anonymous unless the facilitator says otherwise, and a
-  // guided retro names its authors unless they say otherwise: each type brings
-  // its own default, and the toggle below it stays free.
+  // Both types name their authors unless the facilitator says otherwise, so a
+  // change of type leaves the anonymity toggle below it as they set it.
   const handleBoardTypeChange = (next: 'guided' | 'open') => {
     if (next === boardType) return;
     setBoardType(next);
-    setIsAnonymous(next === 'open');
   };
 
   // Switching the template language re-words whatever the facilitator has not

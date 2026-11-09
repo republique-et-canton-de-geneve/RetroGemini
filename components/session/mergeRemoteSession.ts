@@ -471,7 +471,8 @@ const registerOwnRetroChanges = (
   // from Group shows the cards (recordBoardTypeChange). The phase is not
   // claimed — it is navigation, where the server wins — so a phase change that
   // loses its race is healed away whole. Claimed, its settings outlived it, and
-  // a guided Brainstorm took the board's defaults: every card shown. Such a
+  // a guided Brainstorm took the board's defaults (every card shown, as a board
+  // then started; today, voting off and its counts hidden). Such a
   // write also replaces any earlier claim on the settings it changed.
   if (isFacilitator) {
     const phaseChanged = before.phase !== after.phase;

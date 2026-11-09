@@ -121,14 +121,17 @@ describe('Start New Retrospective — board type', () => {
     expect(vi.mocked(dataService.createSession).mock.calls[0][3]).toEqual({ isAnonymous: false, templateLanguage: 'en' });
   });
 
-  it('starts an open board, anonymous unless the facilitator says otherwise', () => {
+  it('starts an open board that names its authors, as a guided retro does, unless the facilitator says otherwise', () => {
     renderDashboard(buildTeam());
     const dialog = openDialog('New Retrospective');
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Open board' }));
     expect(within(dialog).getByRole('button', { name: 'Open board' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(dialog).getByText(/Ideal for a Lean Coffee/)).toBeInTheDocument();
-    expect(isOn(anonymousToggle(dialog))).toBe(true);
+    // Tester feedback (42.2): a board starts as a guided retro's Brainstorm
+    // does, and the facilitator is told where to open it up.
+    expect(within(dialog).getByText(/It starts with the cards hidden and voting off: show them and turn voting on in its settings\./)).toBeInTheDocument();
+    expect(isOn(anonymousToggle(dialog))).toBe(false);
 
     fireEvent.click(within(dialog).getByTestId('retro-template-lean_coffee'));
 
@@ -136,11 +139,11 @@ describe('Start New Retrospective — board type', () => {
       'team-1',
       expect.any(String),
       getRetroTemplateColumns('lean_coffee', 'en'),
-      { isAnonymous: true, templateLanguage: 'en', openBoard: true }
+      { isAnonymous: false, templateLanguage: 'en', openBoard: true }
     );
   });
 
-  it('lets the facilitator make an open board that names its authors', () => {
+  it('lets the facilitator make an open board anonymous', () => {
     renderDashboard(buildTeam());
     const dialog = openDialog('New Retrospective');
 
@@ -149,21 +152,27 @@ describe('Start New Retrospective — board type', () => {
     fireEvent.click(within(dialog).getByTestId('retro-template-lean_coffee'));
 
     expect(vi.mocked(dataService.createSession).mock.calls[0][3]).toEqual({
-      isAnonymous: false,
+      isAnonymous: true,
       templateLanguage: 'en',
       openBoard: true
     });
   });
 
-  it('goes back to a named guided retro when the facilitator changes their mind', () => {
+  it('keeps the facilitator\'s anonymity choice when they change the type', () => {
     renderDashboard(buildTeam());
     const dialog = openDialog('New Retrospective');
 
+    // Both types start with the authors named, so a change of type has no
+    // default of its own to impose on the choice already made.
+    fireEvent.click(anonymousToggle(dialog));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Open board' }));
+    expect(isOn(anonymousToggle(dialog))).toBe(true);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Guided retrospective' }));
-
-    expect(isOn(anonymousToggle(dialog))).toBe(false);
+    expect(isOn(anonymousToggle(dialog))).toBe(true);
     expect(within(dialog).getByText(/Phase by phase/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByTestId('retro-template-start_stop_continue'));
+    expect(vi.mocked(dataService.createSession).mock.calls[0][3]).toEqual({ isAnonymous: true, templateLanguage: 'en' });
   });
 
   it('keeps the choice for a custom template too', () => {
@@ -197,6 +206,7 @@ describe('Start New Retrospective — board type', () => {
     expect(within(choice).getByRole('button', { name: 'Rétrospective guidée' })).toBeInTheDocument();
     fireEvent.click(within(choice).getByRole('button', { name: 'Tableau ouvert' }));
     expect(within(dialog).getByText(/Idéal pour un Lean Coffee/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Il démarre avec les cartes masquées et le vote désactivé : affichez-les et activez le vote dans ses paramètres\./)).toBeInTheDocument();
   });
 });
 

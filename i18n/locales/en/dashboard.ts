@@ -50,7 +50,7 @@ const dashboard = {
   'dashboard.newRetro.boardTypeGuidedHint':
     'Phase by phase: icebreaker, brainstorm, grouping, vote, discussion and actions.',
   'dashboard.newRetro.boardTypeOpenHint':
-    'Everything on one screen, and it stays open: add, group, move and vote on cards at any time. Ideal for a Lean Coffee. You can switch it to a guided retrospective later, and back.',
+    'Everything on one screen, and it stays open: add, group, move and vote on cards at any time. It starts with the cards hidden and voting off: show them and turn voting on in its settings. Ideal for a Lean Coffee. You can switch it to a guided retrospective later, and back.',
   'dashboard.newRetro.savedTemplates': 'Saved Templates',
   'dashboard.newRetro.createCustom': 'Create Custom Template',
   'dashboard.newRetro.customTemplateName': 'Template Name (Optional, to save)',

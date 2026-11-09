@@ -150,13 +150,30 @@ export const guidedResumePhase = (session: Pick<RetroSession, 'guidedPhase'>): s
   isResumablePhase(session.guidedPhase) ? session.guidedPhase : GUIDED_START_PHASE;
 
 /**
- * The card and vote settings each type starts with (`dataService.createSession`):
- * a board shows its cards and takes one vote per card, with no limit; a guided
- * retro hides them in Brainstorm and counts several votes per card. Anonymity is
- * chosen on its own and never follows the type.
+ * The card and vote settings every retrospective starts with
+ * (`dataService.createSession`), guided or board: each person reads only their
+ * own cards while they are written, as in a guided retro's Brainstorm, with
+ * five votes each and several per card if they wish.
  */
-const BOARD_CARD_DEFAULTS = { revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true } as const;
-const GUIDED_CARD_DEFAULTS = { revealBrainstorm: false, oneVotePerTicket: false, unlimitedVotes: false } as const;
+export const CARD_AND_VOTE_START_SETTINGS = { maxVotes: 5, oneVotePerTicket: false, revealBrainstorm: false } as const;
+
+/**
+ * What a board starts with besides: no vote, nor any count, until the
+ * facilitator opens the vote from its settings once the cards are written —
+ * what the guided retro's Vote phase does for it (tester feedback, 42.2; a
+ * board used to start with its cards shown and a "like" per card, as many as
+ * one wished). Anonymity and the colour are chosen on their own and never
+ * follow the type.
+ */
+export const BOARD_START_SETTINGS = { votingDisabled: true, voteCountHidden: true } as const;
+
+const BOARD_TYPE_SETTINGS = { ...CARD_AND_VOTE_START_SETTINGS, unlimitedVotes: false, ...BOARD_START_SETTINGS } as const;
+const GUIDED_TYPE_SETTINGS = {
+  ...CARD_AND_VOTE_START_SETTINGS,
+  unlimitedVotes: false,
+  votingDisabled: false,
+  voteCountHidden: false
+} as const;
 
 /**
  * Called by the session's phase change before it sets `nextPhase`: leaving a
@@ -173,11 +190,11 @@ export const recordBoardTypeChange = (session: RetroSession, nextPhase: string):
   const toBoard = nextPhase === OPEN_BOARD_PHASE;
   const noCardYet = session.tickets.length === 0;
   if (toBoard && !isOpenBoard(session)) {
-    if (noCardYet) Object.assign(session.settings, BOARD_CARD_DEFAULTS);
+    if (noCardYet) Object.assign(session.settings, BOARD_TYPE_SETTINGS);
     else if (PHASES_SHOWING_EVERY_CARD.includes(session.phase)) session.settings.revealBrainstorm = true;
     session.guidedPhase = session.phase;
   } else if (!toBoard && isOpenBoard(session)) {
-    if (noCardYet) Object.assign(session.settings, GUIDED_CARD_DEFAULTS);
+    if (noCardYet) Object.assign(session.settings, GUIDED_TYPE_SETTINGS);
     delete session.guidedPhase;
   }
 };

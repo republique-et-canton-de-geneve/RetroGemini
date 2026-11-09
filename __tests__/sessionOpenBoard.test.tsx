@@ -105,7 +105,8 @@ const createBoard = (overrides: Partial<RetroSession> = {}): RetroSession => ({
     isAnonymous: false,
     maxVotes: 5,
     oneVotePerTicket: false,
-    // Shown, as a board is created; the "Hide cards" cases turn it off.
+    // Shown, as the facilitator turns them on once the cards are written (a
+    // board starts with them hidden); the "Hide cards" cases turn it off.
     revealBrainstorm: true,
     revealHappiness: false,
     revealRoti: false,

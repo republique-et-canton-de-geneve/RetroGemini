@@ -127,18 +127,50 @@ describe('recordBoardTypeChange', () => {
 
   it('gives the new type its own card and vote settings before any card is written', () => {
     // A facilitator who chose the wrong type switches from the Icebreaker:
-    // they get what creating the right one would have given them.
+    // they get what creating the right one would have given them
+    // (dataService.createSession).
     const retro = session({ phase: 'ICEBREAKER' });
     retro.settings.isAnonymous = false;
+    retro.settings.colorBy = 'author';
     recordBoardTypeChange(retro, OPEN_BOARD_PHASE);
-    expect(retro.settings).toMatchObject({ revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true });
-    // Anonymity is its own choice.
+    // The cards hidden while they are written, as in Brainstorm, and no vote
+    // nor any count until the facilitator opens the vote (tester feedback, 42.2).
+    expect(retro.settings).toMatchObject({
+      revealBrainstorm: false,
+      oneVotePerTicket: false,
+      unlimitedVotes: false,
+      maxVotes: 5,
+      votingDisabled: true,
+      voteCountHidden: true
+    });
+    // Anonymity and the colour are their own choices.
     expect(retro.settings.isAnonymous).toBe(false);
+    expect(retro.settings.colorBy).toBe('author');
 
-    // And the other way: the Vote phase counts votes again, and ends itself.
-    const board = session({ settings: { ...session().settings, revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true } });
+    // And the other way, whatever the board was set to before its first card:
+    // the guided retro starts as it is created, and keeps no switch of the
+    // board's for a later return to it.
+    const board = session({
+      settings: {
+        ...session().settings,
+        revealBrainstorm: true,
+        oneVotePerTicket: true,
+        unlimitedVotes: true,
+        maxVotes: 3,
+        votingDisabled: true,
+        voteCountHidden: true
+      }
+    });
     recordBoardTypeChange(board, 'ICEBREAKER');
-    expect(board.settings).toMatchObject({ revealBrainstorm: false, oneVotePerTicket: false, unlimitedVotes: false });
+    expect(board.settings).toMatchObject({
+      revealBrainstorm: false,
+      oneVotePerTicket: false,
+      unlimitedVotes: false,
+      maxVotes: 5,
+      votingDisabled: false,
+      voteCountHidden: false
+    });
+    expect(board.settings.isAnonymous).toBe(true);
   });
 
   it('keeps the settings of a session that already holds a card, either way', () => {
@@ -151,6 +183,9 @@ describe('recordBoardTypeChange', () => {
     recordBoardTypeChange(guided, OPEN_BOARD_PHASE);
     expect(guided.settings).toMatchObject({ revealBrainstorm: false, oneVotePerTicket: false, maxVotes: 3 });
     expect(guided.settings.unlimitedVotes).toBeFalsy();
+    // A retro already under way is not a board starting: its vote stays open.
+    expect(guided.settings.votingDisabled).toBeFalsy();
+    expect(guided.settings.voteCountHidden).toBeFalsy();
   });
 });
 

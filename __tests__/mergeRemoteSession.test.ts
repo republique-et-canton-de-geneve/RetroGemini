@@ -1424,7 +1424,7 @@ describe('the facilitator’s own settings are claimed', () => {
     it('leaves the guided retro with its own card settings', () => {
       const brainstorm = makeSession({ phase: 'BRAINSTORM', _rev: 6, settings: { ...baseSettings(), revealBrainstorm: false } });
       const toBoard = switched(brainstorm, 'OPEN_BOARD');
-      expect(toBoard.settings).toMatchObject({ revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true });
+      expect(toBoard.settings).toMatchObject({ maxVotes: 5, votingDisabled: true, voteCountHidden: true });
       const ownChanges = facilitatorClaims([brainstorm, toBoard]);
       // A participant's first card reached the server first.
       const healed = makeSession({
@@ -1438,25 +1438,30 @@ describe('the facilitator’s own settings are claimed', () => {
 
       expect(merged.phase).toBe('BRAINSTORM');
       expect(merged.settings.revealBrainstorm).toBe(false);
-      expect(merged.settings.oneVotePerTicket).toBe(false);
-      expect(merged.settings.unlimitedVotes).toBeFalsy();
+      expect(merged.settings.maxVotes).toBe(3);
+      expect(merged.settings.votingDisabled).toBeFalsy();
+      expect(merged.settings.voteCountHidden).toBeFalsy();
       expect(divergent).toBe(false);
     });
 
     it('leaves the board with its own card settings', () => {
-      const openBoard = board({ revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true }, { _rev: 6 });
+      const settings = { revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true, votingDisabled: true, voteCountHidden: true };
+      const openBoard = board(settings, { _rev: 6 });
       const toGuided = switched(openBoard, 'ICEBREAKER');
-      expect(toGuided.settings).toMatchObject({ revealBrainstorm: false, oneVotePerTicket: false, unlimitedVotes: false });
+      expect(toGuided.settings).toMatchObject({
+        revealBrainstorm: false,
+        oneVotePerTicket: false,
+        unlimitedVotes: false,
+        votingDisabled: false,
+        voteCountHidden: false
+      });
       const ownChanges = facilitatorClaims([openBoard, toGuided]);
-      const healed = board(
-        { revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true },
-        { _rev: 7, tickets: [makeTicket('t1', { authorId: OTHER })] },
-      );
+      const healed = board(settings, { _rev: 7, tickets: [makeTicket('t1', { authorId: OTHER })] });
 
       const { merged, divergent } = mergeRemoteRetroSession(healed, toGuided, ctx({ ownChanges }), noPending());
 
       expect(merged.phase).toBe('OPEN_BOARD');
-      expect(merged.settings).toMatchObject({ revealBrainstorm: true, oneVotePerTicket: true, unlimitedVotes: true });
+      expect(merged.settings).toMatchObject(settings);
       expect(divergent).toBe(false);
     });
 

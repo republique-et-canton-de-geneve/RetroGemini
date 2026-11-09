@@ -49,7 +49,7 @@ const dashboard: Record<keyof typeof en, string> = {
   'dashboard.newRetro.boardTypeGuidedHint':
     'Étape par étape\u00a0: brise-glace, brainstorming, regroupement, vote, discussion et actions.',
   'dashboard.newRetro.boardTypeOpenHint':
-    'Tout sur un seul écran, et il reste ouvert\u00a0: ajoutez, regroupez, déplacez et votez sur les cartes à tout moment. Idéal pour un Lean Coffee. Vous pourrez le passer en rétrospective guidée plus tard, et inversement.',
+    'Tout sur un seul écran, et il reste ouvert\u00a0: ajoutez, regroupez, déplacez et votez sur les cartes à tout moment. Il démarre avec les cartes masquées et le vote désactivé\u00a0: affichez-les et activez le vote dans ses paramètres. Idéal pour un Lean Coffee. Vous pourrez le passer en rétrospective guidée plus tard, et inversement.',
   'dashboard.newRetro.savedTemplates': 'Modèles enregistrés',
   'dashboard.newRetro.createCustom': 'Créer un modèle personnalisé',
   'dashboard.newRetro.customTemplateName': "Nom du modèle (facultatif, pour l'enregistrer)",

@@ -864,22 +864,37 @@ describe('dataService', () => {
       // utils/openBoard.ts: the board is the phase; turning it into a guided
       // retro later starts at the beginning.
       const team = await dataService.createTeam('Team', 'pwd', 'fac@example.com');
-      const board = dataService.createSession(team.id, 'Lean Coffee', columns, { openBoard: true, isAnonymous: true });
+      const board = dataService.createSession(team.id, 'Lean Coffee', columns, { openBoard: true });
 
       expect(board.phase).toBe('OPEN_BOARD');
       expect(board.status).toBe('IN_PROGRESS');
       expect(board).not.toHaveProperty('guidedPhase');
-      expect(board.settings.isAnonymous).toBe(true);
-      // Voted on with a "like": one vote per card, no budget, every card shown.
-      expect(board.settings.oneVotePerTicket).toBe(true);
-      expect(board.settings.unlimitedVotes).toBe(true);
-      expect(board.settings.revealBrainstorm).toBe(true);
+      // It starts as a guided retro's Brainstorm does (tester feedback, 42.2):
+      // each person reads only their own cards, five votes each and several
+      // per card if they wish, coloured by topic, authors named — and no vote
+      // yet, nor any count, until the facilitator opens the vote from the
+      // board's settings.
+      expect(board.settings).toMatchObject({
+        isAnonymous: false,
+        revealBrainstorm: false,
+        votingDisabled: true,
+        voteCountHidden: true,
+        maxVotes: 5,
+        oneVotePerTicket: false
+      });
+      expect(board.settings.unlimitedVotes).toBeFalsy();
+      expect(board.settings.colorBy).toBeUndefined();
+      // Anonymity is the facilitator's own choice, on a board as on a guided retro.
+      const anonymousBoard = dataService.createSession(team.id, 'Lean Coffee 2', columns, { openBoard: true, isAnonymous: true });
+      expect(anonymousBoard.settings.isAnonymous).toBe(true);
       // Without the option, the guided retrospective it always was.
       const guided = dataService.createSession(team.id, 'Retro', columns);
       expect(guided.phase).toBe('ICEBREAKER');
       expect(guided.settings.oneVotePerTicket).toBe(false);
       expect(guided.settings.revealBrainstorm).toBe(false);
       expect(guided.settings).not.toHaveProperty('unlimitedVotes');
+      expect(guided.settings).not.toHaveProperty('votingDisabled');
+      expect(guided.settings).not.toHaveProperty('voteCountHidden');
     });
 
     it('creates a retrospective with its timer stopped at five minutes', async () => {
