@@ -199,9 +199,11 @@ describe('Group phase — dropping a held card with touch', () => {
     fireEvent.touchStart(loose, touch(50, 50));
     expect(fireEvent.touchEnd(loose, touch(50, 50))).toBe(false);
     await waitFor(() => screen.getByRole('button', { name: /Selected for grouping: Loose card/ }));
+    // The group lies elsewhere on the board: a tap at the same place, as
+    // quick, is the next of a double tap on the card (doubleGestureGuard).
     const container = groupContainer();
-    fireEvent.touchStart(container, touch(50, 50));
-    expect(fireEvent.touchEnd(container, touch(50, 50))).toBe(false);
+    fireEvent.touchStart(container, touch(50, 300));
+    expect(fireEvent.touchEnd(container, touch(50, 300))).toBe(false);
     await waitFor(async () => expect(await persistedGroupOf('loose')).toBe('g1'));
 
     // A scroll is the browser's, and so is a tap on a control.
@@ -519,10 +521,11 @@ describe('a tap the board acts on, and the field it leaves', () => {
       await waitFor(async () => expect(await groupOfTc()).toBeTruthy());
     });
 
-    // A tap that closes no editor moves nothing under the finger: the next
-    // one is the board's at once — leaving the add-idea field changes no
-    // card's size.
-    it('leaves the next tap to the board when the first closed no editor', async () => {
+    // The rule reads no layout: a quick tap at the same place on another
+    // card is the next of a double tap whatever the first did — here it
+    // closed no editor and moved nothing. Half a second later it is the
+    // board's.
+    it('ignores the next tap on another card at the same place, though the first closed no editor', async () => {
       const user = userEvent.setup();
       renderBoard();
       const idea = await screen.findByPlaceholderText('Add an idea...');
@@ -532,7 +535,12 @@ describe('a tap the board acts on, and the field it leaves', () => {
       const clock = heldClock();
       try {
         expect(tap(card('td'))).toBe(false);
+        clock.at(100);
         expect(tap(card('tc'))).toBe(false);
+        expect(inGroup('tc')).toBe(false);
+        expect(held('td')).toBeTruthy();
+        clock.at(700);
+        tap(card('tc'));
       } finally {
         clock.restore();
       }
@@ -922,12 +930,11 @@ describe('a tap the board acts on, and the field it leaves', () => {
       return pressOf(element, detail);
     };
 
-    // Review finding (pass 15 of 42.1): a press or a tap a deletion stopped
-    // ran the half second on from its own time, as one after an editor
-    // closed does: at a steady pace of two taps a second on the Delete that
-    // came up, every tap after the first pressed nothing, for as long as the
-    // pace lasted. A deletion's half second runs from the deletion alone.
-    it('deletes the next card with the tap after the one it stopped, at a steady pace', async () => {
+    // Taps less than half a second apart are one gesture, each counted from
+    // the one before, as a browser counts them: at a steady pace on the
+    // Delete that keeps coming up, the first card goes, and the next once
+    // the pace pauses (the stated cost of the rule, AGENTS.md).
+    it('deletes the next card only after a pause, at a steady pace', async () => {
       renderBoard();
       await screen.findByText('Flaky deploys');
       const before = (await writes()).length;
@@ -938,6 +945,8 @@ describe('a tap the board acts on, and the field it leaves', () => {
         clock.at(450);
         expect(tapPress(removeOf('tc'), 1)).toEqual(nothingPressed);
         clock.at(900);
+        expect(tapPress(removeOf('tc'), 1)).toEqual(nothingPressed);
+        clock.at(1500);
         expect(tapPress(removeOf('tc'), 1)).toEqual(pressedAndClicked);
       } finally {
         clock.restore();
@@ -970,9 +979,9 @@ describe('a tap the board acts on, and the field it leaves', () => {
       expect((await writes()).slice(before)).toHaveLength(1);
     });
 
-    // Past the half second, the browser's own count still says when a tap
-    // is the next of a sequence a deletion began.
-    it('presses nothing with a tap the browser counts past the half second, and deletes with the next it does not', async () => {
+    // Past the first half second, the gesture goes on for as long as its
+    // taps follow each other, counted by the browser or not.
+    it('presses nothing with the taps that go on a deletion, and deletes after a pause', async () => {
       renderBoard();
       await screen.findByText('Flaky deploys');
       const before = (await writes()).length;
@@ -985,7 +994,7 @@ describe('a tap the board acts on, and the field it leaves', () => {
         clock.at(600);
         expect(tapPress(removeOf('tc'), 3)).toEqual(nothingPressed);
         expect(onBoard('tc')).toBe(true);
-        clock.at(900);
+        clock.at(1200);
         expect(tapPress(removeOf('tc'), 1)).toEqual(pressedAndClicked);
       } finally {
         clock.restore();
@@ -995,7 +1004,7 @@ describe('a tap the board acts on, and the field it leaves', () => {
       expect((await writes()).slice(before)).toHaveLength(2);
     });
 
-    it('picks up the card that came up with a tap after the one it ignored, at a steady pace', async () => {
+    it('picks up the card that came up only after a pause', async () => {
       renderBoard();
       await screen.findByText('Flaky deploys');
 
@@ -1006,6 +1015,9 @@ describe('a tap the board acts on, and the field it leaves', () => {
         expect(tap(card('tc'))).toBe(false);
         expect(within(card('tc')).queryByRole('button', { name: /Selected for grouping/ })).toBeNull();
         clock.at(900);
+        expect(tap(card('tc'))).toBe(false);
+        expect(within(card('tc')).queryByRole('button', { name: /Selected for grouping/ })).toBeNull();
+        clock.at(1500);
         expect(tap(card('tc'))).toBe(false);
       } finally {
         clock.restore();
@@ -1174,16 +1186,13 @@ describe('a tap the board acts on, and the field it leaves', () => {
       expect((await writes()).slice(before)).toHaveLength(1);
     });
 
-    // Review finding (pass 16 of 42.1): the press that deleted a card also
-    // closed an editor open on another one, and the editor was taken as the
-    // reason — its half second ran on from every tap it stopped, and at a
-    // steady pace of two taps a second no tap after the first deleted, for as
-    // long as the pace lasted: the defect pass 15 fixed, back with an editor
-    // open. A deletion is the reason, whatever else its press closed.
+    // The press that deleted a card also closed an editor open on another
+    // one: the rule is the same, whatever else the first press closed — and
+    // the editor's text still rides its write.
     it.each([
       ['its end reached before the next', true],
       ['the next coming before its end', false],
-    ])('deletes the next card with the tap after the one it stopped, at a steady pace, when the first also closed an editor: %s', async (_how, settles) => {
+    ])('deletes the next card only after a pause when the first also closed an editor: %s', async (_how, settles) => {
       const user = userEvent.setup();
       renderBoard();
       await screen.findByText('Flaky deploys');
@@ -1203,6 +1212,10 @@ describe('a tap the board acts on, and the field it leaves', () => {
         expect(pressLeaving(removeOf('tc'), 1)).toEqual(nothingPressed);
         if (settles) await settle();
         clock.at(900);
+        expect(tap(removeOf('tc'))).toBe(true);
+        expect(pressLeaving(removeOf('tc'), 1)).toEqual(nothingPressed);
+        if (settles) await settle();
+        clock.at(1500);
         expect(tap(removeOf('tc'))).toBe(true);
         expect(pressLeaving(removeOf('tc'), 1)).toEqual(pressedAndClicked);
       } finally {
@@ -1398,7 +1411,7 @@ describe('a tap the board acts on, and the field it leaves', () => {
     it.each([
       ['on a card', () => card('tc')],
       ['on a group', () => groupContainer()],
-    ])('deletes nothing with the next tap once a tap dropped the held card %s, and deletes with a tap past the drop’s half second', async (_how, target) => {
+    ])('deletes nothing with the next tap once a tap dropped the held card %s, and deletes after a pause', async (_how, target) => {
       renderBoard();
       await screen.findByText('Flaky deploys');
       const before = (await writes()).length;
@@ -1412,9 +1425,8 @@ describe('a tap the board acts on, and the field it leaves', () => {
         clock.at(750);
         expect(press(removeOf('td'), 2, true)).toEqual(nothingPressed);
         expect(onBoard('td')).toBe(true);
-        // The drop's half second runs from the drop alone, never from the tap
-        // it stopped, as a deletion's does.
-        clock.at(1200);
+        // Counted from the tap it stopped, the gesture is over after a pause.
+        clock.at(1300);
         expect(press(removeOf('td'), 1, true)).toEqual(pressedAndClicked);
       } finally {
         clock.restore();
@@ -1725,9 +1737,10 @@ describe('a tap the board acts on, and the field it leaves', () => {
       }
     });
 
-    // A press on no control brought nothing with it: the retry of a missed
-    // "+" is the user's own, though the browser counts it.
-    it('adds the vote with a tap the browser counts after a tap on the count beside the "+"', async () => {
+    // The stated cost of the rule (AGENTS.md): the next tap of a gesture
+    // presses only what its first reached, and a quick retry right beside a
+    // missed "+" is one. It adds the vote once the pace pauses.
+    it('adds the vote with a tap after a pause, not with the quick retry beside a missed "+"', async () => {
       renderGroupPhase({
         phase: 'VOTE',
         tickets: [{ id: 'tc', colId: 'col-1', text: 'Too many meetings', authorId: 'facilitator-1', groupId: null, votes: [] }],
@@ -1742,7 +1755,9 @@ describe('a tap the board acts on, and the field it leaves', () => {
       try {
         expect(press(count, 1, true)).toEqual(pressedAndClicked);
         clock.at(150);
-        expect(press(add, 2, true)).toEqual(pressedAndClicked);
+        expect(press(add, 2, true)).toEqual(nothingPressed);
+        clock.at(700);
+        expect(press(add, 1, true)).toEqual(pressedAndClicked);
       } finally {
         clock.restore();
       }
@@ -1752,10 +1767,10 @@ describe('a tap the board acts on, and the field it leaves', () => {
       expect(after[0].tickets[0].votes).toEqual(['facilitator-1']);
     });
 
-    // A group picked up takes a ring: past the browser's count, its own vote
-    // is the next tap's to press when nothing moved it (a phone's hint that
-    // changes height moves it, which the guard's own suite lays out).
-    it('votes for a group with a tap on its vote right after a tap that picked the group up', async () => {
+    // A group picked up: its own vote, a fingertip and more from where the
+    // pick-up's tap aimed, is the next tap's to press at once — a new
+    // gesture. At the same place it is the double tap's (the case above).
+    it('votes for a group with a tap on its vote, elsewhere in the group, right after a tap that picked it up', async () => {
       renderBoard();
       await screen.findByText('Flaky deploys');
       const before = (await writes()).length;
@@ -1765,7 +1780,8 @@ describe('a tap the board acts on, and the field it leaves', () => {
         expect(tap(groupContainer())).toBe(false);
         clock.at(450);
         const vote = within(groupContainer()).getAllByTestId('vote-add')[0];
-        expect(press(vote, 1, true)).toEqual(pressedAndClicked);
+        expect(tap(vote, 50, 150)).toBe(true);
+        expect(pressOf(vote, 1, 50, 150)).toEqual(pressedAndClicked);
       } finally {
         clock.restore();
       }
@@ -1901,8 +1917,8 @@ describe('a tap the board acts on, and the field it leaves', () => {
       }
     });
 
-    // A mark belongs to the gesture after the one that made it: kept past a
-    // tap the board claims, an earlier drop cut the next pick-up and drop.
+    // A pick-up and a drop at an ordinary pace, each card where it lies on
+    // the board, a second after an earlier drop.
     it('groups with a pick-up and a drop at an ordinary pace a second after an earlier drop', async () => {
       renderBoard();
       await screen.findByText('Flaky deploys');
@@ -1910,14 +1926,14 @@ describe('a tap the board acts on, and the field it leaves', () => {
 
       const clock = heldClock();
       try {
-        expect(tap(card('td'))).toBe(false);
+        expect(tap(card('td'), 50, 50)).toBe(false);
         clock.at(300);
-        expect(tap(card('tc'))).toBe(false);
+        expect(tap(card('tc'), 50, 150)).toBe(false);
         // The new pair's card, picked up and dropped into the other group.
         clock.at(1300);
-        expect(tap(card('tc'))).toBe(false);
+        expect(tap(card('tc'), 50, 150)).toBe(false);
         clock.at(1600);
-        expect(tap(card('ta'), 52, 50)).toBe(false);
+        expect(tap(card('ta'), 50, 250)).toBe(false);
       } finally {
         clock.restore();
       }

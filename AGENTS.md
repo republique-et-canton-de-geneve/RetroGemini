@@ -332,71 +332,67 @@ on the field puts the caret where it presses, never where the draft had it
 the editor is no longer drawn as left: opened again before the press ends, it
 takes the focus, and the press's end leaves it open.
 
-**The double-gesture guard — the second press of a double click, or the
-second tap of a double tap, presses nothing that the first one brought under
-the pointer.** `components/session/doubleGestureGuard.ts`
-(`useDoubleGestureGuard`, mounted first by both session types; see *One
-double-gesture guard* below). The harm it prevents is real and was seen many
-times in review: the first click deletes a card, closes an editor or opens a
-dialog, the layout moves, and the second click lands on the next card's
-Delete (which asks nothing), a vote, *Undo accept*, the next participant's
-row — for everyone. Its rules, in order:
+**The double-gesture guard — the presses that follow the first press of a
+double click, or the taps that follow the first tap of a double tap, press
+nothing but what that first press pressed.**
+`components/session/doubleGestureGuard.ts` (`useDoubleGestureGuard`, mounted
+first by both session types; see *One double-gesture guard* below). The harm
+it prevents is real and was seen many times in review: the first click deletes
+a card, closes an editor or opens a dialog, the layout moves, and the second
+click lands on the next card's Delete (which asks nothing), a vote, *Undo
+accept* or a dialog's backdrop — for everyone. One rule, and it reads no
+layout:
 
-- **Which press is "the next".** The browser's own count (`detail > 1`; for a
-  tap, only within a fingertip of the first, `isNearAim`), or, for taps, the
-  board's own window (`isNextTap`: within 500 ms of the lift, 24 px away;
-  `isTapMouse` tells the mouse a browser emulates for a tap from the mouse
-  itself). The keyboard's click (no `detail`) is never stopped.
-- **Inside the browser's count**, after a gesture that acted (it pressed a
-  control, or the board claimed its tap), a press on another element is
-  stopped. A press after one that did nothing (a missed "+") is the user's
-  retry. Residual: two controls nearer than the browser's double-click
-  distance, pressed one after the other that quickly — the second presses
-  nothing, and does when pressed again.
-- **Past the count, a tap is stopped only once something moved under it**:
-  a mark (`boardMoved`: an editor closed and its card grew back, `'editor'`;
-  the control pressed went with its click, or a tap put down what was held,
-  `'act'`), a card the board drew again around the finger (`relaid`), what
-  the first pressed left the page (`aimGone`, a dialog's backdrop), or the
-  element the press reaches came there (`came`, over `drawnNear`: the
-  controls, cards and groups drawn within 32 px of the first press, their
-  boxes, and whether they could be pressed there).
-- **A text field is the next press's own** only where a click turns the text
-  pressed into that field in place (`data-edits-in-place`: a proposal's text),
-  nothing marked, so a double click there still selects a word.
-- **Taps the board claims** (`actOnClaimedTap` in `Session.tsx`) go through
-  `ignoresClaimedTap` and `aimClaimedTap`, so a quick second tap never drops
-  a held card on a card that came under the finger.
-- After an act the half second runs from the act alone; after a closed
-  editor it runs on from each press it stops. The trade: at a steady pace of
-  two taps a second on a Delete that comes up, every other tap deletes; on
-  macOS, whose click count has no bound, every click within the double-click
-  interval after a deletion is stopped until a pause.
+- **A gesture** is a press and the presses that go on it: those the browser
+  counts as the next of a double click (`detail > 1`), and for taps
+  (`isTapMouse` tells the mouse a browser emulates for a tap from the mouse
+  itself) those within half a second of the tap before and a fingertip (24 px)
+  of where the gesture began (`isNextTap`), or counted by the browser within
+  that fingertip (`isNearAim`). Each press is counted from the one before, as
+  a browser counts; a pause ends the gesture. The keyboard's click (no
+  `detail`) is never stopped.
+- **What a press presses** (`pressKey`): the control around its target (the
+  button around an icon); else the card or the group around it, whatever
+  inline element of their words it reached; else its target. Text a click
+  turns into its own field, in place (a proposal's text), carries the same
+  `data-press-key` as that field, so a double click there still selects a
+  word — put a key on such a pair only, never on a container, where it would
+  let the next press reach every control inside.
+- **A press that goes on a gesture presses nothing unless it reaches what the
+  gesture's first press reached** (`guardsPress` stops its mousedown and its
+  click), and neither does one the browser counts as the next of a double
+  click whose first the guard never saw (the click that opened the session).
+  The taps the board claims and acts on itself (`actOnClaimedTap` in
+  `Session.tsx`), for which the browser sends no mouse, ask the same rule
+  (`pressesClaimedTap`).
 
-**This guard is unfinished, and its work is deferred** (2026-11-07, the
-maintainer's call after twenty review passes). Every pass found new edge
-cases, often created by the previous fix: a rule of this kind has no exact
-solution across browsers, phones and layouts. The twentieth review (of
-`4df8579`) found, all minor and not fixed: a round control (ROTI and survey
-scores, the board vote's take-back cross) read as covered by `drawnNear`, so
-a quick correction tap is lost unless the finger lands near its centre (fix
-suggested: accept an ancestor as the hit, `hit.contains(element)`); a dialog's
-backdrop the first tap brought is invisible to `came`, so a double tap on
-Comments closes the dialog it opened; `drawnNear` measures every control on
-the page at each press, about 85 to 150 ms per press on a 1000-card board on a
-throttled phone; a proposal's in-place text and wrapped proposals escape the
-field rule; several mutants survive. The next session should **replace the
-rule by a simpler, bounded one** (judge only the element pressed and its
-neighbours, never scan the page), keep its limits written down here, and
-stop after one verified fix. The full account — every finding, the history
-of what was tried and the acceptance criteria — is `HARDENING_STATUS.md` →
-*H54*. The tests that hold today's behaviour:
-`__tests__/doubleGestureGuard.test.ts` (the rules on a page laid out by hand —
-jsdom lays nothing out), `__tests__/sessionGroupTouch.test.tsx` (the taps and
-presses on the board, with an event clock of their own, since jsdom stamps
-events with `Date.now()`), `__tests__/healthCheckDoubleGesture.test.tsx`,
+**Its costs are stated, not guessed around** (the maintainer's decision,
+2026-11-09): a quick second press on another element at the same place
+presses nothing — a quick retry beside a missed control, a correction tap
+within a fingertip of the first (the score beside the one chosen usually lies
+further) — and is pressed after a short pause; taps at a steady pace, each
+less than half a second after the one before, are one gesture, so clearing
+cards that keep coming up under the finger deletes one card per pause; on
+macOS, whose click count has no bound, clicks behave the same until a pause.
+A control that acts on `pointerdown` rather than on its click is not guarded.
+
+**Never put the heuristic back.** From 42.0 to 42.2 the guard guessed whether
+something had moved under the pointer: it measured every control, card and
+group of the page at each press (85 to 150 ms per press on a 1000-card board
+on a throttled phone), kept marks of editors closed and controls gone, and each
+of twenty reviews found cases it guessed wrong in one browser or another,
+several made by the fix before (`HARDENING_STATUS.md` → *H54*). Comparing what
+two presses reach needs no layout, and its errors are the costs above.
+
+The tests: `__tests__/doubleGestureGuard.test.ts` (the rule, element by
+element — it reads no layout, so nothing is laid out),
+`__tests__/sessionGroupTouch.test.tsx` (the taps and presses on the board,
+with an event clock of their own, since jsdom stamps events with `Date.now()`;
+taps on two cards land at two places, as on a real board),
+`__tests__/healthCheckDoubleGesture.test.tsx`,
 `__tests__/sessionOpenBoard.test.tsx` and `e2e/retro-touch-card-controls.spec.ts`
-(real layout in Chromium, on a phone and a computer).
+(a real browser, on a phone and a computer: a double click on a card's Delete,
+a double tap half a second apart on its Comments, the steady pace).
 
 **A control shown on hover is shown on focus, and never hidden where nothing
 hovers.** A card's edit, delete and first-comment controls were `opacity-0`
@@ -1191,14 +1187,14 @@ change to it lands in both.**
   type.
 
 - **One double-gesture guard** — `components/session/doubleGestureGuard.ts`
-  (`useDoubleGestureGuard`). The next press of a double click, or the next tap
-  of a double tap, presses nothing the first brought under the pointer (see
-  *Accessibility*, *The double-gesture guard*, and the work deferred there). It lived in `Session.tsx` alone, and
-  the health check, which renders the same proposal rows, deleted the proposal
-  being edited with a double click on its Cancel, and two with one on its
-  Delete. Both screens mount it before anything that listens for a press; the
-  retrospective adds its card editor's mark and its claimed taps through the
-  state the guard returns.
+  (`useDoubleGestureGuard`). The presses that follow the first of a double
+  click or a double tap press nothing but what the first pressed (see
+  *Accessibility*, *The double-gesture guard*). It lived in `Session.tsx` alone,
+  and the health check, which renders the same proposal rows, deleted the
+  proposal being edited with a double click on its Cancel, and two with one on
+  its Delete. Both screens mount it before anything that listens for a press;
+  the retrospective's board asks it about the taps it claims
+  (`pressesClaimedTap`).
 
 What is deliberately **not** shared yet: the session headers themselves (the
 retro's carries the tips and counts different things, and both are pinned by the

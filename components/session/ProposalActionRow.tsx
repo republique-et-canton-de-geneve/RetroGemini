@@ -3,7 +3,7 @@ import { useTranslation } from '../../i18n/I18nContext';
 import { ActionItem, User } from '../../types';
 import ProposalNumber from './ProposalNumber';
 import { participantColorClass } from '../../utils/participantColors';
-import { EDITS_IN_PLACE_ATTRIBUTE } from './doubleGestureGuard';
+import { PRESS_KEY_ATTRIBUTE } from './doubleGestureGuard';
 
 const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: number): React.CSSProperties => {
   const total = upVotes + neutralVotes + downVotes;
@@ -293,6 +293,8 @@ const ProposalActionRow: React.FC<Props> = ({
               if (event.key === 'Escape') onCancelEdit();
             }}
             className={inputClass}
+            // The text this field replaced, to a double click (doubleGestureGuard).
+            {...{ [PRESS_KEY_ATTRIBUTE]: `proposal-text:${proposal.id}` }}
             // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click
             autoFocus
           />
@@ -319,8 +321,9 @@ const ProposalActionRow: React.FC<Props> = ({
             <span
               className={`${proposalTextClass} grow wrap-break-word`}
               // A click turns it into its own field, where it is: the next
-              // press of a double click selects a word of it (doubleGestureGuard).
-              {...(isFacilitator ? { [EDITS_IN_PLACE_ATTRIBUTE]: '' } : {})}
+              // press of a double click selects a word of it, the field taking
+              // the same key (doubleGestureGuard).
+              {...{ [PRESS_KEY_ATTRIBUTE]: `proposal-text:${proposal.id}` }}
               onClick={() => isFacilitator && onStartEdit()}
               title={isFacilitator ? t('phases.proposal.clickToEdit') : ''}
             >

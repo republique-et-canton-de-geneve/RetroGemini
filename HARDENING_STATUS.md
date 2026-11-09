@@ -837,7 +837,52 @@ must accompany the fix.
 > **Of that set, H39, H47, H48, H50 and H42's measurement half have since
 > closed** — look for them in *Recently closed* rather than here.
 
-### H54 — [P2] The double-gesture guard is a heuristic: replace it with a bounded rule (deferred 2026-11-07)
+### H54 — [CLOSED 2026-11-09] The double-gesture guard was a heuristic: replaced by one rule
+
+**Closed 2026-11-09** (42.3). The maintainer reproduced the problem from two
+scenarios checked in a real browser, with and without the guard — a double
+click on a card's Delete deleted two cards before 42.0; a double tap half a
+second apart on a card's Comments opened the dialog and closed it again on
+42.2 — and chose the simple rule over another round of the heuristic:
+
+> The presses that follow the first press of a double click, or the taps that
+> follow the first tap of a double tap, press nothing but what that first press
+> pressed.
+
+It reads no layout. A gesture is a press and the presses the browser counts as
+its next (`detail > 1`), or, for taps, those within half a second of the tap
+before and a fingertip of where it began; each is counted from the one before.
+What a press presses is the control around its target, else the card or group
+around it, else its target; a proposal's text and the field it turns into share
+a `data-press-key`. The marks, `drawnNear`, `came`, `aimGone` and `relaid` are
+gone, and so is every mark `Session.tsx` set. AGENTS.md → *The double-gesture
+guard* states the rule and its costs.
+
+How the findings of review 20 ended:
+- **A** gone: nothing is hit-tested. A correction tap within a fingertip of the
+  first is now one of the stated costs (pressed after a pause); one further
+  away, the usual case for the score beside, is a new gesture.
+- **B** fixed: the backdrop is not what the first tap pressed
+  (`e2e/retro-touch-card-controls.spec.ts` → *a double tap past the browser's
+  count on a card's Comments leaves its dialog open*).
+- **C** gone: no scan, the cost of a press is a `closest()`.
+- **D** fixed: any tap after a group's pick-up, on another element, within the
+  gesture, presses nothing (`__tests__/doubleGestureGuard.test.ts`).
+- **E** obsolete: the guard's suite was rewritten for the rule.
+- **F** still open, and not the guard's: the coloured-card contrast test
+  ignores a rest `opacity-*`.
+- **G** fixed: the rule judges every first press, a `div` with `onClick`
+  included, not only controls.
+- **H** fixed: the press key ties a proposal's text to its own field only.
+
+Changed by the rule, on purpose: the quick retry of a missed control (pass 18
+let it through) and a steady pace of taps on a Delete that keeps coming up
+(pass 15 let every other tap delete) now wait for a pause.
+
+The history below is kept for what it teaches: a guess about layout never
+converged.
+
+#### History: the heuristic (42.0–42.2)
 
 **Opened 2026-11-07**, at the end of PR republique-et-canton-de-geneve/retrogemini#540
 (the open board). The work was stopped there after twenty review passes, by the
