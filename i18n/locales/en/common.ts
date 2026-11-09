@@ -28,6 +28,7 @@ const common = {
   'common.phase.DISCUSS': 'DISCUSS',
   'common.phase.REVIEW': 'REVIEW',
   'common.phase.CLOSE': 'CLOSE',
+  'common.phase.OPEN_BOARD': 'OPEN BOARD',
   'common.phase.SURVEY': 'SURVEY',
 };
 

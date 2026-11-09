@@ -230,7 +230,10 @@ describe('JiraBatchDialog with parent issues', () => {
 
       fireEvent.click(within(dialog()).getByRole('button', { name: 'Create 5 issues' }));
       const close = await within(dialog()).findByRole('button', { name: 'Close' });
-      expect(close).toHaveFocus();
+      // Given by an effect, which can run after the check that found the
+      // button: on a loaded runner the dialog's first frame came in between
+      // and the focus was read on the first link.
+      await waitFor(() => expect(close).toHaveFocus());
 
       expect(within(dialog()).getByText('1 not sent: Jira refused its parent issue')).toBeInTheDocument();
       const created = within(dialog()).getByText('Parent issue created:').closest('li') as HTMLElement;

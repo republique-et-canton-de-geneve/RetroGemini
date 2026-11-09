@@ -167,7 +167,7 @@ const DashboardActionsTab: React.FC<Props> = ({
           <div key={action.id} className="flex items-center p-4 border-b border-slate-100 last:border-0 hover:bg-slate-50 group">
             <button
               onClick={() => onToggleAction(action.id)}
-              className={`mr-4 transition ${action.done ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-400'}`}
+              className={`mr-4 transition ${action.done ? 'text-emerald-600' : 'text-slate-500 hover:text-emerald-600'}`}
               aria-label={action.done ? t('dashboard.actions.markNotDone') : t('dashboard.actions.markDone')}
             >
               <span className="material-symbols-outlined text-2xl">

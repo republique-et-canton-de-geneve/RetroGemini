@@ -179,11 +179,16 @@ const TicketCommentsModal: React.FC<Props> = ({
                     </div>
                   )}
                 </div>
+                {/* Hidden only where a pointer can hover, and shown on focus:
+                    on a phone a bare opacity-0 left the Delete invisible yet
+                    tapped, and a keyboard user tabbed onto controls nobody
+                    could see (pass 15 of 42.1). Shown there, they take a
+                    colour that can be seen on white. */}
                 {canModify && !isEditing && (
-                  <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition shrink-0">
+                  <div className="flex items-center space-x-0.5 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition shrink-0">
                     <button
                       onClick={() => { setEditingCommentId(comment.id); setEditingText(comment.text); }}
-                      className="text-slate-300 hover:text-indigo-500 p-0.5"
+                      className="text-slate-500 hover:text-indigo-600 p-0.5"
                       title={t('session.comments.edit')}
                       data-testid="edit-comment-btn"
                       aria-label={t('session.comments.edit')}
@@ -192,7 +197,7 @@ const TicketCommentsModal: React.FC<Props> = ({
                     </button>
                     <button
                       onClick={() => onDeleteComment(ticket.id, comment.id)}
-                      className="text-slate-300 hover:text-red-500 p-0.5"
+                      className="text-slate-500 hover:text-red-600 p-0.5"
                       title={t('session.comments.delete')}
                       data-testid="delete-comment-btn"
                       aria-label={t('session.comments.delete')}

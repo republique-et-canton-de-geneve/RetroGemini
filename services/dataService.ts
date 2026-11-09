@@ -1,6 +1,7 @@
 
 import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink, JiraParentLink } from '../types';
 import { randomId } from '../utils/randomId';
+import { BOARD_START_SETTINGS, CARD_AND_VOTE_START_SETTINGS, OPEN_BOARD_PHASE } from '../utils/openBoard';
 import { PARTICIPANT_PALETTE } from '../utils/participantColors';
 import { isJiraIssueKey, isJiraIssueTypeId, isJiraLinked, isJiraParentScope, isJiraUncertain } from '../utils/jira.js';
 import {
@@ -1369,7 +1370,8 @@ export const dataService = {
     teamId: string,
     name: string,
     templateCols: Column[],
-    options?: { isAnonymous?: boolean; templateLanguage?: Language }
+    // `openBoard`: every card activity on one screen, no phases (utils/openBoard.ts).
+    options?: { isAnonymous?: boolean; templateLanguage?: Language; openBoard?: boolean }
   ): RetroSession => {
     const team = getAuthenticatedTeam();
     if (!team || team.id !== teamId) throw new Error('Team not found');
@@ -1391,7 +1393,7 @@ export const dataService = {
       name,
       date: new Date().toLocaleDateString(),
       status: 'IN_PROGRESS',
-      phase: 'ICEBREAKER', // Skipped SETUP
+      phase: options?.openBoard ? OPEN_BOARD_PHASE : 'ICEBREAKER', // Skipped SETUP
       participants: [],
       discussionFocusId: null,
       icebreakerQuestion: icebreakerQuestion,
@@ -1399,9 +1401,11 @@ export const dataService = {
       templateLanguage,
       settings: {
         isAnonymous: options?.isAnonymous ?? false,
-        maxVotes: 5,
-        oneVotePerTicket: false,
-        revealBrainstorm: false,
+        // The cards hidden while they are written, five votes each. A board
+        // also starts with voting off and its counts hidden, until the
+        // facilitator opens the vote from its settings (utils/openBoard.ts).
+        ...CARD_AND_VOTE_START_SETTINGS,
+        ...(options?.openBoard ? BOARD_START_SETTINGS : {}),
         revealHappiness: false,
         revealRoti: false,
         ...createTimerSettings(DEFAULT_TIMER_SECONDS)

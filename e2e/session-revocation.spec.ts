@@ -111,7 +111,8 @@ test.describe('Session revocation on a password change', () => {
     await expect(participant.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
 
     await addCard(participant, 'Written before the change');
-    await expect(facilitator.getByText('Written before the change')).toBeVisible({ timeout: 10_000 });
+    // A hidden card on the facilitator's screen: "Reveal cards" is off.
+    await expect(facilitator.getByText('Hidden card', { exact: true })).toHaveCount(1, { timeout: 10_000 });
 
     // ---- The facilitator changes the password from a second tab ----
     const settingsTab = await facilitatorContext.newPage();

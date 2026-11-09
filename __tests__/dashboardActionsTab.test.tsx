@@ -1,6 +1,7 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import { effectivePair } from './helpers/tailwindTheme';
 import DashboardActionsTab from '../components/dashboard/DashboardActionsTab';
 import { Team, User } from '../types';
 import { ROTI_FOLLOW_UP_LINK_ID } from '../components/session/retroConstants';
@@ -101,6 +102,19 @@ describe('DashboardActionsTab', () => {
     { id: 'action-3', text: 'Write the release checklist', assigneeId: null, done: false, type: 'new' as const, proposalVotes: {}, originRetro: 'Sprint 12 Retro', contextText: '' },
     { id: 'action-4', text: 'Archive the old wiki pages', assigneeId: null, done: false, type: 'new' as const, proposalVotes: {}, originRetro: 'Dashboard', contextText: '' }
   ];
+
+  // Review finding (pass 16 of 42.1): the done circle was slate-300 on the
+  // row's white (1.49:1) and its check emerald-500 (2.54:1): the glyph is the
+  // control and its state, non-text that needs 3:1 (1.4.11), and axe-core
+  // skips icon ligatures.
+  it('draws the done circle, open and checked, at a contrast that can be seen', () => {
+    render(<DashboardActionsTab {...baseProps} filteredActions={[twoActions[0], { ...twoActions[1], done: true }]} />);
+    const toggles = [
+      screen.getByRole('button', { name: 'Mark action as done' }),
+      screen.getByRole('button', { name: 'Mark action as not done' })
+    ];
+    for (const toggle of toggles) expect(effectivePair(toggle).ratio).toBeGreaterThanOrEqual(3);
+  });
 
   it('names every action text field', () => {
     render(<DashboardActionsTab {...baseProps} filteredActions={twoActions} />);

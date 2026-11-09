@@ -26,6 +26,7 @@ const common: Record<keyof typeof en, string> = {
   'common.phase.DISCUSS': 'DISCUSSION',
   'common.phase.REVIEW': 'REVUE',
   'common.phase.CLOSE': 'CLÔTURE',
+  'common.phase.OPEN_BOARD': 'TABLEAU OUVERT',
   'common.phase.SURVEY': 'ÉVALUATION',
 };
 

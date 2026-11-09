@@ -140,7 +140,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
             }, action);
             setRefreshTick((tick) => tick + 1);
           }}
-          className={`mr-3 transition ${action.done ? 'text-emerald-500 scale-110' : 'text-slate-300 hover:text-emerald-500'} ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`mr-3 transition ${action.done ? 'text-emerald-600 scale-110' : 'text-slate-500 hover:text-emerald-600'} ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
           aria-label={action.done ? t('phases.actions.markNotDone') : t('phases.actions.markDone')}
         >
           <span className="material-symbols-outlined text-2xl">
@@ -215,7 +215,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
       {isFacilitator && !isGlobal && (
         <div className="ml-3">
           {!confirmingDelete ? (
-            <button onClick={() => setConfirmingDelete(true)} className="text-slate-300 hover:text-red-500" aria-label={t('phases.review.deleteAction')}>
+            <button onClick={() => setConfirmingDelete(true)} className="text-slate-500 hover:text-red-600" aria-label={t('phases.review.deleteAction')}>
               <span className="material-symbols-outlined">delete</span>
             </button>
           ) : (

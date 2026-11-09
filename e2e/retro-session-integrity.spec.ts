@@ -115,7 +115,9 @@ test.describe('A participant\'s cards always reach the board', () => {
     await expect(participant.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 10_000 });
 
     await writeCard(participant, 0, 'Card written after the rename');
-    await expect(facilitator.getByText('Card written after the rename')).toBeVisible({ timeout: 15_000 });
+    // "Reveal cards" is off, so the card reaches the facilitator as a hidden
+    // card: its words never reach their page, its arrival does.
+    await expect(facilitator.getByText('Hidden card', { exact: true })).toHaveCount(1, { timeout: 15_000 });
     await expect(participant.getByText('Your changes are not being saved.')).toHaveCount(0);
   });
 
@@ -151,7 +153,8 @@ test.describe('A participant\'s cards always reach the board', () => {
 
     await joinThroughInvite(participant, teamName, inviteUrl, 'Brainstorm');
     await writeCard(participant, 0, 'Card written after the delete');
-    await expect(liveTab.getByText('Card written after the delete')).toBeVisible({ timeout: 15_000 });
+    // A hidden card on the facilitator's screen: "Reveal cards" is off.
+    await expect(liveTab.getByText('Hidden card', { exact: true })).toHaveCount(1, { timeout: 15_000 });
 
     // The live retro survived in the team record: a fresh load still lists it.
     await staleTab.reload();
