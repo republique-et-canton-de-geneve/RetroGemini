@@ -8,7 +8,7 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 ## [43.0] - 2026-11-10
 
 ### Added
-- Follow a retrospective at a glance: in the Vote phase the participants panel shows how many votes each person still has to place, during Brainstorm, Discuss and on an open board a line at the top of the panel names who is writing a card or proposing an action so a long list no longer has to be scrolled, and super admins see in the Teams tab how many retrospectives each team holds and can sort the teams by that number
+- Follow a retrospective at a glance: in the Vote phase the participants panel shows how many votes each person still has to place; during Brainstorm, Discuss and on an open board, a line at the top of the panel shows who is writing a card or proposing an action, so a long list no longer has to be scrolled; and super admins see in the Teams tab how many retrospectives each team holds and can sort the teams by that number
 
 ## [42.0] - 2026-10-28
 

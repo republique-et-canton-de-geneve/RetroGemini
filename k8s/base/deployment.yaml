@@ -31,7 +31,8 @@ spec:
           # had never once run. It had drifted 17 majors behind VERSION, i.e. it
           # advertised an image predating many user-visible releases;
           # __tests__/deploymentManifestParity.test.ts now fails when the majors
-          # diverge again. Overlays may retag (see k8s/overlays/dev).
+          # diverge again. No overlay retags it: the only image an overlay
+          # changes is PostgreSQL's (k8s/overlays/openshift).
           image: jpfroud/retrogemini:43.0
           imagePullPolicy: Always
           ports:

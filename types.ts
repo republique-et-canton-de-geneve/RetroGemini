@@ -7,8 +7,9 @@ export type Role = 'facilitator' | 'participant';
 // 'brainstorm' = writing a ticket, 'proposal' = proposing an action in Discuss.
 // Never persisted: it is a transient presence cue that auto-expires.
 // Checked on both sides of the wire by utils/participantActivity.js
-// (toParticipantActivity), which must accept the same kinds:
-// __tests__/participantActivity.test.ts fails when they differ.
+// (toParticipantActivity), which must accept the same kinds: `npm run
+// type-check` fails on __tests__/participantActivity.test.ts when they differ
+// (vitest strips the types, so `npm run test` alone stays green).
 export type ParticipantActivity = 'brainstorm' | 'proposal';
 
 export interface User {

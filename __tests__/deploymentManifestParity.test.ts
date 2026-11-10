@@ -492,19 +492,17 @@ describe('deployment configuration parity (audit H7.4)', () => {
 
 describe('base deployment manifest (audit H7.1)', () => {
   /**
-   * The image line is retagged by hand in the pull request that bumps
+   * The image line is retagged by hand, and only in the pull request that bumps
    * `VERSION`'s major (decision D7 deleted the deploy workflow's `sed` and
-   * auto-commit), so the tag lags `VERSION` by the `Y` bumps since the last
-   * retag: deploys are dispatched manually while `VERSION` moves with every
-   * `Y` bump.
+   * auto-commit; the workflow no longer touches the manifests), so the tag lags
+   * `VERSION` by the `Y` bumps since the last retag.
    *
-   * Demanding exact equality would therefore be wrong twice over: it would make
-   * ordinary pull requests claim an image tag that was never built, and it would
-   * break a deployment dispatched with a custom `image_tag`. What the audit
-   * actually caught was a tag **17 majors** behind — an image predating many
-   * user-visible releases. A major bump is by definition a user-visible change,
-   * so requiring the majors to agree catches that while leaving the normal lag
-   * (same major, older `Y`) alone.
+   * Demanding exact equality would therefore be wrong: a `Y` bump would have to
+   * retag the manifest to an image that was never built. What the audit actually
+   * caught was a tag **17 majors** behind — an image predating many user-visible
+   * releases. A major bump is by definition a user-visible change, so requiring
+   * the majors to agree catches that while leaving the normal lag (same major,
+   * older `Y`) alone.
    */
   it('is pinned to an image from the current major', () => {
     const version = read('VERSION').trim();

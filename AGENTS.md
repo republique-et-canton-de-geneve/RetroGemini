@@ -439,9 +439,16 @@ not — a **source** guard, because neither axe nor `jsx-a11y` can report this: 
 name exists, it is merely the wrong one. The same suite refuses a button that
 renders nothing and names nothing (a toggle switch whose only child is its knob);
 there `title` *is* accepted, because with no content it is the last resort the
-algorithm actually reaches. An icon beside a label is `aria-hidden` too: without
-it the ligature ends the button's name, as the console's sortable Teams headers
-did ("Members unfold_more"). A sortable table header carries `aria-sort` on the
+algorithm actually reaches. **In new code, an icon beside a label is
+`aria-hidden` too**: without it the ligature becomes part of the button's name,
+as the console's sortable Teams headers did ("Members unfold_more"). It is a
+rule for new code, not a fact about the codebase: 51 older buttons still
+announce their icon beside their label, `ACCESSIBILITY.md` → *Known gaps* 3,
+left for a judgement per site (some icons carry a state the label does not, a
+spinner or a lock), and **no test guards them** — `iconButtonNames.test.tsx`
+checks icon-only and nameless buttons alone. An icon that is the only carrier
+of a state gets that state another way (words, `aria-pressed`) before it is
+hidden. A sortable table header carries `aria-sort` on the
 sorted column only (`components/admin/teamSort.ts` → `ariaSortOf`, pinned by
 `__tests__/superAdminTeamSorting.test.tsx`).
 
@@ -1002,7 +1009,10 @@ screen at once):
   1 MB socket message (`SOCKET_MAX_BUFFER_SIZE`) and the 1 MiB JSON body, its
   writes stop going through: start a new board instead.
 - **The presence panel merges participants by name** (`getParticipants`), so
-  two connected members with the same name show once.
+  two connected members with the same name show once — in a guided retro too.
+  The merged row's votes left, check, contribution dots and typing cue are the
+  first person's; the other person's are shown nowhere (no "(you)" row for
+  them, nor a name on the typing line).
 - **Taking a card out of a pair hands the card left every vote of the group**,
   including the votes cast for the other card before they were grouped: a
   group does not record which card a vote was for, on purpose — the votes are
@@ -1107,30 +1117,61 @@ change to it lands in both.**
   passes, so it looks exactly as before.
 
   `memberLine` puts words in place of a person's role. In the guided Vote
-  phase, until they finish, it shows the votes they still have to cast: "3
-  votes left", from `utils/voteBudget.ts` → `votesCastByVoter`,
-  `votesLeftFor`. That is the stored number less every vote they cast on cards
-  and groups, never below 0, and nothing while votes are unlimited. It is the
-  count their own "N votes remaining" shows them, never a card's total. Once
-  they finish, the row goes back to its role and the check.
+  phase, until they finish, it shows the votes they can still place: "3
+  votes left", `utils/voteBudget.ts` → `votesLeftToPlace`. That is the stored
+  number less every vote they cast on cards and groups (`votesCastByVoter`),
+  never below 0, and, with one vote per item, never more than the items that
+  do not hold their vote yet (`votableItems`, what the Vote phase draws with a
+  vote control: `getColumnEntries` over the columns, which a test compares);
+  nothing while votes are unlimited. The bar's "N votes remaining", the
+  automatic finish and the row all read that one number (`Session.tsx` counts
+  with `votesCastByVoter` too), so a person who voted on every item is
+  finished on their own instead of being shown "1 vote left" no item will
+  take; it is never a card's total. Once they finish, the row goes back to its
+  role and the check. The check, the only sign that a person is done, is
+  emerald-700 (strong) or emerald-600 (soft): 3:1 on white and on the reader's
+  `bg-indigo-50` row (1.4.11), where -500 and -400 measured 1.73 to 2.46:1.
 
   `typingKind` comes from `utils/typingNow.ts` → `typingKindForPhase`: cards in
   Brainstorm and on an open board, proposals in Discuss, nothing anywhere else.
   It limits the rows' typing cue to that kind. It also pins a line above the
   list, outside its scroll, saying who is typing (`typingMembers`):
-  - in the list's order, never the reader nor anyone marked as having left;
-  - every name up to three, then two and the number of others;
+  - in the list's order, never the reader nor anyone marked as having left
+    (`leftUsers` read as data: a `null` another client wrote is nobody);
+  - every name up to three, then two and the number of others, on three
+    reserved lines (two cut the third first-and-last name in French);
   - counted, never named, in an anonymous session;
   - "Nobody is writing" when nobody is.
 
+  "Typing" is a focused field holding a draft, from the moment it is focused
+  (`reportMyDraft` on the field's focus, not only on its next keystroke): the
+  line and the rows' cue count exactly that. A draft left in a field its
+  author has left is not counted, as the rows' cue never counted it. A field
+  React removes runs no blur, so the sender's keepalive stops the signal once
+  the field that raised it is gone or no longer has the focus: the proposal
+  input the facilitator's Discuss focus took away, a column removed in Edit
+  Layout, a field disabled while the session reconnects (the browser takes the
+  focus off a disabled field; jsdom does not, so no unit test can show that
+  case). `__tests__/sessionParticipantActivity.test.tsx` pins the rest.
+
   The collapsed rail shows the count. Neither line is a live region: other
-  people's typing and votes change too often to be announced.
+  people's typing and votes change too often to be announced. The panel, and
+  with it the typing line, the rail and the Vote phase's votes left, is drawn
+  from `lg` (1024 CSS px) up (`hidden lg:flex`, as before 43.0); below it the
+  header chip shows finished/total only. A count for narrow screens is not
+  built. In French the votes chip may be cut after its number in a wide font
+  with a classic scrollbar; the count comes first and is never cut.
 
   **Nothing that changes while people work moves a row.** The line keeps one
   height in every state. The cue, the votes line and the role are each one
-  16px line. The contribution line is one height with or without cards. The
-  cue's 24px icon and the taller "no tickets" line each used to move every row
-  below them, and the hover-revealed *Mark as left* button with them.
+  16px line. The contribution line is one height with or without cards, and
+  it is drawn from the start of Brainstorm, so the session's first card adds
+  nothing to any row. The cue's 24px icon, the taller "no tickets" line and
+  the line arriving with the first card each used to move every row below
+  them, and the hover-revealed *Mark as left* button with them. What still
+  moves rows, on purpose: entering Brainstorm draws the contribution line (the
+  facilitator's own phase change), the facilitator's own *Mark as left* sends a
+  row to the bottom, and on an open board rows come and go with presence.
   `e2e/retro-full-flow.spec.ts` measures the rows.
 - **Images open inside the app** — `components/common/ImageGallery.tsx`.
   Feedback images are stored as `data:` URIs, and browsers refuse a
@@ -3275,7 +3316,7 @@ outside.
 | `member-joined` | Server→Client | User joined notification |
 | `member-left` | Server→Client | User left notification |
 | `member-roster` | Server→Client | Current participants list. Rebuilt (via a cross-pod `fetchSockets()`) and rebroadcast to the room on every join/leave, but **coalesced** behind a debounce window (`ROSTER_BROADCAST_DEBOUNCE_MS`, default 250ms) so a reconnect stampede after a rolling update cannot drive one rebuild+broadcast per client (audit R28). The roster is rebuilt at fire time, so the coalesced broadcast always reflects current membership; `member-joined`/`member-left` stay immediate for incremental UI. Set the window to `0` to broadcast synchronously |
-| `participant-activity` | Bidirectional | Ephemeral "is typing" cue (Brainstorm ticket / Discuss proposal); broadcast to other clients only, never persisted, auto-expires on the receiver. Only `'brainstorm'`, `'proposal'` or `null` travels (`utils/participantActivity.js` → `toParticipantActivity`), and only from a joined socket with a user id. The server relays any other value as `null`. `syncService` reads what it receives through the same rule and drops an event that names no user, because a pod from before 43.0 relays raw payloads during a rolling update. A peer's `'__proto__'` used to blank every expanded participants panel of the room. The payload keeps its three fields. Add no kind without a rolling-update plan: a client from before 43.0 draws an unknown kind as an empty cue |
+| `participant-activity` | Bidirectional | Ephemeral "is typing" cue (Brainstorm ticket / Discuss proposal); broadcast to other clients only, never persisted, auto-expires on the receiver. Only `'brainstorm'`, `'proposal'` or `null` travels (`utils/participantActivity.js` → `toParticipantActivity`), and only from a joined socket with a user id. The server relays any other value as `null`. `syncService` reads what it receives through the same rule and drops an event that names no user, because a pod from before 43.0 relays raw payloads during a rolling update. A peer's `'__proto__'` used to blank every expanded participants panel of the room. The payload keeps its three fields; only the kind is bounded, and the name is what the join carried (`HARDENING_STATUS.md`, H55). From 43.0 the relay and the client drop an unknown kind (it reads as "stopped"): a new kind needs every pod, then every client, to accept it before any client sends it |
 
 ### The own-change ledger — one user id is not one client
 

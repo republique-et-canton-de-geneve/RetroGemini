@@ -141,14 +141,24 @@ reading `git log`. If the file has grown a history section, prune it.
     - `syncService` reads what it receives through the same rule
       (`utils/participantActivity.js`; pods from before 43.0 relay raw values
       during the rollout);
-    - the panel reads only own entries of its phase's kind (`utils/typingNow.ts`);
+    - the panel reads only own entries of its phase's kind (`utils/typingNow.ts`),
+      and the `leftUsers` list another client wrote as data: the server stores a
+      `null` there as it came (`sessionGuard.js` reads it as a removal), and the
+      typing rule's `.includes` on it threw on every render of a guided
+      Brainstorm or Discuss, blanking every 43.0 screen of the room, stored
+      (found by the review of 43.0);
     - the activity and role labels are chosen by comparison, never by lookup.
-  - **Residual.** A pre-43.0 client behind a pre-43.0 pod stays exposed until
-    either is replaced.
+  - **Residual.** A client from before 43.0 stays exposed until it reloads: to a
+    `role` written into `participants` whatever the pods (no server layer reads
+    it; only the 43.0 panel reads it as data), and to a raw activity as long as
+    any pod from before 43.0 relays for its room (the cross-pod adapter delivers
+    that relay unchanged to every pod). Reload open session and board tabs after
+    deploying 43.0, as `AGENTS.md` asks after 42.0. The other values every client
+    writes into the session and the panel reads unchecked are H55.
   - **Tests:** `participantActivity`, `typingNow`, `socketParticipantActivity`,
     `syncService`, `participantsPanel`, `sessionParticipantActivity`.
 
-  — 43.0 — 2026-11-10
+  — PR #556, 43.0 — 2026-11-10
 - **D3b — a password change signs out the team's open sessions, on every
   route and on the socket, without cutting off the facilitator who made it**
   (Jira plan decision D3b). Team session tokens carry
@@ -856,6 +866,64 @@ must accompany the fix.
 > statement, and falsifying it found a real gap.
 > **Of that set, H39, H47, H48, H50 and H42's measurement half have since
 > closed** — look for them in *Recently closed* rather than here.
+
+### H55 — [P2] Values every client writes into the session are rendered without a type check
+
+**Problem.** Every client writes the whole session (`update-session`, and the
+HTTP persist of a retro or a health check), `sessionGuard.js` protects only the
+facilitator-only fields, and `validateSessionUpdateShape` checks the top level
+alone (an object, its id, a finite `_rev`). The other fields reach every client
+as another client wrote them, and several are read as if they were typed: a
+`participants[]` entry whose `name` (or `email`) is not a string throws in
+`getParticipants` (`p.name.trim()`), `getMemberDisplay` and `pendingInvitees`
+(`p.email.trim()`) on every render of both session types; `tickets: null`,
+`groups: null` and `happiness: null` throw in the merge
+(`mergeRemoteRetroSession`) or the render (Session.tsx counts the reader's
+votes on every render, the participants panel runs `session.tickets.forEach`).
+There is no error boundary, so the screen goes blank for everyone in the
+session, and the state is stored, so a reload brings it back.
+Separately, the join's `userName` is kept on the socket untyped and unbounded (up
+to the 1 MB socket message, `SOCKET_MAX_BUFFER_SIZE`) and relayed with every
+`member-joined`, `member-roster` and `participant-activity`, which has no rate
+limit. Pre-existing, found by the review of 43.0, which closed the same class
+for a participant's `role` and for `leftUsers: null` only (*Recently closed*).
+
+- **Files:** `server/services/socketHandlers.js` (`validateSessionUpdateShape`,
+  `handleJoinSession`, the `participant-activity` relay),
+  `server/services/sessionGuard.js`, `components/Session.tsx` and
+  `components/HealthCheckSession.tsx` (`getParticipants`, `getMemberDisplay`),
+  `components/session/sessionInvitees.ts` (`pendingInvitees`),
+  `components/session/mergeRemoteSession.ts`,
+  `components/session/sessionRoster.ts`.
+- **Failure scenario:** any team credential, an invitation-link login included,
+  sends one `update-session` holding the current state with
+  `participants: [...current, { id: 'x', name: 7 }]`, or with `tickets: null`.
+  The server saves and broadcasts it, every client of the session throws while
+  rendering, in every phase, and a reload re-joins into the same stored state;
+  only a client from before the write, a console single-team restore or deleting
+  the retrospective recovers it. Or: an invitee joins with a 900 kB `userName`
+  and sends `participant-activity` in a loop, and each 30-byte event leaves the
+  server as 900 kB to every other socket of the room.
+- **Acceptance:** a shape check of those fields at the server
+  (`validateSessionUpdateShape`, or the guard putting the stored value back as it
+  does for a protected field): `participants` an array of objects with a string
+  `id` and `name` and a string or absent `email`, `tickets` and `groups` arrays,
+  `happiness` and `roti` plain objects; a read filter on the client like
+  `isInvitee` (a participant entry kept only with a string `id` and `name`, a
+  non-string `email` dropped), so a pod from before the fix cannot blank a new
+  client during the rollout; and the name bounded at join (`utils/textCut.js` →
+  `cutCodeUnits`, about 200 code units, `''` when it is not a string), so
+  `member-joined`, `member-roster` and `participant-activity` all inherit it.
+- **Tests:** a socket test writing a numeric `name`, `tickets: null` and
+  `happiness: null`, asserting that none of them is broadcast; a Session and a
+  HealthCheckSession render test receiving those values and staying on screen,
+  the valid rows listed; a `pendingInvitees` unit test with a numeric email; a
+  socket test joining with a 100 kB name, asserting that every relayed event
+  carries at most the bound.
+- **Effort:** M. **Regression risk:** medium — the check sits on the sync write
+  path every client takes, and refusing a write a legitimate older client makes
+  would lose its user's work: restore or heal rather than refuse, as D23 decided
+  for the protected fields.
 
 ### H54 — [CLOSED 2026-11-09] The double-gesture guard was a heuristic: replaced by one rule
 
@@ -2403,6 +2471,7 @@ Small, independently shippable, ordered by risk-adjusted value. Each is a
 | ~~**L19b**~~ | ~~Roll the manifests to a non-production project~~ — **done 2026-08-26.** The database pod is admitted and runs; the NetworkPolicies proved inert and are now opt-in (decision D21). Nothing is left here except, if anyone wants the isolation, one question to the platform team: *can `expose-all-pod-from-outside` be narrowed on these projects?* | — | done |
 | **L20** | H43 — a scheduled dump outside the cluster's storage, a stated RPO/RTO, **one rehearsed restore into an empty database** | platform-team involvement for the dump target | the restore is rehearsed and the result written into §1 |
 | **L26** | H53 — meter a rejected password on every route that verifies one, or state the general limiters as the bound | **D24** (open) | `SECURITY.md`'s guessing bound is the one the server enforces, with a route test that counts a wrong password sent to `POST /api/team/:teamId` against the login key |
+| **L27** | H55 — a shape check of the session fields every client writes (participants, tickets, groups, happiness), a read filter on the client, and the join's name bounded | — | a session write carrying a numeric participant name or `tickets: null` is never broadcast, both session screens survive receiving one, and a relayed name is at most the bound |
 | **L25** | H44's remaining half — the four numbers | ~~D22~~ — **answered 2026-08-27: (a), an anonymous `/metrics`.** Nothing blocks it now | `/metrics` answers in Prometheus text with active sessions, socket connections, CAS rejections and heal round-trips, and carries no team, session or user identifier |
 | ~~**L13**~~ | ~~H35's remaining half (a live session's persist still overwrites a rename)~~ — **done 2026-10-12**, forced by incident ISS (see H35). It changes the shared sync path, so §7.4's `npm run test:load` against staging is owed before the release is deployed | — | done |
 
