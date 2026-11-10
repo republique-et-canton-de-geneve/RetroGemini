@@ -598,6 +598,19 @@ describe('super-admin team merge', () => {
     expect(JSON.stringify(rows)).not.toContain('someone.else');
   });
 
+  // The Teams tab counts each team's retrospectives from the store's
+  // summaries, which hold no history: end to end, with no mock between the
+  // route and the projection. A merged team holds both sources' retros.
+  it('lists how many retrospectives each team holds, the merged team counting both sources', async () => {
+    const { a, b } = await seedPair();
+    const mergedId = (await merge(a, b)).body.team.id;
+
+    const listed = (await server.post('/api/super-admin/teams', admin({}))).body.teams;
+    const countOf = (id: string) => listed.find((t: Json) => t.id === id).retrospectiveCount;
+    expect([countOf(a.id), countOf(b.id), countOf(mergedId)]).toEqual([1, 1, 2]);
+    for (const listedTeam of listed) expect(listedTeam).not.toHaveProperty('retrospectives');
+  });
+
   it('keeps merge provenance out of team-side writes and team-side reads', async () => {
     const { a, b } = await seedPair();
     const mergedId = (await merge(a, b)).body.team.id;

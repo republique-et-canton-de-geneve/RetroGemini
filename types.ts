@@ -466,6 +466,12 @@ export interface Team {
   // The teams a super-admin merge built this one from. Only the super-admin
   // team list carries it; the server strips it from every team-side answer.
   mergedFrom?: TeamMergeSource[];
+  // How many retrospectives the team holds: closed, in progress and open
+  // boards alike. Only the super-admin team list carries it, counted by the
+  // server's summary projection — that list never carries `retrospectives`,
+  // whatever this type says. Absent from every team-side answer, and from a pod
+  // of an earlier release during a rolling update.
+  retrospectiveCount?: number;
   // Where this team's Jira issues are created. A team setting written only by
   // /api/team/:teamId/jira/target; /update ignores it. (The claims the server
   // keeps on actions being created are server-only and not typed here.)

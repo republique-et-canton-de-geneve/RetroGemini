@@ -20,6 +20,8 @@ import BackupImportCard from './admin/BackupImportCard';
 import type { ListReload } from './admin/backupImportApi';
 import { sizeRefusalNotice } from './admin/backupImportApi';
 import { formatBackupSize, megabytesText, withLocalizedMax } from './admin/backupFormat';
+import { ariaSortOf, retrospectiveCountOf, sortIconOf, sortTeams } from './admin/teamSort';
+import type { SortDirection, TeamSortColumn } from './admin/teamSort';
 
 // Codes the server stores and the console shows: named in the reader's
 // language, and shown as they came when this build does not know them.
@@ -128,9 +130,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
   const [teamToDelete, setTeamToDelete] = useState<Team | null>(null);
 
-  // Team sorting
-  type TeamSortColumn = 'name' | 'members' | 'lastActive';
-  type SortDirection = 'asc' | 'desc';
+  // Team sorting (components/admin/teamSort.ts)
   const [teamSortColumn, setTeamSortColumn] = useState<TeamSortColumn | null>(null);
   const [teamSortDirection, setTeamSortDirection] = useState<SortDirection>('asc');
 
@@ -1235,34 +1235,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     }
   };
 
-  const sortedTeams = (() => {
-    if (!teamSortColumn) return teams;
-    const sorted = [...teams].sort((a, b) => {
-      if (teamSortColumn === 'name') {
-        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-      }
-      if (teamSortColumn === 'members') {
-        return a.members.length - b.members.length;
-      }
-      // lastActive — teams with no date go last regardless of direction
-      const dateA = a.lastConnectionDate ? new Date(a.lastConnectionDate).getTime() : null;
-      const dateB = b.lastConnectionDate ? new Date(b.lastConnectionDate).getTime() : null;
-      if (dateA === null && dateB === null) return 0;
-      if (dateA === null) return 1;
-      if (dateB === null) return -1;
-      return dateA - dateB;
-    });
-    if (teamSortDirection === 'desc') {
-      // Reverse only elements that have a value (keep nulls at end for date sort)
-      if (teamSortColumn === 'lastActive') {
-        const withDate = sorted.filter((t) => t.lastConnectionDate);
-        const withoutDate = sorted.filter((t) => !t.lastConnectionDate);
-        return [...withDate.reverse(), ...withoutDate];
-      }
-      sorted.reverse();
-    }
-    return sorted;
-  })();
+  const sortedTeams = sortTeams(teams, teamSortColumn, teamSortDirection);
 
   // A merge source names the merged team it went into, so the admin can see
   // which teams are waiting to be deleted once the merged team is checked.
@@ -1275,9 +1248,27 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     }
   }
 
-  const sortIcon = (column: TeamSortColumn) => {
-    if (teamSortColumn !== column) return 'unfold_more';
-    return teamSortDirection === 'asc' ? 'arrow_upward' : 'arrow_downward';
+  // A sortable column's header. `aria-sort` says how the rows are ordered, on
+  // the sorted column only; the arrow is decoration — an icon is not a name
+  // (audit H52), and its ligature was read as the end of the button's.
+  const sortableHeader = (column: TeamSortColumn, label: string) => (
+    <th className="text-left p-4 font-bold text-slate-700" aria-sort={ariaSortOf(column, teamSortColumn, teamSortDirection)}>
+      <button
+        onClick={() => handleTeamSort(column)}
+        className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
+      >
+        {label}
+        <span className="material-symbols-outlined text-base" aria-hidden="true">
+          {sortIconOf(column, teamSortColumn, teamSortDirection)}
+        </span>
+      </button>
+    </th>
+  );
+
+  // A pod of an earlier release sends no count during a rolling update.
+  const retrospectiveCountText = (team: Team) => {
+    const count = retrospectiveCountOf(team);
+    return count === null ? t('adminTeams.retrospectiveCountUnknown') : tp('adminTeams.retrospectiveCount', count);
   };
 
   const formatDate = (isoDate: string) => {
@@ -1852,34 +1843,11 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <table className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <th className="text-left p-4 font-bold text-slate-700">
-                      <button
-                        onClick={() => handleTeamSort('name')}
-                        className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
-                      >
-                        {t('adminTeams.column.name')}
-                        <span className="material-symbols-outlined text-base">{sortIcon('name')}</span>
-                      </button>
-                    </th>
-                    <th className="text-left p-4 font-bold text-slate-700">
-                      <button
-                        onClick={() => handleTeamSort('members')}
-                        className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
-                      >
-                        {t('adminTeams.column.members')}
-                        <span className="material-symbols-outlined text-base">{sortIcon('members')}</span>
-                      </button>
-                    </th>
+                    {sortableHeader('name', t('adminTeams.column.name'))}
+                    {sortableHeader('members', t('adminTeams.column.members'))}
+                    {sortableHeader('retrospectives', t('adminTeams.column.retrospectives'))}
                     <th className="text-left p-4 font-bold text-slate-700">{t('adminTeams.column.email')}</th>
-                    <th className="text-left p-4 font-bold text-slate-700">
-                      <button
-                        onClick={() => handleTeamSort('lastActive')}
-                        className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
-                      >
-                        {t('adminTeams.column.lastActive')}
-                        <span className="material-symbols-outlined text-base">{sortIcon('lastActive')}</span>
-                      </button>
-                    </th>
+                    {sortableHeader('lastActive', t('adminTeams.column.lastActive'))}
                     <th className="text-right p-4 font-bold text-slate-700">{t('admin.actions')}</th>
                   </tr>
                 </thead>
@@ -1934,6 +1902,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       </td>
                       <td className="p-4 text-slate-600">
                         {tp('adminTeams.memberCount', team.members.length)}
+                      </td>
+                      <td className="p-4 text-slate-600">
+                        {retrospectiveCountText(team)}
                       </td>
                       <td className="p-4">
                         {editingTeamId === team.id ? (

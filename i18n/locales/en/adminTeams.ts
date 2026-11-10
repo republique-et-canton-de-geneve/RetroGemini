@@ -8,11 +8,16 @@ const adminTeams = {
   // Table
   'adminTeams.column.name': 'Team Name',
   'adminTeams.column.members': 'Members',
+  'adminTeams.column.retrospectives': 'Retrospectives',
   'adminTeams.column.email': 'Recovery Email',
   'adminTeams.column.lastActive': 'Last Active',
   'adminTeams.id': 'ID: {id}',
   'adminTeams.memberCount_one': '{count} member',
   'adminTeams.memberCount_other': '{count} members',
+  'adminTeams.retrospectiveCount_one': '{count} retrospective',
+  'adminTeams.retrospectiveCount_other': '{count} retrospectives',
+  // A pod of an earlier release, during a rolling update, sends no count.
+  'adminTeams.retrospectiveCountUnknown': 'Unknown',
   'adminTeams.emailNotConfigured': 'Not configured',
   'adminTeams.never': 'Never',
   'adminTeams.empty': 'No teams found',

@@ -265,6 +265,109 @@ for (const engine of engines) {
       expect(full.mergedFrom).toEqual([]);
       expect(plain).not.toHaveProperty('jiraTarget');
       expect(full).not.toHaveProperty('jiraTarget');
+      // The console's count: the anonymous login picker reads these
+      // summaries too, and never asks for it.
+      expect(plain).not.toHaveProperty('retrospectiveCount');
+      expect(full).not.toHaveProperty('retrospectiveCount');
+
+      const counted = (await ours(store, { withRetrospectiveCount: true }))[id];
+      expect(counted.retrospectiveCount).toBe(30);
+      expect(counted).not.toHaveProperty('archivedMembers');
+      expect(counted).not.toHaveProperty('mergedFrom');
+      expect(counted).not.toHaveProperty('retrospectives');
+    });
+
+    // The console's Teams tab shows how many retrospectives each team holds:
+    // a count beside the history, read in the same projection, never the
+    // history itself.
+    describe('the retrospective count', () => {
+      const counted = async (s: Store = store) => ours(s, { withRetrospectiveCount: true });
+      const countOf = async (teamId: string) =>
+        (await store.loadTeamSummary(teamId, { withRetrospectiveCount: true }) as Json).retrospectiveCount;
+
+      it('counts every retrospective of a team, on the list and the single-team read alike', async () => {
+        const id = tid('t');
+        const empty = tid('t2');
+        await store.saveTeam(id, team(id, 'Chi'));
+        // A team as /api/team/create stores it.
+        await store.saveTeam(empty, team(empty, 'Chi empty', { retrospectives: [] }));
+
+        const listed = await counted();
+        expect(listed[id].retrospectiveCount).toBe(30);
+        expect(listed[empty].retrospectiveCount).toBe(0);
+        expect(listed[id]).not.toHaveProperty('retrospectives');
+
+        expect(await store.loadTeamSummary(id)).not.toHaveProperty('retrospectiveCount');
+        expect(await countOf(id)).toBe(30);
+        expect(await countOf(empty)).toBe(0);
+      });
+
+      // `jsonb_array_length` raises on a scalar, an object or a JSON null
+      // (22023, which no fallback reads one row at a time), and the list read is
+      // one statement for every team: one such record would fail the login
+      // picker, renames, merges, restores and the console for every team.
+      it('reads 0 for a list that is absent or is not a list, and every list read still answers', async () => {
+        const odd: [string, unknown][] = [['null', null], ['object', {}], ['text', 'x'], ['number', 3]];
+        const ids = odd.map(([label, value]) => {
+          const id = tid(`odd-${label}`);
+          return { id, record: team(id, `Odd ${label}`, { retrospectives: value }) };
+        });
+        const absent = tid('odd-absent');
+        const { retrospectives: _history, ...withoutList } = team(absent, 'Odd absent');
+        ids.push({ id: absent, record: withoutList as ReturnType<typeof team> });
+        for (const { id, record } of ids) await store.saveTeam(id, record);
+
+        const listed = await counted();
+        for (const { id } of ids) expect(listed[id].retrospectiveCount, id).toBe(0);
+        // The login picker's read, and the console's merge-provenance read.
+        expect(Object.keys(await ours())).toEqual(expect.arrayContaining(ids.map(({ id }) => id)));
+        expect(Object.keys(await ours(store, { withMergeProvenance: true }))).toEqual(expect.arrayContaining(ids.map(({ id }) => id)));
+        for (const { id } of ids) expect(await countOf(id), id).toBe(0);
+
+        // The list projection reads the guard on every stale row: leave none
+        // behind for the other suites sharing the database.
+        for (const { id } of ids) await store.deleteTeamRecord(id);
+      });
+
+      it('sees a retrospective this pod adds, and one another pod adds, on both reads', async () => {
+        const id = tid('u');
+        await store.saveTeam(id, team(id, 'Psi'));
+        expect((await counted())[id].retrospectiveCount).toBe(30);
+
+        const addRetro = (retroId: string) => (current: Json) => ({
+          ...current,
+          retrospectives: [{ id: retroId, tickets: [] }, ...(current.retrospectives as Json[])]
+        });
+        await store.atomicTeamUpdate(id, addRetro('own'));
+        expect((await counted())[id].retrospectiveCount).toBe(31);
+
+        await other.atomicTeamUpdate(id, addRetro('foreign'));
+        expect((await counted())[id].retrospectiveCount).toBe(32);
+
+        // Straight to the single-team read, with no list read in between.
+        await other.atomicTeamUpdate(id, addRetro('foreign-2'));
+        expect(await countOf(id)).toBe(33);
+      });
+
+      // The 38.0 rule: every column comes from the one cast per row.
+      // `(value::jsonb)->'retrospectives'` in the outer select would be a
+      // second parse of the whole record, on every cold read.
+      it.skipIf(!isPg)('is read from the one cast per row, on the list and the single-team read', async () => {
+        const id = tid('v');
+        await store.saveTeam(id, team(id, 'Omega count'));
+        const casts = (sql: string[]) => sql.filter((text) => text.includes('::jsonb'));
+
+        const list = casts(await sqlDuring(() => counted()));
+        expect(list).toHaveLength(1);
+        expect(list[0]).toContain('retrospective_count');
+        expect(list[0].match(/::jsonb/g)).toHaveLength(1);
+
+        await other.atomicTeamUpdate(id, (current: Json) => ({ ...current, name: 'Omega counted' }));
+        const single = casts(await sqlDuring(() => store.loadTeamSummary(id, { withRetrospectiveCount: true })));
+        expect(single).toHaveLength(1);
+        expect(single[0]).toContain('retrospective_count');
+        expect(single[0].match(/::jsonb/g)).toHaveLength(1);
+      });
     });
 
     // `/jira/status` is read by every participant's screen on Review entry and

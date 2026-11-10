@@ -1048,14 +1048,25 @@ const createDataStore = ({ rootDir, teamFeedbackCacheMaxChars = TEAM_FEEDBACK_CA
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
   };
 
+  // A count a projection computed in SQL: an INTEGER on SQLite, an `int4` on
+  // PostgreSQL (a number from node-pg, which hands a `bigint` over as a string
+  // of digits), and NULL when the list it counts is absent or is not a list.
+  // Anything that is not a non-negative integer reads 0, as a list that is not
+  // one does in teamRestore.js (`countOf`).
+  const normalizeCount = (value) => {
+    const count = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
+    return Number.isSafeInteger(count) && count >= 0 ? count : 0;
+  };
+
   // Team summaries: the few fields the login picker (`/api/team/list`), the
   // console and the boot passes read for every team — id, name, recovery
-  // address, last connection, the rosters and the merge provenance. They live
-  // inside each team's record, next to its whole history, so even a projection
-  // in SQL has the database read and parse every record in full — and
-  // PostgreSQL did it once per projected column, because each `(value::jsonb)`
-  // is its own cast: the login screen took 1.7 s for 40 teams holding 25 MB of
-  // retrospectives, and grew with every retro run.
+  // address, last connection, the rosters, the merge provenance and how many
+  // retrospectives it holds (the console's Teams tab). They live inside each
+  // team's record, next to its whole history, so even a projection in SQL has
+  // the database read and parse every record in full — and PostgreSQL did it
+  // once per projected column, because each `(value::jsonb)` is its own cast:
+  // the login screen took 1.7 s for 40 teams holding 25 MB of retrospectives,
+  // and grew with every retro run.
   //
   // So each pod keeps the projection of every team, keyed by a fingerprint
   // that costs no parse, and projects only the rows whose fingerprint moved —
@@ -1070,6 +1081,13 @@ const createDataStore = ({ rootDir, teamFeedbackCacheMaxChars = TEAM_FEEDBACK_CA
   // invisible until that team's next write — SQLite deployments run one
   // process. The cache itself is declared with the KV helpers, which forget an
   // entry on every team write.
+  //
+  // The anonymous login picker reads these summaries too, so the fields it
+  // never reads leave the cache only for a caller that asks for them
+  // (`copySummary`): the merge provenance (the console), the archived roster
+  // (the email heal pass, at boot and after a restore), the Jira target
+  // (`/jira/status` and `/jira/issues`) and the retrospective count (the
+  // console's Teams tab).
   const projectSummaryRow = (row) => ({
     stamp: String(row.stamp),
     size: Number(row.size),
@@ -1089,7 +1107,11 @@ const createDataStore = ({ rootDir, teamFeedbackCacheMaxChars = TEAM_FEEDBACK_CA
       // The team's Jira target (`/jira/status`, read by every participant's
       // screen on Review entry and on every reconnect): a few bytes beside a
       // history that can weigh megabytes.
-      jiraTarget: normalizeJsonObject(row.jira_target)
+      jiraTarget: normalizeJsonObject(row.jira_target),
+      // How many retrospectives the team holds — closed, in progress and open
+      // boards alike, the list its Dashboard shows — for the console's Teams
+      // tab: a count beside the history, never the history.
+      retrospectiveCount: normalizeCount(row.retrospective_count)
     }
   });
 
@@ -1122,6 +1144,16 @@ const createDataStore = ({ rootDir, teamFeedbackCacheMaxChars = TEAM_FEEDBACK_CA
   // the outer select, which would turn the single cast back into one per
   // column. The stamp and size are those of the row version projected, never
   // of an earlier fingerprint read.
+  //
+  // The retrospective count is guarded by the list's type, and on PostgreSQL
+  // the guard is load-bearing: `jsonb_array_length` raises 22023 on a scalar,
+  // an object or a JSON null, and the list read is one statement for every
+  // team, so one record whose `retrospectives` is not a list would fail the
+  // login picker, renames, merges, restores and the console for every team
+  // (22023 is no refusal `isJsonbRefusal` falls back on). The guard reads the
+  // row, so the planner cannot fold it, and CASE never evaluates the length
+  // of a value that is not an array. SQLite answers 0 there unguarded; the
+  // guard makes both engines answer NULL, read as 0 (`normalizeCount`).
   const summaryProjectionSql = (where) => (usePostgres
     ? `SELECT key, row_version::text AS stamp, octet_length(value) AS size,
               j->>'id' AS id,
@@ -1131,7 +1163,9 @@ const createDataStore = ({ rootDir, teamFeedbackCacheMaxChars = TEAM_FEEDBACK_CA
               j->'members' AS members,
               j->'mergedFrom' AS merged_from,
               j->'archivedMembers' AS archived_members,
-              j->'jiraTarget' AS jira_target
+              j->'jiraTarget' AS jira_target,
+              CASE WHEN jsonb_typeof(j->'retrospectives') = 'array'
+                   THEN jsonb_array_length(j->'retrospectives') END AS retrospective_count
        FROM (SELECT key, xmin AS row_version, value, value::jsonb AS j
              FROM kv_store WHERE ${where} OFFSET 0) AS team_rows`
     : `SELECT key, updated_at AS stamp, octet_length(value) AS size,
@@ -1142,7 +1176,9 @@ const createDataStore = ({ rootDir, teamFeedbackCacheMaxChars = TEAM_FEEDBACK_CA
               json_extract(value, '$.members') AS members,
               json_extract(value, '$.mergedFrom') AS merged_from,
               json_extract(value, '$.archivedMembers') AS archived_members,
-              json_extract(value, '$.jiraTarget') AS jira_target
+              json_extract(value, '$.jiraTarget') AS jira_target,
+              CASE WHEN json_type(value, '$.retrospectives') = 'array'
+                   THEN json_array_length(value, '$.retrospectives') END AS retrospective_count
        FROM kv_store WHERE ${where}`);
 
   // LIKE (not a collation-sensitive range) for the same reason as
@@ -1210,30 +1246,38 @@ const createDataStore = ({ rootDir, teamFeedbackCacheMaxChars = TEAM_FEEDBACK_CA
   // tenth of a deep clone; the merge provenance and the Jira target are nested
   // and read by few callers.
   const copyRows = (rows) => rows.map((row) => (row && typeof row === 'object' ? { ...row } : row));
-  const copySummary = (entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }) => {
-    const { mergedFrom, archivedMembers, jiraTarget, ...summary } = entry.summary;
+  const copySummary = (entry, { withMergeProvenance, withArchivedMembers, withJiraTarget, withRetrospectiveCount }) => {
+    const { mergedFrom, archivedMembers, jiraTarget, retrospectiveCount, ...summary } = entry.summary;
     return {
       ...summary,
       members: copyRows(summary.members),
       ...(withMergeProvenance ? { mergedFrom: structuredClone(mergedFrom) } : {}),
       ...(withArchivedMembers ? { archivedMembers: copyRows(archivedMembers) } : {}),
-      ...(withJiraTarget ? { jiraTarget: jiraTarget ? structuredClone(jiraTarget) : null } : {})
+      ...(withJiraTarget ? { jiraTarget: jiraTarget ? structuredClone(jiraTarget) : null } : {}),
+      ...(withRetrospectiveCount ? { retrospectiveCount } : {})
     };
   };
 
   // `withMergeProvenance` adds the super-admin merge's `mergedFrom` (the
   // console and the deletion step read it, the anonymous login picker never
   // does); `withArchivedMembers` adds the archived roster; `withJiraTarget` the
-  // team's Jira target. Every summary is a copy: callers edit what they are
-  // given, and must not edit the cache.
-  const loadTeamSummaries = async ({ withMergeProvenance = false, withArchivedMembers = false, withJiraTarget = false } = {}) => {
+  // team's Jira target; `withRetrospectiveCount` how many retrospectives the
+  // team holds (the console's Teams tab; the login picker never asks). Every
+  // summary is a copy: callers edit what they are given, and must not edit
+  // the cache.
+  const loadTeamSummaries = async ({
+    withMergeProvenance = false,
+    withArchivedMembers = false,
+    withJiraTarget = false,
+    withRetrospectiveCount = false
+  } = {}) => {
     const { keys, entries } = await refreshTeamSummaries();
     const summaries = [];
     for (const key of keys) {
       // A row deleted between the two reads has no projection: it is gone.
       const entry = entries.get(key);
       if (!entry) continue;
-      summaries.push(copySummary(entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }));
+      summaries.push(copySummary(entry, { withMergeProvenance, withArchivedMembers, withJiraTarget, withRetrospectiveCount }));
     }
     return summaries;
   };
@@ -1324,10 +1368,18 @@ const createDataStore = ({ rootDir, teamFeedbackCacheMaxChars = TEAM_FEEDBACK_CA
     return entry;
   };
 
-  const loadTeamSummary = async (teamId, { withMergeProvenance = false, withArchivedMembers = false, withJiraTarget = false } = {}) => {
+  // The options are loadTeamSummaries'.
+  const loadTeamSummary = async (teamId, {
+    withMergeProvenance = false,
+    withArchivedMembers = false,
+    withJiraTarget = false,
+    withRetrospectiveCount = false
+  } = {}) => {
     const key = `${TEAM_PREFIX}${teamId}`;
     const entry = usePostgres ? await readOneTeamSummaryPostgres(key) : readOneTeamSummarySqlite(key);
-    return entry ? copySummary(entry, { withMergeProvenance, withArchivedMembers, withJiraTarget }) : null;
+    return entry
+      ? copySummary(entry, { withMergeProvenance, withArchivedMembers, withJiraTarget, withRetrospectiveCount })
+      : null;
   };
 
   // Each team's id and stored password hash, nothing else: what the legacy

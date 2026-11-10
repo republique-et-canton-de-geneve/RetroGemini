@@ -37,6 +37,7 @@ const teams: Team[] = [
     ],
     customTemplates: [],
     retrospectives: [],
+    retrospectiveCount: 3,
     globalActions: [],
     lastConnectionDate: '2026-03-10T10:00:00.000Z'
   },
@@ -48,6 +49,7 @@ const teams: Team[] = [
     members: [{ id: 'u4', name: 'Dave', color: '#ff0', role: 'participant' }],
     customTemplates: [],
     retrospectives: [],
+    retrospectiveCount: 0,
     globalActions: []
   }
 ];
@@ -263,7 +265,7 @@ describe('the super-admin console in French', () => {
     await renderConsole();
 
     expect(screen.getByRole('heading', { name: 'Équipes (2)' })).toBeTruthy();
-    for (const header of ['Nom de l’équipe', 'Membres', 'Dernière activité']) {
+    for (const header of ['Nom de l’équipe', 'Membres', 'Rétrospectives', 'Dernière activité']) {
       expect(screen.getByRole('button', { name: new RegExp(header) })).toBeTruthy();
     }
     expect(screen.getByRole('columnheader', { name: 'E-mail de récupération' })).toBeTruthy();
@@ -271,6 +273,9 @@ describe('the super-admin console in French', () => {
 
     expect(screen.getByText('3 membres')).toBeTruthy();
     expect(screen.getByText('1 membre')).toBeTruthy();
+    expect(screen.getByText('3 rétrospectives')).toBeTruthy();
+    // French reads zero as singular.
+    expect(screen.getByText('0 rétrospective')).toBeTruthy();
     expect(screen.getByText('Jamais')).toBeTruthy();
     expect(screen.getByText('Non configuré')).toBeTruthy();
     expect(screen.getByText('two@example.com')).toBeTruthy();
@@ -283,9 +288,29 @@ describe('the super-admin console in French', () => {
     expect(screen.getAllByRole('button', { name: 'Changer le mot de passe' })).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: 'Modifier l’e-mail' })).toHaveLength(2);
 
-    for (const english of ['Team Name', 'Recovery Email', 'Last Active', 'Never', 'Not configured', 'Rename']) {
+    for (const english of ['Team Name', 'Retrospectives', 'Recovery Email', 'Last Active', 'Never', 'Not configured', 'Rename']) {
       expect(screen.queryByText(english), english).toBeNull();
     }
+  });
+
+  // During a rolling update the console can be answered by a pod of an
+  // earlier release, which sends no count.
+  it('says in French when the server sent no retrospective count', async () => {
+    const fromOlderPod: Team = {
+      id: 'team-3',
+      name: 'Team Three',
+      passwordHash: 'hash',
+      members: [],
+      customTemplates: [],
+      retrospectives: [],
+      globalActions: []
+    };
+    overrides = { '/api/super-admin/teams': { status: 200, body: { teams: [...teams, fromOlderPod] } } };
+    await renderConsole();
+
+    expect(screen.getByText('Inconnu')).toBeTruthy();
+    expect(screen.getByText('3 rétrospectives')).toBeTruthy();
+    expect(screen.queryByText('Unknown')).toBeNull();
   });
 
   it('keeps a visible notice in step with the language switcher', async () => {

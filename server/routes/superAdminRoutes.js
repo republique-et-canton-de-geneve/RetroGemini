@@ -282,13 +282,16 @@ const registerSuperAdminRoutes = ({
     try {
       // Summary projection: the dashboard only needs roster-level fields, not
       // each team's full retrospective/health-check history.
-      const summaries = await dataStore.loadTeamSummaries({ withMergeProvenance: true });
+      const summaries = await dataStore.loadTeamSummaries({ withMergeProvenance: true, withRetrospectiveCount: true });
       const sanitizedTeams = summaries.map((t) => ({
         id: t.id,
         name: t.name,
         facilitatorEmail: t.facilitatorEmail,
         members: (t.members || []).map((m) => ({ id: m.id, name: m.name, color: m.color, role: m.role })),
         lastConnectionDate: t.lastConnectionDate,
+        // How many retrospectives the team holds, open boards and those in
+        // progress included (the list its Dashboard shows): a count, never ids.
+        retrospectiveCount: t.retrospectiveCount,
         // Which teams a merged team was built from (`teamMerge.js`), without
         // the fingerprints and id maps the deletion step reads server-side.
         // `verified`: the merge signed it. An unsigned entry is shown as such —
