@@ -293,16 +293,16 @@ describe('Health check participants panel, shared with the retro', () => {
 
   // 43.0: the retro passes the panel what its phase lets people type and the
   // Vote phase's votes left; the health check passes neither, so its panel
-  // looks exactly as it did.
-  it('draws no typing line, no rail and no votes line: a health check passes neither', () => {
+  // looks exactly as it did. `typing-now` is what guards the typing half: the
+  // line is drawn whenever a typing kind is passed, someone typing or not. The
+  // collapsed rail is not asserted: it is drawn only while someone types, and
+  // no typing signal reaches a health check, so its absence proves nothing.
+  it('draws no typing line and no votes line: a health check passes neither', () => {
     for (const phase of ['SURVEY', 'DISCUSS'] as const) {
       const view = renderSession(createSession({ phase, discussionFocusId: phase === 'DISCUSS' ? 'd1' : null }));
 
       expect(screen.queryByTestId('typing-now'), phase).toBeNull();
       expect(screen.queryByTestId('votes-left'), phase).toBeNull();
-
-      fireEvent.click(screen.getByRole('button', { name: 'Collapse panel' }));
-      expect(screen.queryByTestId('typing-now-rail'), phase).toBeNull();
       view.unmount();
     }
   });

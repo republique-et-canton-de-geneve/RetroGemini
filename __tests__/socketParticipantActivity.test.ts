@@ -16,13 +16,14 @@ import { secureCompare } from '../server/services/security.js';
  * The relay of the live "is typing" signal (`participant-activity`, 43.0).
  *
  * Any team credential, an invitation-link login included, can join a session
- * and send the signal, and the server relayed whatever it was sent to the
+ * and send the signal, and the server relayed whatever kind it was sent to the
  * whole room: a '__proto__' made every expanded participants panel's label an
  * object, React threw, and the screens went blank (there is no error
  * boundary); a string of any size went to each client. The relay now passes
  * on only a kind the clients draw, or `null`, and only from a joined socket
- * that says who it is. The payload keeps the three fields every client
- * release reads.
+ * that says who it is. Only the kind is bounded: the name is what the join
+ * carried, neither checked nor bounded (HARDENING_STATUS.md, H55). The payload
+ * keeps the three fields every client release reads.
  */
 
 const PG_ENV_KEYS = [
@@ -249,11 +250,18 @@ describe('participant-activity relay (integration)', () => {
     stranger.close();
   });
 
-  it('relays nothing from a socket that joined with an empty user id', async () => {
+  // join-session stores the user id as the payload carried it: only a string
+  // that is not empty names someone a client can draw.
+  it.each([
+    ['an empty user id', ''],
+    ['a user id that is a number', 7],
+    ['a user id that is an object', { id: 'par1' }],
+    ['no user id', undefined]
+  ])('relays nothing from a socket that joined with %s', async (_label, userId) => {
     const nameless = await connect();
     nameless.emit('join-session', {
       sessionId: 'live-session',
-      userId: '',
+      ...(userId === undefined ? {} : { userId }),
       userName: 'Nobody',
       sessionToken: teamAToken
     });

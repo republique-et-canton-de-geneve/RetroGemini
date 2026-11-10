@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createDataStore } from '../server/services/dataStore.js';
@@ -497,3 +497,34 @@ for (const engine of engines) {
     });
   });
 }
+
+// Read in the source, so it runs whatever engine the run has. CI has SQLite
+// only, where an unguarded `json_array_length` answers 0 or NULL for a value
+// that is not a list: deleting the PostgreSQL guard left every CI run green
+// (review of 43.0), while on PostgreSQL `jsonb_array_length` raises 22023 on
+// such a value and fails every list read, for every team.
+describe('the type guard on every array length in dataStore.js', () => {
+  const source = readFileSync(join(__dirname, '..', 'server', 'services', 'dataStore.js'), 'utf8').replace(/\s+/g, ' ');
+
+  const unguarded = (lengthFn: string, typeFn: string) =>
+    [...source.matchAll(new RegExp(`\\b${lengthFn}\\(([^()]+)\\)`, 'g'))]
+      .filter((call) => {
+        const guard = `CASE WHEN ${typeFn}(${call[1]}) = 'array' THEN `;
+        const at = call.index ?? 0;
+        return source.slice(Math.max(0, at - guard.length), at) !== guard;
+      })
+      .map((call) => call[0]);
+
+  it('finds the calls it checks', () => {
+    expect(source.match(/\bjsonb_array_length\(/g)?.length ?? 0).toBeGreaterThan(0);
+    expect(source.match(/\bjson_array_length\(/g)?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('guards every jsonb_array_length by jsonb_typeof (PostgreSQL)', () => {
+    expect(unguarded('jsonb_array_length', 'jsonb_typeof')).toEqual([]);
+  });
+
+  it('guards every json_array_length by json_type (SQLite)', () => {
+    expect(unguarded('json_array_length', 'json_type')).toEqual([]);
+  });
+});

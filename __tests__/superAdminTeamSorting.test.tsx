@@ -304,9 +304,14 @@ describe('SuperAdmin Teams sorting', () => {
       expect(screen.getByText('Charlie Team')).toBeTruthy();
     });
 
-    // Sort by name first
-    const nameHeader = screen.getByRole('button', { name: /Team Name/i });
-    fireEvent.click(nameHeader);
+    // Sort by last activity first, an order the members sort must change:
+    // starting from the name sort proved nothing, since names and member counts
+    // order this fixture the same way.
+    fireEvent.click(screen.getByRole('button', { name: /Last Active/i }));
+    const byLastActive = getTeamNameCells();
+    expect(byLastActive[0]).toContain('Charlie Team');
+    expect(byLastActive[1]).toContain('Alpha Team');
+    expect(byLastActive[2]).toContain('Bravo Team');
 
     // Then sort by members
     const membersHeader = screen.getByRole('button', { name: /Members/i });
