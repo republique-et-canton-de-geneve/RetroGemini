@@ -6,13 +6,16 @@ import {
   impactRatingProgress,
   rateableRoundActions
 } from './closedActionsForRating';
-import SessionParticipantsPanel, { ParticipantRowStatus } from './SessionParticipantsPanel';
+import SessionParticipantsPanel, { ParticipantRowLine, ParticipantRowStatus } from './SessionParticipantsPanel';
 import { isOpenBoard } from '../../utils/openBoard';
+import { typingKindForPhase } from '../../utils/typingNow';
+import { votesCastByVoter, votesLeftFor } from '../../utils/voteBudget';
 
 /**
  * The retrospective's participants panel: the shared SessionParticipantsPanel,
  * fed with what only a retro has — contribution dots per ticket, the typing
- * cue, the impact rating round, and its phase-by-phase progress line.
+ * cue and who is typing above the list, the impact rating round, the Vote
+ * phase's votes left, and its phase-by-phase progress line.
  */
 
 interface Props {
@@ -49,6 +52,10 @@ const ParticipantsPanel: React.FC<Props> = ({
 }) => {
   const { t, tp } = useTranslation();
 
+  // What its phase lets people type: cards in Brainstorm and on an open board,
+  // proposals in Discuss, nothing anywhere else (utils/typingNow.ts).
+  const typingKind = typingKindForPhase(session.phase);
+
   // An open board stays open for weeks, and anyone with the link may drop by:
   // its panel lists who is connected right now and no one else, and someone
   // who leaves leaves the list. No waiting list, no "has left" marking and no
@@ -64,6 +71,7 @@ const ParticipantsPanel: React.FC<Props> = ({
         isFacilitator={isFacilitator}
         isCollapsed={isCollapsed}
         activityUsers={activityUsers}
+        typingKind={typingKind}
         memberStatus={() => null}
         heading={t('phases.participants.connectedTitle', { count: connected.length })}
         footer={t('phases.participants.footerConnected')}
@@ -107,6 +115,18 @@ const ParticipantsPanel: React.FC<Props> = ({
   const ratingRoundLive =
     ratingEnabled && session.phase === 'OPEN_ACTIONS' && ratingRoundSize > 0 && raters.length > 0;
   const ratersDone = raters.filter((p) => impactRatingProgress(session, p.id).complete).length;
+
+  // The Vote phase: in place of each person's role, the votes they still have to
+  // cast until they finish, which is the number their own "N votes remaining" shows
+  // them (utils/voteBudget.ts). Never a card's total, which the Vote phase keeps to
+  // itself; nothing while votes are unlimited. Finished, the row goes back to its
+  // role and the check below, as in every phase.
+  const votesCast = session.phase === 'VOTE' ? votesCastByVoter(session) : null;
+  const memberLine = (member: User): ParticipantRowLine | null => {
+    if (!votesCast || session.finishedUsers?.includes(member.id)) return null;
+    const left = votesLeftFor(session.settings, votesCast.get(member.id) ?? 0);
+    return left === null ? null : { kind: 'votesLeft', label: tp('phases.participants.votesLeft', left) };
+  };
 
   const memberStatus = (member: User): ParticipantRowStatus | null => {
     // The facilitator seat does not vote, so it shows neither the check nor
@@ -164,8 +184,10 @@ const ParticipantsPanel: React.FC<Props> = ({
       isFacilitator={isFacilitator}
       isCollapsed={isCollapsed}
       activityUsers={activityUsers}
+      typingKind={typingKind}
       contributionCounts={totalTickets > 0 ? ticketCounts : undefined}
       memberStatus={memberStatus}
+      memberLine={memberLine}
       footer={footer}
       onToggleCollapse={onToggleCollapse}
       onInvite={onInvite}

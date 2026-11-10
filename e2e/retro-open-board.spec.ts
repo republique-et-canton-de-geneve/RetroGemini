@@ -180,6 +180,8 @@ test.describe('Open board', () => {
     await expect(columns(facilitator).nth(0)).toContainText('Flaky deploys');
     await participant.getByRole('searchbox', { name: 'Search the cards' }).fill('');
 
+    // The line above the panel's list says who is writing a card (43.0): the board's audit walks it.
+    await expect(facilitator.getByTestId('typing-now')).toHaveText('Nobody is writing', { timeout: 7_000 });
     await audit(facilitator, test.info(), 'retro-open-board');
 
     // ---- Grouping keeps the vote ----

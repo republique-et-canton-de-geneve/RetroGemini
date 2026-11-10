@@ -15,7 +15,7 @@ import {
   getRetroPhaseTip,
   RETRO_PHASE_TIPS
 } from '../components/session/retroTips';
-import { RetroSession, Ticket, User } from '../types';
+import { ParticipantActivity, RetroSession, Ticket, User } from '../types';
 
 /**
  * The retrospective session chrome and phase screens in French ("phases"
@@ -227,21 +227,33 @@ describe('Participants panel in French', () => {
     votes: []
   });
 
-  const renderPanel = (session: RetroSession) =>
+  const renderPanel = (
+    session: RetroSession,
+    {
+      participants = [facilitator, alice],
+      activityUsers = {}
+    }: { participants?: User[]; activityUsers?: Record<string, ParticipantActivity> } = {}
+  ) =>
     inFrench(
       <ParticipantsPanel
         session={session}
-        participants={[facilitator, alice]}
+        participants={participants}
         connectedUsers={new Set(['fac', 'a'])}
         currentUser={facilitator}
         isFacilitator
         isCollapsed={false}
-        activityUsers={{}}
+        activityUsers={activityUsers}
         onToggleCollapse={vi.fn()}
         onInvite={vi.fn()}
         getMemberDisplay={(member) => ({ displayName: member.name, initials: member.name.slice(0, 2) })}
       />
     );
+
+  const rowOf = (name: string) => {
+    const row = screen.getAllByTestId('participant-row').find((candidate) => within(candidate).queryByText(name));
+    if (!row) throw new Error(`no participant row for ${name}`);
+    return row;
+  };
 
   it('uses the French plural rule, where zero and one are singular', () => {
     const { unmount } = renderPanel(makeSession({ tickets: [] }));
@@ -254,6 +266,59 @@ describe('Participants panel in French', () => {
     expect(screen.getByText('(vous)')).toBeTruthy();
     expect(screen.getByRole('button', { name: "Inviter l'équipe" })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Réduire le panneau' })).toBeTruthy();
+  });
+
+  it('says the votes left in French, zero and one in the singular', () => {
+    const voting = (votes: string[]) =>
+      makeSession({
+        phase: 'VOTE',
+        settings: { ...makeSession().settings, maxVotes: 3 },
+        tickets: [{ ...ticket('fac'), votes }]
+      });
+
+    const { unmount } = renderPanel(voting(['fac', 'fac']));
+    expect(within(rowOf('Alice')).getByText('3 votes restants')).toBeTruthy();
+    expect(within(rowOf('Fran')).getByText('1 vote restant')).toBeTruthy();
+    unmount();
+
+    renderPanel(voting(['fac', 'fac', 'fac']));
+    expect(within(rowOf('Fran')).getByText('0 vote restant')).toBeTruthy();
+  });
+
+  it('names who is writing in French', () => {
+    const line = () => screen.getByTestId('typing-now');
+
+    let view = renderPanel(makeSession());
+    expect(line().textContent).toBe("Personne n'écrit");
+    view.unmount();
+
+    view = renderPanel(makeSession(), { activityUsers: { a: 'brainstorm' } });
+    expect(line().textContent).toBe("En train d'écrire (1)\u00a0: Alice");
+    // The row keeps its own cue.
+    expect(within(rowOf('Alice')).getByText('rédige une carte')).toBeTruthy();
+    view.unmount();
+
+    view = renderPanel(makeSession({ phase: 'DISCUSS' }), { activityUsers: { a: 'proposal' } });
+    expect(line().textContent).toBe('En train de proposer (1)\u00a0: Alice');
+    view.unmount();
+
+    view = renderPanel(makeSession({ phase: 'DISCUSS' }));
+    expect(line().textContent).toBe("Personne ne propose d'action");
+    view.unmount();
+
+    const roster: User[] = [
+      facilitator,
+      alice,
+      { id: 'b', name: 'Bob', color: 'bg-emerald-500', role: 'participant' },
+      { id: 'c', name: 'Carol', color: 'bg-amber-500', role: 'participant' },
+      { id: 'd', name: 'Dave', color: 'bg-sky-500', role: 'participant' }
+    ];
+    renderPanel(makeSession({ participants: roster }), {
+      participants: roster,
+      activityUsers: { a: 'brainstorm', b: 'brainstorm', c: 'brainstorm', d: 'brainstorm' }
+    });
+    expect(line().textContent).toMatch(/Alice, Bob et 2 autres$/);
+    expect(screen.getAllByText('rédige une carte')).toHaveLength(4);
   });
 });
 

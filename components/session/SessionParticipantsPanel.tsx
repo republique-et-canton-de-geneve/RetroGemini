@@ -1,17 +1,19 @@
 import React from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
-import { MessageKey } from '../../i18n/translate';
-import { ParticipantActivity, Role, SessionInvitee, User } from '../../types';
+import { MessageKey, Translator } from '../../i18n/translate';
+import { ParticipantActivity, SessionInvitee, User } from '../../types';
 import { pendingInvitees as selectPendingInvitees } from './sessionInvitees';
 import { avatarColorClasses, DEPARTED_AVATAR_CLASSES, participantColorClass } from '../../utils/participantColors';
+import { joinNames, splitTypingNames, typingMembers } from '../../utils/typingNow';
 
 /**
  * The participants panel of every live session — a retrospective or a health
  * check. Everything both session types share lives here once: the roster with
  * presence, the facilitator's "has left" marking, the invitees still expected,
- * the collapse toggle and the invite button. What differs — what counts as
+ * the collapse toggle and the invite button. What differs (what counts as
  * "done" in the current phase, the footer's progress line, the retro's
- * contribution dots and typing cue — is passed in by the session.
+ * contribution dots, the kind of typing its phase shows and the Vote phase's
+ * votes left) is passed in by the session.
  *
  * The health check used to carry its own copy of this panel, and the copy
  * drifted: invitations sent from a health check never showed as "waiting to
@@ -24,6 +26,13 @@ export type ParticipantRowStatus =
   | { kind: 'check'; title: string; tone: 'strong' | 'soft' }
   /** Part-way through a round, e.g. 1 of 3 actions rated. */
   | { kind: 'progress'; done: number; total: number; title: string };
+
+/**
+ * A line in place of a participant's role: the Vote phase's votes still to cast,
+ * in words ("3 votes left"). Drawn at the role line's height, so the row keeps
+ * its size when its person finishes and the line goes back to the role.
+ */
+export type ParticipantRowLine = { kind: 'votesLeft'; label: string };
 
 interface Props {
   participants: User[];
@@ -43,10 +52,18 @@ interface Props {
   isCollapsed: boolean;
   /** userId -> live "is typing" signal, shown in place of the role line. */
   activityUsers?: Record<string, ParticipantActivity>;
+  /**
+   * The kind of typing the session's phase can show. The rows' cue and the line
+   * above the list (on the collapsed rail, its count) read only this kind.
+   * Omit for none: the health check passes none.
+   */
+  typingKind?: ParticipantActivity | null;
   /** Cards authored per participant. Omit to hide the contribution dots. */
   contributionCounts?: Record<string, number>;
   /** Right-hand marker of a participant who has not left; `null` for none. */
   memberStatus: (member: User) => ParticipantRowStatus | null;
+  /** A line in place of the role of a participant who has not left; `null` for none. Omit for none. */
+  memberLine?: (member: User) => ParticipantRowLine | null;
   /** The progress line under the roster. */
   footer: React.ReactNode;
   /** The panel's title, when "Participants (n)" is not what the list is. */
@@ -58,34 +75,42 @@ interface Props {
   getMemberDisplay: (member: User) => { displayName: string; initials: string };
 }
 
-const ACTIVITY_LABEL_KEY: Record<ParticipantActivity, MessageKey> = {
-  brainstorm: 'phases.participants.activityBrainstorm',
-  proposal: 'phases.participants.activityProposal'
+// Chosen by comparison, never looked up in an object: an unchecked value
+// ('__proto__') found Object.prototype in a lookup, t() handed it back, and React
+// refused to render it, blanking the panel.
+const activityLabelKey = (kind: ParticipantActivity): MessageKey =>
+  kind === 'proposal' ? 'phases.participants.activityProposal' : 'phases.participants.activityBrainstorm';
+
+const activityIcon = (kind: ParticipantActivity): string => (kind === 'proposal' ? 'lightbulb' : 'stylus_note');
+
+const typingLineKeys = (kind: ParticipantActivity): { named: MessageKey; count: MessageKey; nobody: MessageKey } =>
+  kind === 'proposal'
+    ? { named: 'phases.participants.typingNamedProposal', count: 'phases.participants.typingCountProposal', nobody: 'phases.participants.typingNobodyProposal' }
+    : { named: 'phases.participants.typingNamedBrainstorm', count: 'phases.participants.typingCountBrainstorm', nobody: 'phases.participants.typingNobodyBrainstorm' };
+
+// Every client writes its own `role` into the session (sessionGuard.js does not
+// protect `participants`), so it is read as data: a '__proto__' role blanked the
+// panel of both session types the way the typing signal did, and an object role
+// did too.
+const roleLabel = (role: unknown, t: Translator): string => {
+  if (role === 'facilitator') return t('phases.participants.roleFacilitator');
+  if (role === 'participant') return t('phases.participants.roleParticipant');
+  return typeof role === 'string' ? role : '';
 };
 
-const ROLE_LABEL_KEY: Record<Role, MessageKey> = {
-  facilitator: 'phases.participants.roleFacilitator',
-  participant: 'phases.participants.roleParticipant'
-};
-
-const ACTIVITY_ICON: Record<ParticipantActivity, string> = {
-  brainstorm: 'stylus_note',
-  proposal: 'lightbulb'
-};
-
-// Messaging-app style "is typing" cue: a contextual icon, a short label and
-// three softly bouncing dots. Shown in place of the role line while active.
+// Messaging-app style "is typing" cue in place of the role line: a contextual
+// icon, a short label and three softly bouncing dots. One 16px line, the role
+// line's height: its icon used to be a 24px glyph (the plain text-sm is inert on
+// .material-symbols-outlined), which made a typing row 8px taller and moved every
+// row below it. The icon is decoration, never read out.
 const TypingIndicator: React.FC<{ activity: ParticipantActivity }> = ({ activity }) => {
   const { t } = useTranslation();
-  const label = t(ACTIVITY_LABEL_KEY[activity]);
+  const label = t(activityLabelKey(activity));
   return (
-    <div
-      className="flex items-center text-[11px] font-semibold text-retro-primary min-w-0"
-      title={label}
-    >
-      <span className="material-symbols-outlined text-sm mr-1 shrink-0">{ACTIVITY_ICON[activity]}</span>
+    <div className="flex items-center text-[11px] leading-4 font-semibold text-retro-primary min-w-0" title={label}>
+      <span className="material-symbols-outlined text-sm! leading-none mr-1 shrink-0" aria-hidden="true">{activityIcon(activity)}</span>
       <span className="truncate">{label}</span>
-      <span className="flex items-center ml-1 space-x-0.5 shrink-0">
+      <span className="flex items-center ml-1 space-x-0.5 shrink-0" aria-hidden="true">
         <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '0ms' }} />
         <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '150ms' }} />
         <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '300ms' }} />
@@ -101,13 +126,16 @@ const TypingIndicator: React.FC<{ activity: ParticipantActivity }> = ({ activity
 // collapse into a "+N" chip; the exact total is always available on hover.
 const MAX_DOTS = 9;
 
+// One height whatever the count (10px): the 'no tickets' line used to be 15px
+// against the dots' 8px, so a first card shrank its author's row by 7px and
+// moved every row below it.
 const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ count, colorClass }) => {
   const { t, tp } = useTranslation();
   if (count <= 0) {
     return (
-      <div className="flex items-center gap-1.5 mt-1.5 text-slate-600" title={t('phases.participants.noTicketsTitle')}>
+      <div className="flex items-center gap-1.5 mt-1.5 min-h-2.5 text-slate-600" title={t('phases.participants.noTicketsTitle')}>
         <span className="w-2 h-2 rounded-full border border-dashed border-slate-300 shrink-0" />
-        <span className="text-[10px] font-medium tracking-wide">{t('phases.participants.noTickets')}</span>
+        <span className="text-[10px] leading-none font-medium tracking-wide">{t('phases.participants.noTickets')}</span>
       </div>
     );
   }
@@ -116,7 +144,7 @@ const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ cou
   const hidden = count - visibleDots;
   return (
     <div
-      className="flex items-center gap-1 mt-1.5"
+      className="flex items-center gap-1 mt-1.5 min-h-2.5"
       title={tp('phases.participants.ticketsAdded', count)}
     >
       {Array.from({ length: visibleDots }).map((_, index) => (
@@ -129,26 +157,62 @@ const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ cou
   );
 };
 
-// The check is announced by what it means ("Vote recorded"), never by the
-// icon font's ligature: a screen reader would otherwise read "check_circle".
+// Every status is announced by what it means, never by the icon font's ligature:
+// a screen reader would otherwise read "check_circle".
 const RowStatus: React.FC<{ status: ParticipantRowStatus }> = ({ status }) => {
-  if (status.kind === 'progress') {
-    return (
-      <span className="text-[11px] font-bold text-slate-600 ml-2 shrink-0 self-start leading-5" title={status.title}>
-        {status.done}/{status.total}
-      </span>
-    );
+  switch (status.kind) {
+    case 'progress':
+      return (
+        <span className="text-[11px] font-bold text-slate-600 ml-2 shrink-0 self-start leading-5" title={status.title}>
+          {status.done}/{status.total}
+        </span>
+      );
+    case 'check':
+      return (
+        <span
+          role="img"
+          aria-label={status.title}
+          className={`material-symbols-outlined text-lg ml-2 shrink-0 self-start ${status.tone === 'strong' ? 'text-emerald-500' : 'text-emerald-400'}`}
+          title={status.title}
+        >
+          check_circle
+        </span>
+      );
+    default: {
+      // A kind added to the union and not drawn here fails the type check;
+      // it used to be drawn as a check.
+      const unhandled: never = status;
+      return unhandled;
+    }
   }
-  return (
-    <span
-      role="img"
-      aria-label={status.title}
-      className={`material-symbols-outlined text-lg ml-2 shrink-0 self-start ${status.tone === 'strong' ? 'text-emerald-500' : 'text-emerald-400'}`}
-      title={status.title}
-    >
-      check_circle
-    </span>
-  );
+};
+
+// Words in place of the role, at the role line's height, so the row keeps its
+// size when the line goes back to the role. Plain text with no role, aria-label
+// or title: the words are its name, and nothing in it needs a hover. It paints
+// its own background, so it reads the same on the current user's indigo row.
+const RowLine: React.FC<{ line: ParticipantRowLine }> = ({ line }) => {
+  switch (line.kind) {
+    case 'votesLeft':
+      return (
+        <div className="flex min-w-0">
+          <span
+            data-testid="votes-left"
+            className="inline-flex min-w-0 max-w-full items-center gap-0.5 rounded-full bg-indigo-50 px-1 text-[11px] font-bold leading-4 text-indigo-700 ring-1 ring-inset ring-indigo-200 tabular-nums"
+          >
+            <span className="material-symbols-outlined shrink-0 text-xs! leading-none" aria-hidden="true">how_to_vote</span>
+            <span className="min-w-0 truncate">{line.label}</span>
+          </span>
+        </div>
+      );
+    default: {
+      // A kind added to the type and not drawn here fails the type check. Its
+      // `kind` is what narrows: a type of one member is no union, so `line`
+      // itself would never narrow to `never`.
+      const unhandled: never = line.kind;
+      return unhandled;
+    }
+  }
 };
 
 const SessionParticipantsPanel: React.FC<Props> = ({
@@ -161,8 +225,10 @@ const SessionParticipantsPanel: React.FC<Props> = ({
   isFacilitator,
   isCollapsed,
   activityUsers,
+  typingKind,
   contributionCounts,
   memberStatus,
+  memberLine,
   footer,
   heading,
   onToggleCollapse,
@@ -170,7 +236,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
   onToggleLeft,
   getMemberDisplay
 }) => {
-  const { t } = useTranslation();
+  const { t, tp, locale } = useTranslation();
 
   // Participants marked by the facilitator as having left mid-session stay
   // visible (grey, at the bottom) but are excluded from every counter.
@@ -183,8 +249,36 @@ const SessionParticipantsPanel: React.FC<Props> = ({
   // "waiting to join" section so the facilitator knows who is still expected.
   const pendingInvitees = selectPendingInvitees(participants, invitedUsers);
 
+  // Who is typing (utils/typingNow.ts): the rows draw their cue for exactly these
+  // people, and the line above the list names them.
+  const typists = typingMembers(participants, activityUsers, {
+    kind: typingKind ?? null,
+    currentUserId: currentUser.id,
+    leftUserIds,
+  });
+  const typistIds = new Set(typists.map((member) => member.id));
+  const typingCount = typingKind ? t(typingLineKeys(typingKind).count, { count: typists.length }) : '';
+  const typingLine = ((): { text: string; title?: string } | null => {
+    if (!typingKind) return null;
+    const keys = typingLineKeys(typingKind);
+    if (typists.length === 0) return { text: t(keys.nobody) };
+    // Counted, never named, as the invitees are.
+    if (anonymous) return { text: typingCount };
+    const names = typists.map((member) => getMemberDisplay(member).displayName);
+    const { shown, others } = splitTypingNames(names);
+    const listed = others > 0 ? [...shown, tp('phases.participants.typingOthers', others)] : shown;
+    return {
+      text: t(keys.named, { count: typists.length, names: joinNames(listed, locale) }),
+      // Every name, for the hover: two lines can cut the end.
+      title: t(keys.named, { count: typists.length, names: joinNames(names, locale) }),
+    };
+  })();
+
   return (
-    <div className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex transition-all ${isCollapsed ? 'w-12' : 'w-64'}`}>
+    <div
+      data-testid="participants-panel"
+      className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex transition-all ${isCollapsed ? 'w-12' : 'w-64'}`}
+    >
       <div className="p-4 border-b border-slate-200 flex items-center justify-between">
         {!isCollapsed && (
           <h3 className="text-sm font-bold text-slate-700 flex items-center">
@@ -203,16 +297,48 @@ const SessionParticipantsPanel: React.FC<Props> = ({
           </span>
         </button>
       </div>
+      {/* The collapsed rail counts who is typing, never names them. It sits outside
+          the expand button, so that button's name stays its words. */}
+      {isCollapsed && typingKind && typists.length > 0 && (
+        <div
+          data-testid="typing-now-rail"
+          role="img"
+          aria-label={typingCount}
+          title={typingCount}
+          className="flex flex-col items-center gap-0.5 py-2 text-indigo-700"
+        >
+          <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">{activityIcon(typingKind)}</span>
+          <span className="text-xs font-bold leading-4 tabular-nums">{typists.length}</span>
+        </div>
+      )}
       {!isCollapsed && (
         <>
+          {/* Pinned between the title and the list, outside its scroll, one height
+              whatever it says (two lines reserved): a line that came, went or grew would
+              move every row under the pointer, the hover-revealed "Mark as left" with them.
+              Not a live region: other people's typing changes too often to be announced. */}
+          {typingKind && typingLine && (
+            <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-4 py-2">
+              <p className="flex items-start gap-1.5 text-xs leading-4">
+                <span className="material-symbols-outlined shrink-0 text-base! leading-none text-indigo-700" aria-hidden="true">{activityIcon(typingKind)}</span>
+                <span
+                  data-testid="typing-now"
+                  title={typingLine.title}
+                  className={`min-h-8 min-w-0 line-clamp-2 wrap-break-word ${typists.length > 0 ? 'font-semibold text-indigo-700' : 'text-slate-600'}`}
+                >
+                  {typingLine.text}
+                </span>
+              </p>
+            </div>
+          )}
           <div className="grow overflow-y-auto p-3">
             {orderedParticipants.map((member) => {
               const { displayName, initials } = getMemberDisplay(member);
               const hasLeft = leftSet.has(member.id);
               const isCurrentUser = member.id === currentUser.id;
               const isOnline = connectedUsers.has(member.id);
-              const activity = activityUsers?.[member.id];
               const status = hasLeft ? null : memberStatus(member);
+              const line = hasLeft ? null : memberLine?.(member) ?? null;
               return (
                 <div
                   key={member.id}
@@ -250,12 +376,12 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                         <span className="material-symbols-outlined text-xs leading-none" aria-hidden="true">logout</span>
                         {t('phases.participants.left')}
                       </div>
-                    ) : activity ? (
-                      <TypingIndicator activity={activity} />
+                    ) : line ? (
+                      <RowLine line={line} />
+                    ) : typingKind && typistIds.has(member.id) ? (
+                      <TypingIndicator activity={typingKind} />
                     ) : (
-                      <div className="text-xs text-slate-600 capitalize">
-                        {ROLE_LABEL_KEY[member.role] ? t(ROLE_LABEL_KEY[member.role]) : member.role}
-                      </div>
+                      <div className="text-xs text-slate-600 capitalize">{roleLabel(member.role, t)}</div>
                     )}
                     {contributionCounts && !hasLeft && (
                       <ContributionDots count={contributionCounts[member.id] || 0} colorClass={participantColorClass(member.color)} />

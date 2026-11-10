@@ -90,6 +90,10 @@ export const BASELINE: Record<string, number> = {
   'join-member-picker': 0,
   'retro-group-participant': 0,
   'retro-group-participant-left': 0,
+  // 43.0, with the second participant: the Brainstorm phase while they write a card
+  // (whole screen), and the Vote phase's participants panel, scoped.
+  'retro-brainstorm-typing': 0,
+  'retro-vote-participants': 0,
   // e2e/admin-console-accessibility.spec.ts: the console, whole page, per tab.
   'admin-console-teams': 0,
   'admin-console-team-edit': 0,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Group, Ticket } from '../types';
-import { capVotes, keepOneVotePerItem, mayAddVote, voteBudget } from '../utils/voteBudget';
+import { capVotes, keepOneVotePerItem, mayAddVote, voteBudget, votesCastByVoter, votesLeftFor } from '../utils/voteBudget';
 
 /**
  * How many votes one person may cast (utils/voteBudget.ts), and what lowering
@@ -19,6 +19,69 @@ describe('voteBudget', () => {
     expect(voteBudget({ maxVotes: 5, unlimitedVotes: true })).toBe(Number.POSITIVE_INFINITY);
     // What the screens compute from it stays a number that never runs out.
     expect(voteBudget({ maxVotes: 5, unlimitedVotes: true }) - 40 > 0).toBe(true);
+  });
+});
+
+// The Vote phase's participants panel (43.0) counts, per person, the votes
+// they still have to cast: the same count the rules below judge a vote by, and
+// the number their own "N votes remaining" chip shows them.
+describe('votesCastByVoter', () => {
+  it('counts stacked votes, grouped cards and groups together', () => {
+    const cast = votesCastByVoter({
+      tickets: [ticket('t1', ['a', 'a', 'b']), ticket('t2', ['fac'], 'g1')],
+      groups: [group('g1', ['a'])],
+    });
+    expect(cast.get('a')).toBe(3);
+    expect(cast.get('b')).toBe(1);
+    expect(cast.get('fac')).toBe(1);
+    expect(cast.has('c')).toBe(false);
+  });
+
+  it('counts a voter no roster holds', () => {
+    const cast = votesCastByVoter({ tickets: [ticket('t1', ['gone', '__proto__'])], groups: [] });
+    expect(cast.get('gone')).toBe(1);
+    expect(cast.get('__proto__')).toBe(1);
+  });
+
+  it('answers an empty map with no votes', () => {
+    expect(votesCastByVoter({ tickets: [ticket('t1', [])], groups: [group('g1', [])] }).size).toBe(0);
+  });
+});
+
+describe('votesLeftFor', () => {
+  it('is the number less the votes cast', () => {
+    expect(votesLeftFor({ maxVotes: 5 }, 2)).toBe(3);
+  });
+
+  it('never goes below 0', () => {
+    // The number can be lowered under what someone has already cast.
+    expect(votesLeftFor({ maxVotes: 1 }, 3)).toBe(0);
+  });
+
+  it('counts nothing while votes are unlimited, or with no number', () => {
+    expect(votesLeftFor({ maxVotes: 5, unlimitedVotes: true }, 2)).toBeNull();
+    // A session stored without a number.
+    expect(votesLeftFor({ maxVotes: undefined }, 0)).toBeNull();
+  });
+
+  it('agrees with mayAddVote on whether one more vote goes in', () => {
+    const sessions = [
+      { tickets: [ticket('t1', [])], groups: [] as Group[], settings: { maxVotes: 3, oneVotePerTicket: false } },
+      { tickets: [ticket('t1', ['u1'])], groups: [group('g1', ['u1'])], settings: { maxVotes: 3, oneVotePerTicket: false } },
+      { tickets: [ticket('t1', ['u1', 'u1'])], groups: [group('g1', ['u1'])], settings: { maxVotes: 3, oneVotePerTicket: false } },
+      { tickets: [ticket('t1', ['u1', 'u1', 'u1', 'u1'])], groups: [] as Group[], settings: { maxVotes: 2, oneVotePerTicket: false } },
+      { tickets: [ticket('t1', ['u1'])], groups: [] as Group[], settings: { maxVotes: 0, oneVotePerTicket: false } },
+      {
+        tickets: [ticket('t1', Array.from({ length: 10 }, () => 'u1'))],
+        groups: [] as Group[],
+        settings: { maxVotes: 1, unlimitedVotes: true, oneVotePerTicket: false },
+      },
+    ];
+    const freshItem = ticket('fresh', []);
+    for (const s of sessions) {
+      const left = votesLeftFor(s.settings, votesCastByVoter(s).get('u1') ?? 0) ?? Number.POSITIVE_INFINITY;
+      expect(left > 0).toBe(mayAddVote(s, freshItem, 'u1'));
+    }
   });
 });
 

@@ -10,6 +10,33 @@ export const voteBudget = (settings: Pick<RetroSettings, 'maxVotes' | 'unlimited
   settings.unlimitedVotes ? Number.POSITIVE_INFINITY : settings.maxVotes;
 
 /**
+ * How many votes each voter has cast, cards and groups together, a grouped card's
+ * own votes included and stacked votes one by one: what mayAddVote, capVotes and
+ * the Vote phase's per-person counts all count. Every voter found in the votes is
+ * counted, on a roster or not.
+ */
+export const votesCastByVoter = (session: Pick<RetroSession, 'tickets' | 'groups'>): Map<string, number> => {
+  const cast = new Map<string, number>();
+  [...session.tickets, ...session.groups].forEach((item) =>
+    item.votes.forEach((voter) => cast.set(voter, (cast.get(voter) ?? 0) + 1)));
+  return cast;
+};
+
+/**
+ * The votes someone who has cast `cast` may still cast: the stored number less
+ * what they cast, never below 0 (the number can be lowered under it), and `null`
+ * when there is nothing to count down from (unlimited votes, or no number). What
+ * their own "N votes remaining" chip shows; a number still being typed is not stored.
+ */
+export const votesLeftFor = (
+  settings: Pick<RetroSettings, 'maxVotes' | 'unlimitedVotes'>,
+  cast: number,
+): number | null => {
+  const budget = voteBudget(settings);
+  return Number.isFinite(budget) ? Math.max(0, budget - cast) : null;
+};
+
+/**
  * Whether one more vote of `userId` may go on `item`: the voter has votes left
  * (cards and groups counted together) and, with one vote per item, has not
  * voted on it yet. Read on the state a write is built on, not only on the
@@ -25,8 +52,7 @@ export const mayAddVote = (
   item: { votes: string[] },
   userId: string,
 ): boolean => {
-  const cast = [...session.tickets, ...session.groups]
-    .reduce((sum, entry) => sum + entry.votes.filter((voter) => voter === userId).length, 0);
+  const cast = votesCastByVoter(session).get(userId) ?? 0;
   if (cast >= voteBudget(session.settings)) return false;
   return !session.settings.oneVotePerTicket || !item.votes.includes(userId);
 };
@@ -42,9 +68,8 @@ export const mayAddVote = (
  * took any vote back.
  */
 export const capVotes = (session: Pick<RetroSession, 'tickets' | 'groups'>, max: number): boolean => {
-  const cast = new Map<string, number>();
+  const cast = votesCastByVoter(session);
   const items = [...session.tickets, ...session.groups];
-  items.forEach((item) => item.votes.forEach((voter) => cast.set(voter, (cast.get(voter) ?? 0) + 1)));
 
   let removed = false;
   cast.forEach((total, voter) => {

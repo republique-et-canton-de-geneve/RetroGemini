@@ -2,6 +2,7 @@ import { io, Socket } from 'socket.io-client';
 import { RetroSession, HealthCheckSession, ParticipantActivity } from '../types';
 import { getTeamSessionToken } from './dataService';
 import { SESSION_REVOKED, isSessionRevoked, noteRevokedAnswer, onSessionTokenChanged } from './sessionRevocation';
+import { toParticipantActivity } from '../utils/participantActivity.js';
 
 type SyncedSession = RetroSession | HealthCheckSession;
 type SessionUpdateCallback = (session: SyncedSession) => void;
@@ -510,8 +511,18 @@ class SyncService {
       this.rosterCallbacks.forEach(cb => cb(data));
     });
 
-    socket.on('participant-activity', (data: { userId: string; userName: string; activity: ParticipantActivity | null }) => {
-      this.activityCallbacks.forEach(cb => cb(data));
+    socket.on('participant-activity', (data: unknown) => {
+      // Read through the relay's own rule: during a rolling update a pod from before
+      // 43.0 relays whatever a client sent. An event that names no user is dropped.
+      if (!data || typeof data !== 'object') return;
+      const { userId, userName, activity } = data as Record<string, unknown>;
+      if (typeof userId !== 'string' || userId === '') return;
+      const event = {
+        userId,
+        userName: typeof userName === 'string' ? userName : '',
+        activity: toParticipantActivity(activity),
+      };
+      this.activityCallbacks.forEach((cb) => cb(event));
     });
 
     socket.on('disconnect', () => {

@@ -129,6 +129,26 @@ reading `git log`. If the file has grown a history section, prune it.
 
 ### Recently closed
 
+- **The typing signal could blank every expanded participants panel of a room** (43.0).
+  - **Cause.** Any team credential, an invitation link included, could send
+    `participant-activity` with any JSON value. The server relayed it, and the
+    panel looked it up as an object key, so `'__proto__'` made the label an
+    object and React threw with no error boundary. A participant's own `role`,
+    which every client writes into the session, did the same.
+  - **Fix, at four layers:**
+    - the relay sends only `'brainstorm'`, `'proposal'` or `null`, and only
+      from a joined socket with a user id;
+    - `syncService` reads what it receives through the same rule
+      (`utils/participantActivity.js`; pods from before 43.0 relay raw values
+      during the rollout);
+    - the panel reads only own entries of its phase's kind (`utils/typingNow.ts`);
+    - the activity and role labels are chosen by comparison, never by lookup.
+  - **Residual.** A pre-43.0 client behind a pre-43.0 pod stays exposed until
+    either is replaced.
+  - **Tests:** `participantActivity`, `typingNow`, `socketParticipantActivity`,
+    `syncService`, `participantsPanel`, `sessionParticipantActivity`.
+
+  — 43.0 — 2026-11-10
 - **D3b — a password change signs out the team's open sessions, on every
   route and on the socket, without cutting off the facilitator who made it**
   (Jira plan decision D3b). Team session tokens carry

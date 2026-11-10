@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import ParticipantsPanel from '../components/session/ParticipantsPanel';
 import TicketCommentsModal from '../components/session/TicketCommentsModal';
-import type { RetroSession, Ticket, User } from '../types';
+import type { ParticipantActivity, RetroSession, Ticket, User } from '../types';
 import { effectivePair } from './helpers/tailwindTheme';
 
 /**
@@ -72,7 +72,12 @@ const makeSession = (overrides: Partial<RetroSession> = {}): RetroSession => ({
 
 const initialsOf = (member: User) => member.name.slice(0, 2).toUpperCase();
 
-const renderPanel = (session: RetroSession, participants: User[], currentUser: User = facilitator) =>
+const renderPanel = (
+  session: RetroSession,
+  participants: User[],
+  currentUser: User = facilitator,
+  { activityUsers = {}, isCollapsed = false }: { activityUsers?: Record<string, ParticipantActivity>; isCollapsed?: boolean } = {},
+) =>
   render(
     <ParticipantsPanel
       session={session}
@@ -80,8 +85,8 @@ const renderPanel = (session: RetroSession, participants: User[], currentUser: U
       connectedUsers={new Set(participants.map((p) => p.id))}
       currentUser={currentUser}
       isFacilitator={currentUser.role === 'facilitator'}
-      isCollapsed={false}
-      activityUsers={{}}
+      isCollapsed={isCollapsed}
+      activityUsers={activityUsers}
       onToggleCollapse={vi.fn()}
       onInvite={vi.fn()}
       onToggleLeft={vi.fn()}
@@ -152,6 +157,46 @@ describe('the current user\'s own row', () => {
     renderPanel(session, [facilitator, me], me);
     const progress = within(rowOf('Mina')).getByText('0/2');
     const pair = effectivePair(progress);
+    expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(FLOOR);
+  });
+
+  // 43.0: the chip paints its own background, so it reads the same on the
+  // tinted row as on every other one.
+  it('the votes-left chip clears 4.5:1 on the tinted row and on another row', () => {
+    renderPanel(makeSession({ phase: 'VOTE' }), [facilitator, me], me);
+    for (const name of ['Mina', 'Indigo']) {
+      const pair = effectivePair(within(rowOf(name)).getByText('5 votes left'));
+      expect(pair.bg, name).toBe('indigo-50');
+      expect(pair.ratio, `${name}: ${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(FLOOR);
+    }
+  });
+});
+
+// 43.0: the line above the list that names who is typing, and its count on the
+// collapsed rail. Nobody hovers anything to see them, but the e2e audit only
+// walks the line while someone types: both states are measured here.
+describe('the panel\'s typing line and rail', () => {
+  const lime = palette.find((member) => member.name === 'Lime') as User;
+
+  it('the line clears 4.5:1, someone writing or nobody', () => {
+    const { unmount } = renderPanel(makeSession(), [facilitator, lime]);
+    const nobody = effectivePair(screen.getByTestId('typing-now'));
+    expect(nobody.bg).toBe('slate-50');
+    expect(nobody.fg).toBe('slate-600');
+    expect(nobody.ratio, `${nobody.fg} on ${nobody.bg}`).toBeGreaterThanOrEqual(FLOOR);
+    unmount();
+
+    renderPanel(makeSession(), [facilitator, lime], facilitator, { activityUsers: { li: 'brainstorm' } });
+    const writing = effectivePair(screen.getByTestId('typing-now'));
+    expect(writing.bg).toBe('slate-50');
+    expect(writing.fg).toBe('indigo-700');
+    expect(writing.ratio, `${writing.fg} on ${writing.bg}`).toBeGreaterThanOrEqual(FLOOR);
+  });
+
+  it('the collapsed rail\'s count clears 4.5:1', () => {
+    renderPanel(makeSession(), [facilitator, lime], facilitator, { activityUsers: { li: 'brainstorm' }, isCollapsed: true });
+    const pair = effectivePair(within(screen.getByTestId('typing-now-rail')).getByText('1'));
+    expect(pair.bg).toBe('white');
     expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(FLOOR);
   });
 });
