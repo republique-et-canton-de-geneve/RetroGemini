@@ -492,10 +492,11 @@ describe('deployment configuration parity (audit H7.4)', () => {
 
 describe('base deployment manifest (audit H7.1)', () => {
   /**
-   * The image line is machine-owned: `docker-deploy.yml` rewrites it with
-   * `sed` and commits it on every deployment, so the tag is whatever was last
-   * *pushed to the registry* — not necessarily the current `VERSION`, since
-   * deploys are dispatched manually while `VERSION` moves with every `Y` bump.
+   * The image line is retagged by hand in the pull request that bumps
+   * `VERSION`'s major (decision D7 deleted the deploy workflow's `sed` and
+   * auto-commit), so the tag lags `VERSION` by the `Y` bumps since the last
+   * retag: deploys are dispatched manually while `VERSION` moves with every
+   * `Y` bump.
    *
    * Demanding exact equality would therefore be wrong twice over: it would make
    * ordinary pull requests claim an image tag that was never built, and it would

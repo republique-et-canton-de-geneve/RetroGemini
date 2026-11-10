@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [43.0] - 2026-11-10
+
+### Added
+- Les super administrateurs voient dans l'onglet Équipes combien de rétrospectives compte chaque équipe, et peuvent trier les équipes selon ce nombre
+
 ## [42.0] - 2026-10-28
 
 ### Added
