@@ -68,7 +68,7 @@ import {
     moveGesture,
     startGesture,
 } from './session/groupingTouch';
-import { aimClaimedTap, ignoresClaimedTap, useDoubleGestureGuard } from './session/doubleGestureGuard';
+import { pressesClaimedTap, useDoubleGestureGuard } from './session/doubleGestureGuard';
 import {
   BrainstormSelection,
   canMoveGroupInBrainstorm,
@@ -722,13 +722,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // What the press began on.
     target: Element | null;
   }>({ active: false, leaving: false, dispatching: null, leave: null, dragSource: null, boardDrag: false, safety: null, seq: 0, target: null });
-  // What the gesture before the next one aimed at, and whether what lies
-  // under the pointer moved since: the next press of a double click, or the
-  // next tap of a double tap, presses nothing on another control. Mounted
-  // before the press below, which it stops (components/session/
-  // doubleGestureGuard.ts, shared with the health check). The press marks the
-  // card editor it closes there ('editor'), and the taps the board claims
-  // aim there.
+  // The next press of a double click, or the next tap of a double tap,
+  // presses nothing but what the first pressed. Mounted before the press
+  // below, which it stops (components/session/doubleGestureGuard.ts, shared
+  // with the health check); the taps the board claims ask it too
+  // (actOnClaimedTap).
   const gestureRef = useDoubleGestureGuard();
   // A press in a group's title is the field's: the group is not dragged from
   // there while it lasts (begin).
@@ -1202,7 +1200,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     const leave = press.leave;
     if (!leave || leave.folded || !press.dispatching || press.dispatching.eventPhase === Event.NONE) return [];
     leave.folded = true;
-    gestureRef.current.boardMoved = 'editor';
     setEditingTicketId(current => (current === leave.ticketId ? null : current));
     // Closed, it is no longer drawn as left: opened again before the press
     // ends — the keyboard's click took the text while a popup kept the
@@ -1235,7 +1232,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     if (!leave) return false;
     // Closed here, or already by the write of its click.
     const closes = !leave.folded;
-    if (closes) gestureRef.current.boardMoved = 'editor';
     setEditingTicketId(current => (current === leave.ticketId ? null : current));
     if (leave.text !== null && closes && sessionRef.current?.tickets.some(t => t.id === leave.ticketId)) {
       updateSession(writeTicketText(leave.ticketId, leave.text));
@@ -1483,24 +1479,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // goes alone when the tap writes nothing (a hold).
   const actOnClaimedTap = (e: React.TouchEvent, point: TouchPoint, perform: () => void) => {
     e.preventDefault();
-    const gesture = gestureRef.current;
     const aimedAt = e.currentTarget as Element;
-    // The next tap of a double tap, once the tap before moved what this one
-    // reaches — an editor it closed, a dialog's backdrop it took away, a hint
-    // it drew a line longer — is ignored (ignoresClaimedTap).
-    if (ignoresClaimedTap(gesture, aimedAt, point, e.timeStamp)) return;
+    // The next tap of a double tap acts only on the card or the group the
+    // first reached, never on one that came under the finger.
+    if (!pressesClaimedTap(gestureRef.current, aimedAt, point, e.timeStamp)) return;
     if (emojiPickerOpenId && !emojiPickerRef.current?.contains(e.target as Node)) setEmojiPickerOpenId(null);
     const active = document.activeElement;
-    // Left, the card's editor closes, and what lies under the finger moves.
-    aimClaimedTap(gesture, aimedAt, point, e.timeStamp);
-    gesture.boardMoved = !!active && active === editorFieldRef.current ? 'editor' : null;
-    // A tap that puts down what was held — into a group, onto a card, back
-    // where it was — lays the board out again under the finger: the card it
-    // dropped came there, its own Delete under the next tap, which deleted it
-    // for everyone (pass 16 of 42.1). An editor it closed too stays the
-    // reason: its half second runs on from every tap it stops, which kept the
-    // third tap of a triple tap off the card that grew back (pass 13).
-    const putsHoldDown = !!draggedTicket || !!movingItem;
     if (active instanceof HTMLElement && active !== document.body) {
       const collected: Array<(s: RetroSession) => void> = [];
       collectingTapBlurWritesRef.current = collected;
@@ -1512,7 +1496,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       tapBlurWritesRef.current.push(...collected);
     }
     perform();
-    if (putsHoldDown && gesture.boardMoved !== 'editor') gesture.boardMoved = 'act';
     if (tapBlurWritesRef.current.length > 0) updateSession(() => {});
   };
 

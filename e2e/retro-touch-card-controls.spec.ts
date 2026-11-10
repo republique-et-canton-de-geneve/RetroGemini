@@ -784,9 +784,9 @@ test('taps after one on a group’s title that closes an editor press nothing th
     const { first, next: at } = pair;
     // The editor took its Edit off the page when it opened: a tap on the Edit
     // that came back, at the same point within half a second of the first, is
-    // the next of a double tap, and presses nothing (aimLeftPage). A person
-    // closes the editor with a gesture of their own, which starts over; the
-    // test closed it with none.
+    // the next of a double tap on another element, and presses nothing
+    // (doubleGestureGuard). A person closes the editor with a gesture of their
+    // own, which starts over; the test closed it with none.
     await page.waitForTimeout(600);
     await openEditor(`${long} too`, ' again');
     expect(await rectOf(title)).toEqual(titleRect);
@@ -887,11 +887,12 @@ for (const device of ['phone', 'computer'] as const) test(`a double ${device ===
   }
 });
 
-// Review finding (pass 15 of 42.1): the half second a deletion starts ran on
-// from every tap it stopped. A facilitator clearing cards at two taps a second
-// deleted the first and nothing after it, however long the pace lasted, though
-// the browser counted none of those taps as the next of a double tap.
-test('taps at a steady pace on the Delete that comes up under the finger delete every other card, on a phone', async ({ browser }) => {
+// The simple rule's stated cost (AGENTS.md → The double-gesture guard): taps
+// less than half a second apart are one gesture, each counted from the one
+// before, as a browser counts them. A facilitator clearing cards at two taps a
+// second deletes the first, and the next once the pace pauses — though the
+// browser counts none of those taps as the next of a double tap.
+test('taps at a steady pace on the Delete that comes up under the finger delete one card, and the next after a pause, on a phone', async ({ browser }) => {
   const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
   const context = await browser.newContext({ ...phone, locale: 'en-US' });
   await context.addInitScript(() => {
@@ -930,15 +931,20 @@ test('taps at a steady pace on the Delete that comes up under the finger delete 
     };
     await page.touchscreen.tap(at.x, at.y);
     for (let n = 0; n < 3; n += 1) await tapAfterLift(450);
+    await page.waitForTimeout(200);
+    // The first deleted the card under the finger; the three after it, each
+    // the next of the one before, nothing.
+    await expect(page.locator('[data-ticket-id]')).toHaveCount(4);
+    await tapAfterLift(900);
     await page.waitForTimeout(700);
 
     const taps = await page.evaluate(() => (window as unknown as { __taps: Array<{ type: string; at: number; detail: number }> }).__taps);
     const presses = taps.filter((t) => t.type === 'mousedown');
     const lifts = taps.filter((t) => t.type === 'touchend');
-    expect(presses.map((t) => t.detail)).toEqual([1, 1, 1, 1]);
+    expect(presses.map((t) => t.detail)).toEqual([1, 1, 1, 1, 1]);
     for (const n of [1, 2, 3]) expect(presses[n].at - lifts[n - 1].at).toBeLessThanOrEqual(500);
-    // The first and the third deleted the card under the finger; the second
-    // and the fourth, the next of the one before by the board's time, nothing.
+    expect(presses[4].at - lifts[3].at).toBeGreaterThan(500);
+    // After the pause, the next card under the finger.
     await expect(page.locator('[data-ticket-id]')).toHaveCount(3);
     for (const text of ['Card 1', 'Card 2', 'Card 3']) await expect(card(page, text)).toBeVisible();
     expect(sent.length - before).toBe(2);
@@ -1141,6 +1147,52 @@ test('a double tap past the browser’s count on a card’s vote keeps the vote,
     expect(sent.length - before).toBe(1);
     await expect(takeBack).toBeVisible();
     expect((await controlAt(page, second)).label).toBe('Take back one of your votes on this ticket');
+  } finally {
+    await context.close();
+  }
+});
+
+// The scenario that showed the heuristic's last hole (HARDENING_STATUS.md →
+// H54 → B): two taps half a second apart on a card's Comments. The first
+// opened the dialog; the second, past the browser's count, reached the
+// dialog's backdrop and closed it again. It is not what the first tap pressed.
+test('a double tap past the browser’s count on a card’s Comments leaves its dialog open, on a phone', async ({ browser }) => {
+  const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
+  const context = await browser.newContext({ ...phone, locale: 'en-US' });
+  await context.addInitScript(() => {
+    const seen: Array<{ type: string; at: number; detail: number }> = [];
+    (window as unknown as { __taps: typeof seen }).__taps = seen;
+    for (const type of ['touchend', 'mousedown']) {
+      window.addEventListener(type, (e) => seen.push({ type, at: e.timeStamp, detail: (e as MouseEvent).detail ?? 0 }), true);
+    }
+  });
+  const page = await context.newPage();
+  try {
+    await startOpenBoard(page, `${TEAM_NAME}-comments`);
+    const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+    await field.fill('Card with comments');
+    await page.keyboard.press('Enter');
+    await expect(card(page, 'Card with comments')).toBeVisible();
+    await field.blur();
+    await page.waitForTimeout(700);
+    const box = (await card(page, 'Card with comments').getByTestId('ticket-comment-btn').boundingBox())!;
+    const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await page.evaluate(() => { (window as unknown as { __taps: unknown[] }).__taps.length = 0; });
+
+    await page.touchscreen.tap(at.x, at.y);
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.evaluate((target) => new Promise<void>((resolve) => {
+      const seen = (window as unknown as { __taps: Array<{ type: string; at: number }> }).__taps;
+      const lift = [...seen].reverse().find((t) => t.type === 'touchend');
+      setTimeout(resolve, Math.max(0, target - (performance.now() - (lift?.at ?? 0))));
+    }), 450);
+    await page.touchscreen.tap(at.x, at.y);
+    await page.waitForTimeout(700);
+
+    const presses = (await page.evaluate(() => (window as unknown as { __taps: Array<{ type: string; detail: number }> }).__taps))
+      .filter((t) => t.type === 'mousedown');
+    expect(presses.map((t) => t.detail)).toEqual([1, 1]);
+    await expect(page.getByRole('dialog')).toBeVisible();
   } finally {
     await context.close();
   }
