@@ -16,7 +16,8 @@ const session: Record<keyof typeof en, string> = {
   'session.board.brainstormTitle': 'Brainstorming',
   'session.board.groupTitle': 'Regrouper les idées',
   'session.board.voteTitle': 'Vote',
-  'session.board.votesRemaining': 'Votes restants\u00a0: {count}',
+  'session.board.votesRemaining_one': 'Vote restant\u00a0: {count}',
+  'session.board.votesRemaining_other': 'Votes restants\u00a0: {count}',
   'session.board.suggestGroups': 'Suggérer des groupes avec l’IA',
   'session.board.suggestGroupsHint':
     'Demander à l’assistant de proposer des regroupements. Vous validerez chaque suggestion avant qu’elle soit appliquée.',

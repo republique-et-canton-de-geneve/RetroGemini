@@ -31,17 +31,24 @@ export const activityOf = (
  * the order the signals came in), never the reader, never anyone marked as having
  * left. The rows draw their cue for exactly these people, so the line's count and
  * the rows cannot disagree.
+ *
+ * `leftUserIds` is `session.leftUsers`, which every client writes and the server
+ * stores as it came: a `null` is read as a removal there, and anything that is not
+ * a list reads here as nobody having left. Read with `.includes` as it came, a
+ * `null` threw on every render of a guided Brainstorm or Discuss and blanked every
+ * screen of the room (review of 43.0).
  */
 export const typingMembers = <T extends { id: string }>(
   participants: readonly T[],
   activityUsers: Readonly<Record<string, unknown>> | undefined,
-  options: { kind: ParticipantActivity | null; currentUserId: string; leftUserIds?: readonly string[] },
+  options: { kind: ParticipantActivity | null; currentUserId: string; leftUserIds?: readonly string[] | null },
 ): T[] => {
-  const { kind, currentUserId, leftUserIds = [] } = options;
+  const { kind, currentUserId } = options;
   if (kind === null) return [];
+  const left: readonly unknown[] = Array.isArray(options.leftUserIds) ? options.leftUserIds : [];
   return participants.filter((member) =>
     member.id !== currentUserId
-    && !leftUserIds.includes(member.id)
+    && !left.includes(member.id)
     && activityOf(activityUsers, member.id) === kind);
 };
 

@@ -100,6 +100,36 @@ describe('typingMembers', () => {
   it('answers nobody where the phase types nothing', () => {
     expect(typingMembers([a, b], { a: 'brainstorm', b: 'proposal' }, { kind: null, currentUserId: 'me' })).toEqual([]);
   });
+
+  // Every client writes `leftUsers` into the session, and the server stores a
+  // `null` as it came (sessionGuard.js reads it as a removal). `.includes` on
+  // it threw on every render of a guided Brainstorm or Discuss, and with no
+  // error boundary the whole screen went blank, for everyone, stored.
+  it.each([
+    ['null', null],
+    ['a string that holds member ids', 'abcd'],
+    ['an object', { d: true }],
+  ])('reads a left list that is %s as nobody having left, without throwing', (_label, leftUserIds) => {
+    const reader = member('me');
+    const signals = { me: 'brainstorm', a: 'brainstorm', d: 'brainstorm' };
+
+    expect(
+      typingMembers([reader, a, b, d], signals, {
+        kind: 'brainstorm',
+        currentUserId: 'me',
+        leftUserIds: leftUserIds as unknown as readonly string[],
+      }),
+    ).toEqual([a, d]);
+  });
+
+  it('names in the order of the list it is given, whatever the ids', () => {
+    // Zoe is listed before Adam, and their ids sort the other way.
+    const zoe = { id: 'z', name: 'Zoe' };
+    const adam = { id: 'a', name: 'Adam' };
+
+    expect(typingMembers([zoe, adam], { a: 'brainstorm', z: 'brainstorm' }, { kind: 'brainstorm', currentUserId: 'me' }))
+      .toEqual([zoe, adam]);
+  });
 });
 
 describe('splitTypingNames', () => {

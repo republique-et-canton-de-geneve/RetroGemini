@@ -174,6 +174,28 @@ describe('ParticipantsPanel - contribution counts', () => {
     expect(container.querySelector('[title$="added"]')).toBeFalsy();
     expect(container.querySelector('[title="No tickets added yet"]')).toBeFalsy();
   });
+
+  // Drawn only once the session held a card, the line came with the first card
+  // anyone wrote, on every row at once, and moved every row below under the
+  // facilitator's pointer. It is drawn from the start of Brainstorm, with the
+  // facilitator's own phase change.
+  it('draws "no tickets" on every row that has not left from the start of Brainstorm', () => {
+    const session = makeSession({ phase: 'BRAINSTORM', participants: [facilitator, alice, bob], leftUsers: ['b'], tickets: [] });
+
+    render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, alice, bob]}
+        activityUsers={{}}
+      />
+    );
+
+    for (const name of ['Fran', 'Alice']) {
+      expect(rowOf(name).querySelector('[title="No tickets added yet"]'), name).not.toBeNull();
+    }
+    expect(rowOf('Bob').querySelector('[title="No tickets added yet"]')).toBeNull();
+  });
 });
 
 describe('ParticipantsPanel - participants who left the session', () => {
@@ -612,7 +634,7 @@ const anonymousDisplay = (roster: User[]) => (member: User) => {
 };
 
 // 43.0: in the Vote phase each row says, in place of the role, the votes its
-// person still has to cast, so the facilitator can follow the vote without
+// person can still place, so the facilitator can follow the vote without
 // asking. It is the number the person's own "N votes remaining" shows them.
 describe('ParticipantsPanel - votes left in the Vote phase', () => {
   const everyone = [facilitator, alice, bob, carol];
@@ -634,7 +656,7 @@ describe('ParticipantsPanel - votes left in the Vote phase', () => {
       />
     );
 
-  it('counts in words the votes each person still has to cast, cards and groups together, the facilitator included', () => {
+  it('counts in words the votes each person can still place, cards and groups together, the facilitator included', () => {
     renderVote(voteSession({
       tickets: [
         { ...ticket('a'), votes: ['a', 'a', 'b'] },
@@ -737,6 +759,29 @@ describe('ParticipantsPanel - votes left in the Vote phase', () => {
     expect(classes.filter((token) => /^(py-|border$|border-)/.test(token))).toEqual([]);
     const icon = chip.querySelector('.material-symbols-outlined');
     expect(icon?.className.split(/\s+/)).toEqual(expect.arrayContaining(['text-xs!', 'leading-none']));
+    // A label too long for the row ("12 votes restants" in a wide font) is cut on
+    // its one line rather than wrapped onto a second, which would grow the row.
+    const label = chip.querySelector(':scope > span:not(.material-symbols-outlined)');
+    expect(label?.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
+  });
+
+  // With "1 vote/item" a person can place at most one vote on each item that
+  // does not hold theirs yet, however many votes the number leaves them: the
+  // row counts the votes they can still place (utils/voteBudget.ts →
+  // votesLeftToPlace), never ones no item will take.
+  it('counts only the votes that can still be placed, with one vote per item', () => {
+    const items = {
+      tickets: [{ ...ticket('a'), votes: ['a'] }],
+      groups: [{ id: 'g1', title: 'Topic', colId: 'col-1', votes: ['a'] }]
+    };
+    const { unmount } = renderVote(voteSession(items, { oneVotePerTicket: true }));
+    expect(within(rowOf('Alice')).getByText('0 votes left')).toBeTruthy();
+    // Nobody else has voted: two items, so two votes they can place, not five.
+    expect(within(rowOf('Bob')).getByText('2 votes left')).toBeTruthy();
+    unmount();
+
+    renderVote(voteSession({ ...items, groups: [{ ...items.groups[0], votes: [] }] }, { oneVotePerTicket: true }));
+    expect(within(rowOf('Alice')).getByText('1 vote left')).toBeTruthy();
   });
 
   it('follows the number when it is lowered', () => {
@@ -850,7 +895,7 @@ describe('ParticipantsPanel - who is typing, above the list', () => {
       { participants: [facilitator, ...crowd] }
     );
     expect(line().textContent).toMatch(/^Writing now \(30\): P01, P02,? and 28 others$/);
-    // Two lines can cut the end of the names; the hover has every one.
+    // Three lines can still cut the end of the names; the hover has every one.
     expect(line().getAttribute('title')).toContain('P30');
     const roster = ['Fran', ...crowd.map((member) => member.name)];
     expect(rowNames(roster)).toEqual(roster);
@@ -905,9 +950,12 @@ describe('ParticipantsPanel - who is typing, above the list', () => {
     expect(line().getAttribute('title')).toBeNull();
   });
 
-  it('reserves two lines named, anonymous or nobody', () => {
+  // Three lines, not two: with first and last names, two lines cut the third
+  // name in French and the "and N others" in English (review of 43.0, measured
+  // in Inter and DejaVu Sans for 1 to 5, 12 and 30 people writing).
+  it('reserves three lines named, anonymous or nobody', () => {
     const named = renderTyping({ a: 'brainstorm' });
-    expect(classesOf(line())).toEqual(expect.arrayContaining(['min-h-8', 'line-clamp-2']));
+    expect(classesOf(line())).toEqual(expect.arrayContaining(['min-h-12', 'line-clamp-3']));
     named.unmount();
 
     const session = makeSession({ participants: everyone });
@@ -921,11 +969,11 @@ describe('ParticipantsPanel - who is typing, above the list', () => {
         getMemberDisplay={anonymousDisplay(everyone)}
       />
     );
-    expect(classesOf(line())).toEqual(expect.arrayContaining(['min-h-8', 'line-clamp-2']));
+    expect(classesOf(line())).toEqual(expect.arrayContaining(['min-h-12', 'line-clamp-3']));
     anonymous.unmount();
 
     renderTyping({});
-    expect(classesOf(line())).toEqual(expect.arrayContaining(['min-h-8', 'line-clamp-2']));
+    expect(classesOf(line())).toEqual(expect.arrayContaining(['min-h-12', 'line-clamp-3']));
   });
 
   it('counts on the collapsed rail', () => {
@@ -1029,5 +1077,70 @@ describe('ParticipantsPanel - who is typing, above the list', () => {
     const css = readFileSync(join(__dirname, '..', 'index.css'), 'utf8');
 
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.typing-dot\s*\{\s*animation:\s*none;?\s*\}/);
+  });
+
+  it("names who is writing in the list's order, never the alphabet's", () => {
+    const zoe = makeUser({ id: 'z', name: 'Zoe' });
+    const adam = makeUser({ id: 'ad', name: 'Adam' });
+    renderTyping({ ad: 'brainstorm', z: 'brainstorm' }, {}, { participants: [facilitator, zoe, adam] });
+
+    expect(line().textContent).toBe('Writing now (2): Zoe and Adam');
+  });
+
+  it('says nobody is writing in an anonymous retro too, with nothing to hover', () => {
+    const session = makeSession({ participants: everyone });
+    session.settings.isAnonymous = true;
+    render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={everyone}
+        activityUsers={{}}
+        getMemberDisplay={anonymousDisplay(everyone)}
+      />
+    );
+
+    expect(line().textContent).toBe('Nobody is writing');
+    expect(line().getAttribute('title')).toBeNull();
+  });
+});
+
+// Every client writes `leftUsers` into the session, and the server stores and
+// broadcasts a `null` as it came (sessionGuard.js reads it as a removal). The
+// typing rule read it with `.includes`, which threw on every render of a guided
+// Brainstorm or Discuss: with no error boundary, every screen of the room went
+// blank, and the stored state blanked it again after a reload.
+describe('ParticipantsPanel - a left list another client wrote as null', () => {
+  const everyone = [facilitator, alice, bob];
+  const leftUsers = null as unknown as string[];
+
+  it('counts who is writing on the collapsed rail in Brainstorm', () => {
+    render(
+      <ParticipantsPanel
+        {...baseProps}
+        isCollapsed
+        session={makeSession({ phase: 'BRAINSTORM', participants: everyone, leftUsers })}
+        participants={everyone}
+        activityUsers={{ a: 'brainstorm' }}
+      />
+    );
+
+    expect(within(screen.getByRole('img', { name: 'Writing now (1)' })).getByText('1')).toBeTruthy();
+  });
+
+  it('draws every row and the line in Discuss', () => {
+    render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={makeSession({ phase: 'DISCUSS', participants: everyone, leftUsers })}
+        participants={everyone}
+        activityUsers={{ b: 'proposal' }}
+      />
+    );
+
+    expect(screen.getByTestId('typing-now').textContent).toBe('Proposing an action (1): Bob');
+    expect(screen.getAllByTestId('participant-row')).toHaveLength(3);
+    expect(within(rowOf('Alice')).getByText('participant')).toBeTruthy();
+    expect(within(rowOf('Bob')).getByText('proposing action')).toBeTruthy();
   });
 });

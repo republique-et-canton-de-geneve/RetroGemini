@@ -263,7 +263,7 @@ test.describe('Accessibility baseline (audit H42)', () => {
       await page.mouse.move(0, 0);
 
       // The Vote phase's participants panel (43.0): each row says in words the votes its
-      // person still has to cast. Audited on its own: the Vote phase is a screen this walk
+      // person can still place. Audited on its own: the Vote phase is a screen this walk
       // never audits whole (AGENTS.md, Before Committing, item 8). Nobody has finished yet.
       await page.getByRole('button', { name: 'VOTE', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Vote' })).toBeVisible({ timeout: 15_000 });

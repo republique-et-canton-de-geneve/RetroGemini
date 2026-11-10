@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import Session from '../components/Session';
 import LanguageProvider from '../i18n/LanguageProvider';
-import { createTranslator } from '../i18n/translate';
+import { createPluralTranslator, createTranslator } from '../i18n/translate';
 import {
   getGroupingAriaLabel,
   getGroupingButtonText
@@ -210,6 +210,20 @@ describe('Session helpers — French translator', () => {
       .toBe('Selected for grouping: Untitled ticket. Activate or press Escape to cancel.');
     expect(getBrainstormMoveAriaLabel({ name: 'Ops', kind: 'group', heldKind: null, isSelected: false }))
       .toBe('Move the group Ops to another column.');
+  });
+
+  // The Vote bar said "1 votes remaining", right above the panel's correctly
+  // pluralised "1 vote left" (review of 43.0). French reads 0 and 1 in the singular.
+  it('says the votes remaining in the singular for one vote, in both languages', () => {
+    const enPlural = createPluralTranslator('en');
+    const frPlural = createPluralTranslator('fr');
+
+    expect(enPlural('session.board.votesRemaining', 1)).toBe('1 vote remaining');
+    expect(enPlural('session.board.votesRemaining', 0)).toBe('0 votes remaining');
+    expect(enPlural('session.board.votesRemaining', 4)).toBe('4 votes remaining');
+    expect(frPlural('session.board.votesRemaining', 0)).toBe('Vote restant\u00a0: 0');
+    expect(frPlural('session.board.votesRemaining', 1)).toBe('Vote restant\u00a0: 1');
+    expect(frPlural('session.board.votesRemaining', 4)).toBe('Votes restants\u00a0: 4');
   });
 });
 

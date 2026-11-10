@@ -4,7 +4,7 @@ import { render, screen, within } from '@testing-library/react';
 import ParticipantsPanel from '../components/session/ParticipantsPanel';
 import TicketCommentsModal from '../components/session/TicketCommentsModal';
 import type { ParticipantActivity, RetroSession, Ticket, User } from '../types';
-import { effectivePair } from './helpers/tailwindTheme';
+import { effectivePair, tokenContrast } from './helpers/tailwindTheme';
 
 /**
  * The avatars as the screens render them, measured against Tailwind's theme.
@@ -173,8 +173,10 @@ describe('the current user\'s own row', () => {
 });
 
 // 43.0: the line above the list that names who is typing, and its count on the
-// collapsed rail. Nobody hovers anything to see them, but the e2e audit only
-// walks the line while someone types: both states are measured here.
+// collapsed rail. The e2e audits walk both states of the line (nobody writing,
+// in 'retro-brainstorm' and on the open board, and someone writing, in
+// 'retro-brainstorm-typing'); the collapsed rail is measured only here, since no
+// audited state has a collapsed panel while someone types.
 describe('the panel\'s typing line and rail', () => {
   const lime = palette.find((member) => member.name === 'Lime') as User;
 
@@ -198,6 +200,41 @@ describe('the panel\'s typing line and rail', () => {
     const pair = effectivePair(within(screen.getByTestId('typing-now-rail')).getByText('1'));
     expect(pair.bg).toBe('white');
     expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(FLOOR);
+  });
+});
+
+// The check is the only sign on a row that its person is done ("Finished",
+// "Vote recorded"): a graphic needed to understand the row, so WCAG 1.4.11's
+// 3:1 against what it is drawn on. It measured 1.73 to 2.46:1 in emerald-400
+// and -500 (review of 43.0). The health check draws the same check
+// (SessionParticipantsPanel → RowStatus), so this measures it too.
+describe('the row\'s status check', () => {
+  const NON_TEXT_FLOOR = 3;
+  const me = user('me', 'Mina', 'bg-amber-500');
+  const lime = palette.find((member) => member.name === 'Lime') as User;
+
+  const checkOf = (name: string, label: string) => within(rowOf(name)).getByRole('img', { name: label });
+
+  it.each([
+    ['the soft tone, "Finished"', makeSession({ phase: 'VOTE', finishedUsers: ['me', 'li'] }), 'Finished'],
+    ['the strong tone, "Vote recorded"', makeSession({ phase: 'WELCOME', happiness: { me: 4, li: 3 } }), 'Vote recorded'],
+  ])('%s clears 3:1 on the tinted row and on another row', (_label, session, label) => {
+    renderPanel(session, [facilitator, me, lime], me);
+    for (const [name, surface] of [['Mina', 'indigo-50'], ['Lime', 'white']]) {
+      const pair = effectivePair(checkOf(name, label));
+      expect(pair.bg, name).toBe(surface);
+      expect(pair.ratio, `${name}: ${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+    }
+  });
+
+  it('keeps the strong tone darker than the soft one', () => {
+    const soft = renderPanel(makeSession({ phase: 'VOTE', finishedUsers: ['li'] }), [facilitator, lime]);
+    const softColor = effectivePair(checkOf('Lime', 'Finished')).fg;
+    soft.unmount();
+    renderPanel(makeSession({ phase: 'WELCOME', happiness: { li: 3 } }), [facilitator, lime]);
+    const strongColor = effectivePair(checkOf('Lime', 'Vote recorded')).fg;
+
+    expect(tokenContrast(strongColor, 'white')).toBeGreaterThan(tokenContrast(softColor, 'white'));
   });
 });
 

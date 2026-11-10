@@ -25,7 +25,12 @@ const waitForSync = (ms = 2000) => new Promise(r => setTimeout(r, ms));
 
 // A row of the participants panel must neither move nor change height while
 // people work (43.0): the hover-revealed "Mark as left" under the facilitator's
-// pointer would otherwise belong to someone else.
+// pointer would otherwise belong to someone else. Measured here: the session's
+// first card, a participant's own first card, someone starting to write, and a
+// person finishing the vote. What still moves rows, on purpose: entering
+// Brainstorm draws the contribution line (the facilitator's own phase change),
+// the facilitator's own "Mark as left" sends a row to the bottom, and on an open
+// board rows come and go with presence.
 type Box = { y: number; height: number };
 const expectSameBox = (after: Box | null, before: Box | null) => {
   if (!after || !before) throw new Error('the participant row is not on screen');
@@ -227,12 +232,23 @@ test.describe('Full Retrospective Flow', () => {
     await expect(participant.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
     await expect(facilitator.locator('span.font-mono.font-bold.text-lg')).toHaveText('7:00');
 
+    // Every row draws its contribution line from the start of Brainstorm, so the
+    // session's first card moves no row: it used to add the line to every row at
+    // once (review of 43.0).
+    const participantRowOnFacilitator = facilitator.getByTestId('participant-row').filter({ hasText: PARTICIPANT_NAME });
+    const facilitatorOwnRow = facilitator.getByTestId('participant-row').filter({ hasText: '(you)' });
+    await expect(participantRowOnFacilitator.getByText('no tickets')).toBeVisible({ timeout: 5_000 });
+    await expect(facilitatorOwnRow.getByText('no tickets')).toBeVisible();
+    const rowBeforeSessionFirstCard = await participantRowOnFacilitator.boundingBox();
+
     // Add tickets as facilitator in "Start" column (first textarea)
     const facilitatorTextareas = facilitator.locator('textarea[placeholder="Add an idea..."]');
     await facilitatorTextareas.nth(0).click();
     await facilitatorTextareas.nth(0).fill('Keep doing daily standups');
     await facilitator.keyboard.press('Enter');
     await waitForSync(800);
+    await expect(facilitatorOwnRow.getByText('no tickets')).toHaveCount(0, { timeout: 5_000 });
+    expectSameBox(await participantRowOnFacilitator.boundingBox(), rowBeforeSessionFirstCard);
 
     // Add ticket in "Stop" column (second textarea)
     await facilitatorTextareas.nth(1).click();
@@ -244,7 +260,6 @@ test.describe('Full Retrospective Flow', () => {
     const participantTextareas = participant.locator('textarea[placeholder="Add an idea..."]');
     // The participant's first card turns their "no tickets" line into a dot: the row
     // keeps its height (the "no tickets" line was 7px taller than the dots).
-    const participantRowOnFacilitator = facilitator.getByTestId('participant-row').filter({ hasText: PARTICIPANT_NAME });
     await expect(participantRowOnFacilitator.getByText('no tickets')).toBeVisible({ timeout: 5_000 });
     const rowBeforeFirstCard = await participantRowOnFacilitator.boundingBox();
     await participantTextareas.nth(0).click();
@@ -527,8 +542,9 @@ test.describe('Full Retrospective Flow', () => {
     // ================================================================
     await expect(facilitator.getByRole('heading', { name: 'Vote' })).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('votes remaining')).toBeVisible({ timeout: 5_000 });
-    // Each row of the facilitator's panel says the votes its person still has to cast
-    // (43.0): the number their own chip shows them.
+    // Each row of the facilitator's panel says the votes its person can still place
+    // (43.0): the number their own chip shows them. Four items take a vote here: the
+    // "Good Practices" group and three cards in no group.
     const ownRowOnFacilitator = facilitator.getByTestId('participant-row').filter({ hasText: '(you)' });
     await expect(votesLeftOn(participantRowOnFacilitator, 5)).toBeVisible({ timeout: 5_000 });
     await expect(votesLeftOn(ownRowOnFacilitator, 5)).toBeVisible();
@@ -557,10 +573,15 @@ test.describe('Full Retrospective Flow', () => {
     await facilitator.keyboard.press('Escape');
     await expect(voteStandupCard.getByTestId('comment-count')).toHaveText('4', { timeout: 5_000 });
 
-    // Enable "1 vote/item" checkbox
+    // Enable "1 vote/item" checkbox. Five votes, four items: nobody can place more
+    // than four votes now, and both counts say so before anyone votes.
     const oneVoteLabel = facilitator.locator('label').filter({ hasText: '1 vote/item' });
     await oneVoteLabel.locator('input[type="checkbox"]').check();
     await waitForSync();
+    await expect(facilitator.getByText('4 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('4 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(participantRowOnFacilitator, 4)).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(ownRowOnFacilitator, 4)).toBeVisible({ timeout: 5_000 });
 
     // Vote on the group "Good Practices" as facilitator
     // The group container has border-dashed class; find the add (vote+) button inside it
@@ -579,24 +600,30 @@ test.describe('Full Retrospective Flow', () => {
     await participantTicketAdd.click();
     await waitForSync(800);
 
-    // Remaining vote counters should reflect each user's own votes
-    await expect(facilitator.getByText('4 votes remaining')).toBeVisible({ timeout: 5_000 });
-    await expect(participant.getByText('4 votes remaining')).toBeVisible({ timeout: 5_000 });
-    await expect(votesLeftOn(participantRowOnFacilitator, 4)).toBeVisible({ timeout: 5_000 });
-    await expect(votesLeftOn(ownRowOnFacilitator, 4)).toBeVisible({ timeout: 5_000 });
+    // Remaining vote counters should reflect each user's own votes: one vote each,
+    // so four left of the number, and three items still without their vote.
+    await expect(facilitator.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(participantRowOnFacilitator, 3)).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(ownRowOnFacilitator, 3)).toBeVisible({ timeout: 5_000 });
 
-    // Participant also votes on "Continue pair programming"
+    // Participant also votes on "Continue pair programming": two items left for them
     const pairProgText = participant.getByText('Continue pair programming');
     const pairProgCard = pairProgText.locator('xpath=ancestor::div[contains(@class, "shadow-xs")]').first();
     const pairProgAdd = pairProgCard.locator('button:has(span:text-is("add"))');
     await pairProgAdd.click();
     await waitForSync();
-    await expect(participant.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
-    await expect(votesLeftOn(participantRowOnFacilitator, 3)).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('2 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(participantRowOnFacilitator, 2)).toBeVisible({ timeout: 5_000 });
 
-    // Re-allow multiple votes per item so Discuss can show votes vs distinct voters
+    // Re-allow multiple votes per item so Discuss can show votes vs distinct voters:
+    // the counts go back to what is left of the number.
     await oneVoteLabel.locator('input[type="checkbox"]').uncheck();
     await waitForSync();
+    await expect(participant.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(participantRowOnFacilitator, 3)).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByText('4 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(ownRowOnFacilitator, 4)).toBeVisible({ timeout: 5_000 });
 
     // Participant stacks a second vote on "Stop long meetings"
     await participantTicketAdd.click();

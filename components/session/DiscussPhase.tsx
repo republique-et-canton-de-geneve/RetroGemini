@@ -43,8 +43,14 @@ interface Props {
   newProposalText: string;
   setNewProposalText: (value: string) => void;
   handleDirectAddAction: (topicId: string) => void;
-  /** Report the current proposal draft so the live "is typing" cue tracks it */
-  onProposalDraftChange?: (value: string) => void;
+  /**
+   * Report the current proposal draft so the live "is typing" cue tracks it,
+   * with the field that holds it: the input goes when the facilitator moves the
+   * focus to another topic, and a field React removes runs no blur, so the
+   * session stops the cue once that field is gone. Reported on focus too, so a
+   * person back in the field with a draft is listed from the focus on.
+   */
+  onProposalDraftChange?: (value: string, field?: HTMLElement) => void;
   /** Signal that the current user stopped editing a proposal (e.g. on blur) */
   onProposalActivityStop?: () => void;
   setPhase: (phase: string) => void;
@@ -333,8 +339,9 @@ const DiscussPhase: React.FC<Props> = ({
                       value={newProposalText}
                       onChange={(event) => {
                         setNewProposalText(event.target.value);
-                        onProposalDraftChange?.(event.target.value);
+                        onProposalDraftChange?.(event.target.value, event.currentTarget);
                       }}
+                      onFocus={(event) => onProposalDraftChange?.(event.currentTarget.value, event.currentTarget)}
                       onBlur={() => onProposalActivityStop?.()}
                       onKeyDown={(event) => event.key === 'Enter' && handleAddProposal(item.id)}
                     />

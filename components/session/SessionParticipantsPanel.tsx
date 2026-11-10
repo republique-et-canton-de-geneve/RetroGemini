@@ -28,7 +28,7 @@ export type ParticipantRowStatus =
   | { kind: 'progress'; done: number; total: number; title: string };
 
 /**
- * A line in place of a participant's role: the Vote phase's votes still to cast,
+ * A line in place of a participant's role: the Vote phase's votes still to place,
  * in words ("3 votes left"). Drawn at the role line's height, so the row keeps
  * its size when its person finishes and the line goes back to the role.
  */
@@ -158,7 +158,10 @@ const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ cou
 };
 
 // Every status is announced by what it means, never by the icon font's ligature:
-// a screen reader would otherwise read "check_circle".
+// a screen reader would otherwise read "check_circle". The check is the only sign
+// on the row that its person is done, so it clears 1.4.11's 3:1 on white and on
+// the reader's indigo-50 row: emerald-700 (strong) and emerald-600 (soft), where
+// emerald-500 and -400 measured 1.73 to 2.46:1 (avatarInitialsContrast.test.tsx).
 const RowStatus: React.FC<{ status: ParticipantRowStatus }> = ({ status }) => {
   switch (status.kind) {
     case 'progress':
@@ -172,7 +175,7 @@ const RowStatus: React.FC<{ status: ParticipantRowStatus }> = ({ status }) => {
         <span
           role="img"
           aria-label={status.title}
-          className={`material-symbols-outlined text-lg ml-2 shrink-0 self-start ${status.tone === 'strong' ? 'text-emerald-500' : 'text-emerald-400'}`}
+          className={`material-symbols-outlined text-lg ml-2 shrink-0 self-start ${status.tone === 'strong' ? 'text-emerald-700' : 'text-emerald-600'}`}
           title={status.title}
         >
           check_circle
@@ -254,7 +257,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
   const typists = typingMembers(participants, activityUsers, {
     kind: typingKind ?? null,
     currentUserId: currentUser.id,
-    leftUserIds,
+    leftUserIds: leftUserIds ?? [],
   });
   const typistIds = new Set(typists.map((member) => member.id));
   const typingCount = typingKind ? t(typingLineKeys(typingKind).count, { count: typists.length }) : '';
@@ -269,7 +272,9 @@ const SessionParticipantsPanel: React.FC<Props> = ({
     const listed = others > 0 ? [...shown, tp('phases.participants.typingOthers', others)] : shown;
     return {
       text: t(keys.named, { count: typists.length, names: joinNames(listed, locale) }),
-      // Every name, for the hover: two lines can cut the end.
+      // Every name, for the hover: three lines fit every case measured (1 to 5,
+      // 12 and 30 people, first and last names, both languages), but a longer
+      // name can still be cut.
       title: t(keys.named, { count: typists.length, names: joinNames(names, locale) }),
     };
   })();
@@ -314,8 +319,10 @@ const SessionParticipantsPanel: React.FC<Props> = ({
       {!isCollapsed && (
         <>
           {/* Pinned between the title and the list, outside its scroll, one height
-              whatever it says (two lines reserved): a line that came, went or grew would
+              whatever it says (three lines reserved): a line that came, went or grew would
               move every row under the pointer, the hover-revealed "Mark as left" with them.
+              Two lines cut the third first-and-last name in French and the "and N others"
+              in English (review of 43.0).
               Not a live region: other people's typing changes too often to be announced. */}
           {typingKind && typingLine && (
             <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-4 py-2">
@@ -324,7 +331,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                 <span
                   data-testid="typing-now"
                   title={typingLine.title}
-                  className={`min-h-8 min-w-0 line-clamp-2 wrap-break-word ${typists.length > 0 ? 'font-semibold text-indigo-700' : 'text-slate-600'}`}
+                  className={`min-h-12 min-w-0 line-clamp-3 wrap-break-word ${typists.length > 0 ? 'font-semibold text-indigo-700' : 'text-slate-600'}`}
                 >
                   {typingLine.text}
                 </span>

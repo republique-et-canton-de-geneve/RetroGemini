@@ -289,8 +289,9 @@ const phases = {
   'phases.participants.ratedSome': 'Rated {rated} of {total} actions',
   'phases.participants.voteRecorded': 'Vote recorded',
   'phases.participants.finished': 'Finished',
-  // The Vote phase, in place of a person's role: the votes they still have to
-  // cast. Never 'votes remaining', the bar's own chip.
+  // The Vote phase, in place of a person's role: the votes they can still place
+  // (utils/voteBudget.ts → votesLeftToPlace), the number their own bar shows.
+  // Never 'votes remaining', the bar's own words.
   'phases.participants.votesLeft_one': '{count} vote left',
   'phases.participants.votesLeft_other': '{count} votes left',
   'phases.participants.invitedHeading': 'Invited · waiting to join ({count})',

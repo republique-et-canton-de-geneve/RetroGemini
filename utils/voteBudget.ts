@@ -1,4 +1,4 @@
-import type { RetroSession, RetroSettings } from '../types';
+import type { Group, RetroSession, RetroSettings, Ticket } from '../types';
 
 /**
  * How many votes one person may cast, in the Vote phase and on an open board:
@@ -23,10 +23,13 @@ export const votesCastByVoter = (session: Pick<RetroSession, 'tickets' | 'groups
 };
 
 /**
- * The votes someone who has cast `cast` may still cast: the stored number less
- * what they cast, never below 0 (the number can be lowered under it), and `null`
- * when there is nothing to count down from (unlimited votes, or no number). What
- * their own "N votes remaining" chip shows; a number still being typed is not stored.
+ * What is left of the stored number for someone who has cast `cast`: the number
+ * less what they cast, never below 0 (the number can be lowered under it), and
+ * `null` when there is nothing to count down from (unlimited votes, or no
+ * number); a number still being typed is not stored. With several votes per item
+ * these are the votes they may still cast. With one vote per item some of them
+ * may find no item left to take them: what a person can still place is
+ * `votesLeftToPlace`.
  */
 export const votesLeftFor = (
   settings: Pick<RetroSettings, 'maxVotes' | 'unlimitedVotes'>,
@@ -34,6 +37,48 @@ export const votesLeftFor = (
 ): number | null => {
   const budget = voteBudget(settings);
   return Number.isFinite(budget) ? Math.max(0, budget - cast) : null;
+};
+
+/**
+ * The items the guided Vote phase offers a vote on, in no particular order: each
+ * group of a column, and each card of a column that is in no group (a grouped
+ * card is voted on through its group). It must stay what
+ * `utils/retroColumnOrder.ts` → `getColumnEntries` lists over `session.columns`,
+ * which is what Session.tsx draws with a vote control:
+ * `__tests__/voteBudget.test.ts` → *votableItems* compares the two.
+ */
+export const votableItems = (
+  session: Pick<RetroSession, 'columns' | 'tickets' | 'groups'>,
+): Array<Ticket | Group> => {
+  const columnIds = new Set(session.columns.map((column) => column.id));
+  return [
+    ...session.groups.filter((group) => columnIds.has(group.colId)),
+    ...session.tickets.filter((ticket) => !ticket.groupId && columnIds.has(ticket.colId)),
+  ];
+};
+
+/**
+ * The votes `voterId`, who has cast `cast`, can still place in the guided Vote
+ * phase: what is left of the number (`votesLeftFor`) and, with one vote per item,
+ * never more than the items that do not hold their vote yet. `null` when there is
+ * nothing to count down from. It is the one number the Vote phase shows and acts
+ * on: each row of the participants panel, the person's own "N votes remaining",
+ * and the automatic finish at 0 (review of 43.0: a person who had voted on every
+ * item read "N votes left", every vote control was off, and nobody was finished).
+ * `items` defaults to `votableItems(session)`; a caller counting every voter
+ * reads them once.
+ */
+export const votesLeftToPlace = (
+  session: Pick<RetroSession, 'columns' | 'tickets' | 'groups'> & {
+    settings: Pick<RetroSettings, 'maxVotes' | 'unlimitedVotes' | 'oneVotePerTicket'>;
+  },
+  voterId: string,
+  cast: number,
+  items: ReadonlyArray<{ votes: string[] }> = votableItems(session),
+): number | null => {
+  const left = votesLeftFor(session.settings, cast);
+  if (left === null || !session.settings.oneVotePerTicket) return left;
+  return Math.min(left, items.filter((item) => !item.votes.includes(voterId)).length);
 };
 
 /**

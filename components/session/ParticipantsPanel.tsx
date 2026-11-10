@@ -9,7 +9,7 @@ import {
 import SessionParticipantsPanel, { ParticipantRowLine, ParticipantRowStatus } from './SessionParticipantsPanel';
 import { isOpenBoard } from '../../utils/openBoard';
 import { typingKindForPhase } from '../../utils/typingNow';
-import { votesCastByVoter, votesLeftFor } from '../../utils/voteBudget';
+import { votableItems, votesCastByVoter, votesLeftToPlace } from '../../utils/voteBudget';
 
 /**
  * The retrospective's participants panel: the shared SessionParticipantsPanel,
@@ -83,7 +83,11 @@ const ParticipantsPanel: React.FC<Props> = ({
   }
 
   // Tickets authored per participant (Brainstorm onwards). Computed here so the
-  // panel updates live as cards are added.
+  // panel updates live as cards are added. Passed for the whole of Brainstorm,
+  // before the first card too, so every row draws its "no tickets" line from the
+  // phase change on: passed only once the session held a card, the line came
+  // with the first card anyone wrote, on every row at once, and moved every row
+  // below under the facilitator's pointer.
   const ticketCounts: Record<string, number> = {};
   session.tickets.forEach((ticket) => {
     if (ticket.authorId) {
@@ -116,15 +120,17 @@ const ParticipantsPanel: React.FC<Props> = ({
     ratingEnabled && session.phase === 'OPEN_ACTIONS' && ratingRoundSize > 0 && raters.length > 0;
   const ratersDone = raters.filter((p) => impactRatingProgress(session, p.id).complete).length;
 
-  // The Vote phase: in place of each person's role, the votes they still have to
-  // cast until they finish, which is the number their own "N votes remaining" shows
-  // them (utils/voteBudget.ts). Never a card's total, which the Vote phase keeps to
-  // itself; nothing while votes are unlimited. Finished, the row goes back to its
-  // role and the check below, as in every phase.
+  // The Vote phase: in place of each person's role, the votes they can still place
+  // until they finish, which is the number their own "N votes remaining" shows them
+  // (utils/voteBudget.ts → votesLeftToPlace): with one vote per item, never more
+  // than the items still without their vote. Never a card's total, which the Vote
+  // phase keeps to itself; nothing while votes are unlimited. Finished, the row
+  // goes back to its role and the check below, as in every phase.
   const votesCast = session.phase === 'VOTE' ? votesCastByVoter(session) : null;
+  const items = votesCast ? votableItems(session) : [];
   const memberLine = (member: User): ParticipantRowLine | null => {
     if (!votesCast || session.finishedUsers?.includes(member.id)) return null;
-    const left = votesLeftFor(session.settings, votesCast.get(member.id) ?? 0);
+    const left = votesLeftToPlace(session, member.id, votesCast.get(member.id) ?? 0, items);
     return left === null ? null : { kind: 'votesLeft', label: tp('phases.participants.votesLeft', left) };
   };
 
@@ -185,7 +191,7 @@ const ParticipantsPanel: React.FC<Props> = ({
       isCollapsed={isCollapsed}
       activityUsers={activityUsers}
       typingKind={typingKind}
-      contributionCounts={totalTickets > 0 ? ticketCounts : undefined}
+      contributionCounts={session.phase === 'BRAINSTORM' || totalTickets > 0 ? ticketCounts : undefined}
       memberStatus={memberStatus}
       memberLine={memberLine}
       footer={footer}
