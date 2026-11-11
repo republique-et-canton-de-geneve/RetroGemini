@@ -225,8 +225,10 @@ test.describe('Full Health Check Flow', () => {
     // The panel shows "2 / 2 completed survey"
     await expect(facilitator.getByText('2 / 2 completed survey')).toBeVisible({ timeout: 10_000 });
 
-    // Verify green checkmarks are visible (check_circle icons in participant panel)
-    const facilitatorCheckmarks = facilitator.locator('span.material-symbols-outlined.text-emerald-500').filter({ hasText: 'check_circle' });
+    // Verify the green checkmarks are visible in the participant panel, found by
+    // what they say ("Finished"), never by their colour, which 43.0 darkened to
+    // clear 3:1 (WCAG 1.4.11)
+    const facilitatorCheckmarks = facilitator.getByTestId('participants-panel').getByRole('img', { name: 'Finished', exact: true });
     await expect(facilitatorCheckmarks).toHaveCount(2, { timeout: 10_000 });
 
     // ================================================================

@@ -3,8 +3,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import ParticipantsPanel from '../components/session/ParticipantsPanel';
 import TicketCommentsModal from '../components/session/TicketCommentsModal';
-import type { RetroSession, Ticket, User } from '../types';
-import { effectivePair } from './helpers/tailwindTheme';
+import type { ParticipantActivity, RetroSession, Ticket, User } from '../types';
+import { effectivePair, tokenContrast } from './helpers/tailwindTheme';
 
 /**
  * The avatars as the screens render them, measured against Tailwind's theme.
@@ -72,7 +72,12 @@ const makeSession = (overrides: Partial<RetroSession> = {}): RetroSession => ({
 
 const initialsOf = (member: User) => member.name.slice(0, 2).toUpperCase();
 
-const renderPanel = (session: RetroSession, participants: User[], currentUser: User = facilitator) =>
+const renderPanel = (
+  session: RetroSession,
+  participants: User[],
+  currentUser: User = facilitator,
+  { activityUsers = {}, isCollapsed = false }: { activityUsers?: Record<string, ParticipantActivity>; isCollapsed?: boolean } = {},
+) =>
   render(
     <ParticipantsPanel
       session={session}
@@ -80,8 +85,8 @@ const renderPanel = (session: RetroSession, participants: User[], currentUser: U
       connectedUsers={new Set(participants.map((p) => p.id))}
       currentUser={currentUser}
       isFacilitator={currentUser.role === 'facilitator'}
-      isCollapsed={false}
-      activityUsers={{}}
+      isCollapsed={isCollapsed}
+      activityUsers={activityUsers}
       onToggleCollapse={vi.fn()}
       onInvite={vi.fn()}
       onToggleLeft={vi.fn()}
@@ -153,6 +158,83 @@ describe('the current user\'s own row', () => {
     const progress = within(rowOf('Mina')).getByText('0/2');
     const pair = effectivePair(progress);
     expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(FLOOR);
+  });
+
+  // 43.0: the chip paints its own background, so it reads the same on the
+  // tinted row as on every other one.
+  it('the votes-left chip clears 4.5:1 on the tinted row and on another row', () => {
+    renderPanel(makeSession({ phase: 'VOTE' }), [facilitator, me], me);
+    for (const name of ['Mina', 'Indigo']) {
+      const pair = effectivePair(within(rowOf(name)).getByText('5 votes left'));
+      expect(pair.bg, name).toBe('indigo-50');
+      expect(pair.ratio, `${name}: ${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(FLOOR);
+    }
+  });
+});
+
+// 43.0: the line above the list that names who is typing, and its count on the
+// collapsed rail. The e2e audits walk both states of the line (nobody writing,
+// in 'retro-brainstorm' and on the open board, and someone writing, in
+// 'retro-brainstorm-typing'); the collapsed rail is measured only here, since no
+// audited state has a collapsed panel while someone types.
+describe('the panel\'s typing line and rail', () => {
+  const lime = palette.find((member) => member.name === 'Lime') as User;
+
+  it('the line clears 4.5:1, someone writing or nobody', () => {
+    const { unmount } = renderPanel(makeSession(), [facilitator, lime]);
+    const nobody = effectivePair(screen.getByTestId('typing-now'));
+    expect(nobody.bg).toBe('slate-50');
+    expect(nobody.fg).toBe('slate-600');
+    expect(nobody.ratio, `${nobody.fg} on ${nobody.bg}`).toBeGreaterThanOrEqual(FLOOR);
+    unmount();
+
+    renderPanel(makeSession(), [facilitator, lime], facilitator, { activityUsers: { li: 'brainstorm' } });
+    const writing = effectivePair(screen.getByTestId('typing-now'));
+    expect(writing.bg).toBe('slate-50');
+    expect(writing.fg).toBe('indigo-700');
+    expect(writing.ratio, `${writing.fg} on ${writing.bg}`).toBeGreaterThanOrEqual(FLOOR);
+  });
+
+  it('the collapsed rail\'s count clears 4.5:1', () => {
+    renderPanel(makeSession(), [facilitator, lime], facilitator, { activityUsers: { li: 'brainstorm' }, isCollapsed: true });
+    const pair = effectivePair(within(screen.getByTestId('typing-now-rail')).getByText('1'));
+    expect(pair.bg).toBe('white');
+    expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(FLOOR);
+  });
+});
+
+// The check is the only sign on a row that its person is done ("Finished",
+// "Vote recorded"): a graphic needed to understand the row, so WCAG 1.4.11's
+// 3:1 against what it is drawn on. It measured 1.73 to 2.46:1 in emerald-400
+// and -500 (review of 43.0). The health check draws the same check
+// (SessionParticipantsPanel → RowStatus), so this measures it too.
+describe('the row\'s status check', () => {
+  const NON_TEXT_FLOOR = 3;
+  const me = user('me', 'Mina', 'bg-amber-500');
+  const lime = palette.find((member) => member.name === 'Lime') as User;
+
+  const checkOf = (name: string, label: string) => within(rowOf(name)).getByRole('img', { name: label });
+
+  it.each([
+    ['the soft tone, "Finished"', makeSession({ phase: 'VOTE', finishedUsers: ['me', 'li'] }), 'Finished'],
+    ['the strong tone, "Vote recorded"', makeSession({ phase: 'WELCOME', happiness: { me: 4, li: 3 } }), 'Vote recorded'],
+  ])('%s clears 3:1 on the tinted row and on another row', (_label, session, label) => {
+    renderPanel(session, [facilitator, me, lime], me);
+    for (const [name, surface] of [['Mina', 'indigo-50'], ['Lime', 'white']]) {
+      const pair = effectivePair(checkOf(name, label));
+      expect(pair.bg, name).toBe(surface);
+      expect(pair.ratio, `${name}: ${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+    }
+  });
+
+  it('keeps the strong tone darker than the soft one', () => {
+    const soft = renderPanel(makeSession({ phase: 'VOTE', finishedUsers: ['li'] }), [facilitator, lime]);
+    const softColor = effectivePair(checkOf('Lime', 'Finished')).fg;
+    soft.unmount();
+    renderPanel(makeSession({ phase: 'WELCOME', happiness: { li: 3 } }), [facilitator, lime]);
+    const strongColor = effectivePair(checkOf('Lime', 'Vote recorded')).fg;
+
+    expect(tokenContrast(strongColor, 'white')).toBeGreaterThan(tokenContrast(softColor, 'white'));
   });
 });
 

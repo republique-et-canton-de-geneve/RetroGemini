@@ -327,6 +327,10 @@ describe('super-admin dashboard reads', () => {
         inviteEpoch: 4,
         lastConnectionDate: '2026-07-01T00:00:00.000Z',
         members: [{ id: 'm1', name: 'Ada', color: '#fff', role: 'facilitator', secretNote: 'nope' }],
+        // What the store's summary carries, deliberately unlike the length of
+        // the history beside it: the real summaries hold no history, so a
+        // route counting `retrospectives` would send nothing in production.
+        retrospectiveCount: 7,
         retrospectives: [{ id: 'retro-1' }]
       }]
     });
@@ -335,12 +339,16 @@ describe('super-admin dashboard reads', () => {
     const response = await request(app, '/api/super-admin/teams', postJson(auth()));
     const body = await response.json();
 
+    expect(dataStore.loadTeamSummaries).toHaveBeenCalledWith(
+      expect.objectContaining({ withMergeProvenance: true, withRetrospectiveCount: true })
+    );
     expect(body.teams).toEqual([{
       id: 'team-1',
       name: 'Platform',
       facilitatorEmail: 'lead@example.test',
       members: [{ id: 'm1', name: 'Ada', color: '#fff', role: 'facilitator' }],
       lastConnectionDate: '2026-07-01T00:00:00.000Z',
+      retrospectiveCount: 7,
       mergedFrom: []
     }]);
     const serialized = JSON.stringify(body);

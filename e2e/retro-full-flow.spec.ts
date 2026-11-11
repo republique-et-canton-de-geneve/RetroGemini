@@ -1,4 +1,4 @@
-import { test, expect, Page, BrowserContext } from '@playwright/test';
+import { test, expect, Page, BrowserContext, Locator } from '@playwright/test';
 import { dismissAnnouncementsIfPresent } from './helpers/announcements';
 
 /**
@@ -22,6 +22,26 @@ const PARTICIPANT_NAME = 'Alice Participant';
 
 // Helper: wait for WebSocket sync to propagate (session-update event)
 const waitForSync = (ms = 2000) => new Promise(r => setTimeout(r, ms));
+
+// A row of the participants panel must neither move nor change height while
+// people work (43.0): the hover-revealed "Mark as left" under the facilitator's
+// pointer would otherwise belong to someone else. Measured here: the session's
+// first card, a participant's own first card, someone starting to write, and a
+// person finishing the vote. What still moves rows, on purpose: entering
+// Brainstorm draws the contribution line (the facilitator's own phase change),
+// the facilitator's own "Mark as left" sends a row to the bottom, and presence:
+// on an open board rows come and go with it, and in a guided retro someone
+// joining is listed above the departed rows, while a participant marked as
+// having left who reconnects goes back to their place.
+type Box = { y: number; height: number };
+const expectSameBox = (after: Box | null, before: Box | null) => {
+  if (!after || !before) throw new Error('the participant row is not on screen');
+  expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(after.height - before.height)).toBeLessThanOrEqual(1);
+};
+// What a row of the facilitator's panel says in place of the role in the Vote phase.
+const votesLeftOn = (row: Locator, count: number) =>
+  row.getByText(`${count} ${count === 1 ? 'vote' : 'votes'} left`, { exact: true });
 
 test.describe('Full Retrospective Flow', () => {
   let facilitatorContext: BrowserContext;
@@ -214,12 +234,23 @@ test.describe('Full Retrospective Flow', () => {
     await expect(participant.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 5_000 });
     await expect(facilitator.locator('span.font-mono.font-bold.text-lg')).toHaveText('7:00');
 
+    // Every row draws its contribution line from the start of Brainstorm, so the
+    // session's first card moves no row: it used to add the line to every row at
+    // once (review of 43.0).
+    const participantRowOnFacilitator = facilitator.getByTestId('participant-row').filter({ hasText: PARTICIPANT_NAME });
+    const facilitatorOwnRow = facilitator.getByTestId('participant-row').filter({ hasText: '(you)' });
+    await expect(participantRowOnFacilitator.getByText('no tickets')).toBeVisible({ timeout: 5_000 });
+    await expect(facilitatorOwnRow.getByText('no tickets')).toBeVisible();
+    const rowBeforeSessionFirstCard = await participantRowOnFacilitator.boundingBox();
+
     // Add tickets as facilitator in "Start" column (first textarea)
     const facilitatorTextareas = facilitator.locator('textarea[placeholder="Add an idea..."]');
     await facilitatorTextareas.nth(0).click();
     await facilitatorTextareas.nth(0).fill('Keep doing daily standups');
     await facilitator.keyboard.press('Enter');
     await waitForSync(800);
+    await expect(facilitatorOwnRow.getByText('no tickets')).toHaveCount(0, { timeout: 5_000 });
+    expectSameBox(await participantRowOnFacilitator.boundingBox(), rowBeforeSessionFirstCard);
 
     // Add ticket in "Stop" column (second textarea)
     await facilitatorTextareas.nth(1).click();
@@ -229,10 +260,16 @@ test.describe('Full Retrospective Flow', () => {
 
     // Add ticket as participant in "Start" column (first textarea)
     const participantTextareas = participant.locator('textarea[placeholder="Add an idea..."]');
+    // The participant's first card turns their "no tickets" line into a dot: the row
+    // keeps its height (the "no tickets" line was 7px taller than the dots).
+    await expect(participantRowOnFacilitator.getByText('no tickets')).toBeVisible({ timeout: 5_000 });
+    const rowBeforeFirstCard = await participantRowOnFacilitator.boundingBox();
     await participantTextareas.nth(0).click();
     await participantTextareas.nth(0).fill('Start code reviews');
     await participant.keyboard.press('Enter');
     await waitForSync(800);
+    await expect(participantRowOnFacilitator.getByText('no tickets')).toHaveCount(0, { timeout: 5_000 });
+    expectSameBox(await participantRowOnFacilitator.boundingBox(), rowBeforeFirstCard);
 
     // Add ticket in "Continue" column (third textarea)
     await participantTextareas.nth(2).click();
@@ -258,19 +295,31 @@ test.describe('Full Retrospective Flow', () => {
     await expect(facilitator.getByText('5 tickets added so far')).toBeVisible({ timeout: 5_000 });
 
     // ---- Feature: live "is typing" indicator in the panel ----
-    // The participant starts writing a ticket (without submitting); the
-    // facilitator should see a live typing cue next to their name.
+    // The participant writes without submitting: the facilitator sees the cue on
+    // their row and, above the list, a line naming who is writing (43.0). The line is
+    // there, saying nobody is, before anyone types, and neither it nor the cue moves a row.
+    const typingNow = facilitator.getByTestId('typing-now');
+    await expect(typingNow).toHaveText('Nobody is writing', { timeout: 5_000 });
+    const rowAtRest = await participantRowOnFacilitator.boundingBox();
     await participantTextareas.nth(0).click();
     await participantTextareas.nth(0).pressSequentially('Thinking out loud', { delay: 40 });
     await expect(facilitator.getByText('writing a ticket')).toBeVisible({ timeout: 5_000 });
-    // The cue must persist as long as an unsubmitted draft remains, even with no
-    // further keystrokes - it must not expire mid-entry (keepalive regression).
+    await expect(typingNow).toHaveText(`Writing now (1): ${PARTICIPANT_NAME}`);
+    expectSameBox(await participantRowOnFacilitator.boundingBox(), rowAtRest);
+    // The cue must persist as long as an unsubmitted draft remains (keepalive regression).
     await participant.waitForTimeout(4_500);
     await expect(facilitator.getByText('writing a ticket')).toBeVisible();
-    // Clearing the draft and blurring removes the cue.
+    await expect(typingNow).toHaveText(`Writing now (1): ${PARTICIPANT_NAME}`);
+    // Collapsed, the panel's rail counts who is writing.
+    await facilitator.getByRole('button', { name: 'Collapse panel' }).click();
+    await expect(facilitator.getByRole('img', { name: 'Writing now (1)', exact: true })).toBeVisible();
+    await facilitator.getByRole('button', { name: 'Expand panel' }).click();
+    await expect(typingNow).toHaveText(`Writing now (1): ${PARTICIPANT_NAME}`);
+    // Clearing the draft and blurring removes the cue; the line says nobody is writing.
     await participantTextareas.nth(0).fill('');
     await participantTextareas.nth(0).blur();
     await expect(facilitator.getByText('writing a ticket')).toBeHidden({ timeout: 7_000 });
+    await expect(typingNow).toHaveText('Nobody is writing', { timeout: 7_000 });
 
     // REVEAL CARDS toggle test
     const revealLabel = facilitator.locator('label').filter({ hasText: 'Reveal cards' });
@@ -495,6 +544,12 @@ test.describe('Full Retrospective Flow', () => {
     // ================================================================
     await expect(facilitator.getByRole('heading', { name: 'Vote' })).toBeVisible({ timeout: 5_000 });
     await expect(participant.getByText('votes remaining')).toBeVisible({ timeout: 5_000 });
+    // Each row of the facilitator's panel says the votes its person can still place
+    // (43.0): the number their own chip shows them. Four items take a vote here: the
+    // "Good Practices" group and three cards in no group.
+    const ownRowOnFacilitator = facilitator.getByTestId('participant-row').filter({ hasText: '(you)' });
+    await expect(votesLeftOn(participantRowOnFacilitator, 5)).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(ownRowOnFacilitator, 5)).toBeVisible();
 
     // Ensure both sides are voting on the same content
     await expect(facilitator.getByText('Good Practices')).toBeVisible({ timeout: 5_000 });
@@ -520,10 +575,15 @@ test.describe('Full Retrospective Flow', () => {
     await facilitator.keyboard.press('Escape');
     await expect(voteStandupCard.getByTestId('comment-count')).toHaveText('4', { timeout: 5_000 });
 
-    // Enable "1 vote/item" checkbox
+    // Enable "1 vote/item" checkbox. Five votes, four items: nobody can place more
+    // than four votes now, and both counts say so before anyone votes.
     const oneVoteLabel = facilitator.locator('label').filter({ hasText: '1 vote/item' });
     await oneVoteLabel.locator('input[type="checkbox"]').check();
     await waitForSync();
+    await expect(facilitator.getByText('4 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('4 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(participantRowOnFacilitator, 4)).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(ownRowOnFacilitator, 4)).toBeVisible({ timeout: 5_000 });
 
     // Vote on the group "Good Practices" as facilitator
     // The group container has border-dashed class; find the add (vote+) button inside it
@@ -542,26 +602,36 @@ test.describe('Full Retrospective Flow', () => {
     await participantTicketAdd.click();
     await waitForSync(800);
 
-    // Remaining vote counters should reflect each user's own votes
-    await expect(facilitator.getByText('4 votes remaining')).toBeVisible({ timeout: 5_000 });
-    await expect(participant.getByText('4 votes remaining')).toBeVisible({ timeout: 5_000 });
+    // Remaining vote counters should reflect each user's own votes: one vote each,
+    // so four left of the number, and three items still without their vote.
+    await expect(facilitator.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(participantRowOnFacilitator, 3)).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(ownRowOnFacilitator, 3)).toBeVisible({ timeout: 5_000 });
 
-    // Participant also votes on "Continue pair programming"
+    // Participant also votes on "Continue pair programming": two items left for them
     const pairProgText = participant.getByText('Continue pair programming');
     const pairProgCard = pairProgText.locator('xpath=ancestor::div[contains(@class, "shadow-xs")]').first();
     const pairProgAdd = pairProgCard.locator('button:has(span:text-is("add"))');
     await pairProgAdd.click();
     await waitForSync();
-    await expect(participant.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(participant.getByText('2 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(participantRowOnFacilitator, 2)).toBeVisible({ timeout: 5_000 });
 
-    // Re-allow multiple votes per item so Discuss can show votes vs distinct voters
+    // Re-allow multiple votes per item so Discuss can show votes vs distinct voters:
+    // the counts go back to what is left of the number.
     await oneVoteLabel.locator('input[type="checkbox"]').uncheck();
     await waitForSync();
+    await expect(participant.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(participantRowOnFacilitator, 3)).toBeVisible({ timeout: 5_000 });
+    await expect(facilitator.getByText('4 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(ownRowOnFacilitator, 4)).toBeVisible({ timeout: 5_000 });
 
     // Participant stacks a second vote on "Stop long meetings"
     await participantTicketAdd.click();
     await waitForSync(800);
     await expect(participant.getByText('2 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(participantRowOnFacilitator, 2)).toBeVisible({ timeout: 5_000 });
 
     // Facilitator votes on "Stop long meetings" too -> 3 votes from 2 distinct voters
     const facilitatorStopMeetingsCard = facilitator
@@ -571,6 +641,15 @@ test.describe('Full Retrospective Flow', () => {
     await facilitatorStopMeetingsCard.locator('button:has(span:text-is("add"))').click();
     await waitForSync(800);
     await expect(facilitator.getByText('3 votes remaining')).toBeVisible({ timeout: 5_000 });
+    await expect(votesLeftOn(ownRowOnFacilitator, 3)).toBeVisible({ timeout: 5_000 });
+
+    // The participant finishes with two votes unused: the row goes back to its role
+    // and today's check, at the same height.
+    const rowBeforeFinish = await participantRowOnFacilitator.boundingBox();
+    await participant.getByRole('button', { name: "I'm Finished" }).click();
+    await expect(participantRowOnFacilitator.getByRole('img', { name: 'Finished', exact: true })).toBeVisible({ timeout: 5_000 });
+    await expect(participantRowOnFacilitator.getByTestId('votes-left')).toHaveCount(0);
+    expectSameBox(await participantRowOnFacilitator.boundingBox(), rowBeforeFinish);
 
     // Move to Discuss phase
     await facilitator.getByRole('button', { name: 'Next Phase' }).click();
@@ -592,6 +671,18 @@ test.describe('Full Retrospective Flow', () => {
 
     // The first topic is auto-expanded when entering the Discuss phase (sorted by votes)
     // No need to click — "Stop long meetings" (3 votes) is already expanded
+
+    // The participant drafts a proposal: the line above the facilitator's list names
+    // who is proposing an action, and goes back to nobody once the draft is gone.
+    await expect(typingNow).toHaveText('Nobody is proposing an action', { timeout: 5_000 });
+    const participantProposalInput = participant.locator('input[placeholder="Propose an action..."]').first();
+    await expect(participantProposalInput).toBeVisible({ timeout: 10_000 });
+    await participantProposalInput.click();
+    await participantProposalInput.pressSequentially('Maybe a checklist', { delay: 40 });
+    await expect(typingNow).toHaveText(`Proposing an action (1): ${PARTICIPANT_NAME}`, { timeout: 5_000 });
+    await participantProposalInput.fill('');
+    await participantProposalInput.blur();
+    await expect(typingNow).toHaveText('Nobody is proposing an action', { timeout: 7_000 });
 
     // Propose an action
     const proposalInput = facilitator.locator('input[placeholder="Propose an action..."]').first();

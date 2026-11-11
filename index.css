@@ -142,6 +142,14 @@ body {
   animation: typing-blink 1.2s infinite ease-in-out;
 }
 
+/* Thirty people writing is ninety blinking dots: a reader who asked for less
+   motion gets them still. */
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot {
+    animation: none;
+  }
+}
+
 /* Drag and drop styles */
 .drag-over {
   background-color: #EEF2FF !important;

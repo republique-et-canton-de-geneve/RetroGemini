@@ -1,6 +1,6 @@
 # Accessibility statement — RetroGemini
 
-_Last reviewed: 2026-10-28. Audit method and remaining gaps below._
+_Last reviewed: 2026-11-10. Audit method and remaining gaps below._
 
 ## The standard we work to
 
@@ -20,21 +20,22 @@ number they allow can fall, never rise.
 
 | Gate | What it checks | Where |
 |---|---|---|
-| axe-core, the main flows | Serious/critical WCAG 2.0/2.1 A + AA rules on ten screens — login, team creation, the dashboard, five retrospective phases (icebreaker, open actions with a live impact-rating round, brainstorm, group, close) and two health-check screens (survey, close), including two **dark** screens, which a light-only sweep cannot check — and, since 2026-10-22, four states with more than one person: the Dashboard's Members tab with one member per participant colour (and one colour the palette does not know), the invite link's member picker, a participant's own Group screen, and the Group phase with a participant marked as departed. Every retrospective screen from the icebreaker on is audited with **two participants of different colours** (the facilitator's indigo and a lime participant, the palette's worst case for white initials) | `e2e/accessibility-audit.spec.ts` |
+| axe-core, the main flows | Serious/critical WCAG 2.0/2.1 A + AA rules on ten screens — login, team creation, the dashboard, five retrospective phases (icebreaker, open actions with a live impact-rating round, brainstorm, group, close) and two health-check screens (survey, close), including two **dark** screens, which a light-only sweep cannot check — and, since 2026-10-22, four states with more than one person: the Dashboard's Members tab with one member per participant colour (and one colour the palette does not know), the invite link's member picker, a participant's own Group screen, and the Group phase with a participant marked as departed. Since 43.0, two more: the Brainstorm phase while the participant writes a card (the typing cue on their row and, above the list, the line naming who is writing), and the Vote phase's participants panel, audited on its own, each row saying in words how many votes its person can still place. Every retrospective screen from the icebreaker on is audited with **two participants of different colours** (the facilitator's indigo and a lime participant, the palette's worst case for white initials) | `e2e/accessibility-audit.spec.ts` |
 | axe-core, the administration console | The same rules on the whole console page, once per tab: Teams, and a team's inline editor open; the settings cards opened up (the AI fields shown, an info message previewed, a restore file chosen); Feedback, and its comment dialog; Live, with a session running in another browser; Server Logs; Backups, with a protected and an unprotected row. The run cannot change the server: every console call outside the reads and the three backup writes it means to make is aborted and fails the test. The merge, delete and one-team-restore dialogs are audited on their own, over real data, in the specs that open them | `e2e/admin-console-accessibility.spec.ts`, `e2e/admin-team-merge.spec.ts`, `e2e/admin-team-restore.spec.ts` |
-| axe-core, seven Jira screens | The same rules, with a Jira connected and a second participant in the session: the Review step with the discovery note, the "Create in Jira" button and a control on every action; the open batch dialog with its preview; the Dashboard's Actions tab with a linked and an unlinked action; the team's *Settings → Jira* card; the console's Jira card; and, since 41.0, two states of the one-parent-issue-per-session mode: the *Settings → Jira* card with its three modes and both issue-type lists loaded, and the batch dialog with its "Parent issue (optional)" field and its list of parent issues. The two cards (in both of the team card's states), the dialogs and the Review step (without the session header and participants panel, which `accessibility-audit.spec.ts` audits on five other phases, with two participants) are audited on their own; the Dashboard's Actions tab is audited whole. The console around its Jira card is audited whole by its own spec, which never turns Jira on; the Dashboard's Settings tab around the team's card is not otherwise audited (gap 2) | `e2e/jira.spec.ts` |
-| axe-core, the open board | The same rules on the open board (42.0), with cards, a vote and a second person connected: the board's bar with its search, its sort and the facilitator's controls, every column's add field, each card's vote button (named by the total it shows first, 2.5.3), and the participants panel listing the people connected right now; and, scoped, the board's settings dialog. The search's result count is a status message (4.1.3). Its keyboard paths are the Group phase's for a card (pick it up, then a card, a group or a column) and Brainstorm's for a group (pick it up, then "Move here"), pinned by `__tests__/sessionOpenBoard.test.tsx` | `e2e/retro-open-board.spec.ts` |
+| axe-core, seven Jira screens | The same rules, with a Jira connected and a second participant in the session: the Review step with the discovery note, the "Create in Jira" button and a control on every action; the open batch dialog with its preview; the Dashboard's Actions tab with a linked and an unlinked action; the team's *Settings → Jira* card; the console's Jira card; and, since 41.0, two states of the one-parent-issue-per-session mode: the *Settings → Jira* card with its three modes and both issue-type lists loaded, and the batch dialog with its "Parent issue (optional)" field and its list of parent issues. The two cards (in both of the team card's states), the dialogs and the Review step (without the session header and participants panel, which `accessibility-audit.spec.ts` audits whole on five other phases, and the panel alone on a sixth (Vote), with two participants) are audited on their own; the Dashboard's Actions tab is audited whole. The console around its Jira card is audited whole by its own spec, which never turns Jira on; the Dashboard's Settings tab around the team's card is not otherwise audited (gap 2) | `e2e/jira.spec.ts` |
+| axe-core, the open board | The same rules on the open board (42.0), with cards, a vote and a second person connected: the board's bar with its search, its sort and the facilitator's controls, every column's add field, each card's vote button (named by the total it shows first, 2.5.3), and the participants panel listing the people connected right now, with the line above it naming who is writing a card; and, scoped, the board's settings dialog. The search's result count is a status message (4.1.3). Its keyboard paths are the Group phase's for a card (pick it up, then a card, a group or a column) and Brainstorm's for a group (pick it up, then "Move here"), pinned by `__tests__/sessionOpenBoard.test.tsx` | `e2e/retro-open-board.spec.ts` |
 | axe-core, the console's backup import card | The same rules on the Backups tab's *Import a backup file* card, audited on its own with a file chosen, before it is sent: the labelled file input, its hint, and the import button (white on teal-700, 5.39:1 — teal-600 would measure 3.66:1) | `e2e/admin-team-restore.spec.ts` |
 | `eslint-plugin-jsx-a11y` | Accessibility rules across the whole React tree, inside the repository's two-way lint budget | `eslint.config.js`, `scripts/lint.mjs` |
 
-**Current measurement (2026-10-28): zero axe violations at any severity on
-every audited state — 35 in all: fourteen in the main flows, eight console
+**Current measurement (2026-11-10): zero axe violations at any severity on
+every audited state — 37 in all: sixteen in the main flows, eight console
 states and three console dialogs, seven Jira screens, the backup import card,
 and the open board and its settings dialog.** The ten main screens have been at zero since 2026-08-26,
 the Jira screens since 2026-10-20 (five, seven since 41.0), the import card
 since 41.0, the four multi-participant states and the console since
-2026-10-22, the open board since it joined (42.0) and its settings dialog
-since it joined (42.1). The cap
+2026-10-22, the open board since it joined (42.0), its settings dialog
+since it joined (42.1), and the Brainstorm phase while a participant writes
+and the Vote phase's participants panel since they joined (43.0). The cap
 for every state is one table, `BASELINE` in `e2e/helpers/axe.ts`, and each
 `color-contrast` finding is printed with its colour pairs and ratios, so a fix
 can be checked against the surface it lands on. The lint budget carries 17 accessibility warnings (2026-10-08), listed by
@@ -88,6 +89,8 @@ where a light-screen contrast sweep had made things worse.
 | **The keyboard lost its place on the open board's votes** — with one vote per card, then the board's default, the vote button turned `disabled` the moment it was used, under the focus, and taking back one's last vote removed the cross that had it: either way the focus fell to the page. And the number of votes per person, which draws no outline of its own, showed no focus at all once the board's settings put it in a dialog, where the keyboard reaches it | 2.4.3 Focus Order, 2.4.7 Focus Visible | **Fixed 2026-10-28.** A vote button that cannot add right now is `aria-disabled`, still focused and announced as unavailable; the cross hands the focus to the vote button before it goes — or, on a card or group its reader cannot read, which takes no vote and has no vote button, to the card or group itself (fixed 2026-11-02, found by the second review of 42.1); the number's stepper draws a ring around the field that has the focus. The guided Vote phase's plus and minus did the same — the vote that used the last one, or took the last one back, turned the pressed button off — and are `aria-disabled` too (fixed 2026-11-04, found by the fifth review of 42.1). `__tests__/sessionOpenBoard.test.tsx` pins all four by the attribute each button carries, never `disabled`: jsdom leaves the focus on a button turned disabled, where a browser drops it. Found by the review of the open board; neither jsdom nor axe-core sees where the focus goes |
 | **An open card editor lost the focus, then took it from another field** — on the open board, a teammate's edit that took the card out of the search removed its editor and the focus fell to the page; when the card came back, its editor took the focus from the field being typed, and wrote what was typed there into the card | 2.4.3 Focus Order | **Fixed 2026-11-04**, found by the sixth review of 42.1. A card whose editor was opened during a search stays in view, with its group, until the search changes, so the Tab out of the editor reaches the card's next control (kept only while the editor was open, the card went at that Tab, with the control, found by the seventh review); and an editor whose card leaves the screen closes, so it never takes the focus back. An editor left for a press of the mouse and drawn again during it (a teammate's write moved its card) takes no focus, so the field pressed keeps it; and it closes with the drop that puts its card in a new group, so the new group's title keeps the focus to be named (found by the eighth review). An editor gone back into with the keyboard before that press ended is typed in again: the card's editor opened again after it takes the focus, and the caret moved with the arrow keys after a drag stays where it was put (found by the ninth review). The editor opened again after a keyboard click's write closed it during such a press takes the focus too, and keeps it as the press ends; a press on the field puts the caret where it presses; and a press in a group's title on the open board places the caret and selects its words there, where it used to start a drag of the group (found by the tenth review). The group's keyboard control to move it stays during such a press, whose release a right click's menu takes, where it went for as long as the press lasted (found by the eleventh review). And the presses and taps that follow the first of a double click or a double tap press nothing but what the first pressed, where the card growing back after an editor closed, a Delete, a vote, a field or a dialog's backdrop that came under the pointer took the focus or acted, for everyone (found by the eleventh to the twentieth reviews; since 2026-11-09 one rule, which replaced a layout heuristic that kept missing cases). Its stated cost: a quick retry beside a missed control, or a correction within a fingertip of the first tap, presses nothing until a short pause, and taps at a steady pace delete one card per pause. `__tests__/doubleGestureGuard.test.ts` pins the rule; `__tests__/sessionOpenBoard.test.tsx` → *the card editor* pins the presses of the mouse; `__tests__/sessionGroupTouch.test.tsx` → *the next tap of a double tap* and `e2e/retro-touch-card-controls.spec.ts` the taps, the mouse a browser emulates for them included |
 | **The "IN PROGRESS" and "OPEN BOARD" statuses** of the Dashboard's retrospective and health-check lists, 12px green on white at 3.22:1, and the two "saved" notices of its Settings tab in the same green | 1.4.3 Contrast | **Fixed 2026-10-28**, one step darker (4.94:1). The e2e audit never opens a list holding a session in progress, so `__tests__/dashboardOpenBoard.test.tsx` measures both lists as rendered |
+| **The participants panel's typing cue**. The icon beside "writing a ticket" was read out as its ligature ("stylus_note"). It was drawn at 24px in a 16px line, so a row grew 8px when its person started writing and every row below moved under the pointer, the facilitator's hover-revealed *Mark as left* among them. A first card shrank its author's row by 7px the same way, and the session's first card added the contribution line to every row at once. Its dots kept blinking for readers who asked for less motion | 1.1.1 Non-text Content | **Fixed 2026-11-10** (43.0). The icon is hidden from assistive technology and sized to its line. The contribution line keeps one height with or without cards, and is drawn on every row from the start of Brainstorm (found by the review of 43.0). The dots stand still under `prefers-reduced-motion`. The line above the list that names who is writing reserves three lines, which hold every case measured (1 to 5, 12 and 30 people writing, first and last names, in English and French, in Inter and DejaVu Sans): with two, the third name was cut in French. Names longer than those measured can still be cut: the line's title holds every name, but only a mouse reaches it, and each person's row still shows their cue. `__tests__/participantsPanel.test.tsx` pins the classes; `e2e/retro-full-flow.spec.ts` measures the rows at the session's first card, while a participant writes, after their first card and when they finish voting |
+| **The participants panel's status check** — "Finished" and "Vote recorded", the only sign on a row that its person is done, drawn in emerald-400 and emerald-500: 1.73 to 2.46:1 on white and on the current user's tinted row | 1.4.11 Non-text Contrast | **Fixed 2026-11-10** (43.0), found by the review of 43.0: emerald-600 for the soft tone, a person finished in a retrospective (3.67:1 on white, 3.28:1 on the tinted row), and emerald-700 for the strong tone, a vote recorded and every check of the health check, which draws the same one (5.37:1 and 4.80:1). `__tests__/avatarInitialsContrast.test.tsx` measures both tones on both surfaces with axe-core's own colour engine; axe-core itself skips icon ligatures |
 
 ## Languages
 
@@ -137,7 +140,7 @@ Stated because a documented gap is honest and silence is not.
    share, the time is a button whenever pressing it does something — setting
    the duration, silencing the alarm — and its name carries the time shown; the
    editor it opens takes focus, saves on Enter and cancels on Escape.)
-2. **Screens not covered by the automated audit.** The fourteen states of
+2. **Screens not covered by the automated audit.** The sixteen states of
    `e2e/accessibility-audit.spec.ts` are the main flows, and they include a
    dark screen at each end (both close screens). `e2e/jira.spec.ts` adds seven
    Jira screens: the Dashboard's Actions tab, audited whole, and six audited
@@ -148,8 +151,9 @@ Stated because a documented gap is honest and silence is not.
    The administration console is audited whole, once per tab
    (`e2e/admin-console-accessibility.spec.ts`). The team feedback board, the
    template builders, the Dashboard's Retrospectives, Health Checks and
-   Settings tabs (apart from the Jira card), the retrospective's Welcome, Vote
-   and Discuss phases, its Review step outside the Jira scope, and the health
+   Settings tabs (apart from the Jira card), the retrospective's Welcome and
+   Discuss phases, its Vote phase outside the participants panel, its Review
+   step outside the Jira scope, and the health
    check's Discuss and Review phases are checked by the lint rules but have no
    axe run. **This gap has now cost something measurable:** the nameless switch
    in the row above is a defect axe *does* report, sitting on a dialog the audit
@@ -157,12 +161,15 @@ Stated because a documented gap is honest and silence is not.
    there. (The console was the previous case: measured once on 2026-10-20 at
    182 `color-contrast` nodes and one `label` finding, both fixed — the label in
    41.0, the contrast on 2026-10-22.)
-3. **54 buttons announce their icon before their label.** A button with both
+3. **51 buttons announce their icon beside their label** (48 before it, 3
+   after it; counted with the TypeScript parser on 2026-11-10, 54 before the
+   console's sortable Teams headers hid theirs in 43.0). A button with both
    an icon and text — "Save Message", "What's New" — has no `aria-hidden` on
    the icon span, so its name is the ligature *and* the text:
    "auto_awesome What's New". This is not a conformance failure: the name
    exists, it contains the visible label, and the control is identifiable. It
-   is noise, on 54 controls. It is not swept here on purpose — several of those
+   is noise, on 51 controls, and no test guards them: new code hides the icon
+   (`AGENTS.md`, *An icon is not a name*). It is not swept here on purpose — several of those
    icons are state-bearing (a spinner while saving, a lock on a protected
    backup), and hiding one loses information a sighted user gets. Like the 17
    `autoFocus` attributes, this needs a judgement per site rather than a
@@ -189,6 +196,18 @@ Stated because a documented gap is honest and silence is not.
    keeps walking the participant's Group phase rather than their Brainstorm.
    `__tests__/sessionOpenBoard.test.tsx` and `__tests__/hiddenCardFiller.test.ts`
    pin it.
+8. **A participant cannot scroll the participants list from the keyboard in
+   Safari.** The list scrolls when it is longer than the panel, and for a
+   participant it holds nothing focusable: Safari does not make a scrolling
+   region focusable, so Tab never enters it and the rows below the fold, the
+   Vote phase's votes left among them, stay out of the keyboard's reach. A
+   facilitator's rows hold the *Mark as left* buttons, so Tab scrolls them
+   (on an open board, which has no such button, the facilitator's list is in
+   the same case). Firefox and recent Chromium make such a region focusable
+   themselves.
+   No audited state has a list long enough to scroll, so axe's
+   `scrollable-region-focusable` never runs on it. Found by the review of 43.0;
+   the list was the same before it.
 
 ## Feedback
 

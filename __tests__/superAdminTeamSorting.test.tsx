@@ -3,8 +3,27 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import SuperAdmin from '../components/SuperAdmin';
 import { Team } from '../types';
 
-// Build mock teams with varying names, member counts, and dates
+// Build mock teams with varying names, member counts, and dates. The order the
+// server sends is none of the orders a sort test expects, and the team with
+// neither a count nor a date comes first: a sort that did nothing would pass a
+// test whose expected order is already the server's, and "unknown last" would
+// hold without the sort ever moving the unknown team.
 const mockTeams: Team[] = [
+  {
+    id: 'team-3',
+    name: 'Bravo Team',
+    passwordHash: 'hash3',
+    members: [
+      { id: 'u5', name: 'Eve', color: '#0ff', role: 'participant' },
+      { id: 'u6', name: 'Frank', color: '#f0f', role: 'participant' },
+    ],
+    customTemplates: [],
+    retrospectives: [],
+    // No retrospectiveCount: what a pod of an earlier release sends during a
+    // rolling update.
+    globalActions: [],
+    // No lastConnectionDate — should be treated as "Never"
+  },
   {
     id: 'team-1',
     name: 'Charlie Team',
@@ -15,7 +34,10 @@ const mockTeams: Team[] = [
       { id: 'u3', name: 'Carol', color: '#00f', role: 'participant' },
     ],
     customTemplates: [],
+    // The console's list never carries the history: the count is what the
+    // server sends, and reading `retrospectives.length` would show 0.
     retrospectives: [],
+    retrospectiveCount: 1,
     globalActions: [],
     lastConnectionDate: '2026-03-10T10:00:00.000Z',
   },
@@ -28,21 +50,9 @@ const mockTeams: Team[] = [
     ],
     customTemplates: [],
     retrospectives: [],
+    retrospectiveCount: 12,
     globalActions: [],
     lastConnectionDate: '2026-04-01T10:00:00.000Z',
-  },
-  {
-    id: 'team-3',
-    name: 'Bravo Team',
-    passwordHash: 'hash3',
-    members: [
-      { id: 'u5', name: 'Eve', color: '#0ff', role: 'participant' },
-      { id: 'u6', name: 'Frank', color: '#f0f', role: 'participant' },
-    ],
-    customTemplates: [],
-    retrospectives: [],
-    globalActions: [],
-    // No lastConnectionDate — should be treated as "Never"
   },
 ];
 
@@ -84,7 +94,7 @@ describe('SuperAdmin Teams sorting', () => {
     });
   };
 
-  it('renders sortable column headers for Team Name, Members and Last Active', async () => {
+  it('renders sortable column headers for Team Name, Members, Retrospectives and Last Active', async () => {
     render(<SuperAdmin sessionToken="test-token" onExit={vi.fn()} />);
 
     await waitFor(() => {
@@ -94,11 +104,92 @@ describe('SuperAdmin Teams sorting', () => {
     // Headers should be clickable buttons (or have sort indicators)
     const nameHeader = screen.getByRole('button', { name: /Team Name/i });
     const membersHeader = screen.getByRole('button', { name: /Members/i });
+    const retrospectivesHeader = screen.getByRole('button', { name: /Retrospectives/i });
     const lastActiveHeader = screen.getByRole('button', { name: /Last Active/i });
 
     expect(nameHeader).toBeTruthy();
     expect(membersHeader).toBeTruthy();
+    expect(retrospectivesHeader).toBeTruthy();
     expect(lastActiveHeader).toBeTruthy();
+
+    // Right after Members, before the recovery email.
+    expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
+      expect.stringContaining('Team Name'),
+      expect.stringContaining('Members'),
+      expect.stringContaining('Retrospectives'),
+      'Recovery Email',
+      expect.stringContaining('Last Active'),
+      'Actions'
+    ]);
+  });
+
+  // An icon is not a name (audit H52): the arrow beside each header used to
+  // be read as part of the button's name, "Members unfold_more".
+  it('names each sortable header by its label alone', async () => {
+    render(<SuperAdmin sessionToken="test-token" onExit={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Charlie Team')).toBeTruthy());
+
+    for (const name of ['Team Name', 'Members', 'Retrospectives', 'Last Active']) {
+      expect(screen.getByRole('button', { name }), name).toBeTruthy();
+    }
+  });
+
+  it('says on the header how the rows are sorted, on the sorted column only', async () => {
+    render(<SuperAdmin sessionToken="test-token" onExit={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Charlie Team')).toBeTruthy());
+    const sortOf = (name: RegExp) => screen.getByRole('columnheader', { name }).getAttribute('aria-sort');
+
+    for (const name of [/Team Name/, /Members/, /Retrospectives/, /Last Active/]) expect(sortOf(name)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Retrospectives/i }));
+    expect(sortOf(/Retrospectives/)).toBe('ascending');
+    for (const name of [/Team Name/, /Members/, /Last Active/]) expect(sortOf(name)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Retrospectives/i }));
+    expect(sortOf(/Retrospectives/)).toBe('descending');
+
+    fireEvent.click(screen.getByRole('button', { name: /Members/i }));
+    expect(sortOf(/Members/)).toBe('ascending');
+    expect(sortOf(/Retrospectives/)).toBeNull();
+  });
+
+  it('shows how many retrospectives each team holds, and says when the server sent no count', async () => {
+    render(<SuperAdmin sessionToken="test-token" onExit={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Charlie Team')).toBeTruthy());
+
+    expect(screen.getByText('1 retrospective')).toBeTruthy();
+    expect(screen.getByText('12 retrospectives')).toBeTruthy();
+    // Bravo was sent no count (an older pod): never "0 retrospectives".
+    expect(screen.getByText('Unknown')).toBeTruthy();
+    expect(screen.queryByText('0 retrospectives')).toBeNull();
+  });
+
+  it('sorts teams by retrospective count ascending, an unknown count last', async () => {
+    render(<SuperAdmin sessionToken="test-token" onExit={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Charlie Team')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Retrospectives/i }));
+
+    const names = getTeamNameCells();
+    // Charlie (1), Alpha (12), Bravo (unknown = last)
+    expect(names[0]).toContain('Charlie Team');
+    expect(names[1]).toContain('Alpha Team');
+    expect(names[2]).toContain('Bravo Team');
+  });
+
+  it('sorts teams by retrospective count descending, an unknown count still last', async () => {
+    render(<SuperAdmin sessionToken="test-token" onExit={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('Charlie Team')).toBeTruthy());
+
+    const retrospectivesHeader = screen.getByRole('button', { name: /Retrospectives/i });
+    fireEvent.click(retrospectivesHeader); // asc
+    fireEvent.click(retrospectivesHeader); // desc
+
+    const names = getTeamNameCells();
+    // Alpha (12), Charlie (1), Bravo (unknown = last)
+    expect(names[0]).toContain('Alpha Team');
+    expect(names[1]).toContain('Charlie Team');
+    expect(names[2]).toContain('Bravo Team');
   });
 
   it('sorts teams by name ascending on first click', async () => {
@@ -213,9 +304,14 @@ describe('SuperAdmin Teams sorting', () => {
       expect(screen.getByText('Charlie Team')).toBeTruthy();
     });
 
-    // Sort by name first
-    const nameHeader = screen.getByRole('button', { name: /Team Name/i });
-    fireEvent.click(nameHeader);
+    // Sort by last activity first, an order the members sort must change:
+    // starting from the name sort proved nothing, since names and member counts
+    // order this fixture the same way.
+    fireEvent.click(screen.getByRole('button', { name: /Last Active/i }));
+    const byLastActive = getTeamNameCells();
+    expect(byLastActive[0]).toContain('Charlie Team');
+    expect(byLastActive[1]).toContain('Alpha Team');
+    expect(byLastActive[2]).toContain('Bravo Team');
 
     // Then sort by members
     const membersHeader = screen.getByRole('button', { name: /Members/i });

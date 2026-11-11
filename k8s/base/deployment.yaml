@@ -26,13 +26,14 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: container
-          # This line is rewritten by .github/workflows/docker-deploy.yml on every
-          # deployment (sed + auto-commit), so it names the last tag pushed to the
-          # registry. It had drifted 17 majors behind VERSION, i.e. it advertised
-          # an image predating many user-visible releases;
+          # Retagged by hand in the pull request that bumps VERSION's major:
+          # decision D7 deleted the deploy workflow's sed + auto-commit, which
+          # had never once run. It had drifted 17 majors behind VERSION, i.e. it
+          # advertised an image predating many user-visible releases;
           # __tests__/deploymentManifestParity.test.ts now fails when the majors
-          # diverge again. Overlays may retag (see k8s/overlays/dev).
-          image: jpfroud/retrogemini:42.0
+          # diverge again. No overlay retags it: the only image an overlay
+          # changes is PostgreSQL's (k8s/overlays/openshift).
+          image: jpfroud/retrogemini:43.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8080

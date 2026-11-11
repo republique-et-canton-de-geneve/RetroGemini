@@ -252,6 +252,19 @@ const phases = {
   // Participants panel (shared with the health check session).
   'phases.participants.activityBrainstorm': 'writing a ticket',
   'phases.participants.activityProposal': 'proposing action',
+  // Above the list where people type: who is writing (Brainstorm, an open
+  // board) or proposing an action (Discuss). Kept, saying nobody is, when nobody
+  // is; counted, never named, in an anonymous session; the count in
+  // parentheses, as in the title.
+  'phases.participants.typingNamedBrainstorm': 'Writing now ({count}): {names}',
+  'phases.participants.typingNamedProposal': 'Proposing an action ({count}): {names}',
+  'phases.participants.typingCountBrainstorm': 'Writing now ({count})',
+  'phases.participants.typingCountProposal': 'Proposing an action ({count})',
+  'phases.participants.typingNobodyBrainstorm': 'Nobody is writing',
+  'phases.participants.typingNobodyProposal': 'Nobody is proposing an action',
+  // The last item of the names list, past three people.
+  'phases.participants.typingOthers_one': '{count} other',
+  'phases.participants.typingOthers_other': '{count} others',
   'phases.participants.noTicketsTitle': 'No tickets added yet',
   'phases.participants.noTickets': 'no tickets',
   'phases.participants.ticketsAdded_one': '{count} ticket added',
@@ -276,6 +289,11 @@ const phases = {
   'phases.participants.ratedSome': 'Rated {rated} of {total} actions',
   'phases.participants.voteRecorded': 'Vote recorded',
   'phases.participants.finished': 'Finished',
+  // The Vote phase, in place of a person's role: the votes they can still place
+  // (utils/voteBudget.ts → votesLeftToPlace), the number their own bar shows.
+  // Never 'votes remaining', the bar's own words.
+  'phases.participants.votesLeft_one': '{count} vote left',
+  'phases.participants.votesLeft_other': '{count} votes left',
   'phases.participants.invitedHeading': 'Invited · waiting to join ({count})',
   'phases.participants.invitationSentTo': 'Invitation sent to {email}',
   'phases.participants.invitationSent': 'Invitation sent',

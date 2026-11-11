@@ -101,10 +101,17 @@ test('audits every tab of the super-admin console with axe-core', async ({ brows
   expect((await created).status()).toBe(200);
 
   // Left open on the Icebreaker: the session stays live for the Live tab.
+  // The console reads its team list once, when it opens, and the Teams tab
+  // counts the retrospectives the team record holds: the creation's save must
+  // have landed first.
+  const retroSaved = teamPage.waitForResponse((response) =>
+    response.request().method() === 'POST'
+    && /^\/api\/team\/[^/]+\/retrospective\/[^/]+$/.test(new URL(response.url()).pathname));
   await teamPage.locator('.dash-tab', { hasText: 'Actions' }).click();
   await teamPage.getByRole('button', { name: 'New Retrospective' }).click();
   await teamPage.locator('text=Start, Stop, Continue').first().click();
   await expect(teamPage.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 15_000 });
+  expect((await retroSaved).ok()).toBe(true);
 
   // ---- The console, behind the allowlist --------------------------------
   adminContext = await browser.newContext();
@@ -117,9 +124,10 @@ test('audits every tab of the super-admin console with axe-core', async ({ brows
     return route.abort();
   });
 
-  // 1. Teams.
+  // 1. Teams, its retrospective count included in the audit.
   await openConsole(admin);
   await expect(teamRow(admin, TEAM)).toHaveCount(1, { timeout: 10_000 });
+  await expect(teamRow(admin, TEAM).getByRole('cell', { name: '1 retrospective', exact: true })).toBeVisible();
   await auditConsole(admin, testInfo, 'admin-console-teams');
 
   // 2. A team's inline editor (opening it writes nothing).

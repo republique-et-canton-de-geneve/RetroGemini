@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import express from 'express';
 import type { AddressInfo } from 'net';
 import { createTeamService } from '../server/services/teamService.js';
@@ -38,6 +38,20 @@ const createMockDataStore = () => {
       teams.set(teamId, structuredClone(teamData));
     },
     loadAllTeams: async () => Array.from(teams.values()),
+    // The summaries as the store hands them out with every option on: the
+    // console's fields beside the login picker's, the retrospective count
+    // included. The anonymous list must pick its four by name.
+    loadTeamSummaries: vi.fn(async (_options?: Record<string, unknown>) => Array.from(teams.values()).map((team) => ({
+      id: team.id,
+      name: team.name,
+      facilitatorEmail: team.facilitatorEmail,
+      lastConnectionDate: team.lastConnectionDate,
+      members: team.members,
+      archivedMembers: team.archivedMembers,
+      mergedFrom: [],
+      jiraTarget: null,
+      retrospectiveCount: Array.isArray(team.retrospectives) ? team.retrospectives.length : 0
+    }))),
     deleteTeamRecord: async (teamId: string) => {
       teams.delete(teamId);
     },
@@ -180,6 +194,27 @@ describe('team answers', () => {
     expect(res.body).toEqual({ success: true });
     const names = (dataStore._teams.get(teamId)!.members as { name: string }[]).map((m) => m.name);
     expect(names).toEqual(['Ada']);
+  });
+
+  // The login picker is anonymous: anyone who can reach the deployment reads
+  // it. It answers four fields per team whatever the summaries carry, and
+  // never asks for the count the super-admin console reads.
+  it('/api/team/list answers four fields per team, and never asks for the retrospective count', async () => {
+    dataStore._teams.get(teamId)!.lastConnectionDate = '2026-11-01T08:00:00.000Z';
+
+    const res = await fetch(`${baseUrl}/api/team/list`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.teams).toHaveLength(1);
+    for (const listed of body.teams) {
+      expect(Object.keys(listed).sort()).toEqual(['id', 'lastConnectionDate', 'memberCount', 'name']);
+    }
+    expect(body.teams[0]).toEqual({ id: teamId, name: 'Alpha', memberCount: 1, lastConnectionDate: '2026-11-01T08:00:00.000Z' });
+    expect(dataStore.loadTeamSummaries).toHaveBeenCalled();
+    for (const [options] of dataStore.loadTeamSummaries.mock.calls) {
+      expect(options?.withRetrospectiveCount).toBeFalsy();
+    }
   });
 
   it('sanitizeTeamForClient leaves teamFeedbacks out', () => {

@@ -4301,7 +4301,7 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
     await screen.findByText('Flaky deploys');
 
     expect(screen.queryByRole('button', { name: /add a vote/ })).toBeNull();
-    expect(screen.queryByText(/votes remaining/)).toBeNull();
+    expect(screen.queryByText(/votes? remaining/)).toBeNull();
     expect(screen.getByText('Voting is off')).toBeTruthy();
     expect(within(cardElement('Slow rollbacks')).getByTestId('vote-total').textContent).toContain('2');
   });
@@ -4429,7 +4429,7 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
     await screen.findByText('Flaky deploys');
 
     // Three votes cast with a maximum of one, and still one more to give.
-    expect(screen.queryByText(/votes remaining/)).toBeNull();
+    expect(screen.queryByText(/votes? remaining/)).toBeNull();
     expect(within(cardElement('Flaky deploys')).getByRole('button', { name: /add a vote/ }).getAttribute('aria-disabled')).toBe('false');
 
     const settings = await openSettings(user);
@@ -4451,7 +4451,7 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
     renderBoard(createBoard({ phase: 'VOTE', settings: settingsOf({ unlimitedVotes: true }) }));
     await screen.findByText('Flaky deploys');
 
-    expect(screen.queryByText(/votes remaining/)).toBeNull();
+    expect(screen.queryByText(/votes? remaining/)).toBeNull();
     expect((screen.getByRole('textbox', { name: 'Max votes per person' }) as HTMLInputElement).disabled).toBe(false);
     await user.click(screen.getByRole('checkbox', { name: 'Unlimited votes' }));
     await waitFor(async () => expect((await lastPersisted())?.settings.unlimitedVotes).toBe(false));

@@ -3,6 +3,7 @@ import { runWithContext, setContextValue } from './logContext.js';
 import { createRepeatCoalescer } from './logCoalescer.js';
 import { SESSION_REVOKED_ERROR, TeamAuthRowCorruptError, sessionVerdict } from './sessionEpoch.js';
 import { NO_OP_SESSION_REVOCATION, TEAM_SESSIONS_REVOKED_EVENT } from './sessionRevocation.js';
+import { toParticipantActivity } from '../../utils/participantActivity.js';
 
 // Decision D3b: how often each pod re-checks its joined sockets against their
 // team's session epoch. The broadcast of a rotation cuts them at once; this
@@ -1249,8 +1250,15 @@ const registerSocketHandlers = ({
     // receivers auto-expire, so it needs no recovery after a reconnection.
     on('participant-activity', (payload) => {
       const sessionId = socket.sessionId;
-      if (!sessionId) return;
-      const activity = payload && typeof payload === 'object' ? payload.activity ?? null : null;
+      // Only a joined socket that says who it is, and only a kind the clients draw
+      // (utils/participantActivity.js). Any other kind used to be relayed as sent: a
+      // '__proto__' blanked every expanded participants panel of the room, and a
+      // string of any size went to each of its clients. Only the kind is bounded:
+      // the name is what the join carried, neither checked nor bounded
+      // (HARDENING_STATUS.md, H55). The payload keeps its three fields, which every
+      // client release reads.
+      if (!sessionId || typeof socket.userId !== 'string' || socket.userId === '') return;
+      const activity = toParticipantActivity(payload && typeof payload === 'object' ? payload.activity : null);
       socket.to(sessionId).emit('participant-activity', {
         userId: socket.userId,
         userName: socket.userName,

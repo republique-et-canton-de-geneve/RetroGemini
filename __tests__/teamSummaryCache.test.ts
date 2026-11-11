@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createDataStore } from '../server/services/dataStore.js';
@@ -265,6 +265,109 @@ for (const engine of engines) {
       expect(full.mergedFrom).toEqual([]);
       expect(plain).not.toHaveProperty('jiraTarget');
       expect(full).not.toHaveProperty('jiraTarget');
+      // The console's count: the anonymous login picker reads these
+      // summaries too, and never asks for it.
+      expect(plain).not.toHaveProperty('retrospectiveCount');
+      expect(full).not.toHaveProperty('retrospectiveCount');
+
+      const counted = (await ours(store, { withRetrospectiveCount: true }))[id];
+      expect(counted.retrospectiveCount).toBe(30);
+      expect(counted).not.toHaveProperty('archivedMembers');
+      expect(counted).not.toHaveProperty('mergedFrom');
+      expect(counted).not.toHaveProperty('retrospectives');
+    });
+
+    // The console's Teams tab shows how many retrospectives each team holds:
+    // a count beside the history, read in the same projection, never the
+    // history itself.
+    describe('the retrospective count', () => {
+      const counted = async (s: Store = store) => ours(s, { withRetrospectiveCount: true });
+      const countOf = async (teamId: string) =>
+        (await store.loadTeamSummary(teamId, { withRetrospectiveCount: true }) as Json).retrospectiveCount;
+
+      it('counts every retrospective of a team, on the list and the single-team read alike', async () => {
+        const id = tid('t');
+        const empty = tid('t2');
+        await store.saveTeam(id, team(id, 'Chi'));
+        // A team as /api/team/create stores it.
+        await store.saveTeam(empty, team(empty, 'Chi empty', { retrospectives: [] }));
+
+        const listed = await counted();
+        expect(listed[id].retrospectiveCount).toBe(30);
+        expect(listed[empty].retrospectiveCount).toBe(0);
+        expect(listed[id]).not.toHaveProperty('retrospectives');
+
+        expect(await store.loadTeamSummary(id)).not.toHaveProperty('retrospectiveCount');
+        expect(await countOf(id)).toBe(30);
+        expect(await countOf(empty)).toBe(0);
+      });
+
+      // `jsonb_array_length` raises on a scalar, an object or a JSON null
+      // (22023, which no fallback reads one row at a time), and the list read is
+      // one statement for every team: one such record would fail the login
+      // picker, renames, merges, restores and the console for every team.
+      it('reads 0 for a list that is absent or is not a list, and every list read still answers', async () => {
+        const odd: [string, unknown][] = [['null', null], ['object', {}], ['text', 'x'], ['number', 3]];
+        const ids = odd.map(([label, value]) => {
+          const id = tid(`odd-${label}`);
+          return { id, record: team(id, `Odd ${label}`, { retrospectives: value }) };
+        });
+        const absent = tid('odd-absent');
+        const { retrospectives: _history, ...withoutList } = team(absent, 'Odd absent');
+        ids.push({ id: absent, record: withoutList as ReturnType<typeof team> });
+        for (const { id, record } of ids) await store.saveTeam(id, record);
+
+        const listed = await counted();
+        for (const { id } of ids) expect(listed[id].retrospectiveCount, id).toBe(0);
+        // The login picker's read, and the console's merge-provenance read.
+        expect(Object.keys(await ours())).toEqual(expect.arrayContaining(ids.map(({ id }) => id)));
+        expect(Object.keys(await ours(store, { withMergeProvenance: true }))).toEqual(expect.arrayContaining(ids.map(({ id }) => id)));
+        for (const { id } of ids) expect(await countOf(id), id).toBe(0);
+
+        // The list projection reads the guard on every stale row: leave none
+        // behind for the other suites sharing the database.
+        for (const { id } of ids) await store.deleteTeamRecord(id);
+      });
+
+      it('sees a retrospective this pod adds, and one another pod adds, on both reads', async () => {
+        const id = tid('u');
+        await store.saveTeam(id, team(id, 'Psi'));
+        expect((await counted())[id].retrospectiveCount).toBe(30);
+
+        const addRetro = (retroId: string) => (current: Json) => ({
+          ...current,
+          retrospectives: [{ id: retroId, tickets: [] }, ...(current.retrospectives as Json[])]
+        });
+        await store.atomicTeamUpdate(id, addRetro('own'));
+        expect((await counted())[id].retrospectiveCount).toBe(31);
+
+        await other.atomicTeamUpdate(id, addRetro('foreign'));
+        expect((await counted())[id].retrospectiveCount).toBe(32);
+
+        // Straight to the single-team read, with no list read in between.
+        await other.atomicTeamUpdate(id, addRetro('foreign-2'));
+        expect(await countOf(id)).toBe(33);
+      });
+
+      // The 38.0 rule: every column comes from the one cast per row.
+      // `(value::jsonb)->'retrospectives'` in the outer select would be a
+      // second parse of the whole record, on every cold read.
+      it.skipIf(!isPg)('is read from the one cast per row, on the list and the single-team read', async () => {
+        const id = tid('v');
+        await store.saveTeam(id, team(id, 'Omega count'));
+        const casts = (sql: string[]) => sql.filter((text) => text.includes('::jsonb'));
+
+        const list = casts(await sqlDuring(() => counted()));
+        expect(list).toHaveLength(1);
+        expect(list[0]).toContain('retrospective_count');
+        expect(list[0].match(/::jsonb/g)).toHaveLength(1);
+
+        await other.atomicTeamUpdate(id, (current: Json) => ({ ...current, name: 'Omega counted' }));
+        const single = casts(await sqlDuring(() => store.loadTeamSummary(id, { withRetrospectiveCount: true })));
+        expect(single).toHaveLength(1);
+        expect(single[0]).toContain('retrospective_count');
+        expect(single[0].match(/::jsonb/g)).toHaveLength(1);
+      });
     });
 
     // `/jira/status` is read by every participant's screen on Review entry and
@@ -394,3 +497,63 @@ for (const engine of engines) {
     });
   });
 }
+
+// Read in the source, so it runs whatever engine the run has. CI has SQLite
+// only, where an unguarded `json_array_length` answers 0 or NULL for a value
+// that is not a list: deleting the PostgreSQL guard left every CI run green
+// (review of 43.0), while on PostgreSQL `jsonb_array_length` raises 22023 on
+// such a value and fails every list read, for every team.
+describe('the type guard on every array length in dataStore.js', () => {
+  const source = readFileSync(join(__dirname, '..', 'server', 'services', 'dataStore.js'), 'utf8').replace(/\s+/g, ' ');
+
+  // Every call, its argument read up to the parenthesis that closes it (nested
+  // parentheses and quoted strings included): an argument such as
+  // `(value::jsonb)->'x'` is checked like any other, never skipped.
+  const unguardedIn = (text: string, lengthFn: string, typeFn: string) => {
+    const found: string[] = [];
+    for (const call of text.matchAll(new RegExp(`\\b${lengthFn}\\(`, 'g'))) {
+      const at = call.index ?? 0;
+      const open = at + call[0].length;
+      let depth = 1;
+      let quoted = false;
+      let end = open;
+      for (; end < text.length && depth > 0; end += 1) {
+        const char = text[end];
+        if (char === "'") quoted = !quoted;
+        else if (!quoted && char === '(') depth += 1;
+        else if (!quoted && char === ')') depth -= 1;
+      }
+      if (depth !== 0) {
+        found.push(text.slice(at));
+        continue;
+      }
+      const argument = text.slice(open, end - 1);
+      const guard = `CASE WHEN ${typeFn}(${argument}) = 'array' THEN `;
+      if (text.slice(Math.max(0, at - guard.length), at) !== guard) found.push(text.slice(at, end));
+    }
+    return found;
+  };
+  const unguarded = (lengthFn: string, typeFn: string) => unguardedIn(source, lengthFn, typeFn);
+
+  it('finds the calls it checks', () => {
+    expect(source.match(/\bjsonb_array_length\(/g)?.length ?? 0).toBeGreaterThan(0);
+    expect(source.match(/\bjson_array_length\(/g)?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('reads an argument that holds parentheses, and reports it unguarded', () => {
+    expect(unguardedIn("SELECT jsonb_array_length((value::jsonb)->'healthChecks') AS n", 'jsonb_array_length', 'jsonb_typeof'))
+      .toEqual(["jsonb_array_length((value::jsonb)->'healthChecks')"]);
+    expect(unguardedIn("CASE WHEN jsonb_typeof((value::jsonb)->'x') = 'array' THEN jsonb_array_length((value::jsonb)->'x') END", 'jsonb_array_length', 'jsonb_typeof'))
+      .toEqual([]);
+    expect(unguardedIn("json_array_length(json_extract(value, '$.x'))", 'json_array_length', 'json_type'))
+      .toEqual(["json_array_length(json_extract(value, '$.x'))"]);
+  });
+
+  it('guards every jsonb_array_length by jsonb_typeof (PostgreSQL)', () => {
+    expect(unguarded('jsonb_array_length', 'jsonb_typeof')).toEqual([]);
+  });
+
+  it('guards every json_array_length by json_type (SQLite)', () => {
+    expect(unguarded('json_array_length', 'json_type')).toEqual([]);
+  });
+});

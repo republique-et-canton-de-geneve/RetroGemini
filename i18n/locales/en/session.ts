@@ -16,7 +16,11 @@ const session = {
   'session.board.brainstormTitle': 'Brainstorm',
   'session.board.groupTitle': 'Group Ideas',
   'session.board.voteTitle': 'Vote',
-  'session.board.votesRemaining': '{count} votes remaining',
+  // The reader's own count: in the guided Vote bar, the votes they can still
+  // place (utils/voteBudget.ts → votesLeftToPlace); on an open board, what is
+  // left of the number, one vote per item or not.
+  'session.board.votesRemaining_one': '{count} vote remaining',
+  'session.board.votesRemaining_other': '{count} votes remaining',
   'session.board.suggestGroups': 'Suggest groups with AI',
   'session.board.suggestGroupsHint':
     'Ask the assistant to suggest groupings. You will validate each suggestion before it is applied.',

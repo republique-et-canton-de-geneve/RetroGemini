@@ -290,6 +290,25 @@ describe('Health check participants panel, shared with the retro', () => {
 
     expect(screen.getByRole('button', { name: 'Expand panel' })).toBeTruthy();
   });
+
+  // 43.0: the retro passes the panel what its phase lets people type and the
+  // Vote phase's votes left; the health check passes neither, so its panel
+  // looks exactly as it did. `typing-now` is what guards the typing half: the
+  // line is drawn whenever a typing kind is passed, someone typing or not. The
+  // collapsed rail is not asserted: it is drawn only while someone types, and
+  // no typing signal reaches a health check, so its absence proves nothing.
+  it('draws no typing line and no votes line: a health check passes neither', () => {
+    for (const phase of ['SURVEY', 'DISCUSS'] as const) {
+      const view = renderSession(createSession({ phase, discussionFocusId: phase === 'DISCUSS' ? 'd1' : null }));
+
+      // The panel is there, so the two absences below are about it, not about a
+      // phase that draws no panel at all.
+      expect(screen.getByTestId('participants-panel'), phase).toBeTruthy();
+      expect(screen.queryByTestId('typing-now'), phase).toBeNull();
+      expect(screen.queryByTestId('votes-left'), phase).toBeNull();
+      view.unmount();
+    }
+  });
 });
 
 describe('mergeRemoteHealthCheckSession keeps invitees a lost write race dropped', () => {

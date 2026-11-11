@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, screen, within } from '@testing-library/react';
 import React from 'react';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import ParticipantsPanel from '../components/session/ParticipantsPanel';
 import { ParticipantActivity, RetroSession, Ticket, User } from '../types';
 
@@ -16,6 +18,15 @@ const facilitator = makeUser({ id: 'fac', name: 'Fran', color: 'bg-indigo-500', 
 const alice = makeUser({ id: 'a', name: 'Alice', color: 'bg-rose-500' });
 const bob = makeUser({ id: 'b', name: 'Bob', color: 'bg-emerald-500' });
 const carol = makeUser({ id: 'c', name: 'Carol', color: 'bg-amber-500' });
+const dave = makeUser({ id: 'd', name: 'Dave' });
+
+// The row whose name is `name`: the name is the element's own text, so a
+// sentence that mentions someone (the typing line) never matches.
+const rowOf = (name: string) => {
+  const row = screen.getAllByTestId('participant-row').find((candidate) => within(candidate).queryByText(name));
+  if (!row) throw new Error(`no participant row for ${name}`);
+  return row;
+};
 
 const ticket = (authorId: string): Ticket => ({
   id: 't-' + Math.random().toString(36).slice(2, 7),
@@ -162,6 +173,28 @@ describe('ParticipantsPanel - contribution counts', () => {
 
     expect(container.querySelector('[title$="added"]')).toBeFalsy();
     expect(container.querySelector('[title="No tickets added yet"]')).toBeFalsy();
+  });
+
+  // Drawn only once the session held a card, the line came with the first card
+  // anyone wrote, on every row at once, and moved every row below under the
+  // facilitator's pointer. It is drawn from the start of Brainstorm, with the
+  // facilitator's own phase change.
+  it('draws "no tickets" on every row that has not left from the start of Brainstorm', () => {
+    const session = makeSession({ phase: 'BRAINSTORM', participants: [facilitator, alice, bob], leftUsers: ['b'], tickets: [] });
+
+    render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={[facilitator, alice, bob]}
+        activityUsers={{}}
+      />
+    );
+
+    for (const name of ['Fran', 'Alice']) {
+      expect(rowOf(name).querySelector('[title="No tickets added yet"]'), name).not.toBeNull();
+    }
+    expect(rowOf('Bob').querySelector('[title="No tickets added yet"]')).toBeNull();
   });
 });
 
@@ -591,5 +624,523 @@ describe('ParticipantsPanel - rating switched off mid-session', () => {
     );
 
     expect(container.textContent).not.toContain('rated all actions');
+  });
+});
+
+// "Participant N", the way an anonymous session names the people on its roster.
+const anonymousDisplay = (roster: User[]) => (member: User) => {
+  const index = roster.findIndex((candidate) => candidate.id === member.id) + 1;
+  return { displayName: `Participant ${index}`, initials: `P${index}` };
+};
+
+// 43.0: in the Vote phase each row says, in place of the role, the votes its
+// person can still place, so the facilitator can follow the vote without
+// asking. It is the number the person's own "N votes remaining" shows them.
+describe('ParticipantsPanel - votes left in the Vote phase', () => {
+  const everyone = [facilitator, alice, bob, carol];
+
+  const voteSession = (overrides: Partial<RetroSession> = {}, settings: Partial<RetroSession['settings']> = {}) => {
+    const session = makeSession({ phase: 'VOTE', participants: everyone, ...overrides });
+    session.settings = { ...session.settings, ...settings };
+    return session;
+  };
+
+  const renderVote = (session: RetroSession, props: Partial<React.ComponentProps<typeof ParticipantsPanel>> = {}) =>
+    render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={everyone}
+        activityUsers={{}}
+        {...props}
+      />
+    );
+
+  it('counts in words the votes each person can still place, cards and groups together, the facilitator included', () => {
+    renderVote(voteSession({
+      tickets: [
+        { ...ticket('a'), votes: ['a', 'a', 'b'] },
+        { ...ticket('b'), groupId: 'g1', votes: ['fac'] }
+      ],
+      groups: [{ id: 'g1', title: 'Topic', colId: 'col-1', votes: ['a'] }]
+    }));
+
+    expect(within(rowOf('Alice')).getByText('2 votes left')).toBeTruthy();
+    expect(within(rowOf('Bob')).getByText('4 votes left')).toBeTruthy();
+    expect(within(rowOf('Carol')).getByText('5 votes left')).toBeTruthy();
+    // The Vote phase counts the facilitator as a voter, and so does the footer.
+    expect(within(rowOf('Fran')).getByText('4 votes left')).toBeTruthy();
+  });
+
+  it('says one vote in the singular, and 0 until the person is finished', () => {
+    renderVote(voteSession({ tickets: [{ ...ticket('a'), votes: ['a', 'b', 'b'] }] }, { maxVotes: 2 }));
+
+    expect(within(rowOf('Alice')).getByText('1 vote left')).toBeTruthy();
+    expect(within(rowOf('Bob')).getByText('0 votes left')).toBeTruthy();
+  });
+
+  it("turns a finished row back to its role and today's check", () => {
+    // Alice finished with two votes left.
+    renderVote(voteSession({ tickets: [{ ...ticket('a'), votes: ['a', 'a', 'a'] }], finishedUsers: ['a'] }));
+
+    const row = rowOf('Alice');
+    expect(within(row).getByRole('img', { name: 'Finished' })).toBeTruthy();
+    expect(within(row).queryByTestId('votes-left')).toBeNull();
+    expect(within(row).getByText('participant')).toBeTruthy();
+  });
+
+  it('never counts below 0', () => {
+    // The number was lowered under what Alice had cast.
+    renderVote(voteSession({ tickets: [{ ...ticket('a'), votes: ['a', 'a', 'a'] }] }, { maxVotes: 1 }));
+
+    expect(within(rowOf('Alice')).getByText('0 votes left')).toBeTruthy();
+  });
+
+  it('counts nothing while votes are unlimited, and keeps the role line', () => {
+    renderVote(
+      voteSession({ tickets: [{ ...ticket('a'), votes: ['a'] }], finishedUsers: ['b'] }, { unlimitedVotes: true })
+    );
+
+    expect(screen.queryAllByTestId('votes-left')).toHaveLength(0);
+    expect(within(rowOf('Alice')).getByText('participant')).toBeTruthy();
+    expect(within(rowOf('Bob')).getByRole('img', { name: 'Finished' })).toBeTruthy();
+  });
+
+  it('shows nothing on a row marked as having left, and leaves the footer as it was', () => {
+    const { container } = renderVote(voteSession({ leftUsers: ['c'] }));
+
+    const carolRow = rowOf('Carol');
+    expect(within(carolRow).getByText('Left the session')).toBeTruthy();
+    expect(within(carolRow).queryByTestId('votes-left')).toBeNull();
+    expect(container.textContent).toContain('0 / 3 finished');
+  });
+
+  it('shows no count outside the Vote phase, nor on an open board', () => {
+    const voted = { tickets: [{ ...ticket('a'), votes: ['a', 'b'] }] };
+    for (const phase of ['GROUP', 'DISCUSS', 'OPEN_BOARD']) {
+      const { unmount } = renderVote(voteSession({ ...voted, phase }));
+      expect(screen.queryAllByTestId('votes-left'), phase).toHaveLength(0);
+      unmount();
+    }
+  });
+
+  it('says a number and names no one in an anonymous retro', () => {
+    const session = voteSession({ tickets: [{ ...ticket('a'), votes: ['a'] }] });
+    session.settings.isAnonymous = true;
+
+    const { container } = renderVote(session, { getMemberDisplay: anonymousDisplay(everyone) });
+
+    expect(screen.getAllByTestId('votes-left')).toHaveLength(4);
+    expect(within(rowOf('Participant 2')).getByText('4 votes left')).toBeTruthy();
+    expect(container.textContent).not.toContain('Alice');
+  });
+
+  it('says it in words, with no ARIA and nothing to hover', () => {
+    renderVote(voteSession());
+
+    const chips = screen.getAllByTestId('votes-left');
+    expect(chips).toHaveLength(4);
+    for (const chip of chips) {
+      expect(chip.getAttribute('role')).toBeNull();
+      expect(chip.getAttribute('aria-label')).toBeNull();
+      expect(chip.getAttribute('title')).toBeNull();
+      expect(chip.querySelector('[role], [aria-label], [title]')).toBeNull();
+      expect(chip.querySelector(':scope > span:not(.material-symbols-outlined)')?.textContent).toMatch(/^\d+ votes? left$/);
+      expect(chip.querySelector('.material-symbols-outlined')?.getAttribute('aria-hidden')).toBe('true');
+    }
+  });
+
+  it('keeps the line the height of the role line', () => {
+    renderVote(voteSession());
+
+    const chip = screen.getAllByTestId('votes-left')[0];
+    const classes = chip.className.split(/\s+/);
+    expect(classes).toContain('leading-4');
+    expect(classes.filter((token) => /^(py-|border$|border-)/.test(token))).toEqual([]);
+    const icon = chip.querySelector('.material-symbols-outlined');
+    expect(icon?.className.split(/\s+/)).toEqual(expect.arrayContaining(['text-xs!', 'leading-none']));
+    // A label too long for the row ("12 votes restants" in a wide font) is cut on
+    // its one line rather than wrapped onto a second, which would grow the row.
+    const label = chip.querySelector(':scope > span:not(.material-symbols-outlined)');
+    expect(label?.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
+  });
+
+  // With "1 vote/item" a person can place at most one vote on each item that
+  // does not hold theirs yet, however many votes the number leaves them: the
+  // row counts the votes they can still place (utils/voteBudget.ts →
+  // votesLeftToPlace), never ones no item will take.
+  it('counts only the votes that can still be placed, with one vote per item', () => {
+    const items = {
+      tickets: [{ ...ticket('a'), votes: ['a'] }],
+      groups: [{ id: 'g1', title: 'Topic', colId: 'col-1', votes: ['a'] }]
+    };
+    const { unmount } = renderVote(voteSession(items, { oneVotePerTicket: true }));
+    expect(within(rowOf('Alice')).getByText('0 votes left')).toBeTruthy();
+    // Nobody else has voted: two items, so two votes they can place, not five.
+    expect(within(rowOf('Bob')).getByText('2 votes left')).toBeTruthy();
+    unmount();
+
+    renderVote(voteSession({ ...items, groups: [{ ...items.groups[0], votes: [] }] }, { oneVotePerTicket: true }));
+    expect(within(rowOf('Alice')).getByText('1 vote left')).toBeTruthy();
+  });
+
+  it('follows the number when it is lowered', () => {
+    const before = voteSession({ tickets: [{ ...ticket('a'), votes: ['a', 'a', 'a', 'a'] }] });
+    const { rerender } = renderVote(before);
+    expect(within(rowOf('Alice')).getByText('1 vote left')).toBeTruthy();
+    expect(within(rowOf('Bob')).getByText('5 votes left')).toBeTruthy();
+
+    // The facilitator lowers the number to 3, which takes Alice's fourth vote back.
+    const lowered = voteSession({ tickets: [{ ...before.tickets[0], votes: ['a', 'a', 'a'] }] }, { maxVotes: 3 });
+    rerender(
+      <ParticipantsPanel
+        {...baseProps}
+        session={lowered}
+        participants={everyone}
+        activityUsers={{}}
+      />
+    );
+
+    expect(within(rowOf('Alice')).getByText('0 votes left')).toBeTruthy();
+    expect(within(rowOf('Bob')).getByText('3 votes left')).toBeTruthy();
+  });
+});
+
+// 43.0: a line pinned above the list says who is typing, so a long list need
+// not be scrolled to find them; the rows keep their cue and their order.
+describe('ParticipantsPanel - who is typing, above the list', () => {
+  const everyone = [facilitator, alice, bob, carol];
+
+  const renderTyping = (
+    activityUsers: Record<string, ParticipantActivity>,
+    overrides: Partial<RetroSession> = {},
+    props: Partial<React.ComponentProps<typeof ParticipantsPanel>> = {}
+  ) => {
+    const participants = props.participants ?? everyone;
+    return render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={makeSession({ participants, ...overrides })}
+        participants={participants}
+        activityUsers={activityUsers}
+        {...props}
+      />
+    );
+  };
+
+  const line = () => screen.getByTestId('typing-now');
+
+  // The name each row shows, in the order the rows are drawn.
+  const rowNames = (names: string[]) =>
+    screen.getAllByTestId('participant-row').map((row) => names.find((name) => within(row).queryByText(name)));
+
+  const classesOf = (element: Element | null | undefined) => element?.className.split(/\s+/) ?? [];
+
+  it("names who is writing in the list's order, not the order the signals came in", () => {
+    renderTyping({ c: 'brainstorm', a: 'brainstorm' });
+
+    expect(line().textContent).toBe('Writing now (2): Alice and Carol');
+    expect(rowNames(['Fran', 'Alice', 'Bob', 'Carol'])).toEqual(['Fran', 'Alice', 'Bob', 'Carol']);
+  });
+
+  it('sits above the list, outside its scroll', () => {
+    renderTyping({ a: 'brainstorm' });
+
+    expect(line().closest('.overflow-y-auto')).toBeNull();
+    const firstRow = screen.getAllByTestId('participant-row')[0];
+    expect(line().compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('keeps its place, saying nobody is writing, when nobody is', () => {
+    renderTyping({});
+
+    expect(line().textContent).toBe('Nobody is writing');
+  });
+
+  it('counts exactly the rows that show the cue', () => {
+    renderTyping(
+      // The reader, a kind of another phase, a value no release draws, someone
+      // marked as having left and an id the list does not hold.
+      { fac: 'brainstorm', a: 'brainstorm', b: 'proposal', c: '__proto__', d: 'brainstorm', zz: 'brainstorm' } as unknown as Record<string, ParticipantActivity>,
+      { leftUsers: ['d'] },
+      { participants: [facilitator, alice, bob, carol, dave] }
+    );
+
+    expect(line().textContent).toBe('Writing now (1): Alice');
+    const cued = screen.getAllByTestId('participant-row').filter((row) => row.textContent?.includes('writing a ticket'));
+    expect(cued).toHaveLength(1);
+    expect(within(cued[0]).queryByText('Alice')).toBeTruthy();
+  });
+
+  it('names everyone up to three, then two and the number of others', () => {
+    const three = renderTyping({ a: 'brainstorm', b: 'brainstorm', c: 'brainstorm' });
+    expect(line().textContent).toMatch(/^Writing now \(3\): Alice, Bob,? and Carol$/);
+    three.unmount();
+
+    const four = renderTyping(
+      { a: 'brainstorm', b: 'brainstorm', c: 'brainstorm', d: 'brainstorm' },
+      {},
+      { participants: [...everyone, dave] }
+    );
+    expect(line().textContent).toMatch(/^Writing now \(4\): Alice, Bob,? and 2 others$/);
+    four.unmount();
+
+    const crowd = Array.from({ length: 30 }, (_, index) => {
+      const name = `P${String(index + 1).padStart(2, '0')}`;
+      return makeUser({ id: name.toLowerCase(), name });
+    });
+    renderTyping(
+      Object.fromEntries(crowd.map((member) => [member.id, 'brainstorm' as const])),
+      {},
+      { participants: [facilitator, ...crowd] }
+    );
+    expect(line().textContent).toMatch(/^Writing now \(30\): P01, P02,? and 28 others$/);
+    // Three lines can still cut the end of the names; the hover has every one.
+    expect(line().getAttribute('title')).toContain('P30');
+    const roster = ['Fran', ...crowd.map((member) => member.name)];
+    expect(rowNames(roster)).toEqual(roster);
+  });
+
+  it('is shown in Brainstorm, in Discuss and on an open board, and in no other phase', () => {
+    let view = renderTyping({ a: 'proposal' }, { phase: 'DISCUSS' });
+    expect(line().textContent).toBe('Proposing an action (1): Alice');
+    view.unmount();
+
+    view = renderTyping({}, { phase: 'DISCUSS' });
+    expect(line().textContent).toBe('Nobody is proposing an action');
+    view.unmount();
+
+    view = renderTyping({ a: 'brainstorm' }, { phase: 'OPEN_BOARD' });
+    expect(line().textContent).toBe('Writing now (1): Alice');
+    view.unmount();
+
+    for (const phase of ['ICEBREAKER', 'WELCOME', 'OPEN_ACTIONS', 'GROUP', 'VOTE', 'REVIEW', 'CLOSE']) {
+      view = renderTyping({ a: 'brainstorm' }, { phase });
+      expect(screen.queryByTestId('typing-now'), phase).toBeNull();
+      view.unmount();
+    }
+  });
+
+  it('shows no cue of a kind its phase cannot produce', () => {
+    const brainstorm = renderTyping({ a: 'proposal' });
+    expect(brainstorm.container.textContent).not.toContain('proposing action');
+    expect(line().textContent).toBe('Nobody is writing');
+    brainstorm.unmount();
+
+    // The receiver keeps a cue up to 4 s, so one can outlive its phase.
+    const vote = renderTyping({ a: 'brainstorm' }, { phase: 'VOTE' });
+    expect(vote.container.textContent).not.toContain('writing a ticket');
+  });
+
+  it('counts and never names in an anonymous retro', () => {
+    const session = makeSession({ participants: everyone });
+    session.settings.isAnonymous = true;
+    render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={everyone}
+        activityUsers={{ a: 'brainstorm' }}
+        getMemberDisplay={anonymousDisplay(everyone)}
+      />
+    );
+
+    expect(line().textContent).toBe('Writing now (1)');
+    expect(line().textContent).not.toContain('Participant');
+    expect(line().getAttribute('title')).toBeNull();
+  });
+
+  // Three lines, not two: with first and last names, two lines cut the third
+  // name in French and the "and N others" in English (review of 43.0, measured
+  // in Inter and DejaVu Sans for 1 to 5, 12 and 30 people writing).
+  it('reserves three lines named, anonymous or nobody', () => {
+    const named = renderTyping({ a: 'brainstorm' });
+    expect(classesOf(line())).toEqual(expect.arrayContaining(['min-h-12', 'line-clamp-3']));
+    named.unmount();
+
+    const session = makeSession({ participants: everyone });
+    session.settings.isAnonymous = true;
+    const anonymous = render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={everyone}
+        activityUsers={{ a: 'brainstorm' }}
+        getMemberDisplay={anonymousDisplay(everyone)}
+      />
+    );
+    expect(classesOf(line())).toEqual(expect.arrayContaining(['min-h-12', 'line-clamp-3']));
+    anonymous.unmount();
+
+    renderTyping({});
+    expect(classesOf(line())).toEqual(expect.arrayContaining(['min-h-12', 'line-clamp-3']));
+  });
+
+  it('counts on the collapsed rail', () => {
+    let view = renderTyping({ a: 'brainstorm', c: 'brainstorm' }, {}, { isCollapsed: true });
+    const rail = screen.getByRole('img', { name: 'Writing now (2)' });
+    expect(within(rail).getByText('2')).toBeTruthy();
+    view.unmount();
+
+    view = renderTyping({}, {}, { isCollapsed: true });
+    expect(screen.queryByTestId('typing-now-rail')).toBeNull();
+    view.unmount();
+
+    view = renderTyping({ a: 'brainstorm' }, { phase: 'VOTE' }, { isCollapsed: true });
+    expect(screen.queryByTestId('typing-now-rail')).toBeNull();
+    view.unmount();
+
+    renderTyping({ a: 'brainstorm' });
+    expect(screen.queryByTestId('typing-now-rail')).toBeNull();
+  });
+
+  it('announces nothing on its own', () => {
+    const live = '[aria-live], [role="status"], [role="alert"], [role="log"]';
+
+    let view = renderTyping({ a: 'brainstorm' });
+    expect(view.container.querySelector(live)).toBeNull();
+    view.unmount();
+
+    view = renderTyping({ a: 'brainstorm' }, { phase: 'VOTE' });
+    expect(view.container.querySelector(live)).toBeNull();
+    view.unmount();
+
+    view = renderTyping({ a: 'brainstorm' }, {}, { isCollapsed: true });
+    expect(view.container.querySelector(live)).toBeNull();
+  });
+
+  it('hides the icons of the line, the rail, the cue and the chip', () => {
+    const expectHidden = (icon: Element | null | undefined, what: string) => {
+      expect(icon, what).toBeTruthy();
+      expect(icon?.getAttribute('aria-hidden'), what).toBe('true');
+    };
+
+    let view = renderTyping({ a: 'brainstorm' });
+    expectHidden(line().parentElement?.querySelector('.material-symbols-outlined'), 'the line');
+    expectHidden(screen.getByTitle('writing a ticket').querySelector('.material-symbols-outlined'), 'the cue');
+    view.unmount();
+
+    view = renderTyping({ a: 'brainstorm' }, {}, { isCollapsed: true });
+    expectHidden(screen.getByTestId('typing-now-rail').querySelector('.material-symbols-outlined'), 'the rail');
+    view.unmount();
+
+    renderTyping({}, { phase: 'VOTE' });
+    expectHidden(screen.getAllByTestId('votes-left')[0]?.querySelector('.material-symbols-outlined'), 'the chip');
+  });
+
+  it('survives a typing signal it does not know (a "__proto__" used to blank the panel)', () => {
+    renderTyping(
+      { a: '__proto__', b: 'constructor', c: 'toString', d: {} } as unknown as Record<string, ParticipantActivity>,
+      {},
+      { participants: [...everyone, dave] }
+    );
+
+    expect(within(rowOf('Fran')).getByText('facilitator')).toBeTruthy();
+    for (const name of ['Alice', 'Bob', 'Carol', 'Dave']) {
+      expect(within(rowOf(name)).getByText('participant')).toBeTruthy();
+    }
+    expect(line().textContent).toBe('Nobody is writing');
+  });
+
+  it('reads a role it does not know as data, without crashing', () => {
+    // Every client writes its own role into the session.
+    const protoRole = makeUser({ id: 'x', name: 'Xena', role: '__proto__' as unknown as User['role'] });
+    const objectRole = makeUser({ id: 'y', name: 'Yann', role: {} as unknown as User['role'] });
+    renderTyping({}, {}, { participants: [facilitator, alice, protoRole, objectRole] });
+
+    expect(within(rowOf('Xena')).getByText('__proto__')).toBeTruthy();
+    expect(rowOf('Yann').querySelector('.capitalize')?.textContent).toBe('');
+    expect(within(rowOf('Fran')).getByText('facilitator')).toBeTruthy();
+    expect(within(rowOf('Alice')).getByText('participant')).toBeTruthy();
+  });
+
+  it("draws the row cue at the role line's height, its icon hidden", () => {
+    renderTyping({ a: 'brainstorm' });
+
+    const cue = screen.getByTitle('writing a ticket');
+    expect(classesOf(cue)).toContain('leading-4');
+    const icon = within(cue).getByText('stylus_note');
+    expect(classesOf(icon)).toEqual(expect.arrayContaining(['text-sm!', 'leading-none']));
+    expect(icon.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('draws the contribution line at one height, with or without cards', () => {
+    const { container } = renderTyping({}, { tickets: [ticket('a'), ticket('a')] });
+
+    const noTickets = screen.getAllByText('no tickets')[0];
+    expect(classesOf(noTickets)).toContain('leading-none');
+    expect(classesOf(noTickets.closest('[title="No tickets added yet"]'))).toContain('min-h-2.5');
+    expect(classesOf(container.querySelector('[title="2 tickets added"]'))).toContain('min-h-2.5');
+  });
+
+  it('keeps the typing dots still for a reader who asked for less motion', () => {
+    const css = readFileSync(join(__dirname, '..', 'index.css'), 'utf8');
+
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.typing-dot\s*\{\s*animation:\s*none;?\s*\}/);
+  });
+
+  it("names who is writing in the list's order, never the alphabet's", () => {
+    const zoe = makeUser({ id: 'z', name: 'Zoe' });
+    const adam = makeUser({ id: 'ad', name: 'Adam' });
+    renderTyping({ ad: 'brainstorm', z: 'brainstorm' }, {}, { participants: [facilitator, zoe, adam] });
+
+    expect(line().textContent).toBe('Writing now (2): Zoe and Adam');
+  });
+
+  it('says nobody is writing in an anonymous retro too, with nothing to hover', () => {
+    const session = makeSession({ participants: everyone });
+    session.settings.isAnonymous = true;
+    render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={session}
+        participants={everyone}
+        activityUsers={{}}
+        getMemberDisplay={anonymousDisplay(everyone)}
+      />
+    );
+
+    expect(line().textContent).toBe('Nobody is writing');
+    expect(line().getAttribute('title')).toBeNull();
+  });
+});
+
+// Every client writes `leftUsers` into the session, and the server stores and
+// broadcasts a `null` as it came (sessionGuard.js reads it as a removal). The
+// typing rule read it with `.includes`, which threw on every render of a guided
+// Brainstorm or Discuss: with no error boundary, every screen of the room went
+// blank, and the stored state blanked it again after a reload.
+describe('ParticipantsPanel - a left list another client wrote as null', () => {
+  const everyone = [facilitator, alice, bob];
+  const leftUsers = null as unknown as string[];
+
+  it('counts who is writing on the collapsed rail in Brainstorm', () => {
+    render(
+      <ParticipantsPanel
+        {...baseProps}
+        isCollapsed
+        session={makeSession({ phase: 'BRAINSTORM', participants: everyone, leftUsers })}
+        participants={everyone}
+        activityUsers={{ a: 'brainstorm' }}
+      />
+    );
+
+    expect(within(screen.getByRole('img', { name: 'Writing now (1)' })).getByText('1')).toBeTruthy();
+  });
+
+  it('draws every row and the line in Discuss', () => {
+    render(
+      <ParticipantsPanel
+        {...baseProps}
+        session={makeSession({ phase: 'DISCUSS', participants: everyone, leftUsers })}
+        participants={everyone}
+        activityUsers={{ b: 'proposal' }}
+      />
+    );
+
+    expect(screen.getByTestId('typing-now').textContent).toBe('Proposing an action (1): Bob');
+    expect(screen.getAllByTestId('participant-row')).toHaveLength(3);
+    expect(within(rowOf('Alice')).getByText('participant')).toBeTruthy();
+    expect(within(rowOf('Bob')).getByText('proposing action')).toBeTruthy();
   });
 });

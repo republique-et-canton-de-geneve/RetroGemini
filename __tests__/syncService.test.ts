@@ -293,6 +293,47 @@ describe('syncService', () => {
     expect(emit).not.toHaveBeenCalledWith('participant-activity', expect.anything());
   });
 
+  // 43.0: during a rolling update a pod from before 43.0 relays whatever a
+  // client sent, so what reaches the screens is read through the relay's own
+  // rule (utils/participantActivity.js). A '__proto__' used to blank every
+  // expanded participants panel of the room.
+  it('hands subscribers only a kind this release draws', async () => {
+    const connection = service.connect();
+    connected = true;
+    trigger('connect');
+    await connection;
+
+    const received: unknown[] = [];
+    service.onActivity((event) => received.push(event));
+
+    for (const activity of ['__proto__', ['__proto__'], {}, 'vote', 7, 'proposal']) {
+      trigger('participant-activity', { userId: 'u9', userName: 'Zoe', activity });
+    }
+
+    expect(received).toEqual([
+      ...Array.from({ length: 5 }, () => ({ userId: 'u9', userName: 'Zoe', activity: null })),
+      { userId: 'u9', userName: 'Zoe', activity: 'proposal' },
+    ]);
+  });
+
+  it('drops a typing event that names no user, and reads a missing name as empty', async () => {
+    const connection = service.connect();
+    connected = true;
+    trigger('connect');
+    await connection;
+
+    const received: unknown[] = [];
+    service.onActivity((event) => received.push(event));
+
+    for (const payload of [undefined, null, 'brainstorm', { activity: 'brainstorm' }, { userId: '' }, { userId: 7 }, { userId: {} }]) {
+      trigger('participant-activity', payload);
+    }
+    expect(received).toEqual([]);
+
+    trigger('participant-activity', { userId: 'u9', activity: 'brainstorm' });
+    expect(received).toEqual([{ userId: 'u9', userName: '', activity: 'brainstorm' }]);
+  });
+
   it('notifies subscribers when the connection goes up and down', async () => {
     const states: boolean[] = [];
     const stop = service.onConnectionChange(s => states.push(s));

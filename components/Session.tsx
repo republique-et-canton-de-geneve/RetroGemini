@@ -42,7 +42,7 @@ import {
   sortBoardEntries,
   type BoardSort
 } from '../utils/boardView';
-import { capVotes, keepOneVotePerItem, mayAddVote, voteBudget } from '../utils/voteBudget';
+import { capVotes, keepOneVotePerItem, mayAddVote, voteBudget, votesCastByVoter, votesLeftToPlace } from '../utils/voteBudget';
 import ShowAuthorsDialog from './session/ShowAuthorsDialog';
 import BoardSettingsDialog from './session/BoardSettingsDialog';
 import BoardViewControls from './session/BoardViewControls';
@@ -209,7 +209,7 @@ const applyMaxVotes = (s: RetroSession, newVal: number) => {
 
 const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
   // Named `tr`, not `t`: `t` is the ticket variable throughout this file.
-  const { t: tr } = useTranslation();
+  const { t: tr, tp: trp } = useTranslation();
   const [session, setSession] = useState<RetroSession | undefined>(() => {
     const retro = team.retrospectives.find(r => r.id === sessionId);
     if (!retro) return undefined;
@@ -281,6 +281,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // Current user's outgoing signal: the active kind and a keepalive interval.
   const myActivityRef = useRef<ParticipantActivity | null>(null);
   const myActivityKeepaliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // The field that raised it. A field React removes runs no blur (react-dom
+  // ignores events during a commit): the proposal input when the facilitator
+  // moves the Discuss focus, a column removed in Edit Layout while someone writes
+  // in it. So the keepalive checks this field before it re-sends, and stops once
+  // the field is gone or has lost the focus (a field disabled while the session
+  // reconnects included, where the browser takes its focus away).
+  const myActivityFieldRef = useRef<HTMLElement | null>(null);
 
   const clearRemoteActivity = (userId: string) => {
     const timeout = activityTimeoutsRef.current[userId];
@@ -297,6 +304,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   };
 
   const stopMyActivity = () => {
+    myActivityFieldRef.current = null;
     if (myActivityKeepaliveRef.current) {
       clearInterval(myActivityKeepaliveRef.current);
       myActivityKeepaliveRef.current = null;
@@ -307,28 +315,38 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     }
   };
 
-  // Outgoing "is typing" signal. Stays active for as long as the participant
-  // has an unsubmitted draft on screen (not just while keys are pressed), so a
-  // long, continuous entry never flickers off. A keepalive re-emits the signal
-  // on an interval shorter than the receiver's safety expiry; the cue is cleared
-  // explicitly when the draft is emptied, the field is blurred, or the phase changes.
-  const signalMyActivity = (kind: ParticipantActivity) => {
+  // Outgoing "is typing" signal: a focused field holding a draft. Stays active
+  // for as long as that field keeps the focus and its draft (not just while keys
+  // are pressed), so a long, continuous entry never flickers off. A keepalive
+  // re-emits the signal on an interval shorter than the receiver's safety
+  // expiry; the cue is cleared explicitly when the draft is emptied or submitted,
+  // the field is blurred, or the phase changes, and by the keepalive itself once
+  // the field that raised it is gone or no longer has the focus.
+  const signalMyActivity = (kind: ParticipantActivity, field: HTMLElement | null) => {
+    myActivityFieldRef.current = field;
     if (myActivityRef.current !== kind) {
       myActivityRef.current = kind;
       syncService.sendActivity(kind);
     }
     if (!myActivityKeepaliveRef.current) {
       myActivityKeepaliveRef.current = setInterval(() => {
+        const typedIn = myActivityFieldRef.current;
+        if (typedIn && (!typedIn.isConnected || document.activeElement !== typedIn)) {
+          stopMyActivity();
+          return;
+        }
         if (myActivityRef.current) syncService.sendActivity(myActivityRef.current);
       }, 2000);
     }
   };
 
   // Drive the cue from the field's content: a non-empty draft shows it, an empty
-  // field (e.g. right after submitting) clears it.
-  const reportMyDraft = (kind: ParticipantActivity, value: string) => {
+  // field (e.g. right after submitting) clears it. Reported from the field's focus
+  // too, so a person back in a field that still holds their draft is listed from
+  // the focus on, not from their next keystroke.
+  const reportMyDraft = (kind: ParticipantActivity, value: string, field?: HTMLElement) => {
     if (value.trim().length > 0) {
-      signalMyActivity(kind);
+      signalMyActivity(kind, field ?? null);
     } else {
       stopMyActivity();
     }
@@ -1118,6 +1136,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       }
 
       // Stop our own outgoing typing signal and drop every pending expiry timer
+      myActivityFieldRef.current = null;
       if (myActivityKeepaliveRef.current) {
         clearInterval(myActivityKeepaliveRef.current);
         myActivityKeepaliveRef.current = null;
@@ -1538,20 +1557,32 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.id, currentUser.id]);
 
-  // Calculate votes left in render scope for Auto-Finish Logic
-  const myTicketVotes = session ? session.tickets.reduce((acc, t) => acc + t.votes.filter(v => v === currentUser.id).length, 0) : 0;
-  const myGroupVotes = session ? session.groups.reduce((acc, g) => acc + g.votes.filter(v => v === currentUser.id).length, 0) : 0;
-  // Infinite with unlimited votes (utils/voteBudget.ts): never runs out, so the
-  // Vote phase never finishes anyone on its own.
-  const votesLeft = session ? voteBudget(session.settings) - (myTicketVotes + myGroupVotes) : 0;
+  // The reader's votes, counted as the participants panel counts every row's
+  // (utils/voteBudget.ts → votesCastByVoter): cards and groups together, a
+  // grouped card's own votes included, stacked votes one by one. One count, so
+  // the bar and the reader's row in the panel cannot drift apart.
+  const myVotesCast = session ? (votesCastByVoter(session).get(currentUser.id) ?? 0) : 0;
+  // What is left of the number. Infinite with unlimited votes: it never runs
+  // out, so the Vote phase never finishes anyone on its own.
+  const budgetLeft = session ? voteBudget(session.settings) - myVotesCast : 0;
+  // What the reader can still place (votesLeftToPlace): in the guided Vote phase
+  // with one vote per item, never more than the items still without their vote.
+  // The bar's "N votes remaining", the automatic finish below, its un-finish and
+  // the Finished button all read it, and the panel's own row shows the same
+  // number. Unlimited votes, no number and the open board (whose phase is not
+  // VOTE) keep the budget, as before.
+  const votesLeft = (session?.phase === 'VOTE' ? votesLeftToPlace(session, currentUser.id, myVotesCast) : null) ?? budgetLeft;
   // What the vote buttons offer: a number left in the votes field for the
   // click now leaving it counts already, as it will in that click's write
   // (updateSession folds it in, and mayAddVote judges the vote on the result).
+  // The budget alone: a button refuses a second vote on its own item itself.
   const votesLeftToCast = session && pendingMaxVotes !== null
-    ? voteBudget({ ...session.settings, maxVotes: pendingMaxVotes }) - (myTicketVotes + myGroupVotes)
-    : votesLeft;
+    ? voteBudget({ ...session.settings, maxVotes: pendingMaxVotes }) - myVotesCast
+    : budgetLeft;
 
-  // Auto Finish / Unfinish Effect
+  // Auto Finish / Unfinish Effect: finished once the reader can place no more
+  // votes (votesLeft above), un-finished when one can be placed again (a vote
+  // taken back, the number raised, one vote per item turned off).
   useEffect(() => {
       if (!session || session.phase !== 'VOTE') return;
 
@@ -3596,7 +3627,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           if (session.settings.unlimitedVotes) return null;
           return (
               <div className="text-sm font-medium bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-200 whitespace-nowrap">
-                  {tr('session.board.votesRemaining', { count: Math.max(0, votesLeft) })}
+                  {trp('session.board.votesRemaining', Math.max(0, votesLeft))}
               </div>
           );
       };
@@ -4296,7 +4327,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             className="w-full text-sm resize-none outline-hidden bg-transparent text-slate-900 auto-textarea disabled:opacity-60 disabled:cursor-not-allowed"
                                             data-brainstorm-input={col.id}
                                             rows={1}
-                                            onInput={(e) => reportMyDraft('brainstorm', e.currentTarget.value)}
+                                            onInput={(e) => reportMyDraft('brainstorm', e.currentTarget.value, e.currentTarget)}
+                                            onFocus={(e) => reportMyDraft('brainstorm', e.currentTarget.value, e.currentTarget)}
                                             onBlur={stopMyActivity}
                                             onKeyDown={(e) => {
                                                 if(e.key === 'Enter' && !e.shiftKey) {
@@ -4604,7 +4636,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   newProposalText={newProposalText}
                   setNewProposalText={setNewProposalText}
                   handleDirectAddAction={handleDirectAddAction}
-                  onProposalDraftChange={(value) => reportMyDraft('proposal', value)}
+                  onProposalDraftChange={(value, field) => reportMyDraft('proposal', value, field)}
                   onProposalActivityStop={stopMyActivity}
                   setPhase={setPhase}
                 />

@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [43.0] - 2026-11-10
+
+### Added
+- Suivez une rétrospective d'un coup d'œil : dans la phase Vote, le panneau des participants indique combien de votes il reste à placer à chaque personne ; pendant le Brainstorming, la Discussion et sur un tableau ouvert, une ligne en haut du panneau montre qui écrit une carte ou propose une action, sans avoir à faire défiler une longue liste ; et les super administrateurs voient dans l'onglet Équipes combien de rétrospectives compte chaque équipe et peuvent trier les équipes selon ce nombre
+
 ## [42.0] - 2026-10-28
 
 ### Added

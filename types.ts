@@ -6,6 +6,12 @@ export type Role = 'facilitator' | 'participant';
 // Ephemeral "is typing" signal broadcast between session participants.
 // 'brainstorm' = writing a ticket, 'proposal' = proposing an action in Discuss.
 // Never persisted: it is a transient presence cue that auto-expires.
+// Checked on both sides of the wire by utils/participantActivity.js
+// (toParticipantActivity), which must accept the same kinds: `npm run
+// type-check` fails on __tests__/participantActivity.test.ts when the type names
+// a kind the rule refuses (vitest strips the types, so `npm run test` alone stays
+// green). A kind the rule accepts and the type does not name is caught by
+// nothing: widen the type first.
 export type ParticipantActivity = 'brainstorm' | 'proposal';
 
 export interface User {
@@ -466,6 +472,12 @@ export interface Team {
   // The teams a super-admin merge built this one from. Only the super-admin
   // team list carries it; the server strips it from every team-side answer.
   mergedFrom?: TeamMergeSource[];
+  // How many retrospectives the team holds: closed, in progress and open
+  // boards alike. Only the super-admin team list carries it, counted by the
+  // server's summary projection — that list never carries `retrospectives`,
+  // whatever this type says. Absent from every team-side answer, and from a pod
+  // of an earlier release during a rolling update.
+  retrospectiveCount?: number;
   // Where this team's Jira issues are created. A team setting written only by
   // /api/team/:teamId/jira/target; /update ignores it. (The claims the server
   // keeps on actions being created are server-only and not typed here.)

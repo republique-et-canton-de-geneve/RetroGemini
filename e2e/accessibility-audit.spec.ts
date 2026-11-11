@@ -203,6 +203,13 @@ test.describe('Accessibility baseline (audit H42)', () => {
       const participantIdea = participant.getByRole('textbox', { name: 'Add an idea...' }).first();
       await expect(participantIdea).toBeVisible({ timeout: 15_000 });
       await participantIdea.fill('Lime idea');
+      // While the participant writes (43.0): the cue on their row and, above the list,
+      // the line naming who is writing. The Brainstorm screen is audited whole, so this
+      // state of it is too.
+      await expect(page.getByTestId('typing-now')).toHaveText(`Writing now (1): ${PARTICIPANT}`, { timeout: 15_000 });
+      await expect(page.getByTestId('participant-row').filter({ hasText: PARTICIPANT })).toContainText('writing a ticket');
+      await page.mouse.move(0, 0);
+      await audit(page, testInfo, 'retro-brainstorm-typing');
       await participantIdea.press('Enter');
       // The facilitator cannot read it yet, so it reaches their board as a hidden
       // card, whose words never reach their page.
@@ -254,6 +261,14 @@ test.describe('Accessibility baseline (audit H42)', () => {
       await participantRow.getByTestId('toggle-left-btn').click();
       await expect(page.getByText('Participants (2)')).toBeVisible({ timeout: 10_000 });
       await page.mouse.move(0, 0);
+
+      // The Vote phase's participants panel (43.0): each row says in words the votes its
+      // person can still place. Audited on its own: the Vote phase is a screen this walk
+      // never audits whole (AGENTS.md, Before Committing, item 8). Nobody has finished yet.
+      await page.getByRole('button', { name: 'VOTE', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Vote' })).toBeVisible({ timeout: 15_000 });
+      await expect(participantRow.getByText('5 votes left', { exact: true })).toBeVisible({ timeout: 15_000 });
+      await audit(page, testInfo, 'retro-vote-participants', { scope: page.getByTestId('participants-panel') });
 
       // The close screen, which is **dark**. Added after a light-screen contrast
       // sweep darkened its text tokens too: on `bg-slate-900` the muted grey went
