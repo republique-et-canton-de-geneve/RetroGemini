@@ -260,6 +260,51 @@ describe('the session screen and its participants panel', () => {
     expect(finishedWrites()).toHaveLength(1);
     expect(finishedWrites()[0].autoFinishedUsers).toContain('fac');
     expect(within(ownRow()).getByRole('img', { name: 'Finished' })).toBeTruthy();
+    // Nothing left to place: the button cannot un-finish them, which the
+    // automatic finish would undo 800 ms later.
+    expect((screen.getByRole('button', { name: 'Finished!' }) as HTMLButtonElement).disabled).toBe(true);
+
+    // The facilitator turns one vote per item off (another tab of theirs): votes
+    // can be placed again, so the reader is un-finished on their own.
+    const written = finishedWrites()[0];
+    vi.mocked(syncService.updateSession).mockClear();
+    receive({ ...written, settings: { ...written.settings, oneVotePerTicket: false }, _rev: 5 });
+    const unfinished = vi.mocked(syncService.updateSession).mock.calls
+      .map(([state]) => state as RetroSession)
+      .filter((state) => !state.finishedUsers?.includes('fac') && !(state.autoFinishedUsers ?? []).includes('fac'));
+    expect(unfinished.length).toBeGreaterThan(0);
+    expect(barChip()).toBe('3 votes remaining');
+    expect((screen.getByRole('button', { name: "I'm Finished" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // Finished by hand with votes still to place, the button stays open: it is how
+  // they go back to voting.
+  it('keeps the Finished button open for a reader who finished by hand with votes left', () => {
+    renderRetro(retro({
+      phase: 'VOTE',
+      tickets: [ticketIn('t1', 'col-1', ['fac'])],
+      finishedUsers: ['fac'],
+    }));
+
+    expect(barChip()).toBe('4 votes remaining');
+    expect((screen.getByRole('button', { name: 'Finished!' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // The cap belongs to the guided Vote phase: on an open board the bar keeps what
+  // is left of the number, one vote per item or not (review of 43.0).
+  it('keeps the open board on what is left of the number, one vote per item or not', () => {
+    const board = retro({
+      phase: 'OPEN_BOARD',
+      tickets: [ticketIn('t1', 'col-1', ['fac']), ticketIn('t2', 'col-1', ['fac'])],
+    });
+    board.settings = { ...board.settings, oneVotePerTicket: true, revealBrainstorm: true };
+    const view = renderRetro(board);
+    expect(barChip()).toBe('3 votes remaining');
+    view.unmount();
+
+    // The same cards in the guided Vote phase: nothing left to place.
+    renderRetro({ ...board, phase: 'VOTE' });
+    expect(barChip()).toBe('0 votes remaining');
   });
 
   // The receiver forgets a signal 4 s after it came, unless another comes: it is
@@ -327,6 +372,60 @@ describe('the typing signal the screen sends', () => {
     vi.mocked(syncService.sendActivity).mockClear();
     act(() => { field.focus(); });
     expect(syncService.sendActivity).not.toHaveBeenCalled();
+  });
+
+  it('says proposing again when the proposal field holding the draft is focused, and nothing for an emptied one', () => {
+    renderRetroAs(me, retro({
+      phase: 'DISCUSS',
+      discussionFocusId: 't1',
+      tickets: [ticketIn('t1', 'col-1', ['fac'])],
+    }));
+    const input = screen.getByPlaceholderText('Propose an action...') as HTMLInputElement;
+
+    act(() => { input.focus(); });
+    fireEvent.change(input, { target: { value: 'Add a checklist' } });
+    expect(lastSent()).toBe('proposal');
+
+    act(() => { input.blur(); });
+    expect(lastSent()).toBeNull();
+
+    // Back into the field, its draft kept, and no key pressed yet.
+    vi.mocked(syncService.sendActivity).mockClear();
+    act(() => { input.focus(); });
+    expect(vi.mocked(syncService.sendActivity).mock.calls).toEqual([['proposal']]);
+
+    // An emptied field focused says nothing.
+    act(() => { input.blur(); });
+    fireEvent.change(input, { target: { value: '' } });
+    vi.mocked(syncService.sendActivity).mockClear();
+    act(() => { input.focus(); });
+    expect(syncService.sendActivity).not.toHaveBeenCalled();
+  });
+
+  // A field the browser takes the focus from with no blur React hears: one
+  // disabled while the session reconnects, which Chromium defocuses. jsdom keeps
+  // the focus on a disabled field, so the defocus is stubbed: what is checked is
+  // the keepalive's reaction to a field still on the page that has lost the focus.
+  it('stops within one keepalive once its field, still on the page, has lost the focus', () => {
+    renderRetroAs(me, retro());
+    const field = screen.getByPlaceholderText('Add an idea...') as HTMLTextAreaElement;
+
+    act(() => { field.focus(); });
+    fireEvent.input(field, { target: { value: 'Ship smaller' } });
+    expect(lastSent()).toBe('brainstorm');
+
+    const activeElement = vi.spyOn(document, 'activeElement', 'get').mockReturnValue(document.body);
+    try {
+      vi.mocked(syncService.sendActivity).mockClear();
+      act(() => { vi.advanceTimersByTime(2_000); });
+      expect(field.isConnected).toBe(true);
+      expect(vi.mocked(syncService.sendActivity).mock.calls).toEqual([[null]]);
+
+      act(() => { vi.advanceTimersByTime(10_000); });
+      expect(vi.mocked(syncService.sendActivity).mock.calls).toEqual([[null]]);
+    } finally {
+      activeElement.mockRestore();
+    }
   });
 
   it('stops within one keepalive once the facilitator moves the Discuss focus away from the proposal being typed', () => {

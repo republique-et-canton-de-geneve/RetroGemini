@@ -1009,10 +1009,11 @@ screen at once):
   1 MB socket message (`SOCKET_MAX_BUFFER_SIZE`) and the 1 MiB JSON body, its
   writes stop going through: start a new board instead.
 - **The presence panel merges participants by name** (`getParticipants`), so
-  two connected members with the same name show once — in a guided retro too.
-  The merged row's votes left, check, contribution dots and typing cue are the
-  first person's; the other person's are shown nowhere (no "(you)" row for
-  them, nor a name on the typing line).
+  two members with the same name show once (on an open board, two connected
+  ones). The merged row's votes left, check, contribution dots and typing cue
+  are the first person's. The other person has no row of their own: no "(you)"
+  row, no name on the typing line; their own Vote bar shows their count, beside
+  a row that bears their name and shows the other person's.
 - **Taking a card out of a pair hands the card left every vote of the group**,
   including the votes cast for the other card before they were grouped: a
   group does not record which card a vote was for, on purpose — the votes are
@@ -1150,16 +1151,18 @@ change to it lands in both.**
   React removes runs no blur, so the sender's keepalive stops the signal once
   the field that raised it is gone or no longer has the focus: the proposal
   input the facilitator's Discuss focus took away, a column removed in Edit
-  Layout, a field disabled while the session reconnects (the browser takes the
-  focus off a disabled field; jsdom does not, so no unit test can show that
-  case). `__tests__/sessionParticipantActivity.test.tsx` pins the rest.
+  Layout, a field disabled while the session reconnects (Chromium takes the
+  focus off a disabled field; jsdom keeps it, so that test stubs the defocus
+  and checks the keepalive's reaction to a field still on the page).
+  `__tests__/sessionParticipantActivity.test.tsx` pins each of them, and the
+  focus report of both fields.
 
   The collapsed rail shows the count. Neither line is a live region: other
   people's typing and votes change too often to be announced. The panel, and
   with it the typing line, the rail and the Vote phase's votes left, is drawn
   from `lg` (1024 CSS px) up (`hidden lg:flex`, as before 43.0); below it the
-  header chip shows finished/total only. A count for narrow screens is not
-  built. In French the votes chip may be cut after its number in a wide font
+  header chip shows a count only (who is done in a guided phase, who is
+  connected on an open board). A count for narrow screens is not built. In French the votes chip may be cut after its number in a wide font
   with a classic scrollbar; the count comes first and is never cut.
 
   **Nothing that changes while people work moves a row.** The line keeps one
@@ -1171,7 +1174,10 @@ change to it lands in both.**
   them, and the hover-revealed *Mark as left* button with them. What still
   moves rows, on purpose: entering Brainstorm draws the contribution line (the
   facilitator's own phase change), the facilitator's own *Mark as left* sends a
-  row to the bottom, and on an open board rows come and go with presence.
+  row to the bottom, and presence: on an open board rows come and go with it,
+  and in a guided retro someone joining is listed above the departed rows (and
+  leaves the waiting list), while a participant marked as having left who
+  reconnects is un-marked by every client and goes back to their place.
   `e2e/retro-full-flow.spec.ts` measures the rows.
 - **Images open inside the app** — `components/common/ImageGallery.tsx`.
   Feedback images are stored as `data:` URIs, and browsers refuse a

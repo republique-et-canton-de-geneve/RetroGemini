@@ -900,8 +900,9 @@ for a participant's `role` and for `leftUsers: null` only (*Recently closed*).
   `participants: [...current, { id: 'x', name: 7 }]`, or with `tickets: null`.
   The server saves and broadcasts it, every client of the session throws while
   rendering, in every phase, and a reload re-joins into the same stored state;
-  only a client from before the write, a console single-team restore or deleting
-  the retrospective recovers it. Or: an invitee joins with a 900 kB `userName`
+  only a console single-team restore or deleting the retrospective recovers it
+  (a client already open receives the broadcast and throws on the same path, and
+  a write of its own is refused as stale and healed with the stored state). Or: an invitee joins with a 900 kB `userName`
   and sends `participant-activity` in a loop, and each 30-byte event leaves the
   server as 900 kB to every other socket of the room.
 - **Acceptance:** a shape check of those fields at the server

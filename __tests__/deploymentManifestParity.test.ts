@@ -497,8 +497,8 @@ describe('base deployment manifest (audit H7.1)', () => {
    * auto-commit; the workflow no longer touches the manifests), so the tag lags
    * `VERSION` by the `Y` bumps since the last retag.
    *
-   * Demanding exact equality would therefore be wrong: a `Y` bump would have to
-   * retag the manifest to an image that was never built. What the audit actually
+   * Demanding exact equality would therefore be wrong: every `Y` bump would have
+   * to retag the manifest, which D7 leaves to the major bump alone. What the audit actually
    * caught was a tag **17 majors** behind — an image predating many user-visible
    * releases. A major bump is by definition a user-visible change, so requiring
    * the majors to agree catches that while leaving the normal lag (same major,

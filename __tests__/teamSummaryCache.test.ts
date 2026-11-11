@@ -506,18 +506,47 @@ for (const engine of engines) {
 describe('the type guard on every array length in dataStore.js', () => {
   const source = readFileSync(join(__dirname, '..', 'server', 'services', 'dataStore.js'), 'utf8').replace(/\s+/g, ' ');
 
-  const unguarded = (lengthFn: string, typeFn: string) =>
-    [...source.matchAll(new RegExp(`\\b${lengthFn}\\(([^()]+)\\)`, 'g'))]
-      .filter((call) => {
-        const guard = `CASE WHEN ${typeFn}(${call[1]}) = 'array' THEN `;
-        const at = call.index ?? 0;
-        return source.slice(Math.max(0, at - guard.length), at) !== guard;
-      })
-      .map((call) => call[0]);
+  // Every call, its argument read up to the parenthesis that closes it (nested
+  // parentheses and quoted strings included): an argument such as
+  // `(value::jsonb)->'x'` is checked like any other, never skipped.
+  const unguardedIn = (text: string, lengthFn: string, typeFn: string) => {
+    const found: string[] = [];
+    for (const call of text.matchAll(new RegExp(`\\b${lengthFn}\\(`, 'g'))) {
+      const at = call.index ?? 0;
+      const open = at + call[0].length;
+      let depth = 1;
+      let quoted = false;
+      let end = open;
+      for (; end < text.length && depth > 0; end += 1) {
+        const char = text[end];
+        if (char === "'") quoted = !quoted;
+        else if (!quoted && char === '(') depth += 1;
+        else if (!quoted && char === ')') depth -= 1;
+      }
+      if (depth !== 0) {
+        found.push(text.slice(at));
+        continue;
+      }
+      const argument = text.slice(open, end - 1);
+      const guard = `CASE WHEN ${typeFn}(${argument}) = 'array' THEN `;
+      if (text.slice(Math.max(0, at - guard.length), at) !== guard) found.push(text.slice(at, end));
+    }
+    return found;
+  };
+  const unguarded = (lengthFn: string, typeFn: string) => unguardedIn(source, lengthFn, typeFn);
 
   it('finds the calls it checks', () => {
     expect(source.match(/\bjsonb_array_length\(/g)?.length ?? 0).toBeGreaterThan(0);
     expect(source.match(/\bjson_array_length\(/g)?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('reads an argument that holds parentheses, and reports it unguarded', () => {
+    expect(unguardedIn("SELECT jsonb_array_length((value::jsonb)->'healthChecks') AS n", 'jsonb_array_length', 'jsonb_typeof'))
+      .toEqual(["jsonb_array_length((value::jsonb)->'healthChecks')"]);
+    expect(unguardedIn("CASE WHEN jsonb_typeof((value::jsonb)->'x') = 'array' THEN jsonb_array_length((value::jsonb)->'x') END", 'jsonb_array_length', 'jsonb_typeof'))
+      .toEqual([]);
+    expect(unguardedIn("json_array_length(json_extract(value, '$.x'))", 'json_array_length', 'json_type'))
+      .toEqual(["json_array_length(json_extract(value, '$.x'))"]);
   });
 
   it('guards every jsonb_array_length by jsonb_typeof (PostgreSQL)', () => {

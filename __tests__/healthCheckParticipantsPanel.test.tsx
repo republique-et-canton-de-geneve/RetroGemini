@@ -301,6 +301,9 @@ describe('Health check participants panel, shared with the retro', () => {
     for (const phase of ['SURVEY', 'DISCUSS'] as const) {
       const view = renderSession(createSession({ phase, discussionFocusId: phase === 'DISCUSS' ? 'd1' : null }));
 
+      // The panel is there, so the two absences below are about it, not about a
+      // phase that draws no panel at all.
+      expect(screen.getByTestId('participants-panel'), phase).toBeTruthy();
       expect(screen.queryByTestId('typing-now'), phase).toBeNull();
       expect(screen.queryByTestId('votes-left'), phase).toBeNull();
       view.unmount();

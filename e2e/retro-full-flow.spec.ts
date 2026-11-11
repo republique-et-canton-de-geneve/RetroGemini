@@ -29,8 +29,10 @@ const waitForSync = (ms = 2000) => new Promise(r => setTimeout(r, ms));
 // first card, a participant's own first card, someone starting to write, and a
 // person finishing the vote. What still moves rows, on purpose: entering
 // Brainstorm draws the contribution line (the facilitator's own phase change),
-// the facilitator's own "Mark as left" sends a row to the bottom, and on an open
-// board rows come and go with presence.
+// the facilitator's own "Mark as left" sends a row to the bottom, and presence:
+// on an open board rows come and go with it, and in a guided retro someone
+// joining is listed above the departed rows, while a participant marked as
+// having left who reconnects goes back to their place.
 type Box = { y: number; height: number };
 const expectSameBox = (after: Box | null, before: Box | null) => {
   if (!after || !before) throw new Error('the participant row is not on screen');
