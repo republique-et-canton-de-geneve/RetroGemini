@@ -87,7 +87,7 @@
     "@tailwindcss/postcss": "^4.3.5",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
-    "@testing-library/user-event": "^14.6.9",
+    "@testing-library/user-event": "^14.6.10",
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.0",
     "@types/node": "^26.6.6",
@@ -112,7 +112,7 @@
     "postcss": "^8.5.32",
     "tailwindcss": "^4.2.2",
     "typescript": "~6.0.3",
-    "vite": "^8.3.7",
+    "vite": "^8.3.8",
     "vitest": "^5.1.0"
   },
   "homepage": "https://github.com/republique-et-canton-de-geneve/RetroGemini#readme",
