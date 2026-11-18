@@ -1,0 +1,19 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: retrogemini-proxy
+  annotations:
+    haproxy.router.openshift.io/rewrite-target: /
+spec:
+  host: tools.example.org
+  path: /retrogemini
+  to:
+    kind: Service
+    name: retrogemini-service
+    weight: 100
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

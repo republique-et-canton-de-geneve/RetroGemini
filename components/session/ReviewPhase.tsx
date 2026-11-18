@@ -1,3 +1,4 @@
+import { appFetch } from '../../services/publicPath';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
 import { createTranslator } from '../../i18n/translate';
@@ -281,7 +282,7 @@ const ReviewPhase: React.FC<Props> = ({
     setAiGenerating(true);
     try {
       const sentToken = dataService.getSessionToken();
-      const response = await fetch('/api/ai/generate-retro-summary', {
+      const response = await appFetch('/api/ai/generate-retro-summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

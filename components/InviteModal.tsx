@@ -1,3 +1,4 @@
+import { appFetch, appUrl } from '../services/publicPath';
 import React, { useMemo, useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import { Team, RetroSession, HealthCheckSession } from '../types';
@@ -67,7 +68,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       })
       .catch((err) => {
         console.warn('[InviteModal] Failed to generate session invite link', err);
-        if (!cancelled) setLink(window.location.origin);
+        if (!cancelled) setLink(appUrl());
       });
     return () => {
       cancelled = true;
@@ -83,7 +84,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     // Authenticated since H31: the Wi-Fi password is a credential, so the route
     // requires the team credential this modal already holds (POST, because the
     // credential belongs in the body rather than in a logged URL).
-    fetch('/api/wifi-config', {
+    appFetch('/api/wifi-config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

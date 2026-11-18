@@ -72,6 +72,26 @@ const notifyCalls = (calls: Call[]) => calls.filter((call) => call.url.includes(
 // Lets a fire-and-forget call settle, and whatever it chains after.
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+it('submits and notifies through the reverse-proxy path with the default HTTP client', async () => {
+  const meta = document.createElement('meta');
+  meta.name = 'app-base-path';
+  meta.content = '/retrogemini/';
+  document.head.append(meta);
+  const { impl, calls } = fakeFetch(async () => response(200, { feedback: storedFeedback }));
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(impl);
+  try {
+    expect(await submitTeamFeedback(submission())).toBe('sent');
+    await settle();
+    expect(calls.map((call) => call.url)).toEqual([
+      '/retrogemini/api/feedbacks/create',
+      '/retrogemini/api/notify-new-feedback',
+    ]);
+  } finally {
+    fetchSpy.mockRestore();
+    meta.remove();
+  }
+});
+
 describe('newFeedbackSubmissionId', () => {
   it('matches the pattern the server accepts, and differs each time', () => {
     const ids = Array.from({ length: 20 }, () => newFeedbackSubmissionId());

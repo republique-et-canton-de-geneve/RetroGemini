@@ -1,3 +1,4 @@
+import { appFetch } from './publicPath';
 import type {
   JiraIssueResult,
   JiraIssueType,
@@ -139,7 +140,7 @@ const post = async (endpoint: string, payload: Record<string, unknown>, retried 
   };
   let res: Response;
   try {
-    res = await fetch(endpoint, {
+    res = await appFetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...credential, ...payload })

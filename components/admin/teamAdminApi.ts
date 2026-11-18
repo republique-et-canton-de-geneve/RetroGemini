@@ -1,3 +1,4 @@
+import { appFetch } from '../../services/publicPath';
 import type { Notice } from '../../i18n/notice';
 import type { MessageKey } from '../../i18n/translate';
 import { PASSWORD_MIN_LENGTH } from '../../utils/passwordPolicy.js';
@@ -116,7 +117,7 @@ const post = async <T>(
 ): Promise<AdminResult<T>> => {
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await appFetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionToken, ...body })

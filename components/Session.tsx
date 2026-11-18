@@ -1,3 +1,4 @@
+import { appFetch } from '../services/publicPath';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
@@ -547,7 +548,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
 
   useEffect(() => {
-    fetch('/api/ai-status').then(r => r.json()).then(d => setAiEnabled(!!d.enabled)).catch(() => {});
+    appFetch('/api/ai-status').then(r => r.json()).then(d => setAiEnabled(!!d.enabled)).catch(() => {});
   }, []);
 
   // Interaction State
@@ -1818,7 +1819,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     reviewSummaryGeneratedRef.current = true;
 
     const sentToken = dataService.getSessionToken();
-    fetch('/api/ai/generate-retro-summary', {
+    appFetch('/api/ai/generate-retro-summary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2110,7 +2111,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
     setAiSuggestingGroupId(groupId);
     const sentToken = dataService.getSessionToken();
-    fetch('/api/ai/suggest-group-title', {
+    appFetch('/api/ai/suggest-group-title', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionToken: sentToken, ticketTexts })
@@ -2160,7 +2161,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     setAiGroupSuggestionsError(null);
     setAiGroupSuggestions(null);
 
-    fetch('/api/ai/suggest-groups', {
+    appFetch('/api/ai/suggest-groups', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

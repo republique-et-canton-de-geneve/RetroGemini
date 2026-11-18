@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [44.0] - 2026-11-18
+
+### Added
+- Utilisez RetroGemini depuis son adresse d’origine et un chemin supplémentaire derrière un reverse proxy, avec les ressources, les appels API, la collaboration en direct, les invitations et la navigation adaptés aux deux adresses
+
 ## [43.0] - 2026-11-10
 
 ### Added

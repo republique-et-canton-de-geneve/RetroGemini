@@ -299,6 +299,19 @@ describe('SessionTimer — running the countdown', () => {
     expect(audio.volume).toBeCloseTo(0.3);
   });
 
+  it('loads the timer chime inside the reverse-proxy mount', () => {
+    const meta = document.createElement('meta');
+    meta.name = 'app-base-path';
+    meta.content = '/retrogemini/';
+    document.head.append(meta);
+    try {
+      const { container } = renderTimer(createTimerSettings(300));
+      expect(container.querySelector('audio')?.getAttribute('src')).toBe('/retrogemini/assets/timer-alert.mp3');
+    } finally {
+      meta.remove();
+    }
+  });
+
   it('closes a run that was already over when the session opened, without sounding', () => {
     // Guards: an alarm going off for a stored timer nobody stopped, the moment
     // someone opens the session.

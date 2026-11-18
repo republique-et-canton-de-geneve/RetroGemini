@@ -27,6 +27,8 @@
  * question of which host a link may name.
  */
 
+import { createPublicAccess } from './publicAccess.js';
+
 const MAX_URL_LENGTH = 4096;
 
 /** Parse a value as an http(s) URL, or return null. */
@@ -57,6 +59,7 @@ const requestBaseUrl = (req) => {
 };
 
 const createPublicOriginResolver = ({ env = process.env } = {}) => {
+  const publicAccess = createPublicAccess({ env });
   const configuredBaseUrl = () => parseHttpUrl(env.PUBLIC_BASE_URL);
 
   /**
@@ -74,7 +77,7 @@ const createPublicOriginResolver = ({ env = process.env } = {}) => {
     const requested = parseHttpUrl(candidate);
     if (!requested) return '';
 
-    const configured = configuredBaseUrl();
+    const configured = publicAccess.proxyUrl(req) ?? configuredBaseUrl();
     const base = configured ?? requestBaseUrl(req);
     // No configured origin and no Host header: there is no trustworthy origin
     // to build on, and the caller's is exactly what must not be trusted.
@@ -104,7 +107,10 @@ const createPublicOriginResolver = ({ env = process.env } = {}) => {
     return link.toString();
   };
 
-  return { resolveEmailLink, hasConfiguredBaseUrl: () => configuredBaseUrl() !== null };
+  return {
+    resolveEmailLink,
+    hasConfiguredBaseUrl: (req) => configuredBaseUrl() !== null || publicAccess.proxyUrl(req) !== null,
+  };
 };
 
 export { createPublicOriginResolver };

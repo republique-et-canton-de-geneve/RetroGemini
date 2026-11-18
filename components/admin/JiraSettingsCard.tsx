@@ -1,3 +1,4 @@
+import { appFetch } from '../../services/publicPath';
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { parseJiraBaseUrl } from '../../utils/jira.js';
 import { useTranslation } from '../../i18n/I18nContext';
@@ -212,7 +213,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
     };
     const load = async () => {
       try {
-        const response = await fetch('/api/super-admin/jira-settings', {
+        const response = await appFetch('/api/super-admin/jira-settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionToken })
@@ -265,7 +266,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
     setLoadAttempt(attempt => attempt + 1);
   };
 
-  const post = (path: string, payload: Record<string, unknown>) => fetch(path, {
+  const post = (path: string, payload: Record<string, unknown>) => appFetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionToken, ...payload })

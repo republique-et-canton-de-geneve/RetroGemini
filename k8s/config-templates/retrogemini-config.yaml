@@ -41,3 +41,5 @@ metadata:
     app: retrogemini
 data:
   PUBLIC_BASE_URL: "https://retrogemini.apps.example.org/"
+  # Optional second public mount. Proxy preserves Host and strips this prefix.
+  # PROXY_BASE_URL: "https://tools.example.org/retrogemini/"

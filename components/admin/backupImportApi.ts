@@ -1,3 +1,4 @@
+import { appFetch } from '../../services/publicPath';
 import type { BackupEntry, BackupLimits } from '../../types';
 import type { Notice } from '../../i18n/notice';
 import { megabytesText } from './backupFormat';
@@ -112,7 +113,7 @@ export const importBackupFile = async (
 
   let response: Response;
   try {
-    response = await fetch('/api/super-admin/backups/import', {
+    response = await appFetch('/api/super-admin/backups/import', {
       method: 'POST',
       headers: {
         // Never `application/json`: the server's global JSON parser would take

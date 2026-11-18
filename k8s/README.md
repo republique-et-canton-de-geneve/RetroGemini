@@ -1,5 +1,18 @@
 # Kubernetes / OpenShift Deployment Guide
 
+For simultaneous root and proxy access, set `PROXY_BASE_URL` in the optional
+`retrogemini-config` ConfigMap to the second full HTTPS URL. Preserve the public
+Host at the proxy and strip its prefix once with the Route rewrite annotation.
+The application selects that configured prefix for resources, APIs, Socket.IO
+and links. `PUBLIC_BASE_URL` continues to supply the original canonical URL.
+
+For OpenShift, copy the optional [proxy Route example](optional/proxy-route.example.yaml)
+into your own deployment configuration and choose its host and path. Store those
+installation-specific values outside this repository. Keep the existing native
+Route, and set the matching `PROXY_BASE_URL` in your own ConfigMap before rollout.
+Run `npm run test:e2e:dual-url` and `npm run test:e2e:dual-url-flows` to validate
+production assets and complete native/proxy journeys before deployment.
+
 ## Table of contents
 
 1. [Deployment workflow](#deployment-workflow)

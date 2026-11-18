@@ -1,3 +1,4 @@
+import { appFetch } from '../../services/publicPath';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { RetroSession } from '../../types';
 import { dataService } from '../../services/dataService';
@@ -156,7 +157,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
         body.additionalInstructions = additionalInstructions.trim();
       }
 
-      const response = await fetch('/api/ai/generate-release-analysis', {
+      const response = await appFetch('/api/ai/generate-release-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)

@@ -1,3 +1,4 @@
+import { appFetch } from '../services/publicPath';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   PASSWORD_MIN_LENGTH,
@@ -254,7 +255,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   const loadInfoMessage = async () => {
     try {
-      const response = await fetch('/api/info-message');
+      const response = await appFetch('/api/info-message');
       if (response.ok) {
         const data = await response.json();
         setInfoMessage(data.infoMessage || '');
@@ -270,7 +271,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setInfoMessageSaving(true);
 
     try {
-      const response = await fetch('/api/super-admin/info-message', {
+      const response = await appFetch('/api/super-admin/info-message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken, infoMessage })
@@ -298,7 +299,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   const loadAdminEmail = async () => {
     try {
-      const response = await fetch('/api/super-admin/admin-email', {
+      const response = await appFetch('/api/super-admin/admin-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken })
@@ -328,7 +329,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setAdminEmailSaving(true);
 
     try {
-      const response = await fetch('/api/super-admin/update-admin-email', {
+      const response = await appFetch('/api/super-admin/update-admin-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken, adminEmail: parsed.email ?? '' })
@@ -366,7 +367,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     const newValue = !notifyNewTeam;
 
     try {
-      const response = await fetch('/api/super-admin/update-notify-new-team', {
+      const response = await appFetch('/api/super-admin/update-notify-new-team', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken, notifyNewTeam: newValue })
@@ -395,7 +396,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   const loadAiSettings = async () => {
     try {
-      const response = await fetch('/api/super-admin/ai-settings', {
+      const response = await appFetch('/api/super-admin/ai-settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken })
@@ -421,7 +422,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setAiTestResult(null);
 
     try {
-      const response = await fetch('/api/super-admin/update-ai-settings', {
+      const response = await appFetch('/api/super-admin/update-ai-settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken, enabled: aiEnabled, apiUrl: aiApiUrl, apiKey: aiApiKey, model: aiModel, allowSelfSignedCerts: aiAllowSelfSignedCerts })
@@ -452,7 +453,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setAiTestResult(null);
 
     try {
-      const response = await fetch('/api/super-admin/test-ai', {
+      const response = await appFetch('/api/super-admin/test-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -490,7 +491,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     liveLoadingRef.current = true;
 
     try {
-      const response = await fetch('/api/super-admin/active-sessions', {
+      const response = await appFetch('/api/super-admin/active-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken: sessionTokenRef.current })
@@ -517,7 +518,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setLogsLoading(true);
 
     try {
-      const response = await fetch('/api/super-admin/logs', {
+      const response = await appFetch('/api/super-admin/logs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken, filter: logFilter })
@@ -538,7 +539,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     if (!confirm(t('adminLogs.confirmClear'))) return;
 
     try {
-      const response = await fetch('/api/super-admin/clear-logs', {
+      const response = await appFetch('/api/super-admin/clear-logs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken })
@@ -557,7 +558,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const loadBackups = async () => {
     setBackupsLoading(true);
     try {
-      const response = await fetch('/api/super-admin/backups/list', {
+      const response = await appFetch('/api/super-admin/backups/list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken })
@@ -580,7 +581,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setError(null);
     setSuccessMessage(null);
     try {
-      const response = await fetch('/api/super-admin/backups/create', {
+      const response = await appFetch('/api/super-admin/backups/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken, label: checkpointLabel.trim() || undefined })
@@ -603,7 +604,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   const handleDownloadServerBackup = async (backupId: string) => {
     try {
-      const response = await fetch('/api/super-admin/backups/download', {
+      const response = await appFetch('/api/super-admin/backups/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken, backupId })
@@ -637,7 +638,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setError(null);
     setSuccessMessage(null);
     try {
-      const response = await fetch('/api/super-admin/backups/restore', {
+      const response = await appFetch('/api/super-admin/backups/restore', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken, backupId: backup.id })
@@ -677,7 +678,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const handleDeleteServerBackup = async (backup: BackupEntry) => {
     if (!confirm(t('adminBackups.confirm.delete', { name: backupLabel(backup) || backup.filename }))) return;
     try {
-      const response = await fetch('/api/super-admin/backups/delete', {
+      const response = await appFetch('/api/super-admin/backups/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken, backupId: backup.id })
@@ -698,7 +699,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   const handleToggleProtected = async (backup: BackupEntry) => {
     try {
-      const response = await fetch('/api/super-admin/backups/update', {
+      const response = await appFetch('/api/super-admin/backups/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken, backupId: backup.id, protected: !backup.protected })
@@ -749,7 +750,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/super-admin/teams', {
+      const response = await appFetch('/api/super-admin/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken })
@@ -786,7 +787,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     }
 
     try {
-      const response = await fetch('/api/super-admin/update-email', {
+      const response = await appFetch('/api/super-admin/update-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -834,7 +835,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     }
 
     try {
-      const response = await fetch('/api/super-admin/update-password', {
+      const response = await appFetch('/api/super-admin/update-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -875,7 +876,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     }
 
     try {
-      const response = await fetch('/api/super-admin/rename-team', {
+      const response = await appFetch('/api/super-admin/rename-team', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -951,7 +952,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   const loadFeedbacks = async () => {
     try {
-      const response = await fetch('/api/super-admin/feedbacks', {
+      const response = await appFetch('/api/super-admin/feedbacks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken })
@@ -980,7 +981,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setSuccessMessage(null);
 
     try {
-      const response = await fetch('/api/super-admin/feedbacks/update', {
+      const response = await appFetch('/api/super-admin/feedbacks/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1020,7 +1021,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setSuccessMessage(null);
 
     try {
-      const response = await fetch('/api/super-admin/feedbacks/delete', {
+      const response = await appFetch('/api/super-admin/feedbacks/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1067,7 +1068,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     if (!content.trim()) return;
 
     try {
-      const response = await fetch('/api/super-admin/feedbacks/comment', {
+      const response = await appFetch('/api/super-admin/feedbacks/comment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1113,7 +1114,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setBackupDownloading(true);
 
     try {
-      const response = await fetch('/api/super-admin/backup', {
+      const response = await appFetch('/api/super-admin/backup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken })
@@ -1168,7 +1169,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     setRestoreUploading(true);
 
     try {
-      const response = await fetch('/api/super-admin/restore', {
+      const response = await appFetch('/api/super-admin/restore', {
         method: 'POST',
         headers: {
           // Octet-stream, not gzip: a plain JSON archive must not be labelled
@@ -1527,7 +1528,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   setAiEnabled(newEnabled);
                   if (!newEnabled) {
                     try {
-                      await fetch('/api/super-admin/update-ai-settings', {
+                      await appFetch('/api/super-admin/update-ai-settings', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ sessionToken, enabled: false, apiUrl: aiApiUrl, apiKey: aiApiKey, model: aiModel, allowSelfSignedCerts: aiAllowSelfSignedCerts })

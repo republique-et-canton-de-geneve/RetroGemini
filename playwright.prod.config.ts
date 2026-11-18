@@ -21,6 +21,7 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e-prod',
+  testIgnore: '**/dual-url.spec.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   workers: 1,
