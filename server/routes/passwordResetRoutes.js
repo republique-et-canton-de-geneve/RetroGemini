@@ -95,7 +95,7 @@ const registerPasswordResetRoutes = ({
     // authenticated, and the payload it mails is a credential the caller
     // already holds, so a foreign host there gains an attacker nothing they do
     // not already have.
-    if (!publicOrigin.hasConfiguredBaseUrl()) {
+    if (!publicOrigin.hasConfiguredBaseUrl(req)) {
       console.warn(
         '[Server] Refusing to mail a password reset: PUBLIC_BASE_URL is not set, ' +
         'so the server has no origin it can trust to build the link on (audit H4)'

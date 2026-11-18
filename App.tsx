@@ -1,3 +1,4 @@
+import { appFetch, appPath, localPath } from './services/publicPath';
 import React, { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
 import { Team, User, AppVersion, VersionAnnouncement } from './types';
 import { dataService, OPEN_SESSION_STORAGE_KEY } from './services/dataService';
@@ -151,7 +152,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const fetchVersionInfo = async () => {
       try {
-        const response = await fetch('/api/version');
+        const response = await appFetch('/api/version');
         if (!response.ok) return;
 
         const data: AppVersion = await response.json();
@@ -202,7 +203,7 @@ const App: React.FC = () => {
       if (!savedToken) return;
 
       try {
-        const res = await fetch('/api/super-admin/validate-session', {
+        const res = await appFetch('/api/super-admin/validate-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionToken: savedToken })
@@ -232,8 +233,8 @@ const App: React.FC = () => {
 
     const restoreSession = async () => {
       try {
-        const pathMatch = window.location.pathname.match(SESSION_PATH_REGEX);
-        const healthCheckPathMatch = window.location.pathname.match(HEALTH_CHECK_PATH_REGEX);
+        const pathMatch = localPath(window.location.pathname).match(SESSION_PATH_REGEX);
+        const healthCheckPathMatch = localPath(window.location.pathname).match(HEALTH_CHECK_PATH_REGEX);
         const sessionFromPath = pathMatch?.[1] || null;
         const healthCheckFromPath = healthCheckPathMatch?.[1] || null;
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -289,7 +290,7 @@ const App: React.FC = () => {
             setView('HEALTH_CHECK');
             return;
           } else {
-            window.history.replaceState({}, document.title, '/');
+            window.history.replaceState({}, document.title, appPath('/'));
           }
         }
 
@@ -300,7 +301,7 @@ const App: React.FC = () => {
             setView('SESSION');
             return;
           } else {
-            window.history.replaceState({}, document.title, '/');
+            window.history.replaceState({}, document.title, appPath('/'));
           }
         } else if (saved.view === 'SESSION' && saved.activeSessionId) {
           // Session was in URL but no longer there - check if session still exists
@@ -409,17 +410,17 @@ const App: React.FC = () => {
     if (!hydrated) return;
 
     if (view === 'SESSION' && activeSessionId) {
-      const sessionPath = `/session/${activeSessionId}`;
+      const sessionPath = appPath(`/session/${activeSessionId}`);
       if (window.location.pathname !== sessionPath) {
         window.history.replaceState({}, document.title, sessionPath);
       }
     } else if (view === 'HEALTH_CHECK' && activeHealthCheckId) {
-      const healthCheckPath = `/healthcheck/${activeHealthCheckId}`;
+      const healthCheckPath = appPath(`/healthcheck/${activeHealthCheckId}`);
       if (window.location.pathname !== healthCheckPath) {
         window.history.replaceState({}, document.title, healthCheckPath);
       }
-    } else if (window.location.pathname !== '/') {
-      window.history.replaceState({}, document.title, '/');
+    } else if (window.location.pathname !== appPath('/')) {
+      window.history.replaceState({}, document.title, appPath('/'));
     }
   }, [view, activeSessionId, activeHealthCheckId, hydrated]);
 

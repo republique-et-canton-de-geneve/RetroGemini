@@ -1,3 +1,4 @@
+import { appPath } from './publicPath';
 import { io, Socket } from 'socket.io-client';
 import { RetroSession, HealthCheckSession, ParticipantActivity } from '../types';
 import { getTeamSessionToken } from './dataService';
@@ -369,7 +370,7 @@ class SyncService {
     console.log('[SyncService] Connecting to:', url);
 
     const socket = io(url, {
-      path: '/socket.io',
+      path: envUrl || isViteDev ? '/socket.io' : appPath('/socket.io'),
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 10,

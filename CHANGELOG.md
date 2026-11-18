@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [44.0] - 2026-11-18
+
+### Added
+- Use RetroGemini through its original address and an additional reverse-proxy path, with matching resources, API calls, live collaboration, invitations and navigation on both addresses
+
 ## [43.0] - 2026-11-10
 
 ### Added

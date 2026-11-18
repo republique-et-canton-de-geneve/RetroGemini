@@ -400,6 +400,7 @@ const PARITY_CONTRACT: Record<string, Partial<Record<Surface, string>>> = {
   POSTGRES_PASSWORD: {},
   POSTGRES_USER: {},
   PUBLIC_BASE_URL: { k8sSecrets: NOT_A_SECRET },
+  PROXY_BASE_URL: { k8sSecrets: NOT_A_SECRET },
   POSTGRES_PORT: {
     manifest: 'defaults to 5432; the bundled postgresql Service does not move it',
     k8sSecrets: 'defaults to 5432; not part of the credential set',

@@ -1,3 +1,4 @@
+import { appFetch } from '../services/publicPath';
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback as TeamFeedbackType } from '../types';
@@ -155,7 +156,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   useEffect(() => {
     const loadInfoMessage = async () => {
       try {
-        const response = await fetch('/api/info-message');
+        const response = await appFetch('/api/info-message');
         if (response.ok) {
           const data = await response.json();
           setInfoMessage(data.infoMessage || '');
@@ -168,7 +169,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
   }, []);
 
   useEffect(() => {
-    fetch('/api/ai-status')
+    appFetch('/api/ai-status')
       .then(r => r.json())
       .then(d => setAiEnabled(!!d.enabled))
       .catch(() => setAiEnabled(false));

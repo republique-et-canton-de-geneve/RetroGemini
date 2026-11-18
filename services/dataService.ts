@@ -1,3 +1,4 @@
+import { appFetch, appUrl } from './publicPath';
 
 import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink, JiraParentLink } from '../types';
 import { randomId } from '../utils/randomId';
@@ -477,7 +478,7 @@ const apiCall = async <T>(
     return { data: null, error: SESSION_REVOKED };
   }
   try {
-    const res = await fetch(endpoint, {
+    const res = await appFetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1119,7 +1120,7 @@ export const dataService = {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), LIST_TEAMS_TIMEOUT_MS);
     try {
-      const res = await fetch('/api/team/list', { signal: controller.signal });
+      const res = await appFetch('/api/team/list', { signal: controller.signal });
       if (!res.ok) {
         return null;
       }
@@ -1164,7 +1165,7 @@ export const dataService = {
       throw new Error(RECOVERY_EMAIL_REQUIRED_MESSAGE);
     }
 
-    const res = await fetch('/api/team/create', {
+    const res = await appFetch('/api/team/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: trimmedName, password, facilitatorEmail: recoveryEmail.email })
@@ -1210,7 +1211,7 @@ export const dataService = {
    * Login to a team via the secure API
    */
   loginTeam: async (name: string, password: string): Promise<Team> => {
-    const res = await fetch('/api/team/login', {
+    const res = await appFetch('/api/team/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ teamName: name, password })
@@ -1252,7 +1253,7 @@ export const dataService = {
   // address, or when the database hiccuped.
   restoreSession: async (sessionToken: string): Promise<{ team: Team } | { failure: 'rejected' | 'transient' }> => {
     try {
-      const res = await fetch('/api/team/restore-session', {
+      const res = await appFetch('/api/team/restore-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionToken })
@@ -1931,7 +1932,7 @@ export const dataService = {
     };
 
     const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
-    const link = `${window.location.origin}?join=${encodeURIComponent(encodedData)}`;
+    const link = `${appUrl()}?join=${encodeURIComponent(encodedData)}`;
 
     return { inviteLink: link };
   },
@@ -2001,7 +2002,7 @@ export const dataService = {
     }
 
     const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
-    const link = `${window.location.origin}?join=${encodeURIComponent(encodedData)}`;
+    const link = `${appUrl()}?join=${encodeURIComponent(encodedData)}`;
 
     return { user, inviteLink: link };
   },
@@ -2025,7 +2026,7 @@ export const dataService = {
     teamId: string,
     invite: { email: string; name?: string; link: string; sessionName?: string }
   ): Promise<void> => {
-    const res = await fetch('/api/send-invite', {
+    const res = await appFetch('/api/send-invite', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2098,7 +2099,7 @@ export const dataService = {
     // embed the plaintext password and keep joining until stage 7d.
     let res: Response;
     try {
-      res = await fetch('/api/team/login', {
+      res = await appFetch('/api/team/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
@@ -2513,7 +2514,7 @@ export const dataService = {
     };
 
     const encodedData = btoa(unescape(encodeURIComponent(JSON.stringify(inviteData))));
-    const link = `${window.location.origin}?join=${encodeURIComponent(encodedData)}`;
+    const link = `${appUrl()}?join=${encodeURIComponent(encodedData)}`;
 
     return { inviteLink: link };
   },
@@ -2622,7 +2623,7 @@ export const dataService = {
     // queues a write the server can still reject as a duplicate, and
     // `persistTeamUpdate` only logs that rejection — so the UI would report a
     // rename that silently never happened until the next refresh reverted it.
-    const checkRes = await fetch(`/api/team/exists/${encodeURIComponent(trimmedName)}`);
+    const checkRes = await appFetch(`/api/team/exists/${encodeURIComponent(trimmedName)}`);
     if (!checkRes.ok) {
       throw new Error(
         checkRes.status === 429
@@ -2653,13 +2654,13 @@ export const dataService = {
     }
 
     try {
-      const response = await fetch('/api/send-password-reset', {
+      const response = await appFetch('/api/send-password-reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: typed.email,
           teamName,
-          resetBaseUrl: `${window.location.origin}${window.location.pathname}`,
+          resetBaseUrl: appUrl(),
           language: getActiveLanguage()
         })
       });
@@ -2699,7 +2700,7 @@ export const dataService = {
 
   resetPassword: async (token: string, newPassword: string): Promise<{ success: boolean; message: string; teamName?: string }> => {
     try {
-      const response = await fetch('/api/password-reset/confirm', {
+      const response = await appFetch('/api/password-reset/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, newPassword })
@@ -2732,7 +2733,7 @@ export const dataService = {
 
   verifyResetToken: async (token: string): Promise<{ valid: boolean; teamName?: string; throttled?: boolean }> => {
     try {
-      const response = await fetch('/api/password-reset/verify', {
+      const response = await appFetch('/api/password-reset/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token })

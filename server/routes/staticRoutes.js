@@ -34,6 +34,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
+import { createPublicAccess, renderPublicHtml } from '../services/publicAccess.js';
 
 export const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 export const REVALIDATE_CACHE_CONTROL = 'no-cache';
@@ -148,7 +149,15 @@ const assetError = (err, _req, res, next) => {
   return res.send(status === 404 ? 'Not Found' : 'Error');
 };
 
-export const registerStaticRoutes = ({ app, distDir, spaLimiterMax = 600 }) => {
+export const registerStaticRoutes = ({ app, distDir, spaLimiterMax = 600, env = process.env }) => {
+  const access = createPublicAccess({ env });
+  const indexPath = join(distDir, 'index.html');
+  const html = existsSync(indexPath) ? readFileSync(indexPath, 'utf8') : null;
+  const sendIndex = (req, res) => {
+    res.set('Cache-Control', REVALIDATE_CACHE_CONTROL);
+    if (html === null) return res.status(404).type('text/plain').send('Not Found');
+    return res.type('html').send(renderPublicHtml(html, access.basePath(req)));
+  };
   const assetsDir = join(distDir, 'assets');
   const immutable = readImmutableAssets(distDir);
   const precompressed = findPrecompressedAssets(assetsDir);
@@ -174,7 +183,9 @@ export const registerStaticRoutes = ({ app, distDir, spaLimiterMax = 600 }) => {
   // `index.html` for "/", the fonts, every other root file: revalidated. "/"
   // stays here, outside the SPA limiter below: invite links land on
   // "/?join=…", and a whole office opens the same one at once.
+  app.get(['/', '/index.html'], sendIndex);
   app.use(express.static(distDir, {
+    index: false,
     setHeaders: (res) => res.setHeader('Cache-Control', REVALIDATE_CACHE_CONTROL)
   }));
 
@@ -186,10 +197,10 @@ export const registerStaticRoutes = ({ app, distDir, spaLimiterMax = 600 }) => {
     legacyHeaders: false
   });
 
-  app.get(/.*/, spaLimiter, (_req, res) => {
+  app.get(/.*/, spaLimiter, (req, res) => {
     // The page that names the hashed assets: always revalidated, so a release
     // is picked up on the next load.
     res.set('Cache-Control', REVALIDATE_CACHE_CONTROL);
-    res.sendFile(join(distDir, 'index.html'));
+    sendIndex(req, res);
   });
 };

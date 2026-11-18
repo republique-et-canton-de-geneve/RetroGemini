@@ -1,3 +1,4 @@
+import { appFetch } from '../services/publicPath';
 
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { dataService, InviteAutoJoinError } from '../services/dataService';
@@ -280,7 +281,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   useEffect(() => {
     const loadInfoMessage = async () => {
       try {
-        const response = await fetch('/api/info-message');
+        const response = await appFetch('/api/info-message');
         if (response.ok) {
           const data = await response.json();
           setInfoMessage(data.infoMessage || '');
@@ -540,7 +541,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     if (!onSuperAdminLogin) return;
 
     try {
-      const response = await fetch('/api/super-admin/verify', {
+      const response = await appFetch('/api/super-admin/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password })

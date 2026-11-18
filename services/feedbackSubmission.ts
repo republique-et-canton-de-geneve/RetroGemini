@@ -1,4 +1,5 @@
 import type { TeamFeedback } from '../types';
+import { appFetch } from './publicPath';
 import { randomId } from '../utils/randomId';
 import { noteRevokedResponse } from './sessionRevocation';
 
@@ -53,7 +54,7 @@ const notifyAdmin = (fetchImpl: typeof fetch, credential: Record<string, unknown
 
 export const submitTeamFeedback = async (
   submission: FeedbackSubmission,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = appFetch
 ): Promise<FeedbackSubmitResult> => {
   // Created through the API rather than the team record, to stay clear of the
   // record's sync. The notification below carries the credential the create

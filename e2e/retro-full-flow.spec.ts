@@ -51,12 +51,12 @@ test.describe('Full Retrospective Flow', () => {
 
   test.beforeAll(async ({ browser }) => {
     facilitatorContext = await browser.newContext({
-      recordVideo: {
+      recordVideo: process.env.PW_DISABLE_VIDEO === '1' ? undefined : {
         dir: 'test-results/videos/facilitator',
       },
     });
     participantContext = await browser.newContext({
-      recordVideo: {
+      recordVideo: process.env.PW_DISABLE_VIDEO === '1' ? undefined : {
         dir: 'test-results/videos/participant',
       },
     });
@@ -73,7 +73,7 @@ test.describe('Full Retrospective Flow', () => {
     // ================================================================
     // STEP 1: Create Team
     // ================================================================
-    await facilitator.goto('/');
+    await facilitator.goto('./');
     await facilitator.waitForLoadState('networkidle');
 
     // Click "+ New Team"

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { appPath } from '../../services/publicPath';
 import { useTranslation } from '../../i18n/I18nContext';
 import { TimerSettings, formatTimer } from '../../utils/sessionTimer';
 import { TimerUpdate, useSessionTimer } from './useSessionTimer';
@@ -110,7 +111,7 @@ const SessionTimer: React.FC<Props> = ({ settings, phase, fallbackSeconds, isFac
   return (
     <div className="flex shrink-0 items-center bg-slate-100 rounded-lg px-1 sm:px-3 py-1 mr-1 sm:mr-4">
       {/* The alarm chime: no speech to caption. Self-hosted, like every asset. */}
-      <audio ref={timer.bindAudio} src="/assets/timer-alert.mp3" preload="auto" />
+      <audio ref={timer.bindAudio} src={appPath('/assets/timer-alert.mp3')} preload="auto" />
       {!timer.editing ? (
         <>
           {faceAction ? (

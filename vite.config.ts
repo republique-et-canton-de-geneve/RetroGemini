@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react';
 const port = parseInt(process.env.PORT || '8080', 10);
 
 export default defineConfig({
+  base: './',
   server: {
     port: 5173,
     host: '0.0.0.0',

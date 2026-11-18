@@ -111,6 +111,11 @@ and drop the repo's `.claude/` bootstrap.
 
 ## Zero Downtime Requirements
 
+`PROXY_BASE_URL` optionally supplies a second HTTPS public mount. Only its exact
+configured request Host selects the public prefix. The proxy strips that prefix
+once. Keep assets, API calls, Socket.IO paths, navigation and mailed links aligned
+with the server-rendered public base while preserving root access.
+
 **CRITICAL**: This application is deployed on OpenShift/Kubernetes with rolling updates. Users may be in the middle of a retrospective session when deployments occur.
 
 ### Key Principles

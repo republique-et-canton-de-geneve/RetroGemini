@@ -46,12 +46,12 @@ test.describe('Full Health Check Flow', () => {
 
   test.beforeAll(async ({ browser }) => {
     facilitatorContext = await browser.newContext({
-      recordVideo: {
+      recordVideo: process.env.PW_DISABLE_VIDEO === '1' ? undefined : {
         dir: 'test-results/videos/hc-facilitator',
       },
     });
     participantContext = await browser.newContext({
-      recordVideo: {
+      recordVideo: process.env.PW_DISABLE_VIDEO === '1' ? undefined : {
         dir: 'test-results/videos/hc-participant',
       },
     });
@@ -68,7 +68,7 @@ test.describe('Full Health Check Flow', () => {
     // ================================================================
     // STEP 1: Create Team
     // ================================================================
-    await facilitator.goto('/');
+    await facilitator.goto('./');
     await facilitator.waitForLoadState('networkidle');
 
     // Click "+ New Team"
@@ -458,7 +458,8 @@ test.describe('Full Health Check Flow', () => {
     const storedHealthCheckStatus = () =>
       facilitator.evaluate(async () => {
         const saved = JSON.parse(localStorage.getItem('retro-open-session') ?? '{}');
-        const response = await fetch(`/api/team/${saved.teamId}`, {
+        const base = document.querySelector<HTMLMetaElement>('meta[name="app-base-path"]')?.content ?? '/';
+        const response = await fetch(`${base}api/team/${saved.teamId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionToken: saved.sessionToken })
