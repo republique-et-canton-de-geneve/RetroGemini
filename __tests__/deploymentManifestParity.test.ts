@@ -598,6 +598,98 @@ describe('base deployment manifest (audit H7.1)', () => {
   // must not encode an opinion the people running the cluster have overruled.
 });
 
+describe('opt-in OpenShift trusted CA configuration', () => {
+  const patchPath = 'k8s/config-templates/trusted-ca.patch.yaml';
+  const configMapPath = 'k8s/config-templates/trusted-ca.yaml';
+
+  // These are deployment artefacts, like the base manifests above. Follow the
+  // references between their blocks: merely finding a CA path somewhere in the
+  // patch would pass even when Node reads a different file from the one mounted.
+  const childrenOf = (source: string, key: string) => {
+    const lines = source.split('\n');
+    const index = lines.findIndex((line) => line.trim() === `${key}:`);
+    expect(index, `missing YAML block ${key}`).toBeGreaterThan(-1);
+    const indent = indentOf(lines[index]);
+    const children: string[] = [];
+    for (let next = index + 1; next < lines.length; next += 1) {
+      const line = lines[next];
+      if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+      if (indentOf(line) <= indent) break;
+      children.push(line);
+    }
+    return children.join('\n');
+  };
+
+  const namedEntry = (source: string, name: string) => {
+    const lines = source.split('\n');
+    const index = lines.findIndex((line) => line.trim() === `- name: ${name}`);
+    expect(index, `missing named YAML entry ${name}`).toBeGreaterThan(-1);
+    const indent = indentOf(lines[index]);
+    const body: string[] = [];
+    for (let next = index + 1; next < lines.length; next += 1) {
+      const line = lines[next];
+      if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+      if (indentOf(line) <= indent) break;
+      body.push(line);
+    }
+    return body.join('\n');
+  };
+
+  const scalarOf = (source: string, key: string) => source.split('\n')
+    .find((line) => line.trimStart().startsWith(`${key}:`))
+    ?.trim().slice(key.length + 1).trim().replace(/^["']|["']$/g, '');
+
+  it('requests the cluster trust bundle in a dedicated ConfigMap', () => {
+    expect(resourceIdsOf(configMapPath)).toEqual([{ kind: 'ConfigMap', name: 'retrogemini-trusted-ca' }]);
+    const source = read(configMapPath);
+    expect(scalarOf(source, 'apiVersion')).toBe('v1');
+    expect(scalarOf(childrenOf(source, 'labels'), 'config.openshift.io/inject-trusted-cabundle')).toBe('true');
+    expect(source).toMatch(/^data:[^\S\n]*\{\}[^\S\n]*$/m);
+    expect(source).not.toMatch(/^[^\S\n]*service\.beta\.openshift\.io\/inject-cabundle:/m);
+  });
+
+  it('points Node at the bundle actually mounted read-only on the application', () => {
+    expect(resourceIdsOf(patchPath)).toEqual([{ kind: 'Deployment', name: 'retrogemini' }]);
+    const source = read(patchPath);
+    expect(scalarOf(source, 'apiVersion')).toBe('apps/v1');
+    const pod = childrenOf(childrenOf(childrenOf(source, 'spec'), 'template'), 'spec');
+    const container = namedEntry(childrenOf(pod, 'containers'), 'container');
+    const env = namedEntry(childrenOf(container, 'env'), 'NODE_EXTRA_CA_CERTS');
+    const mount = namedEntry(childrenOf(container, 'volumeMounts'), 'trusted-ca');
+    const volume = namedEntry(childrenOf(pod, 'volumes'), 'trusted-ca');
+    const configMap = childrenOf(volume, 'configMap');
+
+    expect(scalarOf(configMap, 'name')).toBe(idOfDocument(read(configMapPath))?.name);
+    expect(scalarOf(configMap, 'optional')).not.toBe('true');
+    const items = childrenOf(configMap, 'items');
+    expect(items).toMatch(/-[^\S\n]*key:[^\S\n]*ca-bundle\.crt/);
+    expect(scalarOf(items, 'path')).toBe('ca-bundle.crt');
+    expect(scalarOf(env, 'value')).toBe(`${scalarOf(mount, 'mountPath')}/${scalarOf(items, 'path')}`);
+    expect(scalarOf(env, 'value')).toBe('/etc/retrogemini/trusted-ca/ca-bundle.crt');
+    expect(scalarOf(mount, 'readOnly')).toBe('true');
+    expect(imageRefs(patchPath), 'a trust fix must preserve the deployed application image').toEqual([]);
+    const settings = source.split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n');
+    expect(settings).not.toMatch(/NODE_TLS_REJECT_UNAUTHORIZED|ignoreTLS|rejectUnauthorized:[^\S\n]*false/);
+  });
+
+  it('leaves cluster-specific trust opt-in on generic shipped deployment paths', () => {
+    // Environment overlays may opt into the CA templates, as the operator
+    // guide recommends; only the generic deployment paths must stay neutral.
+    const paths = [
+      'k8s/base/kustomization.yaml',
+      'k8s/overlays/openshift/kustomization.yaml',
+      'k8s/overlays/nodeport/kustomization.yaml',
+    ];
+    for (const path of paths) {
+      const references = [...resourceFilesOf(path), ...patchPaths(read(path))];
+      expect(
+        references.filter((entry) => /(?:^|\/)trusted-ca(?:\.patch)?\.yaml$/.test(entry)),
+        `${path} must not require an OpenShift-specific trust bundle`,
+      ).toEqual([]);
+    }
+  });
+});
+
 describe('database pod security context (audit H40)', () => {
   /**
    * H7.2/D4 hardened the application pod and stopped there. The PostgreSQL
