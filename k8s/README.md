@@ -275,6 +275,76 @@ stringData:
 
 See the main [README.md](../README.md#configuration) for SMTP variable details.
 
+#### Internal SMTP certificates on OpenShift
+
+`SMTP_SECURE=false` selects a plain initial SMTP connection; Nodemailer still
+upgrades it with STARTTLS when the server offers it. An internal CA missing from
+Node's trust store therefore fails with `ESOCKET` /
+`SELF_SIGNED_CERT_IN_CHAIN`, even on port 25. Trust the issuing CA rather than
+disabling certificate verification. No application rebuild is needed.
+
+The following opt-in templates use the trust bundle maintained by OpenShift's
+Cluster Network Operator. Run each command in the intended namespace, first in
+dev and then in production after testing:
+
+```bash
+oc apply -n <namespace> -f k8s/config-templates/trusted-ca.yaml
+```
+
+Wait for CNO to populate the `ca-bundle.crt` key, then export the bundle:
+
+```bash
+oc get configmap retrogemini-trusted-ca -n <namespace> \
+  -o jsonpath='{.data.ca-bundle\.crt}' > /tmp/retrogemini-ca-bundle.crt
+```
+
+Inspect its certificates and compare the required root's SHA-256 fingerprint with an independently
+trusted source (your corporate certificate store or PKI administrator). The
+bundle must contain the SMTP issuer's trusted root. The ConfigMap is dedicated
+to CNO injection: do not edit its data or add service-CA injection. If the
+corporate CA is absent, ask the cluster administrator to add it to cluster
+trust before continuing.
+
+```bash
+# Inspect the merge without changing the running Deployment.
+oc patch deployment retrogemini -n <namespace> --type=strategic \
+  --patch-file k8s/config-templates/trusted-ca.patch.yaml --dry-run=server -o yaml
+
+# Apply only the CA configuration, preserving the deployed image and Secrets.
+oc patch deployment retrogemini -n <namespace> --type=strategic \
+  --patch-file k8s/config-templates/trusted-ca.patch.yaml
+oc rollout status deployment/retrogemini -n <namespace> --timeout=180s
+
+# Check from each new application pod, without sending mail.
+oc exec -n <namespace> <pod> -- node --input-type=module -e \
+  'import {createMailerService} from "./server/services/mailerService.js"; const {mailer}=createMailerService(); try { console.log(await mailer.verify()); } finally { mailer.close(); }'
+```
+
+Once verification succeeds on every replica, send an invitation from the app
+and check its delivery. The patch mounts the bundle read-only and sets
+`NODE_EXTRA_CA_CERTS`; normal certificate and hostname verification stay active.
+The existing rolling-update strategy keeps a ready replica serving while the
+new ones start. Node reads the extra CAs only at startup: after any later CA
+bundle update, use `oc rollout restart deployment/retrogemini -n <namespace>`
+and wait for rollout completion again.
+
+These files are deliberately absent from the generic kustomizations. To manage
+this setting declaratively, copy both files into your environment overlay and
+include them there:
+
+```yaml
+# k8s/overlays/<environment>/kustomization.yaml
+resources:
+  - ../openshift
+  - trusted-ca.yaml
+patches:
+  - path: trusted-ca.patch.yaml
+```
+
+Keep your registry/image overrides in that overlay too. For a configuration-only
+repair on an existing deployment, use the targeted patch above: applying the
+whole generic overlay also reapplies its image tag and other defaults.
+
 ### Wi-Fi QR code (optional)
 
 File: `k8s/secrets-templates/wifi-secret.yaml`

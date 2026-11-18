@@ -1,0 +1,12 @@
+# Opt-in OpenShift cluster trust bundle. Apply before trusted-ca.patch.yaml.
+# The Cluster Network Operator owns data in this dedicated ConfigMap.
+# Do not add service-ca injection or hand-written certificates here.
+# Verify that ca-bundle.crt contains the required corporate CA before rollout.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: retrogemini-trusted-ca
+  labels:
+    app: retrogemini
+    config.openshift.io/inject-trusted-cabundle: "true"
+data: {}

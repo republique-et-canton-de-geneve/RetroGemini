@@ -1,0 +1,26 @@
+# Opt-in strategic-merge patch; not a standalone Deployment to apply.
+# oc patch deployment retrogemini --type=strategic --patch-file <this-file>
+# Preserve the running image, credentials, probes and rolling-update strategy.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retrogemini
+spec:
+  template:
+    spec:
+      containers:
+        - name: container
+          env:
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/retrogemini/trusted-ca/ca-bundle.crt
+          volumeMounts:
+            - name: trusted-ca
+              mountPath: /etc/retrogemini/trusted-ca
+              readOnly: true
+      volumes:
+        - name: trusted-ca
+          configMap:
+            name: retrogemini-trusted-ca
+            items:
+              - key: ca-bundle.crt
+                path: ca-bundle.crt
