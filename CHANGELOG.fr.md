@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [45.0] - 2026-11-19
+
+### Changed
+- Profitez d'une interface rafraîchie sur tous les écrans : une nouvelle police, une palette de couleurs plus calme, des coins et des ombres plus doux, et des icônes plus rondes
+
 ## [44.0] - 2026-11-18
 
 ### Added

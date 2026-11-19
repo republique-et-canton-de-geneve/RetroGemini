@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [45.0] - 2026-11-19
+
+### Changed
+- Enjoy a refreshed interface on every screen: a new typeface, a calmer colour palette, softer corners and shadows, and rounder icons
+
 ## [44.0] - 2026-11-18
 
 ### Added

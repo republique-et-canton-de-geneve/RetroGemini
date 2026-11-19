@@ -1,21 +1,111 @@
-/* Inter font - fallback to system fonts if not available */
-/* Note: For fully offline mode, download fonts locally */
+/* The look of RetroGemini ("Clarté", 45.0): white surfaces, cool neutrals, one
+   violet-indigo brand, soft radii and thin ink-tinted shadows.
+
+   Every screen takes it from here: the components keep their Tailwind classes
+   (`text-slate-600`, `bg-indigo-600`, `rounded-lg`, `shadow-sm`) and this file
+   gives those tokens the look's values. So a colour is changed in one place,
+   and `__tests__/helpers/tailwindTheme.ts` reads this @theme block: what the
+   contrast tests measure is what the browser paints. Declare a colour token
+   nowhere else in this file (`__tests__/participantColors.test.ts` checks). */
 
 @import 'tailwindcss';
 
 @theme {
-  --color-retro-bg: #f8fafc;
-  /* Indigo 600/700 rather than 500/600: white text on the 500 measures 4.46:1
-     against a 4.5:1 floor, so every primary button in the product failed WCAG
-     AA by four hundredths (audit H42). One step darker clears it at 6.29:1. */
-  --color-retro-primary: #4f46e5;
-  --color-retro-primaryHover: #4338ca;
-  --color-retro-secondary: #cbd5e1;
-  --color-retro-dark: #0f172a;
+  /* Neutrals: the slate scale, cooler and slightly violet. 500 is the lightest
+     that reads as text (4.5:1) on white, on the page (50), on a panel (100) and
+     on the brand tint (indigo-100); 400 is the lightest that draws a control's
+     edge (3:1 on white and on the page); 300 is the muted text of the dark
+     screens. */
+  --color-slate-50: #f5f6fa;
+  --color-slate-100: #eceef5;
+  --color-slate-200: #e3e6ef;
+  --color-slate-300: #c9cddb;
+  --color-slate-400: #858aa2;
+  --color-slate-500: #646982;
+  --color-slate-600: #555a72;
+  --color-slate-700: #3c415a;
+  --color-slate-800: #262a40;
+  --color-slate-900: #171a2b;
+  --color-slate-950: #0c0e1a;
 
-  --font-sans:
-    Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto,
-    sans-serif;
+  /* Brand: the indigo scale. White text clears 4.5:1 from 500 down. */
+  --color-indigo-50: #f4f3ff;
+  --color-indigo-100: #eceaff;
+  --color-indigo-200: #dcd8ff;
+  --color-indigo-300: #beb7ff;
+  --color-indigo-400: #988dfb;
+  --color-indigo-500: #6558f5;
+  --color-indigo-600: #4f3ff0;
+  --color-indigo-700: #3f30d6;
+  --color-indigo-800: #3427ad;
+  --color-indigo-900: #2c2388;
+  --color-indigo-950: #1a1450;
+
+  --color-retro-bg: #f5f6fa;
+  --color-retro-primary: #4f3ff0;
+  --color-retro-primaryHover: #3f30d6;
+  --color-retro-secondary: #c9cddb;
+  --color-retro-dark: #171a2b;
+
+  /* A person's colours. `User.color` stays the stored class (`bg-indigo-500`…);
+     `utils/participantColors.ts` maps it to one of these tones: a pastel body,
+     an ink of the same hue for initials, dots and outlines, a brighter accent
+     for the drawings. The eighth stored colour (pink) is drawn as peach, so it
+     is not taken for rose. */
+  --color-person-indigo: #cfcaff;
+  --color-person-indigo-ink: #3a2fc0;
+  --color-person-indigo-pop: #8b7dfa;
+  --color-person-emerald: #b4ebd0;
+  --color-person-emerald-ink: #0b6444;
+  --color-person-emerald-pop: #34c38f;
+  --color-person-amber: #ffdb94;
+  --color-person-amber-ink: #864600;
+  --color-person-amber-pop: #ffa928;
+  --color-person-rose: #ffc4ce;
+  --color-person-rose-ink: #a31936;
+  --color-person-rose-pop: #ff6b86;
+  --color-person-cyan: #aee6f2;
+  --color-person-cyan-ink: #0a5c74;
+  --color-person-cyan-pop: #2fb9d6;
+  --color-person-fuchsia: #ddc6ff;
+  --color-person-fuchsia-ink: #6526bf;
+  --color-person-fuchsia-pop: #a974f8;
+  --color-person-lime: #cfe99a;
+  --color-person-lime-ink: #445f09;
+  --color-person-lime-pop: #8fc42b;
+  --color-person-pink: #ffcbad;
+  --color-person-pink-ink: #953a05;
+  --color-person-pink-pop: #ff8b4f;
+  /* A colour this release does not know, and a person who has left. */
+  --color-person-neutral: #dde0ea;
+  --color-person-neutral-ink: #3c415a;
+  --color-person-neutral-pop: #858aa2;
+
+  --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1.125rem;
+  --radius-3xl: 1.375rem;
+  --radius: 0.375rem;
+
+  /* Shadows carry the ink's colour and stay thin; only dialogs and popovers
+     (xl, 2xl) are deep. */
+  --shadow-2xs: 0 1px rgb(23 26 43 / 0.05);
+  --shadow-xs: 0 1px 2px 0 rgb(23 26 43 / 0.06);
+  --shadow-sm: 0 1px 2px 0 rgb(23 26 43 / 0.06), 0 2px 6px -2px rgb(23 26 43 / 0.08);
+  --shadow: 0 1px 2px 0 rgb(23 26 43 / 0.06), 0 2px 6px -2px rgb(23 26 43 / 0.08);
+  --shadow-md: 0 2px 4px -1px rgb(23 26 43 / 0.06), 0 8px 16px -6px rgb(23 26 43 / 0.14);
+  --shadow-lg: 0 4px 8px -2px rgb(23 26 43 / 0.06), 0 14px 28px -10px rgb(23 26 43 / 0.2);
+  --shadow-xl: 0 8px 16px -6px rgb(23 26 43 / 0.08), 0 22px 44px -14px rgb(23 26 43 / 0.26);
+  --shadow-2xl: 0 30px 70px -20px rgb(23 26 43 / 0.45);
+  --shadow-inner: inset 0 2px 4px 0 rgb(23 26 43 / 0.05);
+
+  --ease-settle: cubic-bezier(0.2, 0.9, 0.3, 1);
+  --ease-spring: cubic-bezier(0.3, 1.8, 0.5, 1);
 }
 
 /*
@@ -36,16 +126,67 @@
   }
 }
 
-/* Material Symbols - embedded as base64 for offline/proxy support */
+/* Geist and Geist Mono (SIL OFL 1.1, public/fonts/OFL-Geist.txt): the variable
+   fonts, Latin and Latin Extended subsets, served from this deployment like
+   every other asset. `swap`: the text is readable in the system font until the
+   file has arrived, on a slow corporate Wi-Fi too. */
 @font-face {
-  font-family: 'Material Symbols Outlined';
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/geist-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/geist-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/geist-mono-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/geist-mono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Material Symbols, the Rounded cut (static, weight 400, no FILL axis; Apache
+   2.0). The class keeps its historical name: 300 icons and the tests that find
+   them by it, and the column icons people choose are stored by ligature name.
+   `block`: an icon is never shown as the word that names it while the file
+   loads. The Outlined cut of 44.x is the second source: during a rolling
+   update a pod of the previous release does not have the new file (it answers
+   the page instead), and the icons are then drawn in the old cut rather than
+   as words. It also stays in public/fonts one release for the pages of 44.x
+   that still ask for it. */
+@font-face {
+  font-family: 'Material Symbols Rounded';
   font-style: normal;
   font-weight: 400;
-  src: url('/fonts/material-symbols-outlined.woff2') format('woff2');
+  font-display: block;
+  src:
+    url('/fonts/material-symbols-rounded.woff2') format('woff2'),
+    url('/fonts/material-symbols-outlined.woff2') format('woff2');
 }
 
 .material-symbols-outlined {
-  font-family: 'Material Symbols Outlined';
+  font-family: 'Material Symbols Rounded';
   font-weight: normal;
   font-style: normal;
   font-size: 24px;
@@ -62,10 +203,13 @@
 
 /* Base styles */
 body {
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background-color: #F8FAFC;
+  font-family: var(--font-sans);
+  background-color: var(--color-retro-bg);
+  color: var(--color-slate-900);
   margin: 0;
   padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Focus returned to a control the user opened with the pointer.
@@ -79,14 +223,16 @@ body {
   outline: none;
 }
 
-/* Phase navigation button styles */
+/* Phase navigation: the current phase sits on a soft pill of the brand colour. */
 .phase-nav-btn {
   position: relative;
-  transition: all 0.2s;
+  border-radius: 9px;
+  transition: color 0.2s, background-color 0.2s;
 }
 
 .phase-nav-btn.active {
-  color: #4F46E5;
+  color: var(--color-indigo-700);
+  background-color: var(--color-indigo-100);
   font-weight: 700;
 }
 
@@ -94,19 +240,8 @@ body {
    and no shadow while focused (audit H42, WCAG 2.4.7), against an outline plus
    a ring on every ordinary button. */
 .phase-nav-btn:focus-visible {
-  outline: 2px solid #4F46E5;
+  outline: 2px solid var(--color-indigo-600);
   outline-offset: -2px;
-  border-radius: 4px;
-}
-
-.phase-nav-btn.active::after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background-color: #4F46E5;
 }
 
 /* Hide scrollbar */
@@ -152,8 +287,8 @@ body {
 
 /* Drag and drop styles */
 .drag-over {
-  background-color: #EEF2FF !important;
-  border-color: #6366F1 !important;
+  background-color: var(--color-indigo-50) !important;
+  border-color: var(--color-indigo-500) !important;
   transform: scale(1.01);
 }
 
@@ -166,7 +301,7 @@ body {
 /* Ticket blur effect for anonymous mode */
 .ticket-blur {
   color: transparent;
-  text-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 0 8px rgba(23, 26, 43, 0.5);
   user-select: none;
   pointer-events: none;
 }
@@ -177,6 +312,252 @@ body {
 }
 
 .dash-tab.active {
-  border-bottom: 2px solid #4F46E5;
-  color: #4F46E5;
+  border-bottom: 2px solid var(--color-indigo-600);
+  color: var(--color-indigo-600);
+}
+
+@layer components {
+  /* A person's tone, for what is drawn rather than written: an avatar picture
+     reads these three. Text and backgrounds use the `person-*` utilities, which
+     the contrast tests measure. */
+  .tone-indigo { --av-bg: var(--color-person-indigo); --av-ink: var(--color-person-indigo-ink); --av-pop: var(--color-person-indigo-pop); }
+  .tone-emerald { --av-bg: var(--color-person-emerald); --av-ink: var(--color-person-emerald-ink); --av-pop: var(--color-person-emerald-pop); }
+  .tone-amber { --av-bg: var(--color-person-amber); --av-ink: var(--color-person-amber-ink); --av-pop: var(--color-person-amber-pop); }
+  .tone-rose { --av-bg: var(--color-person-rose); --av-ink: var(--color-person-rose-ink); --av-pop: var(--color-person-rose-pop); }
+  .tone-cyan { --av-bg: var(--color-person-cyan); --av-ink: var(--color-person-cyan-ink); --av-pop: var(--color-person-cyan-pop); }
+  .tone-fuchsia { --av-bg: var(--color-person-fuchsia); --av-ink: var(--color-person-fuchsia-ink); --av-pop: var(--color-person-fuchsia-pop); }
+  .tone-lime { --av-bg: var(--color-person-lime); --av-ink: var(--color-person-lime-ink); --av-pop: var(--color-person-lime-pop); }
+  .tone-pink { --av-bg: var(--color-person-pink); --av-ink: var(--color-person-pink-ink); --av-pop: var(--color-person-pink-pop); }
+  .tone-neutral { --av-bg: var(--color-person-neutral); --av-ink: var(--color-person-neutral-ink); --av-pop: var(--color-person-neutral-pop); }
+
+  /* How an avatar picture is painted. A picture is a list of shapes for a
+     40 by 40 box (components/common/avatars/avatarArt.ts); each shape says what
+     it is and the wearer's tone gives the colours. */
+  .avatar-art {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+  .avatar-art .bg { fill: var(--av-bg); stroke: var(--av-ink); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .avatar-art .pop { fill: var(--av-pop); stroke: var(--av-ink); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .avatar-art .light { fill: #fff; stroke: var(--av-ink); stroke-width: 1.275; stroke-linejoin: round; }
+  .avatar-art .ink { fill: none; stroke: var(--av-ink); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .avatar-art .dot { fill: var(--av-ink); stroke: none; }
+  .avatar-art .shade { fill: var(--av-ink); fill-opacity: 0.14; stroke: none; }
+  .avatar-art .blush { fill: var(--av-pop); fill-opacity: 0.6; stroke: none; }
+
+  /* The main action of a screen: the brand colour with a light upper edge and
+     a shadow of its own colour. */
+  .btn-brand-glow {
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.22),
+      0 1px 2px rgb(79 63 240 / 0.4),
+      0 6px 14px -6px rgb(79 63 240 / 0.65);
+  }
+
+  /* A token that flies between the vote budget and a card
+     (components/common/motion/flight.ts). Decoration: never focusable, never
+     in the way of a click. */
+  .fx-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .fx-token {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 12px;
+    height: 12px;
+    margin: -6px 0 0 -6px;
+    border-radius: 9999px;
+    background: var(--color-indigo-600);
+    box-shadow: inset 0 -1.5px 0 rgb(0 0 0 / 0.22), 0 6px 12px rgb(79 63 240 / 0.55);
+  }
+}
+
+/* Motion. Every effect below is decoration: the state it accompanies is
+   already on screen, in words or in a count. All of it sits under
+   `no-preference`, so a reader who asked for less motion gets none of it, and
+   no leftover delay either. The classes are put on an element for the length of
+   one animation and taken off (components/session/useSessionMotion.ts): what is
+   animated is what just happened, never what is merely drawn again. */
+@media (prefers-reduced-motion: no-preference) {
+  @layer components {
+    /* A teammate's card arrives. */
+    .fx-card-in {
+      animation: fx-card-in 0.5s var(--ease-settle) backwards;
+    }
+    /* A ring in the card's colour closes onto it: where a card arrived, or was voted on. */
+    .fx-ring::after {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: inherit;
+      pointer-events: none;
+      animation: fx-ring 0.9s ease-out both;
+    }
+    /* A dot, a tick, an avatar that springs into place. */
+    .fx-pop {
+      animation: fx-pop 0.45s var(--ease-spring) backwards;
+    }
+    /* A count that changed. */
+    .fx-bump {
+      animation: fx-bump 0.45s var(--ease-spring);
+    }
+    /* A button that answers a press. */
+    .fx-press {
+      animation: fx-press 0.4s ease-out;
+    }
+    /* A refused gesture: no votes left. */
+    .fx-nope {
+      animation: fx-nope 0.4s ease-in-out;
+    }
+    /* A phase title coming in. */
+    .fx-title-in {
+      animation: fx-title-in 0.45s var(--ease-settle) backwards;
+    }
+    /* A new person's row: it slides in and lights up in their colour. */
+    .fx-person-in {
+      animation: fx-person-in 0.5s var(--ease-settle) backwards;
+    }
+    .fx-person-in::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      border-radius: inherit;
+      pointer-events: none;
+      background: var(--av-bg, var(--color-indigo-100));
+      animation: fx-wash 1.6s ease-out both;
+    }
+    /* The presence dot of someone who just arrived. */
+    .fx-halo {
+      animation: fx-halo 0.9s ease-out 0.3s 2;
+    }
+    /* The pencil of the "who is writing" line, while someone writes. */
+    .fx-write {
+      animation: fx-write 0.7s ease-in-out infinite;
+    }
+    /* Hidden cards being shown: `--fx-delay` staggers them. */
+    .fx-reveal {
+      animation: fx-reveal 0.5s ease-out backwards;
+      animation-delay: var(--fx-delay, 0ms);
+    }
+    /* A dialog opening. Nothing animates on the way out: focus goes back at once. */
+    .fx-dialog-in {
+      animation: fx-dialog-in 0.28s var(--ease-settle) backwards;
+    }
+    .fx-veil-in {
+      animation: fx-veil-in 0.2s ease-out backwards;
+    }
+    /* An avatar that was just chosen. */
+    .fx-swap {
+      animation: fx-swap 0.5s var(--ease-spring) backwards;
+    }
+  }
+
+  @keyframes fx-card-in {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.97);
+    }
+  }
+  @keyframes fx-ring {
+    0% {
+      box-shadow: 0 0 0 7px color-mix(in srgb, var(--fx-ring, var(--color-indigo-600)) 42%, transparent);
+    }
+    100% {
+      box-shadow: 0 0 0 0 transparent;
+    }
+  }
+  @keyframes fx-pop {
+    0% {
+      transform: scale(0);
+    }
+  }
+  @keyframes fx-bump {
+    0% {
+      transform: scale(1.18);
+    }
+  }
+  @keyframes fx-press {
+    0% {
+      transform: scale(0.94);
+    }
+    55% {
+      transform: scale(1.03);
+    }
+  }
+  @keyframes fx-nope {
+    25% {
+      transform: translateX(-4px);
+    }
+    75% {
+      transform: translateX(4px);
+    }
+  }
+  @keyframes fx-title-in {
+    from {
+      opacity: 0;
+      transform: translateY(60%);
+    }
+  }
+  @keyframes fx-person-in {
+    from {
+      opacity: 0;
+      transform: translateX(18px);
+    }
+  }
+  @keyframes fx-wash {
+    0% {
+      opacity: 0;
+    }
+    20%,
+    60% {
+      opacity: 0.7;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes fx-halo {
+    0% {
+      box-shadow: 0 0 0 0 rgb(5 150 105 / 0.55);
+    }
+    100% {
+      box-shadow: 0 0 0 12px rgb(5 150 105 / 0);
+    }
+  }
+  @keyframes fx-write {
+    50% {
+      transform: translateX(3px) rotate(-10deg);
+    }
+  }
+  @keyframes fx-reveal {
+    from {
+      filter: blur(5px);
+      opacity: 0.55;
+    }
+  }
+  @keyframes fx-dialog-in {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.97);
+    }
+  }
+  @keyframes fx-veil-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes fx-swap {
+    0% {
+      opacity: 0;
+      transform: scale(0.3) rotate(-25deg);
+    }
+  }
 }
