@@ -59,17 +59,40 @@ test('styles survive style-src, so the app is not unstyled text', async ({ page 
   expect(hasStyles, 'no CSS rules applied — style-src is blocking the stylesheet').toBe(true);
 });
 
-test('the icon font loads, so the UI is not full of ligature text', async ({ page }) => {
+test('the icon font and the text font load, so the UI is neither ligature text nor a fallback font', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#root')).not.toBeEmpty();
 
-  // Material Symbols ships from public/fonts. If font-src blocked it, every
-  // icon renders as its raw ligature name and the app stays "working".
-  const fontLoaded = await page.evaluate(async () => {
+  // Both ship from public/fonts. If font-src blocked the icon font, every icon
+  // would render as its raw ligature name; if it blocked Geist, the text would
+  // quietly fall back to the system font. Either way the app stays "working",
+  // so each family is asked for by name: "some font loaded" was true with one.
+  const loaded = await page.evaluate(async () => {
     await document.fonts.ready;
-    return Array.from(document.fonts).some((font) => font.status === 'loaded');
+    return Array.from(document.fonts)
+      .filter((font) => font.status === 'loaded')
+      .map((font) => font.family.replace(/["']/g, ''));
   });
-  expect(fontLoaded, 'no font loaded — font-src is blocking the icon font').toBe(true);
+  expect(loaded, 'font-src is blocking the icon font').toContain('Material Symbols Rounded');
+  expect(loaded, 'font-src is blocking the text font').toContain('Geist');
+});
+
+test('nothing the app loads leaves this deployment', async ({ page }) => {
+  // The offline rule, observed: on the networks this runs on there is nothing
+  // to reach, and a font or script asked of another host would simply be
+  // missing. The CSP refuses most of them; a request is caught here whether
+  // the policy would have let it through or not.
+  const requested: string[] = [];
+  page.on('request', (request) => requested.push(request.url()));
+
+  await page.goto('/');
+  await expect(page.locator('#root')).not.toBeEmpty();
+  await page.evaluate(() => document.fonts.ready);
+
+  const origin = new URL(page.url()).origin;
+  const elsewhere = requested.filter((url) => !url.startsWith(`${origin}/`) && !url.startsWith('data:') && !url.startsWith('blob:'));
+  expect(requested.some((url) => url.endsWith('.woff2')), 'no font was requested at all').toBe(true);
+  expect(elsewhere).toEqual([]);
 });
 
 test('Socket.IO connects, so connect-src does not break real-time sync', async ({ page }) => {
