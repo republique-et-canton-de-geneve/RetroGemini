@@ -159,7 +159,7 @@ the UI:
 | `img-src 'self' data:` | Both invite QR codes vanish (`QRCode.toDataURL` produces `data:` URIs), feedback image thumbnails vanish (they are stored and shown as `data:` URIs), and no image too large to send as it is can be attached any more (`utils/feedbackImages.ts` decodes it through a `data:` URL to reduce it, because `blob:` is refused) |
 | `style-src 'self' 'unsafe-inline'` | Tailwind's runtime injection is blocked; the app renders as unstyled HTML |
 | `connect-src 'self'` | Socket.IO cannot connect — the app loads and never syncs |
-| `font-src 'self'` | Material Symbols is blocked; every icon shows its raw ligature name |
+| `font-src 'self'` | Material Symbols is blocked; every icon shows its raw ligature name (and the text falls back from Geist to the system font) |
 
 **Two test layers, and neither replaces the other.**
 `__tests__/securityHeaders.test.ts` pins the header values and that they reach
@@ -242,6 +242,53 @@ each rule on a synthetic `dist/`; `e2e-prod/static-delivery.spec.ts` drives the
 real build in a browser (`npm run test:e2e:prod`). Leave router compression
 off: an answer that already carries `Content-Encoding` is not compressed again
 by HAProxy or ingress-nginx, and the application's is the one that is tested.
+
+## The look: one set of theme tokens (45.0)
+
+The interface's look lives in the `@theme` block of `index.css`, not in the
+components. A component keeps its Tailwind classes (`bg-slate-50`,
+`text-indigo-600`, `rounded-xl`, `shadow-xs`) and the block gives those names
+their values, so every screen changes at once and none can be left behind in
+another look. Six rules:
+
+- **`slate` is the neutral scale and `indigo` the brand**, both redefined step
+  by step (slate-900 `#171a2b` is the ink, slate-50 the page, indigo-600
+  `#4f3ff0` the brand). The other hues keep Tailwind's values. The radii
+  (`rounded-sm` 6px to `rounded-3xl` 22px), the shadows (drawn with the ink
+  colour) and the fonts (`font-sans` Geist, `font-mono` Geist Mono) are tokens
+  too.
+- **A colour of the look is written once.** Outside `@theme`, `index.css` and
+  the components name tokens (a class, `var(--color-indigo-600)`), never a hex
+  of the palette: a hex is a second source that the next retune misses
+  (`__tests__/lookTokens.test.ts` → *one source for a colour*). Colours that
+  are data stay data: a column's colour, `ColorPicker`'s list.
+- **Each token has a job, stated as a measured pair** in
+  `__tests__/lookTokens.test.ts`, with axe-core's engine. Muted text is
+  slate-500 on white, the page, the panels and the brand tints; slate-600 and
+  darker read on every light surface; white reads on indigo-500 to 800.
+  **slate-400 is an edge, never a text colour**: it draws a control's outline
+  at 3:1 on white and on the page, and fails as text on the dark screens, whose
+  muted text is slate-200 and -300 (no single value does both jobs). Retune a
+  value in that test first, then in the block.
+- **The contrast helper measures what is painted.**
+  `__tests__/helpers/tailwindTheme.ts` reads Tailwind's `theme.css` and then
+  every `@theme` block of `index.css` (the later value wins, `initial` removes
+  one), knows every token by name, blends a translucent background over the one
+  behind it, and **throws** on a colour it cannot name (an arbitrary value such
+  as `text-[#555]`, a gradient, `opacity-*`, `grayscale`) rather than measure
+  white. So a measured element takes its colours from token classes, or from an
+  inline `style` that its test reads and measures with `contrastRatio`.
+- **Fonts are served from this deployment and fall back quietly.** Geist is
+  declared with `font-display: swap` and a system stack behind it, so a blocked
+  font file costs the look and nothing else; the icon font is `block` (a raw
+  ligature name must never flash) with the previous cut as its second source.
+  `e2e-prod/production-csp.spec.ts` loads the built app under the policy and
+  checks that the text font and the icon font are loaded and that no request
+  left the origin.
+- **A token that the look needs and Tailwind lacks is added to `@theme`**
+  (`--color-person-*`, `--ease-settle`), never written as an arbitrary value in
+  a class: an arbitrary colour is invisible to the helper and to the next
+  retune.
 
 ## Accessibility (audit H42)
 
@@ -1302,13 +1349,18 @@ that test in hand.
 ### Current Self-Hosted Assets
 | Asset | Location | Purpose |
 |-------|----------|---------|
-| Material Symbols font | `public/fonts/material-symbols-outlined.woff2` | Icon font for all UI icons |
+| Material Symbols Rounded | `public/fonts/material-symbols-rounded.woff2` | Icon font for all UI icons (static cut, weight 400, Apache 2.0) |
+| Material Symbols Outlined | `public/fonts/material-symbols-outlined.woff2` | The icon font of 44.x, kept as the second `src` of the same `@font-face`: font files are not hashed, so during a rolling update a 45.x page can ask a 44.x pod for the Rounded file and get the SPA page instead. Remove it one release after 45.0 |
+| Geist | `public/fonts/geist-latin.woff2`, `geist-latin-ext.woff2` | The interface typeface (variable, weights 100 to 900; SIL OFL 1.1) |
+| Geist Mono | `public/fonts/geist-mono-latin.woff2`, `geist-mono-latin-ext.woff2` | Digits that change: the timer, counts (variable; SIL OFL 1.1) |
+| Typeface licence | `public/fonts/OFL-Geist.txt` | The licence asks that its text travels with the fonts; `__tests__/lookTokens.test.ts` checks it is there |
 | Timer alert sound | `public/assets/timer-alert.mp3` | Audio notification when a retrospective or health check timer ends |
 | Background texture | `public/assets/cubes.png` | Decorative pattern on login page |
 
 ### When Adding New Features
 1. **Check for external resource dependencies** — if a new library or feature loads something from the internet, find an offline alternative
-2. **If you need a new icon** that isn't rendering, the Material Symbols woff2 file may need to be updated — re-download from Google Fonts and replace `public/fonts/material-symbols-outlined.woff2`.
+2. **If you need a new icon** that isn't rendering, the Material Symbols woff2 file may need to be updated — re-download the Rounded static cut (weight 400) from Google Fonts and replace `public/fonts/material-symbols-rounded.woff2`. The class stays `material-symbols-outlined` and the ligature names are the same in every cut: 45.0 changed the drawing, not the markup, so every test that finds an icon by its text kept working.
+   **Every name the application can draw is measured.** The icons written in the components, the picker's list (`components/iconPickerIcons.ts`) and the built-in template icons are each drawn as one 24px glyph in the built app by `e2e-prod/icon-ligatures.spec.ts` (a missing ligature is the raw word, several characters wide: `groups_off` measured 120px), which also checks that the previous cut still draws them when the Rounded file is unreachable. A stored name no cut draws is read as one that draws through `columnIconName` (today only `clarity` → `light_mode`): call it wherever a column's stored icon reaches the screen.
    ⚠️ **That file is a *static* cut with no `FILL` axis**, so it cannot draw a
    filled variant of anything: `star`, `star_border`, `star_outline` and `grade`
    all resolve to the same outlined glyph in it, which is why
@@ -2176,6 +2228,7 @@ that take a team credential (`/api/send-invite`, `/api/wifi-config`,
 | `/api/team/:teamId/action` | POST | Persist a global action update. **Additive, not a replace** (`utils/actionImpact.js` → `mergeActionImpactState`): it folds the incoming action onto the stored one so `impactRatings`, `closedAt` and `impactDeferredBy` survive a caller that never read them. Without that, a facilitator renaming an action from a client loaded before anyone voted wipes the whole rating round. It also stamps `closedAt` when *it* is what closes the action, which is what keeps the field correct through a rolling update where an older pod closes an action without stamping — but it never invents one for an action already stored as closed without a stamp, because those are the pre-feature closures and dating them would drag the entire historical backlog into the next rating round. Its `jira` comes from the record only (`withRecordedJiraLink`: the stored copy's value, else another copy's, else none), so a caller can neither drop a link nor plant one |
 | `/api/team/:teamId/action/impact` | POST | Record one participant's impact vote on one closed action (`{ actionId, userId, vote }`; `vote: 1 \| 2 \| 3 \| 'abstain' \| null`, `null` clears the caller's own vote). **Deliberately narrow, for the same reason `/retrospective/:retroId/name` is**: `impactRatings` is the first per-user data on the team record and it has one writer per participant, so sending a whole action would make two people voting in the same second race, with the loser's vote vanishing silently. This writes exactly `impactRatings[userId]` inside `atomicTeamUpdate`, so concurrent voters never contend for the same key. Carries no revision, touches no other field, and takes no retro/health-check hint — it scans all three homes, because a hint would be a second way to locate an action that could disagree with the scan. Answers `404 action_not_found` (after the write, never from a preliminary read) and `400 invalid_vote` for anything off the scale, refused rather than coerced. **`{ actionId, reset: true }` drops the whole map for one action** — what a *later* retrospective does when it puts a postponed action back to the team, because "Rate later" promises the question is asked again and a vote left in place is pre-filled next time, so the early answerer is never re-asked. It lives on this route rather than a new one because `impactRatings` is owned here and nowhere else (the whole-action route deliberately cannot touch it), and a clear written elsewhere would be a second owner. The reset is performed at **re-presentation**, never at the deferral: that is what keeps the "Rate later" toggle lossless, so a mis-click stays undoable and the votes only go when the round that would have shown them really reopens. `reset` must be a literal `true`; anything else falls through to the ordinary vote path and its validation |
 | `/api/team/:teamId/members` | POST | Update the member roster. Member emails are **cleaned, never refused** by the shared email rule (`cleanRosterEmails`, the function the heal pass uses): a value that does not parse is stored as sent, and so is one whose cleaned form another member already holds — a roster write carries joins, and member emails are identities on the client. Answers `{ success: true }`: it used to return the whole team, which no client read, so every join paid for a second copy of the history |
+| `/api/team/:teamId/member/avatar` | POST | Set or clear one member's avatar `{ memberId, avatar: <id> \| null, sessionId? }` (`server/routes/teamAvatarRoutes.js`). Credential first (`401`); `400 invalid_member` unless `memberId` is a plausible member id (`isValidRaterId`); `400 invalid_avatar` unless `avatar` is `null` or an id of `utils/avatars.js`'s list: refused, never coerced, because an id this pod does not know may be one a later release offers. Under the row lock it writes `memberAvatars[memberId] = { id, at }`, with `at` the server's clock in ms and never before the entry it replaces, and a clear stored as `{ id: null, at }` (so a clear too is newer than every copy of the choice it replaces). It rebuilds the map from its valid entries, so junk heals, and caps it at 500 entries (ids on neither roster list go first, then the oldest; never the one just written). An unchanged choice writes nothing. Answers `{ success: true, memberAvatars }` after the write. With a `sessionId`, after the answer and best-effort, it stamps that live session's participant entry with `avatar` and `avatarAt` through `liveSessionPatch`: only the team's own session, only a participant it already holds, only when the stored stamp is older. `/update` ignores `memberAvatars`. The client calls it through `dataService.setMemberAvatar`, which retries an older pod's HTML 404 across a rollout and never posts the roster |
 | `/api/team/:teamId/invite-credential` | POST | Derive the team's current invite credential for embedding in invite links (revoked by password rotation) |
 | `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links). **Revokes every session token of the team** (decision D3b): the same transaction gives the team a new session epoch, and the answer is `{ success, sessionToken }`, a token under the new epoch for the caller, so the facilitator who changed it keeps working (a 41.0 client ignores it and keeps authenticating by the new password it holds). After the answer, best-effort, the team's live sockets are cut on this pod and the others (`sessionRevocation.js`). Recorded as `team.password-change` with `detail.sessionsRevoked: true` |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned; its Jira token, `team-secret:{teamId}`, is deleted before the record). The Dashboard waits for the answer: a failure keeps the team signed in and says so, and `team_not_found` (already deleted — a lost answer, another tab, the super admin) counts as done |
@@ -2369,6 +2422,20 @@ subtaskTypeId? }` or `{ uncertainSince }`), is sent to clients but written by
 `/jira/issues` alone. Neither is on a retro entry nor a `session:{id}` row: a
 persist replaces the whole entry with a participant's blob, and a session row is
 participant-writable.
+
+`memberAvatars` maps each member id to that member's avatar choice,
+`{ id: <avatar id> | null, at: <server ms> }`, written by `/member/avatar`
+alone and ignored by `/update`. It is a top-level key, not a field of the
+member row, because `/members` replaces the rows wholesale with whatever roster
+a client cached: a stale tab would lose a value kept there. It is sent to
+clients as stored and read through `memberAvatar` / `memberAvatarId`
+(`utils/avatars.js`), as data: any holder of a team credential can post
+anything. A merge re-keys it through the member-id map (`mergedMemberAvatars`:
+for a member the merge unifies, the primary's entry wins, a clear included, and
+the secondary's is used when the primary has none); a single-team restore keeps
+the current map (`KEPT_FROM_CURRENT`); a whole-store restore puts the archive's
+map back with the record. A session's participant copies carry `avatar` and
+`avatarAt`, and the newer `at` wins everywhere (see *Avatars*).
 
 `teamFeedbacks` is stored on the record and stripped from every team-side
 answer (`sanitizeTeamForClient`): the Feedback Hub reads `/api/feedbacks/*`,
