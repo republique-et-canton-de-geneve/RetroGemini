@@ -67,7 +67,9 @@ export default defineConfig({
     // `e2e-prod` holds the CSP gate (audit H36): Playwright specs served from a
     // built `server.js`, so vitest must not try to load them — it picks up
     // `*.spec.ts` and fails on the `@playwright/test` import.
-    exclude: ['node_modules', 'dist', 'build', 'e2e', 'e2e-prod'],
+    // `.claude/worktrees` holds an agent's isolated checkout, a second copy of
+    // every test of this repository.
+    exclude: ['node_modules', 'dist', 'build', 'e2e', 'e2e-prod', '.claude/worktrees/**'],
   },
   resolve: {
     alias: {

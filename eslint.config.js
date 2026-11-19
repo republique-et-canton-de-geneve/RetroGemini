@@ -15,6 +15,9 @@ export default [
       'coverage/**',
       '*.config.js',
       'vite.config.ts',
+      // A Claude Code agent's isolated checkout is a second copy of this whole
+      // repository inside it: linted, it doubles every warning of the budget.
+      '.claude/worktrees/**',
     ],
   },
   {
