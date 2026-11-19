@@ -1147,7 +1147,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{t('healthCheck.discuss.title')}</h2>
             {isFacilitator && (
-              <label className="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-slate-700 border-l border-slate-200 pl-4">
+              // No rule before it: the bar wraps on a phone, and the rule then
+              // opened the label's own line. The gaps space it (as the board's bar).
+              <label className="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-slate-700">
                 <input
                   type="checkbox"
                   className="w-4 h-4 accent-indigo-600"

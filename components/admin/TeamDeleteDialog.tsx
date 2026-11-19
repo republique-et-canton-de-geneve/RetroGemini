@@ -153,8 +153,8 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
     <ModalDialog
       labelledBy={titleId}
       onClose={busy ? undefined : onClose}
-      overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center p-4"
-      panelClassName="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto"
+      overlayClassName="fixed inset-0 bg-slate-900/45 z-100 flex items-center justify-center p-4"
+      panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 max-w-md w-full max-h-[90vh] overflow-y-auto"
     >
       <div className="text-center mb-4">
         <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-3">
@@ -189,7 +189,7 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
           value={confirmText}
           onChange={(e) => { setConfirmText(e.target.value); setConfirmation(null); }}
           autoComplete="off"
-          className="w-full border border-red-300 rounded-lg p-2 bg-white text-slate-900 outline-hidden focus:border-red-500 focus:ring-1 focus:ring-red-500"
+          className="w-full border border-red-500 rounded-lg p-2 bg-white text-slate-900 outline-hidden focus:border-red-500 focus:ring-1 focus:ring-red-500"
         />
       </div>
 

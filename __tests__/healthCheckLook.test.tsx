@@ -261,6 +261,19 @@ describe('Discuss', () => {
   const discuss = (overrides: Partial<HealthCheckSessionType> = {}, user: User = facilitator) =>
     renderSession(createSession({ phase: 'DISCUSS', ...overrides }), user);
 
+  // The same bar as the retrospective's Discuss: no rule before "Show votes",
+  // which opened the label's own line once the bar wrapped on a phone.
+  it('spaces its bar with gaps, never a rule before "Show votes", and lets it wrap', () => {
+    discuss();
+    const label = screen.getByLabelText('Show votes').closest('label') as HTMLElement;
+    expect(label.className).not.toMatch(/(^|\s)border-l(-|\s|$)/);
+    expect(label.className).not.toMatch(/(^|\s)pl-/);
+    for (const box of [label.parentElement!, label.parentElement!.parentElement!]) {
+      expect(box).toHaveClass('flex-wrap');
+      expect(box.className).toMatch(/(^|\s)gap-x-/);
+    }
+  });
+
   it('reads the score of every range on its tile', () => {
     discuss();
     for (const name of ['Fun', 'Speed', 'Process']) {

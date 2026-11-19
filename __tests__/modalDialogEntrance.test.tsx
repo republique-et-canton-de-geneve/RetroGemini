@@ -1,10 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import React, { useState } from 'react';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import ModalDialog from '../components/common/ModalDialog';
 import ImageGallery from '../components/common/ImageGallery';
+import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 /**
  * The entrance every dialog of the product takes (45.0): the veil fades in,
@@ -32,6 +33,25 @@ const Stack: React.FC = () => {
 };
 
 describe('ModalDialog — the entrance', () => {
+  // A reader who did not ask for less motion; the case below states the other one.
+  beforeEach(() => prefersMotion('no-preference'));
+  afterEach(() => restoreMotionPreference());
+
+  it.each([
+    ['who asked for less motion', () => prefersMotion('reduce')],
+    ['whose browser cannot say (no matchMedia)', () => restoreMotionPreference()],
+  ])('gives a reader %s no entrance class at all, and the same dialog', (_, prefer) => {
+    prefer();
+    render(
+      <ModalDialog label="Test" overlayClassName="fixed inset-0 a" panelClassName="b">
+        <button type="button">Ok</button>
+      </ModalDialog>
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toBe('b');
+    expect(veilOf(dialog).className).toBe('fixed inset-0 a');
+  });
+
   it('fades the veil and raises the panel when it opens', () => {
     render(
       <ModalDialog label="Test" overlayClassName="fixed inset-0 a" panelClassName="b">

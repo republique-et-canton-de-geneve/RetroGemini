@@ -530,3 +530,22 @@ describe('JiraTeamSettings', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
   });
 });
+
+// The card sits in the Dashboard's Settings tab, under the team name, the
+// impact round and the password: it titles itself, and draws its fields and
+// buttons, with the same recipes (components/dashboard/dashboardLook.ts).
+describe('JiraTeamSettings - the look of its neighbours', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('titles itself as the other settings do, and draws the recipes\' field and primary button', async () => {
+    const { SETTING_TITLE, SETTING_ICON, FIELD, PRIMARY_BUTTON } = await import('../components/dashboard/dashboardLook');
+    setup(NO_TOKEN);
+    const heading = await screen.findByRole('heading', { name: 'Jira', level: 3 });
+    expect(heading).toHaveClass(...SETTING_TITLE.split(' '));
+    expect(heading.querySelector('.material-symbols-outlined')).toHaveClass(...SETTING_ICON.split(' '));
+    expect(screen.getByLabelText(/token/i, { selector: 'input' })).toHaveClass(...FIELD.split(' '));
+    expect(screen.getByRole('button', { name: /save/i })).toHaveClass(...PRIMARY_BUTTON.split(' '));
+  });
+});

@@ -180,3 +180,36 @@ describe('ReviewPhase assignee dropdown during timer', () => {
     );
   });
 });
+
+// On a 390px phone the row used to keep the assignee and the trash beside the
+// text, which their fixed widths squeezed to one word per line. Below sm the
+// row wraps: the text block takes the whole line, the assignee goes under it.
+// jsdom lays nothing out, so this holds the classes that make it wrap; the
+// pictures of the port and e2e/jira.spec.ts (which finds the row by div.group)
+// hold the rest.
+describe('ReviewPhase - an action row on a phone', () => {
+  it('wraps below sm, the text block on a line of its own, and stays one line from sm', () => {
+    render(
+      <ReviewPhase
+        session={createSession()}
+        team={team}
+        currentUser={facilitator}
+        isFacilitator
+        historyActionIds={[]}
+        setPhase={vi.fn()}
+        updateSession={vi.fn()}
+        applyActionUpdate={vi.fn()}
+        buildActionContext={vi.fn(() => '')}
+        assignableMembers={team.members}
+        setRefreshTick={vi.fn()}
+      />
+    );
+    const select = screen.getByRole('combobox', { name: /Fix the build/ });
+    const row = select.closest('div.group') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row).toHaveClass('flex', 'flex-wrap', 'sm:flex-nowrap');
+    const textBlock = screen.getByDisplayValue('Fix the build').closest('div.group > div') as HTMLElement;
+    expect(textBlock).toHaveClass('basis-full', 'sm:basis-auto', 'min-w-0');
+    expect(select.parentElement).toBe(row);
+  });
+});

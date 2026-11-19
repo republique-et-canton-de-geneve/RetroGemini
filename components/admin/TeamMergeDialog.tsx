@@ -46,7 +46,7 @@ interface Props {
   onMerged: (name: string) => void;
 }
 
-const inputClass = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white text-slate-900';
+const inputClass = 'w-full border border-slate-400 rounded-lg px-3 py-2 text-sm bg-white text-slate-900';
 const sectionTitleClass = 'text-sm font-bold text-slate-700 mb-2';
 
 // Codes the server reports, mapped rather than spliced into a key: a code from
@@ -258,8 +258,8 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
       labelledBy={ids.title}
       onClose={busy ? undefined : onClose}
       closeOnBackdropClick={false}
-      overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center p-4"
-      panelClassName="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6"
+      overlayClassName="fixed inset-0 bg-slate-900/45 z-100 flex items-center justify-center p-4"
+      panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6"
     >
       <h2 id={ids.title} className="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
         <span className="material-symbols-outlined text-indigo-600" aria-hidden="true">merge</span>

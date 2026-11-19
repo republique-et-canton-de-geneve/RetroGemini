@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { arrivedPeople } from '../../utils/sessionMotion';
+import { motionAllowed } from '../common/motion/effects';
 
 /**
  * The participants panel's motion: who just arrived, who just finished, and
@@ -22,8 +23,9 @@ import { arrivedPeople } from '../../utils/sessionMotion';
  *   reconnect wave, a restore);
  * - while the panel is collapsed, on the render that expands it, and when the
  *   scope (the phase) changes, which can turn every row's check on at once;
- * - for a reader who asked for less motion (the CSS keeps them still anyway;
- *   this also keeps the classes off the page).
+ * - for a reader who asked for less motion, or whose browser cannot say (no
+ *   `matchMedia`): the classes stay off the page, by the rule every effect
+ *   follows (`motionAllowed`).
  */
 
 /** How long after the mount, or after the viewer's own reconnection, nothing plays. */
@@ -60,14 +62,6 @@ export interface PanelMotion {
 }
 
 const EMPTY: ReadonlySet<string> = new Set();
-
-const prefersReducedMotion = (): boolean => {
-  // jsdom and older browsers have no matchMedia: the classes go on, and the
-  // stylesheet, whose effects sit under `prefers-reduced-motion: no-preference`,
-  // still decides whether anything moves.
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-};
 
 const sortedKey = (ids: readonly string[]) => [...ids].sort().join('\u0000');
 
@@ -130,7 +124,7 @@ export function usePanelMotion(input: PanelMotionInput): PanelMotion {
       !before.isCollapsed &&
       before.scope === scope &&
       now >= quietUntil.current &&
-      !prefersReducedMotion();
+      motionAllowed();
     if (!calm) return;
 
     const arrived = arrivedPeople(before.present, present);

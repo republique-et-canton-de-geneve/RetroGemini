@@ -126,7 +126,7 @@ const RotiFollowUpActions: React.FC<Props> = ({
           type="text"
           // The placeholder is slate-400, which reads on this field's
           // slate-900 (not on the card's slate-800 around it).
-          className="grow min-w-0 border border-slate-600 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/25 bg-slate-900 text-white placeholder:text-slate-400"
+          className="grow min-w-0 border border-slate-500 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/25 bg-slate-900 text-white placeholder:text-slate-400"
           placeholder={t('phases.rotiFollowUp.placeholder')}
           value={proposalText}
           onChange={(event) => onProposalTextChange(event.target.value)}

@@ -52,14 +52,6 @@ const recordEffects = async (context: BrowserContext) => {
   });
 };
 
-/**
- * The effects of the board, its bar and its panel, played by what happens in
- * a session. Dialogs and the "who is writing" pencil carry their classes as
- * they are drawn, inert under reduced motion (index.css declares every effect
- * under `no-preference`), so they are not in this list.
- */
-const BOARD_EFFECTS = new Set(['fx-card-in', 'fx-ring', 'fx-pop', 'fx-bump', 'fx-press', 'fx-nope', 'fx-title-in', 'fx-person-in', 'fx-halo', 'fx-reveal', 'fx-layer', 'fx-token']);
-
 const effectsSince = (page: Page, since: number) =>
   page.evaluate((t) => (window as unknown as { __fx: Effect[] }).__fx.filter((e) => e.at >= t), since);
 const now = (page: Page) => page.evaluate(() => performance.now());
@@ -308,10 +300,13 @@ test.describe('the board’s motion', () => {
         }
         await expect(facilitator.getByText('0 votes remaining')).toBeVisible();
         await facilitator.waitForTimeout(800);
-        const board = async (page: Page) => (await effectsSince(page, 0)).filter((e) => BOARD_EFFECTS.has(e.cls));
-        expect(await board(facilitator)).toEqual([]);
-        expect(await board(participant)).toEqual([]);
+        // One rule for every effect, the dialogs', the panel's and the pencil's
+        // included: a reader who asked for less motion is never given an fx-*
+        // class (motionAllowed), rather than given one the stylesheet keeps still.
+        expect(await effectsSince(facilitator, 0)).toEqual([]);
+        expect(await effectsSince(participant, 0)).toEqual([]);
         const still = await leftovers(facilitator);
+        expect(still.classes).toEqual([]);
         expect(still.layers).toBe(0);
         expect(still.running).toEqual([]);
       } finally {

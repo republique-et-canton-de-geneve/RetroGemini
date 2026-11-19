@@ -7,6 +7,7 @@ import { avatarColorClasses, DEPARTED_AVATAR_CLASSES, participantColorClass, par
 import Avatar from '../common/Avatar';
 import { joinNames, splitTypingNames, typingMembers } from '../../utils/typingNow';
 import { usePanelMotion } from './usePanelMotion';
+import { motionAllowed } from '../common/motion/effects';
 
 /**
  * The participants panel of every live session — a retrospective or a health
@@ -366,9 +367,10 @@ const SessionParticipantsPanel: React.FC<Props> = ({
           {typingKind && typingLine && (
             <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-2.5">
               <p className="flex items-start gap-2 text-xs leading-4">
-                {/* The pencil moves while someone writes (fx-write), and only then. */}
+                {/* The pencil moves while someone writes (fx-write), and only then,
+                    and never for a reader who asked for less motion (motionAllowed). */}
                 <span
-                  className={`material-symbols-outlined shrink-0 text-base! leading-none ${typists.length > 0 ? 'text-indigo-700 fx-write' : 'text-slate-500'}`}
+                  className={`material-symbols-outlined shrink-0 text-base! leading-none ${typists.length > 0 ? `text-indigo-700${motionAllowed() ? ' fx-write' : ''}` : 'text-slate-500'}`}
                   aria-hidden="true"
                 >
                   {activityIcon(typingKind)}
@@ -414,11 +416,13 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                     <span className={`block rounded-full ${arriving ? 'fx-pop' : ''}`}>
                       <Avatar colorClasses={hasLeft ? DEPARTED_AVATAR_CLASSES : avatarColorClasses(member.color)} initials={initials} size={36} avatarId={hasLeft ? null : avatarId} />
                     </span>
-                    {/* Ringed in the row's own surface, so it reads as a dot on the avatar's edge. */}
+                    {/* Ringed in the row's own surface, so it reads as a dot on the avatar's edge.
+                        A picture has no disc and reaches its box's edge, so the dot
+                        sits further out there, on the corner, rather than over the art. */}
                     {isOnline && !hasLeft && (
                       <div
                         data-presence-dot
-                        className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-600 border-2 ${isCurrentUser ? 'border-indigo-100' : 'border-white'} ${arriving ? 'fx-halo' : ''}`}
+                        className={`absolute ${avatarId ? '-bottom-1 -right-1.5' : '-bottom-0.5 -right-0.5'} w-3 h-3 rounded-full bg-emerald-600 border-2 ${isCurrentUser ? 'border-indigo-100' : 'border-white'} ${arriving ? 'fx-halo' : ''}`}
                         title={t('phases.participants.online')}
                       >
                         <span className="sr-only">{t('phases.participants.online')}</span>

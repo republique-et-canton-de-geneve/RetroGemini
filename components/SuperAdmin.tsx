@@ -1400,7 +1400,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 value={infoMessage}
                 onChange={(e) => setInfoMessage(e.target.value)}
                 placeholder={t('admin.info.placeholder')}
-                className="w-full border border-slate-300 rounded-lg p-3 text-sm resize-none h-24 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-hidden"
+                className="w-full border border-slate-400 rounded-lg p-3 text-sm resize-none h-24 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-hidden"
               />
               {infoMessage && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -1455,7 +1455,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   autoCapitalize="none"
                   spellCheck={false}
                   placeholder={t('admin.notifications.emailPlaceholder')}
-                  className="w-full md:w-96 border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-hidden"
+                  className="w-full md:w-96 border border-slate-400 rounded-lg px-4 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-hidden"
                 />
                 <p className="text-xs text-slate-500">
                   {t('admin.notifications.emailHint')}
@@ -1497,7 +1497,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       notifyNewTeamSaving || !adminEmail
                         ? 'cursor-not-allowed opacity-50'
                         : 'cursor-pointer'
-                    } ${notifyNewTeam ? 'bg-green-600' : 'bg-slate-300'}`}
+                    } ${notifyNewTeam ? 'bg-green-600' : 'bg-slate-400'}`}
                     title={!adminEmail ? t('admin.notifications.newTeamNeedsEmail') : notifyNewTeam ? t('admin.notifications.newTeamDisable') : t('admin.notifications.newTeamEnable')}
                   >
                     <span
@@ -1539,7 +1539,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     } catch { /* ignore */ }
                   }
                 }}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiEnabled ? 'bg-violet-600' : 'bg-slate-300'}`}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiEnabled ? 'bg-violet-600' : 'bg-slate-400'}`}
                 title={aiEnabled ? t('admin.ai.disable') : t('admin.ai.enable')}
               >
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
@@ -1556,7 +1556,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     value={aiApiUrl}
                     onChange={(e) => setAiApiUrl(e.target.value)}
                     placeholder={t('admin.ai.apiUrlPlaceholder')}
-                    className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
+                    className="w-full border border-slate-400 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
                   />
                   <p className="text-xs text-slate-500">
                     {t('admin.ai.apiUrlHint')}
@@ -1571,7 +1571,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     value={aiApiKey}
                     onChange={(e) => setAiApiKey(e.target.value)}
                     placeholder={t('admin.ai.apiKeyPlaceholder')}
-                    className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
+                    className="w-full border border-slate-400 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
                   />
                   <p className="text-xs text-slate-500">
                     {t('admin.ai.apiKeyHint')}
@@ -1586,7 +1586,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     value={aiModel}
                     onChange={(e) => setAiModel(e.target.value)}
                     placeholder={t('admin.ai.modelPlaceholder')}
-                    className="w-full border border-slate-300 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
+                    className="w-full border border-slate-400 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
                   />
                   <p className="text-xs text-slate-500">
                     {t('admin.ai.modelHint')}
@@ -1605,7 +1605,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   </div>
                   <button
                     onClick={() => setAiAllowSelfSignedCerts(!aiAllowSelfSignedCerts)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiAllowSelfSignedCerts ? 'bg-violet-600' : 'bg-slate-300'}`}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiAllowSelfSignedCerts ? 'bg-violet-600' : 'bg-slate-400'}`}
                     title={aiAllowSelfSignedCerts ? t('admin.ai.selfSignedDisable') : t('admin.ai.selfSignedEnable')}
                   >
                     <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiAllowSelfSignedCerts ? 'translate-x-6' : 'translate-x-1'}`} />
@@ -1865,7 +1865,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               type="text"
                               value={editName}
                               onChange={(e) => setEditName(e.target.value)}
-                              className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
+                              className="flex-1 border border-slate-400 rounded-sm px-2 py-1 text-sm"
                               placeholder={t('adminTeams.namePlaceholder')}
                               // eslint-disable-next-line jsx-a11y/no-autofocus -- the rename button it replaces is unmounted by this very click
                               autoFocus
@@ -1919,7 +1919,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               onChange={(e) => setEditEmail(e.target.value)}
                               autoCapitalize="none"
                               spellCheck={false}
-                              className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
+                              className="flex-1 border border-slate-400 rounded-sm px-2 py-1 text-sm"
                               placeholder={t('adminTeams.emailPlaceholder')}
                               // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click
                               autoFocus
@@ -1960,7 +1960,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 type="password"
                                 value={editPassword}
                                 onChange={(e) => setEditPassword(e.target.value)}
-                                className="flex-1 border border-slate-300 rounded-sm px-2 py-1 text-sm"
+                                className="flex-1 border border-slate-400 rounded-sm px-2 py-1 text-sm"
                                 placeholder={t('adminTeams.passwordPlaceholder', { min: PASSWORD_MIN_LENGTH })}
                                 // eslint-disable-next-line jsx-a11y/no-autofocus -- the change-password button it replaces is unmounted by this very click
                                 autoFocus
@@ -2180,7 +2180,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                         onChange={(e) =>
                           handleUpdateFeedbackStatus(feedback, e.target.value as TeamFeedback['status'])
                         }
-                        className="px-3 py-1.5 bg-white border border-slate-300 rounded-sm text-sm"
+                        className="px-3 py-1.5 bg-white border border-slate-400 rounded-sm text-sm"
                       >
                         <option value="pending">{t('feedback.status.pending')}</option>
                         <option value="in_progress">{t('feedback.status.inProgress')}</option>
@@ -2366,7 +2366,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     setLogFilter({ ...logFilter, level: e.target.value || undefined });
                     setTimeout(loadServerLogs, 100);
                   }}
-                  className="border border-slate-300 rounded-sm px-2 py-1 text-sm"
+                  className="border border-slate-400 rounded-sm px-2 py-1 text-sm"
                 >
                   <option value="">{t('adminLogs.levelAll')}</option>
                   <option value="error">{t('adminLogs.levelFilter.error')}</option>
@@ -2383,7 +2383,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     setLogFilter({ ...logFilter, source: e.target.value || undefined });
                     setTimeout(loadServerLogs, 100);
                   }}
-                  className="border border-slate-300 rounded-sm px-2 py-1 text-sm"
+                  className="border border-slate-400 rounded-sm px-2 py-1 text-sm"
                 >
                   <option value="">{t('adminLogs.sourceAll')}</option>
                   <option value="postgres">{t('adminLogs.sourceFilter.postgres')}</option>
@@ -2497,7 +2497,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   value={checkpointLabel}
                   onChange={(e) => setCheckpointLabel(e.target.value)}
                   placeholder={t('adminBackups.checkpoint.placeholder')}
-                  className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                  className="flex-1 border border-slate-400 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                   maxLength={100}
                 />
                 <button
@@ -2666,8 +2666,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             // The comment is unsaved text: a stray backdrop click must not throw
             // it away. Escape is the deliberate way out.
             closeOnBackdropClick={false}
-            overlayClassName="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            panelClassName="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6"
+            overlayClassName="fixed inset-0 bg-slate-900/45 flex items-center justify-center z-50 p-4"
+            panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6"
           >
             <>
               <h3 id="admin-comment-title" className="text-xl font-bold text-slate-800 mb-4">{t('adminFeedbacks.addComment')}</h3>
@@ -2676,7 +2676,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </p>
               <textarea
                 placeholder={t('adminFeedbacks.comment.placeholder')}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-slate-400 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 rows={4}
                 id="admin-comment-input"
                 maxLength={1000}

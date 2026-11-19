@@ -6,6 +6,7 @@ import { join } from 'path';
 import ParticipantsPanel from '../components/session/ParticipantsPanel';
 import { ParticipantActivity, RetroSession, Ticket, User } from '../types';
 import { participantToneHex } from '../utils/participantColors';
+import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 const makeUser = (overrides: Partial<User> = {}): User => ({
   id: 'u-' + Math.random().toString(36).slice(2, 7),
@@ -1138,8 +1139,8 @@ describe('ParticipantsPanel - motion', () => {
   const afterTheQuiet = () => act(() => { vi.advanceTimersByTime(3100); });
   const classesOf = (element: Element | null | undefined) => element?.className.split(/\s+/) ?? [];
 
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => { vi.useFakeTimers(); prefersMotion('no-preference'); });
+  afterEach(() => { vi.useRealTimers(); restoreMotionPreference(); });
 
   it('slides a guest in with a wash of their own tone, springs their avatar and pulses their dot', () => {
     const view = render(renderAt(['fac', 'a']));
@@ -1215,6 +1216,17 @@ describe('ParticipantsPanel - motion', () => {
     expect(classesOf(pencil())).toContain('fx-write');
     // The row's cue keeps its three typing dots, still for a reader who asked for less motion.
     expect(rowOf('Alice').querySelectorAll('.typing-dot')).toHaveLength(3);
+  });
+
+  it('gives a reader who asked for less motion no effect class at all, the pencil included', () => {
+    prefersMotion('reduce');
+    const view = render(renderAt(['fac', 'a']));
+    afterTheQuiet();
+    view.rerender(renderAt(['fac', 'a', 'b'], { activityUsers: { a: 'brainstorm' } }));
+    expect(document.querySelector('[class*="fx-"]')).toBeNull();
+    // The words still say it: the pencil keeps its colour, the line its names.
+    const pencil = screen.getByTestId('typing-now').parentElement?.querySelector('.material-symbols-outlined');
+    expect(classesOf(pencil)).toContain('text-indigo-700');
   });
 
   // "Connectés en ce moment (3)" is wider than the head: cut, it lost its count.

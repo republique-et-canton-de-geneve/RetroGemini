@@ -3561,7 +3561,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           disabled={!isLive}
           value={session.settings.isAnonymous ? 'topic' : (session.settings.colorBy || 'topic')}
           onChange={(e) => updateSession(s => s.settings.colorBy = e.target.value as 'author' | 'topic')}
-          className={`text-sm bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-800 font-semibold cursor-pointer hover:border-slate-400 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 disabled:cursor-not-allowed`}
+          className={`text-sm bg-white border border-slate-400 rounded-lg px-2 py-1 text-slate-800 font-semibold cursor-pointer hover:border-slate-400 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 disabled:cursor-not-allowed`}
         >
           <option value="topic">{tr('session.board.colorByTopic')}</option>
           <option value="author" disabled={session.settings.isAnonymous}>{tr('session.board.colorByAuthor')}</option>
@@ -3620,7 +3620,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           </label>
       );
       const stepper = (
-            <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden text-sm focus-within:border-indigo-600 focus-within:ring-2 focus-within:ring-indigo-600">
+            <div className="flex items-center bg-white border border-slate-400 rounded-lg overflow-hidden text-sm focus-within:border-indigo-600 focus-within:ring-2 focus-within:ring-indigo-600">
                 {placement === 'bar' && label}
                 <button
                     onClick={() => stepMaxVotes(-1)}
@@ -4404,7 +4404,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 setFocusColumnId(null);
                                             }
                                         }}
-                                        className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-sm font-semibold text-slate-900 w-full mr-8 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
+                                        className="bg-white border border-slate-400 rounded-lg px-2 py-1 text-sm font-semibold text-slate-900 w-full mr-8 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
                                     />
                                 ) : (
                                     // The hue moves to the icon's tile (its ink on the

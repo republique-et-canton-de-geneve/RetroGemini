@@ -248,8 +248,8 @@ const ProposalActionRow: React.FC<Props> = ({
     ? `p-3 rounded-lg border mb-2 text-slate-100 ${hasVoted ? 'border-slate-600/80' : pendingRingClass}`
     : `p-3 rounded-lg border mb-2 bg-white ${hasVoted ? 'border-slate-200' : pendingRingClass}`;
   const inputClass = isDark
-    ? 'grow min-w-0 border border-slate-600 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/25 bg-slate-900 text-slate-50'
-    : 'grow min-w-0 border border-slate-300 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 bg-white text-slate-900';
+    ? 'grow min-w-0 border border-slate-500 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/25 bg-slate-900 text-slate-50'
+    : 'grow min-w-0 border border-slate-400 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 bg-white text-slate-900';
   const saveClass = isDark
     ? 'bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-indigo-700 transition'
     : 'bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-indigo-700 btn-brand-glow transition';

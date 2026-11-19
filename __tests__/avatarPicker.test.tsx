@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, onTestFinished } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import LanguageProvider from '../i18n/LanguageProvider';
 import AvatarPicker from '../components/common/AvatarPicker';
@@ -7,6 +7,7 @@ import { AVATAR_FAMILIES, AVATAR_FAMILY_LABEL_KEYS, AVATAR_NAME_KEYS } from '../
 import { avatarColorClasses } from '../utils/participantColors';
 import { en, fr } from '../i18n/messages';
 import { classColor, effectivePair, tokenContrast } from './helpers/tailwindTheme';
+import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 /**
  * The avatar picker: a dialog of six family tabs, twenty named pictures each
@@ -168,6 +169,8 @@ describe('AvatarPicker', () => {
   });
 
   it('swaps the big avatar once on success and stays open until Done', async () => {
+    prefersMotion('no-preference');
+    onTestFinished(restoreMotionPreference);
     const { container, onClose } = renderPicker({ currentAvatarId: null });
     expect(container.ownerDocument.querySelector('.fx-swap')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Bee' }));
@@ -185,6 +188,16 @@ describe('AvatarPicker', () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the choice with no swap for a reader who asked for less motion', async () => {
+    prefersMotion('reduce');
+    onTestFinished(restoreMotionPreference);
+    renderPicker({ currentAvatarId: null });
+    fireEvent.click(screen.getByRole('button', { name: 'Bee' }));
+    await waitFor(() => expect(document.querySelector('[data-avatar-art="bee"]')).not.toBeNull());
+    expect(screen.getByRole('status').textContent).toBe(en['avatars.picker.saved']);
+    expect(document.querySelector('.fx-swap')).toBeNull();
   });
 
   it('writes null for "My initials"', async () => {

@@ -98,11 +98,13 @@ const DiscussPhase: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-50">
-      <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs z-30 shrink-0">
-        <div className="flex items-center space-x-4">
+      {/* Spaced with gaps, never a rule: the bar wraps on a phone, and a rule
+          before "Show votes" then opened its own line (as the board's bar). */}
+      <div className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex flex-wrap justify-between items-center gap-x-4 gap-y-2 shadow-xs z-30 shrink-0">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{t('phases.discuss.title')}</h2>
           {isFacilitator && (
-            <label className="flex items-center space-x-1.5 cursor-pointer text-sm font-medium text-slate-700 border-l border-slate-200 pl-4">
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-slate-700">
               <input
                 type="checkbox"
                 className="w-4 h-4 accent-indigo-600"
@@ -116,7 +118,7 @@ const DiscussPhase: React.FC<Props> = ({
         {isFacilitator && (
           <button
             onClick={() => setPhase('REVIEW')}
-            className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-indigo-700 btn-brand-glow transition"
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] transition"
           >
             {t('phases.shared.nextPhase')}
           </button>
@@ -352,7 +354,7 @@ const DiscussPhase: React.FC<Props> = ({
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      className="grow min-w-0 border border-slate-300 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 bg-white text-slate-900 placeholder:text-slate-500"
+                      className="grow min-w-0 border border-slate-400 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 bg-white text-slate-900 placeholder:text-slate-500"
                       placeholder={t('phases.discuss.proposePlaceholder')}
                       value={newProposalText}
                       onChange={(event) => {

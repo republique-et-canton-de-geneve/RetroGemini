@@ -37,7 +37,7 @@ const ERROR_BANNER_ID = 'team-login-error';
 // The look's recipes, written once so the seven views of this screen agree.
 // Full class strings, so Tailwind's scanner sees every one.
 const FIELD =
-  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 placeholder:text-slate-500 outline-hidden transition-shadow focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15';
+  'w-full rounded-lg border border-slate-400 bg-white px-3 py-2.5 text-slate-900 placeholder:text-slate-500 outline-hidden transition-shadow focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15';
 const LABEL = 'block text-sm font-semibold text-slate-700 mb-1.5';
 const HINT = 'text-xs text-slate-500 mt-1.5';
 const PRIMARY =

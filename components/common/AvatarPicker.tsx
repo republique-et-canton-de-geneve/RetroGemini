@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import ModalDialog from './ModalDialog';
 import Avatar from './Avatar';
+import { motionAllowed } from './motion/effects';
 import {
   AVATAR_FAMILIES,
   AVATAR_FAMILY_LABEL_KEYS,
@@ -57,7 +58,8 @@ const TILE_OFF = 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-
 const TILE_ON = 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-600/20';
 
 // The big avatar's swap lasts 0.5s (index.css, .fx-swap); this takes the class
-// off where no animation runs (reduced motion) and so no animationend comes.
+// off should no animationend come. A reader who asked for less motion is never
+// given the class (motionAllowed, the rule of every effect).
 const SWAP_FALLBACK_MS = 700;
 
 const AvatarPicker: React.FC<AvatarPickerProps> = ({
@@ -135,8 +137,10 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
       chosenRef.current = choice;
       setChosen(choice);
       setSaved(true);
-      setSwapping(true);
-      setSwapCount((count) => count + 1);
+      if (motionAllowed()) {
+        setSwapping(true);
+        setSwapCount((count) => count + 1);
+      }
     } catch (err) {
       setError(translateErrorMessage(err instanceof Error ? err.message : null, t));
     }

@@ -8,6 +8,7 @@ import { useJiraStatus } from './useJiraStatus';
 import JiraTargetFields from './JiraTargetFields';
 import { formatJiraDate } from './jiraAvailability';
 import { draftFromTarget, targetFromDraft, type JiraTargetDraft } from './jiraTargetDraft';
+import { DANGER_BUTTON, FIELD, PRIMARY_BUTTON, SECONDARY_BUTTON, SETTING_ICON, SETTING_TITLE } from '../dashboard/dashboardLook';
 
 interface Props {
   team: Team;
@@ -166,8 +167,9 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
 
   const sectionClass = ['mb-4', className].filter(Boolean).join(' ');
   const title = (
-    <h3 ref={titleRef} id={ids.title} tabIndex={-1} className="mb-2 flex items-center font-bold text-slate-700 outline-hidden">
-      <span className="material-symbols-outlined mr-2 text-slate-500" aria-hidden="true">integration_instructions</span>
+    // Titled as the other settings of the card are (dashboardLook's SETTING_TITLE).
+    <h3 ref={titleRef} id={ids.title} tabIndex={-1} className={`${SETTING_TITLE} outline-hidden`}>
+      <span className={SETTING_ICON} aria-hidden="true">integration_instructions</span>
       {t('jira.settings.title')}
     </h3>
   );
@@ -186,7 +188,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
               void refresh();
             }}
             aria-disabled={loading ? true : undefined}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 aria-disabled:cursor-wait aria-disabled:opacity-70"
+            className={`${SECONDARY_BUTTON} px-3 py-1.5 text-sm aria-disabled:cursor-wait aria-disabled:opacity-70`}
           >
             {t('jira.settings.retry')}
           </button>
@@ -309,9 +311,10 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
     }
   };
 
-  const primaryButton = 'rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 aria-disabled:cursor-wait aria-disabled:opacity-70';
-  const secondaryButton = 'rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 aria-disabled:cursor-wait aria-disabled:opacity-70';
-  const inputClass = 'w-full rounded-lg border border-slate-300 p-2 text-sm aria-invalid:border-red-500';
+  // The dashboard's recipes, so this card draws its buttons and fields as its neighbours do.
+  const primaryButton = `${PRIMARY_BUTTON} px-4 py-2 text-sm aria-disabled:cursor-wait aria-disabled:opacity-70`;
+  const secondaryButton = `${SECONDARY_BUTTON} px-4 py-2 text-sm aria-disabled:cursor-wait aria-disabled:opacity-70`;
+  const inputClass = `${FIELD} text-sm aria-invalid:border-red-600`;
 
   const removeControls = isFacilitatorView && token.configured && !replacing && (
     <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -327,7 +330,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
             onClick={() => { void removeToken(); }}
             aria-disabled={removing ? true : undefined}
             aria-describedby={removeError ? `${ids.removeQuestion} ${ids.removeError}` : ids.removeQuestion}
-            className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-800 aria-disabled:cursor-wait aria-disabled:opacity-70"
+            className={`${DANGER_BUTTON} px-4 py-2 text-sm aria-disabled:cursor-wait aria-disabled:opacity-70`}
           >
             {t('jira.settings.remove')}
           </button>
@@ -376,7 +379,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
       )}
     </div>
   );
-  const tokenStatus = <p role="status" className="mt-2 text-xs text-green-700">{tokenNotice ? noticeText(tokenNotice, t) : ''}</p>;
+  const tokenStatus = <p role="status" className="mt-2 text-xs font-medium text-emerald-700">{tokenNotice ? noticeText(tokenNotice, t) : ''}</p>;
 
   if (!status.enabled) {
     if (!token.configured && !tokenNotice) return null;
@@ -519,7 +522,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
               </button>
             )}
           </div>
-          <p role="status" className="text-xs text-green-700">{targetNotice ? noticeText(targetNotice, t) : ''}</p>
+          <p role="status" className="text-xs font-medium text-emerald-700">{targetNotice ? noticeText(targetNotice, t) : ''}</p>
         </div>
       )}
     </section>

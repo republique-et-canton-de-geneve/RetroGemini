@@ -136,8 +136,8 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
     <ModalDialog
       labelledBy={titleId}
       onClose={busy ? undefined : onClose}
-      overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center p-4"
-      panelClassName="bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto"
+      overlayClassName="fixed inset-0 bg-slate-900/45 z-100 flex items-center justify-center p-4"
+      panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto"
     >
       <h2 id={titleId} className="text-xl font-bold text-slate-800 mb-1">{t('adminBackups.teamRestore.title')}</h2>
       <p className="text-sm text-slate-600 mb-4 wrap-anywhere">{t('adminBackups.teamRestore.subtitle', { name: backupName })}</p>
@@ -159,7 +159,7 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoComplete="off"
-            className="w-full border border-slate-300 rounded-lg p-2 mb-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+            className="w-full border border-slate-400 rounded-lg p-2 mb-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
           />
           <fieldset className="mb-4">
             <legend className="text-sm font-bold text-slate-600 mb-1">{t('adminBackups.teamRestore.listLabel')}</legend>
@@ -227,7 +227,7 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
                 maxLength={TEAM_NAME_MAX_LENGTH}
                 autoComplete="off"
                 aria-describedby={selected.nameTaken ? nameHintId : undefined}
-                className="w-full border border-amber-300 rounded-lg p-2 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                className="w-full border border-amber-600 rounded-lg p-2 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
               />
               {selected.nameTaken && (
                 <p id={nameHintId} className="text-xs mt-1">{t('adminBackups.teamRestore.nameTaken', { name: selected.name })}</p>

@@ -8,7 +8,7 @@ const invite: Record<keyof typeof en, string> = {
   'invite.tab.email': 'E-MAIL',
   'invite.tab.link': 'CODE ET LIEN',
   'invite.tab.wifi': 'WI-FI',
-  'invite.copy': 'COPIER',
+  'invite.copy': 'Copier',
   'invite.testAnotherUser': 'Souhaitez-vous tester avec un autre utilisateur\u202f?',
   'invite.logoutAndCreate': 'Se déconnecter et créer un nouvel utilisateur',
   'invite.done': 'Terminé',

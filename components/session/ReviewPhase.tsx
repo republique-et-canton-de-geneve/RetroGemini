@@ -128,9 +128,12 @@ const ActionRow: React.FC<ActionRowProps> = ({
 
   return (
     <div
-      className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 transition ${action.done ? 'bg-emerald-50/60' : ''}`}
+      // Below sm the row wraps: the text takes the whole line and the assignee
+      // and the trash go under it, lined up with the text, rather than squeeze
+      // it to one word per line beside their fixed widths.
+      className={`p-4 border-b border-slate-100 last:border-0 flex flex-wrap sm:flex-nowrap items-center justify-between gap-y-2 group hover:bg-slate-50 transition ${action.done ? 'bg-emerald-50/60' : ''}`}
     >
-      <div className="flex items-center grow mr-4">
+      <div className="flex items-center grow basis-full sm:basis-auto min-w-0 sm:mr-4">
         <button
           disabled={!canEdit}
           onClick={() => {
@@ -206,7 +209,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
         value={action.assigneeId || ''}
         disabled={!canEdit}
         onChange={(event) => commitAssigneeChange(event.target.value || null)}
-        className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white text-slate-900 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600"
+        className="max-sm:ml-9 max-w-full text-xs border border-slate-400 rounded-lg px-2 py-1.5 bg-white text-slate-900 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600"
       >
         <option value="">{t('phases.shared.unassigned')}</option>
         {assignableMembers.map((member) => (
@@ -491,7 +494,7 @@ const ReviewPhase: React.FC<Props> = ({
               }}
               placeholder={t('phases.review.summaryPlaceholder')}
               rows={5}
-              className="w-full border border-slate-300 rounded-lg p-3 text-sm outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 bg-white text-slate-900 placeholder:text-slate-500 resize-y"
+              className="w-full border border-slate-400 rounded-lg p-3 text-sm outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 bg-white text-slate-900 placeholder:text-slate-500 resize-y"
             />
           ) : (
             <div className="text-sm text-slate-700 whitespace-pre-wrap min-h-[90px] p-3 rounded-lg bg-slate-50 border border-slate-200">

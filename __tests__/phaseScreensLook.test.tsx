@@ -357,6 +357,19 @@ describe('Discuss', () => {
       />
     );
 
+  // The bar wraps on a phone: a rule before "Show votes" then opened the
+  // label's own line. Its items are spaced with gaps, as the board's bar is.
+  it('spaces its bar with gaps, never a rule before "Show votes", and lets it wrap', () => {
+    renderDiscuss(baseSession({ columns: [column('col-1', '#10b981')] }), null);
+    const label = screen.getByLabelText('Show votes').closest('label') as HTMLElement;
+    expect(label.className).not.toMatch(/(^|\s)border-l(-|\s|$)/);
+    expect(label.className).not.toMatch(/(^|\s)pl-/);
+    for (const box of [label.parentElement!, label.parentElement!.parentElement!]) {
+      expect(box).toHaveClass('flex-wrap');
+      expect(box.className).toMatch(/(^|\s)gap-x-/);
+    }
+  });
+
   it.each(COLUMN_COLOURS)('paints a topic in a soft tint of its column (%s), its words in the dark ink', (hex) => {
     const { container } = renderDiscuss(baseSession({ columns: [column('col-1', hex)] }), null);
     const tones = cardTones(hex)!;

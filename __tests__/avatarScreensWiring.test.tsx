@@ -171,6 +171,14 @@ describe.each<Kind>(['retro', 'health check'])('avatars on the %s screen', (kind
     const rows = screen.getAllByTestId('participant-row');
     const rowArt = rows.map((row) => row.querySelector('[data-avatar-art]')?.getAttribute('data-avatar-art') ?? null);
     expect(rowArt).toEqual(expect.arrayContaining(['owl', 'fox']));
+    // A picture has no disc: the presence dot sits on its box's corner, off the art.
+    const dots = rows.filter((row) => row.querySelector('[data-presence-dot]'));
+    expect(dots.length).toBeGreaterThan(0);
+    for (const row of dots) {
+      const dot = row.querySelector('[data-presence-dot]')!;
+      const hasPicture = !!row.querySelector('[data-avatar-art]');
+      expect(dot.className.split(/\s+/)).toEqual(expect.arrayContaining(hasPicture ? ['-bottom-1', '-right-1.5'] : ['-bottom-0.5', '-right-0.5']));
+    }
     const opener = screen.getByRole('button', { name: 'Fran, choose my avatar' });
     expect(opener.querySelector('[data-avatar-art="fox"]')).not.toBeNull();
     // A card names its author with their picture (the retro board only).

@@ -263,7 +263,7 @@ const DashboardActionsTab: React.FC<Props> = ({
                       aria-label={t('dashboard.actions.assigneeFor', { text: action.text })}
                       value={action.assigneeId || ''}
                       onChange={(e) => onUpdateAssignee(action.id, e.target.value || null)}
-                      className="max-w-[12rem] text-xs font-medium border border-amber-400 rounded-lg px-2 py-1.5 bg-amber-50 text-amber-800 hover:border-amber-500 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 outline-hidden transition"
+                      className="max-w-[12rem] text-xs font-medium border border-amber-600 rounded-lg px-2 py-1.5 bg-amber-50 text-amber-800 hover:border-amber-700 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 outline-hidden transition"
                     >
                       <option value={archived.id}>{t('dashboard.actions.removedMember', { name: archived.name })}</option>
                       {team.members.map((member) => (

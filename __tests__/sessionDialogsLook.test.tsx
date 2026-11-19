@@ -367,7 +367,7 @@ describe('invite dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'CODE & LINK' }));
     await waitFor(() => expect(screen.getByAltText(/QR/)).toHaveAttribute('src', 'data:image/png;base64,stub'));
     expectText(screen.getByText('https://retro.example/?join=stub'), 'the link');
-    expectText(screen.getByRole('button', { name: 'COPY' }), 'COPY');
+    expectText(screen.getByRole('button', { name: 'Copy' }), 'Copy');
 
     fireEvent.click(screen.getByRole('button', { name: 'WI-FI' }));
     expectText(screen.getByText('Office'), 'the network');

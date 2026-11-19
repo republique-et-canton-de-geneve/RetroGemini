@@ -47,7 +47,7 @@ const BoardViewControls: React.FC<Props> = ({ search, onSearch, sort, onSort, ca
           }}
           aria-label={t('session.openBoard.search')}
           placeholder={t('session.openBoard.searchPlaceholder')}
-          className="w-40 sm:w-48 text-sm bg-white border border-slate-300 rounded-lg pl-8 pr-2 py-1.5 text-slate-900 placeholder:text-slate-500 hover:border-slate-400 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
+          className="w-40 sm:w-48 text-sm bg-white border border-slate-400 rounded-lg pl-8 pr-2 py-1.5 text-slate-900 placeholder:text-slate-500 hover:border-slate-400 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
         />
       </div>
       {/* Always in the page, empty with no search: a status region added (or
@@ -62,7 +62,7 @@ const BoardViewControls: React.FC<Props> = ({ search, onSearch, sort, onSort, ca
           aria-label={t('session.openBoard.sortBy')}
           value={sort}
           onChange={(e) => onSort(toBoardSort(e.target.value))}
-          className="text-sm bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-slate-800 font-semibold cursor-pointer hover:border-slate-400 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
+          className="text-sm bg-white border border-slate-400 rounded-lg px-2 py-1.5 text-slate-800 font-semibold cursor-pointer hover:border-slate-400 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
         >
           {BOARD_SORTS.map((option) => (
             <option key={option} value={option} disabled={option === 'votes' && !canSortByVotes}>

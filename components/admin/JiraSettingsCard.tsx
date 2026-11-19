@@ -372,7 +372,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
 
   const describedBy = [ids.hint, addressChanges ? ids.warning : null, fieldError ? ids.error : null].filter(Boolean).join(' ');
   const switchClass = (on: boolean) =>
-    `relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${on ? 'bg-indigo-600' : 'bg-slate-300'}`;
+    `relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${on ? 'bg-indigo-600' : 'bg-slate-400'}`;
   const knobClass = (on: boolean) =>
     `inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`;
 
@@ -419,7 +419,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
               setBaseUrl(e.target.value);
               setFieldError(null);
             }}
-            className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 aria-invalid:border-red-500"
+            className="w-full rounded-lg border border-slate-400 px-4 py-2 text-sm outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 aria-invalid:border-red-500"
           />
           <p id={ids.hint} className="text-xs text-slate-600">{t('admin.jira.baseUrlHint')}</p>
           {addressChanges && (
@@ -472,7 +472,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
             onClick={() => { void save(); }}
             aria-disabled={saving || loadState !== 'loaded' ? true : undefined}
             aria-describedby={loadFailed ? ids.loadError : undefined}
-            className={`flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 aria-disabled:opacity-70 ${loadFailed ? 'aria-disabled:cursor-not-allowed' : 'aria-disabled:cursor-wait'}`}
+            className={`flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 btn-brand-glow aria-disabled:opacity-70 ${loadFailed ? 'aria-disabled:cursor-not-allowed' : 'aria-disabled:cursor-wait'}`}
           >
             <span className="material-symbols-outlined text-base" aria-hidden="true">{saving ? 'sync' : 'save'}</span>
             {saving ? t('admin.saving') : t('admin.jira.save')}

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { isTopDialog, pushDialog } from './modalDialogStack';
 import { useReturnFocus } from './useReturnFocus';
+import { motionAllowed } from './motion/effects';
 
 /**
  * The shared modal shell.
@@ -83,7 +84,9 @@ export const DIALOG_PANEL_CLASS = 'bg-white rounded-2xl shadow-2xl border border
 /**
  * The entrance effects (`index.css`, under `prefers-reduced-motion:
  * no-preference`). They fill backwards only, so nothing of the transform
- * remains once they have run.
+ * remains once they have run. A reader who asked for less motion, or a browser
+ * that cannot say (no `matchMedia`), is never given them: the same rule as
+ * every other effect (`motionAllowed`), not a class the stylesheet keeps still.
  */
 export const VEIL_ENTRANCE_CLASS = 'fx-veil-in';
 const PANEL_ENTRANCE_CLASS: Record<DialogEntrance, string> = {
@@ -98,7 +101,7 @@ const PANEL_ENTRANCE_CLASS: Record<DialogEntrance, string> = {
  * descendant, whose events bubble up to it.
  */
 const useEntrance = (ref: React.RefObject<HTMLElement | null>) => {
-  const [entering, setEntering] = useState(true);
+  const [entering, setEntering] = useState(motionAllowed);
   // A native listener rather than React's `onAnimationEnd`: React picks the
   // event's name once, from what the environment supports, and a mismatch
   // there would leave the class on for good with nothing reporting it.

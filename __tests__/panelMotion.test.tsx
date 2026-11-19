@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { ARRIVAL_MS, POP_MS, PanelMotionInput, QUIET_MS, usePanelMotion } from '../components/session/usePanelMotion';
+import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 /**
  * Who the participants panel animates (components/session/usePanelMotion.ts):
@@ -30,10 +31,12 @@ const settle = () => act(() => { vi.advanceTimersByTime(QUIET_MS + 10); });
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-11-19T10:00:00Z'));
+  // A reader who did not ask for less motion, unless a case says otherwise.
+  prefersMotion('no-preference');
 });
 afterEach(() => {
   vi.useRealTimers();
-  vi.unstubAllGlobals();
+  restoreMotionPreference();
 });
 
 describe('the arrival', () => {
@@ -111,7 +114,7 @@ describe('the arrival', () => {
   });
 
   it('plays nothing for a reader who asked for less motion', () => {
-    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), media: query }));
+    prefersMotion('reduce');
     const { result, rerender } = mount();
     settle();
     rerender({ ...base, presentIds: ['me', 'a', 'b'], checkedIds: ['a'], count: 4 });
@@ -121,11 +124,21 @@ describe('the arrival', () => {
   });
 
   it('plays for a reader who did not ask for less motion', () => {
-    vi.stubGlobal('matchMedia', (query: string) => ({ matches: !query.includes('reduce'), media: query }));
+    prefersMotion('no-preference');
     const { result, rerender } = mount();
     settle();
     rerender({ ...base, presentIds: ['me', 'a', 'b'] });
     expect([...result.current.arriving]).toEqual(['b']);
+  });
+
+  it('plays nothing where the browser cannot say (no matchMedia), by the rule of every effect', () => {
+    restoreMotionPreference();
+    const { result, rerender } = mount();
+    settle();
+    rerender({ ...base, presentIds: ['me', 'a', 'b'], checkedIds: ['a'], count: 4 });
+    expect(result.current.arriving.size).toBe(0);
+    expect(result.current.finishing.size).toBe(0);
+    expect(result.current.bump).toBe(0);
   });
 });
 

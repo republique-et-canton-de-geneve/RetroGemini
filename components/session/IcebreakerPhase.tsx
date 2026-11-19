@@ -51,7 +51,7 @@ const IcebreakerPhase: React.FC<Props> = ({
               lang={questionLanguage(localIcebreakerQuestion !== null ? localIcebreakerQuestion : session.icebreakerQuestion)}
               value={localIcebreakerQuestion !== null ? localIcebreakerQuestion : session.icebreakerQuestion}
               onChange={(event) => onQuestionChange(event.target.value)}
-              className="w-full h-full bg-slate-900 border border-slate-600 rounded-xl p-6 text-3xl text-center text-indigo-300 font-medium leading-relaxed placeholder:text-slate-400 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/25 outline-hidden resize-none grow"
+              className="w-full h-full bg-slate-900 border border-slate-500 rounded-xl p-6 text-3xl text-center text-indigo-300 font-medium leading-relaxed placeholder:text-slate-400 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/25 outline-hidden resize-none grow"
               placeholder={t('phases.icebreaker.placeholder')}
             />
           ) : (
