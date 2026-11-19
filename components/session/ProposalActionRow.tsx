@@ -233,7 +233,7 @@ const ProposalActionRow: React.FC<Props> = ({
   leftUserIds,
   number
 }) => {
-  const { t } = useTranslation();
+  const { t, tp } = useTranslation();
   const upVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'up').length;
   const neutralVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'neutral').length;
   const downVotes = Object.values(proposal.proposalVotes || {}).filter((vote) => vote === 'down').length;
@@ -377,28 +377,35 @@ const ProposalActionRow: React.FC<Props> = ({
                 </span>
               )}
               <div className={voteBoxClass}>
+                {/* Each vote is named in words, the count it shows first: its
+                    content is an icon and a number, and the icon's ligature
+                    read as a name said "thumb_up 2", or "remove" for a
+                    neutral vote. */}
                 <button
                   onClick={() => onVote('up')}
                   aria-pressed={myVote === 'up'}
+                  aria-label={upVotes > 0 ? tp('phases.proposal.votesFor', upVotes) : t('phases.proposal.voteFor')}
                   className={`px-2 py-1 rounded-md flex items-center transition ${upVoteClass}`}
                 >
-                  <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
+                  <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">thumb_up</span>
                   <span className="text-xs font-semibold tabular-nums">{upVotes > 0 ? upVotes : ''}</span>
                 </button>
                 <button
                   onClick={() => onVote('neutral')}
                   aria-pressed={myVote === 'neutral'}
+                  aria-label={neutralVotes > 0 ? tp('phases.proposal.votesNeutral', neutralVotes) : t('phases.proposal.voteNeutral')}
                   className={`px-2 py-1 rounded-md flex items-center transition ${neutralVoteClass}`}
                 >
-                  <span className="material-symbols-outlined text-sm mr-1">remove</span>
+                  <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">remove</span>
                   <span className="text-xs font-semibold tabular-nums">{neutralVotes > 0 ? neutralVotes : ''}</span>
                 </button>
                 <button
                   onClick={() => onVote('down')}
                   aria-pressed={myVote === 'down'}
+                  aria-label={downVotes > 0 ? tp('phases.proposal.votesAgainst', downVotes) : t('phases.proposal.voteAgainst')}
                   className={`px-2 py-1 rounded-md flex items-center transition ${downVoteClass}`}
                 >
-                  <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
+                  <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">thumb_down</span>
                   <span className="text-xs font-semibold tabular-nums">{downVotes > 0 ? downVotes : ''}</span>
                 </button>
               </div>

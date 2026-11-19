@@ -3685,6 +3685,34 @@ describe('Open board — every hold and every drop', () => {
     expect(commentControl.className).toContain('focus-within:opacity-100');
   });
 
+  // The comments button holds an icon and, once a card has comments, their
+  // number: nothing else. Its name was the icon's ligature read as a word
+  // ("comment 3"). It is named in words, the number it shows first (2.5.3).
+  it('names a card\u2019s comments button in words, with the count it shows first', () => {
+    const remark = (id: string) => ({ id, authorId: 'fac', authorName: 'Facilitator', text: 'A remark', createdAt: '2026-11-01T10:00:00.000Z' });
+    renderBoard(groupedBoard({
+      tickets: [
+        ticket('t-none', 'No remark yet'),
+        ticket('t-one', 'One remark', { comments: [remark('c1')] }),
+        ticket('t-two', 'Two remarks', { comments: [remark('c2'), remark('c3')] }),
+      ],
+      groups: [],
+    }));
+    const comments = (text: string) => within(cardElement(text)).getByTestId('ticket-comment-btn');
+
+    expect(comments('No remark yet').getAttribute('aria-label')).toBe('Comments');
+    expect(comments('One remark').getAttribute('aria-label')).toBe('1 comment');
+    expect(comments('Two remarks').getAttribute('aria-label')).toBe('2 comments');
+    // The number on the button is a word of its name, and the icon is decoration.
+    expect(within(comments('Two remarks')).getByTestId('comment-count').textContent).toBe('2');
+    for (const text of ['No remark yet', 'One remark', 'Two remarks']) {
+      expect(comments(text).querySelector('.material-symbols-outlined')!.getAttribute('aria-hidden')).toBe('true');
+    }
+    // What the browser computes: found by its words, never by the ligature.
+    expect(within(cardElement('Two remarks')).getByRole('button', { name: '2 comments' })).toBe(comments('Two remarks'));
+    expect(within(cardElement('Two remarks')).queryByRole('button', { name: /^comment\b/ })).toBeNull();
+  });
+
   // Review finding (pass 15 of 42.1): a comment's edit and Delete were
   // hidden by a bare opacity-0 until hovered: on a phone, where nothing
   // hovers, the Delete was invisible yet tapped, and a keyboard user tabbed
@@ -4229,7 +4257,11 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
       Promise.resolve({ json: () => Promise.resolve({ enabled: true }) }),
     ) as unknown as typeof fetch;
     const { unmount } = renderBoard();
-    expect(await screen.findByRole('button', { name: /Suggest groups with AI/ })).toBeTruthy();
+    // Named by its words alone: its icon (a spinner while the assistant works)
+    // is decoration, and the working state is said with aria-busy.
+    const suggest = await screen.findByRole('button', { name: 'Suggest groups with AI' });
+    expect(suggest.querySelector('.material-symbols-outlined')!.getAttribute('aria-hidden')).toBe('true');
+    expect(suggest.getAttribute('aria-busy')).toBe('false');
     unmount();
 
     renderBoard(createBoard({ settings: settingsOf({ revealBrainstorm: false }) }));

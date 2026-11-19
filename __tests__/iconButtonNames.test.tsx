@@ -47,8 +47,12 @@ const tsxFilesUnder = (dir: string): string[] =>
 interface IconButton {
   file: string;
   line: number;
-  /** `ligature`: named by the icon font. `nameless`: no accessible name at all. */
-  reason: 'ligature' | 'nameless';
+  /**
+   * `ligature`: named by the icon font. `nameless`: no accessible name at all.
+   * `beside`: an icon that is not hidden, beside the button's words or count,
+   * so the name is the ligature and then the words ("thumb_up 2").
+   */
+  reason: 'ligature' | 'nameless' | 'beside';
 }
 
 const attributeOf = (node: ts.JsxElement | ts.JsxSelfClosingElement, name: string) => {
@@ -61,13 +65,23 @@ const attributeOf = (node: ts.JsxElement | ts.JsxSelfClosingElement, name: strin
 const tagNameOf = (node: ts.JsxElement | ts.JsxSelfClosingElement) =>
   (ts.isJsxSelfClosingElement(node) ? node.tagName : node.openingElement.tagName).getText();
 
-/** A Material Symbols span — the element whose text content is a ligature. */
+/**
+ * A Material Symbols span — the element whose text content is a ligature. Its
+ * class is written out, or is one of the look's icon recipes, which are all
+ * named `…ICON…` (`TAB_ICON`, `CHIP_ICON_CLASS`, `BANNER_ICON_CLASS`): read
+ * only as a literal, an icon drawn through a recipe counted as the button's
+ * words.
+ */
 const isIconSpan = (node: ts.Node): boolean => {
   if (!ts.isJsxElement(node) && !ts.isJsxSelfClosingElement(node)) return false;
   if (tagNameOf(node) !== 'span') return false;
-  const className = attributeOf(node, 'className');
-  return !!className?.initializer?.getText().includes('material-symbols-outlined');
+  const className = attributeOf(node, 'className')?.initializer?.getText() ?? '';
+  return className.includes('material-symbols-outlined') || /\b[A-Z0-9_]*ICON[A-Z0-9_]*\b/.test(className);
 };
+
+/** An icon span a screen reader reads out: one that is not `aria-hidden`. */
+const isReadIconSpan = (node: ts.Node): boolean =>
+  isIconSpan(node) && !attributeOf(node as ts.JsxElement | ts.JsxSelfClosingElement, 'aria-hidden');
 
 /**
  * Does this node render anything a screen reader would announce, other than an
@@ -146,6 +160,8 @@ const findUnnamedButtons = (
           found.push({ file, line, reason: 'ligature' });
         } else if (!named && !hasIcon && !hasOtherContent && !attributeOf(node, 'title')) {
           found.push({ file, line, reason: 'nameless' });
+        } else if (!named && hasOtherContent && children.some(hasReadIconSpan)) {
+          found.push({ file, line, reason: 'beside' });
         }
       }
       node.forEachChild(visit);
@@ -161,6 +177,17 @@ const hasIconSpan = (node: ts.Node): boolean => {
   let found = false;
   node.forEachChild(child => {
     if (!found && hasIconSpan(child)) found = true;
+  });
+  return found;
+};
+
+/** Is there an icon span a screen reader reads anywhere under this node? One inside a hidden wrapper is not read. */
+const hasReadIconSpan = (node: ts.Node): boolean => {
+  if (isReadIconSpan(node)) return true;
+  if ((ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) && attributeOf(node, 'aria-hidden')) return false;
+  let found = false;
+  node.forEachChild(child => {
+    if (!found && hasReadIconSpan(child)) found = true;
   });
   return found;
 };
@@ -182,6 +209,21 @@ describe('H52 — icon-only buttons must not be named by their ligature', () => 
     const offenders = findUnnamedButtons().filter(o => o.reason === 'nameless');
     const report = offenders.map(o => `${o.file}:${o.line}`).join('\n');
     expect(report, `Buttons with no accessible name:\n${report}`).toBe('');
+  });
+
+  it('leaves no button that reads its icon out beside its words', () => {
+    // The last of the family. A button holding an icon and a label, or an
+    // icon and a count, was named "save Save Message", "thumb_up 2" or, for a
+    // neutral vote, "remove". 51 buttons did before 45.0, whose restyle hid
+    // the icon wherever the words already said everything; the six left each
+    // needed a judgement (a spinner, a copy's outcome, a vote with no words at
+    // all) and got one: the icon is hidden, and what only it said is said in
+    // words, in `aria-busy` or in the button's own name. An icon beside a
+    // label is `aria-hidden`; one that is the only carrier of a state gets
+    // that state another way first.
+    const offenders = findUnnamedButtons().filter(o => o.reason === 'beside');
+    const report = offenders.map(o => `${o.file}:${o.line}`).join('\n');
+    expect(report, `Buttons that read an icon beside their words:\n${report}`).toBe('');
   });
 
   it('is not vacuous — the scan does find buttons to check', () => {
@@ -206,6 +248,24 @@ describe('H52 — the guard, on fixtures', () => {
   // holding only that is announced as "button".
   it('reports a button whose only child is an <Avatar> without a label', () => {
     expect(reasonsIn('const A = () => <button onClick={() => open()}><Avatar colorClasses={c} initials="AB" size={32} /></button>;')).toEqual(['nameless']);
+  });
+
+  it('reports an icon read out beside a label or a count, written out or through a recipe', () => {
+    expect(reasonsIn('const A = () => <button><span className="material-symbols-outlined">save</span>Save Message</button>;')).toEqual(['beside']);
+    expect(reasonsIn('const A = () => <button><span className="material-symbols-outlined text-sm mr-1">thumb_up</span><span>{count > 0 ? count : \'\'}</span></button>;')).toEqual(['beside']);
+    expect(reasonsIn('const A = () => <button><span className={TAB_ICON}>groups</span>{label}</button>;')).toEqual(['beside']);
+    expect(reasonsIn('const A = () => <button><span className={`${CHIP_ICON_CLASS} mr-1`}>wifi</span>{label}</button>;')).toEqual(['beside']);
+  });
+
+  it('accepts it once the icon is hidden, alone or inside a hidden wrapper, or the button is named', () => {
+    expect(reasonsIn('const A = () => <button><span className="material-symbols-outlined" aria-hidden="true">save</span>Save Message</button>;')).toEqual([]);
+    expect(reasonsIn('const A = () => <button><span aria-hidden="true"><span className="material-symbols-outlined">save</span></span>Save</button>;')).toEqual([]);
+    expect(reasonsIn('const A = () => <button aria-label={name}><span className="material-symbols-outlined">thumb_up</span><span>{count}</span></button>;')).toEqual([]);
+    expect(reasonsIn('const A = () => <button><span className={TAB_ICON} aria-hidden="true">groups</span>{label}</button>;')).toEqual([]);
+  });
+
+  it('still reports an icon drawn through a recipe when it is the button\'s only content', () => {
+    expect(reasonsIn('const A = () => <button title="Close"><span className={ICON_CLASS}>close</span></button>;')).toEqual(['ligature']);
   });
 
   it('accepts it once the button is named, or the avatar is', () => {

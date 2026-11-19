@@ -212,7 +212,7 @@ const applyMaxVotes = (s: RetroSession, newVal: number) => {
 
 const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired, onTeamAvatars }) => {
   // Named `tr`, not `t`: `t` is the ticket variable throughout this file.
-  const { t: tr } = useTranslation();
+  const { t: tr, tp } = useTranslation();
   const [session, setSession] = useState<RetroSession | undefined>(() => {
     const retro = team.retrospectives.find(r => r.id === sessionId);
     if (!retro) return undefined;
@@ -3405,9 +3405,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             }`}
                             style={controlInk}
                             title={tr('session.ticket.comments')}
+                            // Named in words, the count it shows first: its content is an
+                            // icon and a number, and the ligature read as a name said "comment 3".
+                            aria-label={(t.comments?.length || 0) > 0
+                                ? tp('session.ticket.commentsCount', t.comments?.length ?? 0)
+                                : tr('session.ticket.comments')}
                             data-testid="ticket-comment-btn"
                         >
-                            <span className="material-symbols-outlined text-lg! leading-none">comment</span>
+                            <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">comment</span>
                             {(t.comments?.length || 0) > 0 && (
                                 <span className="font-bold tabular-nums" data-testid="comment-count">{t.comments!.length}</span>
                             )}
@@ -3727,10 +3732,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               type="button"
               onClick={openAiGroupSuggestions}
               disabled={aiGroupSuggestionsLoading}
+              // The spinner was the only sign that the assistant is working:
+              // said as a state, so the icon can be decoration.
+              aria-busy={aiGroupSuggestionsLoading}
               title={tr('session.board.suggestGroupsHint')}
               className="flex items-center gap-1 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-3 py-1.5 rounded-full transition disabled:opacity-60 disabled:cursor-not-allowed"
           >
-              <span className={`material-symbols-outlined text-sm ${aiGroupSuggestionsLoading ? 'animate-spin' : ''}`}>
+              <span className={`material-symbols-outlined text-sm ${aiGroupSuggestionsLoading ? 'animate-spin' : ''}`} aria-hidden="true">
                   {aiGroupSuggestionsLoading ? 'progress_activity' : 'auto_awesome'}
               </span>
               <span>{tr('session.board.suggestGroups')}</span>

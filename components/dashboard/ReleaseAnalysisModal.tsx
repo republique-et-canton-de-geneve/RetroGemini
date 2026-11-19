@@ -236,7 +236,8 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 transition"
       title={t('dashboard.releaseAnalysis.copyTitle')}
     >
-      <span className="material-symbols-outlined text-sm">
+      {/* The words beside it say the outcome (Copied, Copy failed): the icon is decoration. */}
+      <span className="material-symbols-outlined text-sm" aria-hidden="true">
         {copyState === 'copied' ? 'check' : copyState === 'failed' ? 'error' : 'content_copy'}
       </span>
       {copyState === 'copied'

@@ -128,6 +128,9 @@ const session = {
   'session.ticket.delete': 'Delete ticket',
   'session.ticket.hidden': 'Hidden card',
   'session.ticket.comments': 'Comments',
+  // The comments button's accessible name once a card has comments: the count it shows, then what it counts.
+  'session.ticket.commentsCount_one': '{count} comment',
+  'session.ticket.commentsCount_other': '{count} comments',
   'session.ticket.removeVote': 'Remove a vote from this ticket',
   'session.ticket.addVote': 'Add a vote to this ticket',
   // Open board: the votes a card or a group holds from everyone.
