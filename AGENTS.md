@@ -300,9 +300,14 @@ another look. Eight rules:
   dialog frame as `DIALOG_OVERLAY_CLASS` / `DIALOG_PANEL_CLASS` in
   `ModalDialog.tsx`; the session's are written inline in its components, and
   both session headers carry the same class set
-  (`__tests__/healthCheckLook.test.tsx` compares them). Reuse the recipe of
-  the screen you are on before writing a new one: one primary button per
-  area, a secondary or a quiet one beside it.
+  (`__tests__/healthCheckLook.test.tsx` compares them). The administration
+  console draws with the dashboard's recipes, imported and never copied, plus
+  the few it needs of its own in `components/admin/adminLook.ts` (card titles,
+  its switch, the tab's icon and count, a table header cell, a row button):
+  no colour per verb, no gradient and no control faded by an opacity, which
+  `__tests__/superAdminConsoleLook.test.tsx` refuses and measures. Reuse the
+  recipe of the screen you are on before writing a new one: one primary button
+  per area, a secondary or a quiet one beside it.
 - **A control's edge is slate-400, not slate-300** (3.41:1 on white against
   1.59:1). A text field's, a select's, a textarea's border and a switch's off
   track are often the only thing that shows where the control is (1.4.11); a
@@ -386,7 +391,16 @@ rules:
   change of session, while the connection is down, in the three seconds after
   it comes back (a rolling update reconnects everybody), or for a burst: more
   than six cards or more than two people at once is a healed state or a
-  restore, not people working.
+  restore, not people working. **The first paint is a seed, never a "before".**
+  A session screen is drawn first from the cached team record, which lags the
+  session row, and the server's state or roster can land seconds later. So
+  nothing is compared until the server's first state has been applied
+  (`useSessionMotion`'s `ready`, set by `Session.tsx` in the same batch as that
+  state; the phase title's slide waits for it too) or its first roster
+  (`usePanelMotion`'s `ready`, the panel's `rosterReceived`, set by both
+  session screens), and the three quiet seconds open at that moment, not at the
+  mount: counted from the mount, a join snapshot four seconds late played
+  every card and every person it brought.
 - **An effect never changes a box that a test measures or a click aims at.**
   Rings and washes are drawn on pseudo-elements; a participant's row may
   animate only opacity, a pseudo-element and `translateX`, never its height or
@@ -408,7 +422,11 @@ rules:
   (`heldVotes`, `playLandedVote`), and a button answers its press once the vote
   is drawn: played during the click, the class was wiped by the one React
   wrote in the same commit. Past ten votes, with unlimited votes and on the
-  open board, the dot pops in place. **In the guided Vote phase, and on a board
+  open board, the dot pops in place. The budget (`VoteBudget`) draws one filled
+  token per vote left and one outline per vote the viewer really cast: a vote
+  one vote per item leaves no item to place on (five votes, three items) is
+  neither, and is not drawn, so the tokens never show a vote as cast that was
+  not. **In the guided Vote phase, and on a board
   whose counts are hidden, only the viewer's own votes are marked**: a ring
   must never tell where a teammate's vote went.
 - **A new effect is a class in `index.css` with its numbers, a trigger read
@@ -2457,7 +2475,7 @@ that take a team credential (`/api/send-invite`, `/api/wifi-config`,
 | `/api/team/:teamId/action` | POST | Persist a global action update. **Additive, not a replace** (`utils/actionImpact.js` → `mergeActionImpactState`): it folds the incoming action onto the stored one so `impactRatings`, `closedAt` and `impactDeferredBy` survive a caller that never read them. Without that, a facilitator renaming an action from a client loaded before anyone voted wipes the whole rating round. It also stamps `closedAt` when *it* is what closes the action, which is what keeps the field correct through a rolling update where an older pod closes an action without stamping — but it never invents one for an action already stored as closed without a stamp, because those are the pre-feature closures and dating them would drag the entire historical backlog into the next rating round. Its `jira` comes from the record only (`withRecordedJiraLink`: the stored copy's value, else another copy's, else none), so a caller can neither drop a link nor plant one |
 | `/api/team/:teamId/action/impact` | POST | Record one participant's impact vote on one closed action (`{ actionId, userId, vote }`; `vote: 1 \| 2 \| 3 \| 'abstain' \| null`, `null` clears the caller's own vote). **Deliberately narrow, for the same reason `/retrospective/:retroId/name` is**: `impactRatings` is the first per-user data on the team record and it has one writer per participant, so sending a whole action would make two people voting in the same second race, with the loser's vote vanishing silently. This writes exactly `impactRatings[userId]` inside `atomicTeamUpdate`, so concurrent voters never contend for the same key. Carries no revision, touches no other field, and takes no retro/health-check hint — it scans all three homes, because a hint would be a second way to locate an action that could disagree with the scan. Answers `404 action_not_found` (after the write, never from a preliminary read) and `400 invalid_vote` for anything off the scale, refused rather than coerced. **`{ actionId, reset: true }` drops the whole map for one action** — what a *later* retrospective does when it puts a postponed action back to the team, because "Rate later" promises the question is asked again and a vote left in place is pre-filled next time, so the early answerer is never re-asked. It lives on this route rather than a new one because `impactRatings` is owned here and nowhere else (the whole-action route deliberately cannot touch it), and a clear written elsewhere would be a second owner. The reset is performed at **re-presentation**, never at the deferral: that is what keeps the "Rate later" toggle lossless, so a mis-click stays undoable and the votes only go when the round that would have shown them really reopens. `reset` must be a literal `true`; anything else falls through to the ordinary vote path and its validation |
 | `/api/team/:teamId/members` | POST | Update the member roster. Member emails are **cleaned, never refused** by the shared email rule (`cleanRosterEmails`, the function the heal pass uses): a value that does not parse is stored as sent, and so is one whose cleaned form another member already holds — a roster write carries joins, and member emails are identities on the client. Answers `{ success: true }`: it used to return the whole team, which no client read, so every join paid for a second copy of the history |
-| `/api/team/:teamId/member/avatar` | POST | Set or clear one member's avatar `{ memberId, avatar: <id> \| null, sessionId? }` (`server/routes/teamAvatarRoutes.js`). Credential first (`401`); `400 invalid_member` unless `memberId` is a plausible member id (`isValidRaterId`); `400 invalid_avatar` unless `avatar` is `null` or an id of `utils/avatars.js`'s list: refused, never coerced, because an id this pod does not know may be one a later release offers. Under the row lock it writes `memberAvatars[memberId] = { id, at }`, with `at` the server's clock in ms and never before the entry it replaces, and a clear stored as `{ id: null, at }` (so a clear too is newer than every copy of the choice it replaces). It rebuilds the map from its valid entries, so junk heals, and caps it at 500 entries (ids on neither roster list go first, then the oldest; never the one just written). An unchanged choice writes nothing. Answers `{ success: true, memberAvatars }` after the write. With a `sessionId`, after the answer and best-effort, it stamps that live session's participant entry with `avatar` and `avatarAt` through `liveSessionPatch`: only the team's own session, only a participant it already holds, only when the stored stamp is older. `/update` ignores `memberAvatars`. The client calls it through `dataService.setMemberAvatar`, which retries an older pod's HTML 404 across a rollout and never posts the roster |
+| `/api/team/:teamId/member/avatar` | POST | Set or clear one member's avatar `{ memberId, avatar: <id> \| null, sessionId? }` (`server/routes/teamAvatarRoutes.js`). Credential first (`401`); `400 invalid_member` unless `memberId` is a plausible member id (`isValidRaterId`); `400 invalid_avatar` unless `avatar` is `null` or an id the release accepts (`isAcceptedAvatarId` in `utils/avatars.js`: the offered ids, and those accepted one release ahead of being offered): refused, never coerced, because an id this pod does not know may be one a later release offers. Under the row lock it writes `memberAvatars[memberId] = { id, at }`, with `at` the server's clock in ms and never before the entry it replaces, and a clear stored as `{ id: null, at }` (so a clear too is newer than every copy of the choice it replaces). It rebuilds the map from its valid entries, so junk heals, and caps it at 500 entries (ids on neither roster list go first, then the oldest; never the one just written). An unchanged choice writes nothing. Answers `{ success: true, memberAvatars }` after the write. With a `sessionId`, after the answer and best-effort, it stamps that live session's participant entry with `avatar` and `avatarAt` through `liveSessionPatch`: only the team's own session, only a participant it already holds, only when the stored stamp is older. `/update` ignores `memberAvatars`. The client calls it through `dataService.setMemberAvatar`, which retries an older pod's HTML 404 across a rollout and never posts the roster |
 | `/api/team/:teamId/invite-credential` | POST | Derive the team's current invite credential for embedding in invite links (revoked by password rotation) |
 | `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links). **Revokes every session token of the team** (decision D3b): the same transaction gives the team a new session epoch, and the answer is `{ success, sessionToken }`, a token under the new epoch for the caller, so the facilitator who changed it keeps working (a 41.0 client ignores it and keeps authenticating by the new password it holds). After the answer, best-effort, the team's live sockets are cut on this pod and the others (`sessionRevocation.js`). Recorded as `team.password-change` with `detail.sessionsRevoked: true` |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned; its Jira token, `team-secret:{teamId}`, is deleted before the record). The Dashboard waits for the answer: a failure keeps the team signed in and says so, and `team_not_found` (already deleted — a lost answer, another tab, the super admin) counts as done |
