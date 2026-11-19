@@ -238,6 +238,51 @@ Residuals, stated rather than discovered:
   "Pre-delete snapshot", which holds every link. Each such issue repeats the
   action's content in Jira.
 
+### Avatars
+
+Each member can choose a picture in place of their initials (45.0). The choice
+is stored on the team record, `memberAvatars[memberId] = { id, at }`, written
+by one route, `POST /api/team/:teamId/member/avatar`.
+
+- **Any team credential can set any member's avatar.** The route checks the
+  credential (password or session token, an invitation-link login included),
+  the shape of the member id and the avatar id — not who is asking, which it
+  cannot know: a credential names a team, not a person. "Your own avatar" is a
+  rule of the screens. The harm is bounded to a picture from the list below,
+  shown beside a member's name, and the next choice replaces it.
+- **The id is checked against a closed list and refused, never coerced.** An
+  avatar id is one of the application's own ids (`utils/avatars.js`), or `null`
+  for none; anything else is answered `400 invalid_avatar`. The map is rebuilt
+  from its valid entries on every write, so junk another path left heals, and
+  it is capped at 500 entries.
+- **A picture is drawn from data, never from markup or a URL.** Each picture is
+  a list of shapes in a closed vocabulary (eight SVG element types, seven
+  colour classes, a fixed list of attributes) compiled into the bundle, and the
+  screen draws it with React; a stored value only selects one of them, after it
+  has been checked against the list, and is never written into the page as
+  markup, an image source or a class. A value the client does not know draws
+  the initials. Nothing is fetched: there is no
+  upload and no remote image, so the CSP's `img-src` is not involved.
+- **An anonymous session shows no chosen avatar.** One resolver decides what a
+  session draws and answers nothing while the session is anonymous, because a
+  picture beside a card would say who wrote it; a source test refuses any other
+  read of an avatar in the components.
+- **Nothing of it is in a URL or a log.** The choice travels in the request
+  body, and the route logs no member id, avatar id or choice: a failure logs
+  the error alone. A choice is not a privileged action and writes no row to the
+  audit trail.
+
+### Fonts and icons
+
+The interface typeface (Geist, Geist Mono) and the icon font (Material Symbols)
+are served by the deployment itself, from `public/fonts/`, and the
+`font-src 'self'` directive of the CSP refuses any other origin. Nothing is
+loaded from a font service, so a browser on a network without internet access
+draws the same screens and tells no third party who opened them.
+`e2e-prod/production-csp.spec.ts` loads the built application under its
+production policy, checks that the text font and the icon font are each
+loaded by name, and fails on any request that leaves the application's origin.
+
 ### Database Security
 
 - SQLite database is unencrypted at rest

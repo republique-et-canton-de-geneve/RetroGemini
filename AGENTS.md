@@ -249,7 +249,7 @@ The interface's look lives in the `@theme` block of `index.css`, not in the
 components. A component keeps its Tailwind classes (`bg-slate-50`,
 `text-indigo-600`, `rounded-xl`, `shadow-xs`) and the block gives those names
 their values, so every screen changes at once and none can be left behind in
-another look. Six rules:
+another look. Eight rules:
 
 - **`slate` is the neutral scale and `indigo` the brand**, both redefined step
   by step (slate-900 `#171a2b` is the ink, slate-50 the page, indigo-600
@@ -266,10 +266,12 @@ another look. Six rules:
   `__tests__/lookTokens.test.ts`, with axe-core's engine. Muted text is
   slate-500 on white, the page, the panels and the brand tints; slate-600 and
   darker read on every light surface; white reads on indigo-500 to 800.
-  **slate-400 is an edge, never a text colour**: it draws a control's outline
-  at 3:1 on white and on the page, and fails as text on the dark screens, whose
-  muted text is slate-200 and -300 (no single value does both jobs). Retune a
-  value in that test first, then in the block.
+  **slate-400 is an edge, not a text colour**: it draws a control's outline
+  at 3:1 on white and on the page (3.41:1 on white) and is far under 4.5:1 there
+  as text; on the dark screens it fails on their slate-800 panels (4.14:1), so
+  their muted text is slate-200 and -300 (no single value does both jobs). The
+  one place it is text is a placeholder inside a slate-900 field (5.05:1).
+  Retune a value in that test first, then in the block.
 - **The contrast helper measures what is painted.**
   `__tests__/helpers/tailwindTheme.ts` reads Tailwind's `theme.css` and then
   every `@theme` block of `index.css` (the later value wins, `initial` removes
@@ -289,6 +291,26 @@ another look. Six rules:
   (`--color-person-*`, `--ease-settle`), never written as an arbitrary value in
   a class: an arbitrary colour is invisible to the helper and to the next
   retune.
+- **The screens share recipes, written where their screens are.** A recipe is
+  a full class string (Tailwind's scanner reads only whole strings): the
+  dashboard's, the Feedback Hub's and the Dashboard's dialogs' in
+  `components/dashboard/dashboardLook.ts` (buttons, fields, cards, chips and
+  their measured colour helpers, the switch, segmented choices), the login
+  screens' as the constants at the top of `components/TeamLogin.tsx`, the
+  dialog frame as `DIALOG_OVERLAY_CLASS` / `DIALOG_PANEL_CLASS` in
+  `ModalDialog.tsx`; the session's are written inline in its components, and
+  both session headers carry the same class set
+  (`__tests__/healthCheckLook.test.tsx` compares them). Reuse the recipe of
+  the screen you are on before writing a new one: one primary button per
+  area, a secondary or a quiet one beside it.
+- **A control's edge is slate-400, not slate-300** (3.41:1 on white against
+  1.59:1). A text field's, a select's, a textarea's border and a switch's off
+  track are often the only thing that shows where the control is (1.4.11); a
+  card's hairline (slate-200) is not a control. `__tests__/fieldEdgeContrast.test.ts`
+  reads every field of `components/` with the TypeScript parser, follows its
+  class list through constants and conditionals, and measures each border
+  against each fill it can take; a native checkbox or radio stays native
+  (`accent-indigo-600`) and is not read.
 
 ### A card's colour
 
@@ -350,10 +372,15 @@ rules:
 - **A class is put on for one animation and taken off**
   (`components/common/motion/effects.ts` → `playEffect`: at the element's own
   `animationend`, with a timeout as a net). On the board it is put on
-  imperatively: it costs no render of a 4,700-line component, a remounted
-  element simply has no class, and the unit tests of the screens keep seeing
-  the class strings React wrote. `motionAllowed()` reads the reader's setting
-  live; without `matchMedia` (jsdom) the board plays nothing.
+  imperatively: it costs no render of a component of nearly 5,000 lines, a
+  remounted element simply has no class, and the unit tests of the screens
+  keep seeing the class strings React wrote. `motionAllowed()` reads the
+  reader's setting live; the board's effects and the vote's flights ask it
+  first and play nothing when it says no or cannot tell (jsdom has no
+  `matchMedia`). Whatever a component writes into a class from a render (a
+  dialog's entrance, an arriving row, the writing pencil) is still bound by
+  the CSS gate above, which is the guarantee: a script's check only saves it
+  work.
 - **Quiet by default.** Nothing plays on first paint, on a phase change or a
   change of session, while the connection is down, in the three seconds after
   it comes back (a rolling update reconnects everybody), or for a burst: more
@@ -574,9 +601,12 @@ field. So must every icon control shown at rest, hover or not: the card's
 *Add reaction*, a comment's edit and delete, and an action row's done circle
 (open and checked) and trash, in Review, Open Actions, the health check's
 Review and the Dashboard's Actions tab, were slate-300 on white (1.49:1) or a
-check in emerald-500 (2.54:1); they are slate-500 (4.76:1) and emerald-600, and
-the tests measure what each paints (`effectivePair`), never a class refused:
-slate-400, 2.63:1, passed a check that only refused slate-300. axe-core skips
+check in emerald-500 (2.54:1); they are slate-500 and emerald-600, and the
+tests measure what each paints (`effectivePair`), never a class refused:
+slate-400, 2.63:1, passed a check that only refused slate-300. (Those numbers
+are Tailwind's slate, before 45.0; the look's slate-500 measures 5.41:1 on
+white and its slate-400 3.41:1, an edge's value and still no text colour.)
+axe-core skips
 icon ligatures, so no audit reports them. **Measure a card's control on a
 coloured card**: every column a template or Edit Layout makes has a colour,
 and cards are coloured by topic by default, so the white card is the rare
@@ -604,13 +634,23 @@ there `title` *is* accepted, because with no content it is the last resort the
 algorithm actually reaches. **In new code, an icon beside a label is
 `aria-hidden` too**: without it the ligature becomes part of the button's name,
 as the console's sortable Teams headers did ("Members unfold_more"). It is a
-rule for new code, not a fact about the codebase: 51 older buttons still
-announce their icon beside their label, `ACCESSIBILITY.md` → *Known gaps* 3,
+rule for new code, not a fact about the codebase: 23 older buttons still
+announce their icon beside their label (51 before 45.0, whose restyle hid the
+icon wherever it carried no state; 17 of the 23 are in the console),
+`ACCESSIBILITY.md` → *Known gaps* 3,
 left for a judgement per site (some icons carry a state the label does not, a
 spinner or a lock), and **no test guards them** — `iconButtonNames.test.tsx`
 checks icon-only and nameless buttons alone. An icon that is the only carrier
 of a state gets that state another way (words, `aria-pressed`) before it is
-hidden. A sortable table header carries `aria-sort` on the
+hidden. **A choice that stays chosen says so as a state, not only as a
+colour**: a button that selects one option among several carries
+`aria-pressed` (the Welcome phase's moods, Discuss's *Move On*, the ROTI
+scores of both session types, the health check's survey scores, the invite
+dialog's tabs and member rows, the avatar picker's tiles, joining the
+language switcher and the impact-rating choices that had it), and a chosen
+option is never drawn by fading the others (`opacity-*`, `grayscale`), which
+both hides the choice from assistive technology and takes the unchosen text
+under 4.5:1. A sortable table header carries `aria-sort` on the
 sorted column only (`components/admin/teamSort.ts` → `ariaSortOf`, pinned by
 `__tests__/superAdminTeamSorting.test.tsx`).
 
@@ -635,12 +675,17 @@ an axe rule turns every audited screen red without a code change — fix the
 markup, never the `BASELINE`.
 
 **Colour is checked, not judged by eye.** `utils/colorUtils.ts` carries
-`contrastRatio`, `readableTextColor` (for any colour a *user* chooses, such as a
-column title — no default can fix a value the facilitator picks) and
-`bestTextColorOn` (black or white on a coloured surface, guaranteed to clear
-4.5:1 for **every** background: black clears it above luminance 0.175 and white
-below 0.183, and the ranges overlap). The brand primary is indigo-600, not
-500 — white on the 500 measures 4.46:1 against a 4.5:1 floor.
+`contrastRatio`, `readableTextColor` (for any colour a *user* chooses — today a
+column title in the two template editors; no default can fix a value the
+facilitator picks) and `bestTextColorOn` (black or white on a coloured surface,
+guaranteed to clear 4.5:1 for **every** background: black clears it above
+luminance 0.175 and white below 0.183, and the ranges overlap). Since 45.0 a
+board's column title is slate-900 and a card is a tint with dark words (see
+*A card's colour*), so no screen calls `bestTextColorOn` any more; it stays
+for the next saturated surface. The brand primary is indigo-600 (white on it
+6.36:1). Tailwind's indigo-500 measured 4.46:1 under white, which is why the
+brand moved off it; the look's indigo-500 clears 4.5:1, but the brand is
+still 600, the value every recipe and `__tests__/lookTokens.test.ts` name.
 
 > ⚠️ **A contrast fix is directional, and a global find-and-replace gets half of
 > it backwards.** Darkening muted text is right on white and wrong on
@@ -651,7 +696,11 @@ below 0.183, and the ranges overlap). The brand primary is indigo-600, not
 > it everywhere.** The super-admin console is the other worked example: it has
 > no dark surface carrying muted text, yet `text-slate-500` still stays on its
 > white cards (4.77:1) and went to slate-600 only where it lands on the grey
-> page or a tinted panel (4.35:1). The audit prints each `color-contrast`
+> page or a tinted panel (4.35:1). (Both examples measured Tailwind's palette,
+> before 45.0. The look's slate-500 reads on white, the page and the brand
+> tints, and its muted text on the dark Icebreaker and Close screens is
+> slate-200 and -300; the rule is unchanged, and `__tests__/lookTokens.test.ts`
+> states which surface each token serves.) The audit prints each `color-contrast`
 > finding as its colour pairs and ratios, which is what tells you the surface.
 
 **A participant's colour is data, and as a class it reaches the screen
@@ -1632,7 +1681,13 @@ avatar, which opens the avatar picker, shows at every width for a participant
 and from 360px for a facilitator, whose header also carries invite and play
 (`data-viewer-avatar`). The phase labels are drawn in mixed case by CSS from
 the dictionary's capitals, so every accessible name and every test that clicks
-a phase by its name is unchanged. `e2e/i18n.spec.ts` →
+a phase by its name is unchanged. Both session headers carry one class set,
+control for control (`__tests__/healthCheckLook.test.tsx`), and the
+dashboard's top bar is `components/AppHeader.tsx`, rendered by `App.tsx`'s
+`renderHeader`, with the viewer's avatar at every width. Tailwind 4 emits an
+arbitrary `min-[Npx]:` variant before the named breakpoints, so
+`lg:hidden min-[1440px]:block` never shows: write a range as
+`sm:max-lg:block min-[1440px]:block`, as the timer's ring does. `e2e/i18n.spec.ts` →
 *headers fit in both languages* asserts it for the dashboard, retro and health check headers
 and the administration console's title row (the e2e server sets a test-only
 `SUPER_ADMIN_PASSWORD` in `playwright.config.ts` to reach it) at
@@ -1647,10 +1702,14 @@ things about that test are load-bearing:
   gives one with no request. A reload per width spent about 80 of the 120
   `/api/team/*` reads one IP may make per minute, and the invite specs that run
   next in CI were refused their invite link.
-- **It renders in DejaVu Sans.** The app asks for Inter, which a developer
-  machine may have installed and CI does not; CI's wider fallback overflowed by
-  a pixel where the local run had 19 to spare. Pinning the wide font makes the
-  test measure the same thing everywhere.
+- **It renders in DejaVu Sans.** Until 45.0 the app asked for Inter, which a
+  developer machine may have installed and CI does not; CI's wider fallback
+  overflowed by a pixel where the local run had 19 to spare. The app now serves
+  Geist itself, but Geist falls back to the system font when its file is
+  blocked or still on its way (`font-display: swap`), so the test keeps the
+  wide font as the worst case, and awaits `document.fonts.ready` before it
+  measures. (Two spec comments still name Inter as the app's font: read them
+  as history.)
 - **Leave headroom.** A header that fits DejaVu Sans by a few pixels fits the
   narrower fonts phones and laptops use, but not by much; extend the test when a
   control joins a header.
@@ -1728,8 +1787,15 @@ half-way; `e2e/axe-animations.spec.ts` holds that wait.
 ```
 /
 ├── components/          # React components
-│   ├── common/         # Shared UI primitives (ModalDialog, Avatar, the avatar pictures, the motion kit)
+│   ├── common/         # Shared UI primitives (ModalDialog, Avatar, AvatarPicker, StarRating)
+│   │   ├── avatars/    # The avatar pictures, as data, and AvatarArt (see Avatars)
+│   │   └── motion/     # playEffect, motionAllowed, fly (see Motion)
+│   ├── session/        # The pieces both session screens share, phases, votes, panel, header
+│   ├── dashboard/      # Dashboard tabs and dialogs; dashboardLook.ts holds its recipes
+│   ├── admin/          # Super-admin console dialogs and cards
 │   └── jira/           # Jira controls, settings card and status hook (see Jira)
+├── utils/              # Pure rules shared by screens (and server, for the .js ones): cardTones, columnHue, avatars…
+├── public/fonts/       # Self-hosted Geist, Geist Mono and the icon font (see Offline)
 ├── i18n/               # EN/FR interface dictionaries, language detection, bilingual retro content
 ├── services/           # Business logic (dataService, syncService)
 ├── __tests__/          # Test files
@@ -1739,6 +1805,7 @@ half-way; `e2e/axe-animations.spec.ts` holds that wait.
 ├── server/             # Backend modules (routes, services, config)
 ├── server.js           # Express backend
 ├── App.tsx             # Main React app
+├── index.css           # The look: theme tokens, person tones, effect classes (see The look)
 ├── types.ts            # TypeScript interfaces
 ├── publiccode.yml      # Swiss open-source catalogue metadata (English and French)
 ├── VERSION             # Current version (X.Y format)
@@ -1964,10 +2031,16 @@ the English file does not have. Both files ship in the image (`Dockerfile`,
    once per tab (Teams, a team's inline editor, the settings cards opened up,
    Feedback and its comment dialog, Live, Logs, Backups), behind an allowlist
    that aborts any console call it did not mean to make; `e2e/jira.spec.ts` the
-   seven Jira screens, at 0 since they joined (2026-10-20); and
+   seven Jira screens, at 0 since they joined (2026-10-20);
+   `e2e/retro-open-board.spec.ts` the open board and, scoped, its settings
+   dialog; `e2e/avatars.spec.ts` the avatar picker over a session, scoped
+   (45.0); and
    `e2e/admin-team-merge.spec.ts` / `e2e/admin-team-restore.spec.ts` the merge,
    delete and one-team-restore dialogs and the backup import card, scoped, so
    any new serious or critical rule on those screens fails the pull request.
+   `accessibility-audit.spec.ts` also runs in the `motion` project, and
+   `audit()` waits for the page's animations to end before axe reads a colour
+   (see *Test runs emulate reduced motion*).
    All of them run `audit()` from `e2e/helpers/axe.ts`, which holds the one
    `BASELINE` table; a screen joins it at 0, and a card added to a screen the
    audit never walked is audited on its own (`{ scope }`), so it neither
