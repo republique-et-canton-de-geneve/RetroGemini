@@ -1335,10 +1335,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     session.phase === LIVE_PLACEHOLDER.phase ? t('adminLive.unknownPhase') : codeLabel(PHASE_KEYS, session.phase);
 
   // Contrast is decided by the surface a token lands on (audit H42): muted
-  // text is `text-slate-500` on the white cards (4.77:1) and `text-slate-600`
-  // on this grey page and on tinted panels, where slate-500 measures 4.35:1.
-  // No dark surface here carries muted text. The whole page is audited per tab
-  // by e2e/admin-console-accessibility.spec.ts.
+  // text is `text-slate-500` on the white cards (5.41:1 with the 45.0 tokens)
+  // and `text-slate-600` on this grey page and on tinted panels (slate-500
+  // measures 4.66:1 on the page and 4.33:1 on slate-200, the disabled
+  // buttons' fill). No dark surface here carries muted text. The whole page is
+  // audited per tab by e2e/admin-console-accessibility.spec.ts, and what that
+  // audit skips (disabled buttons, an empty list) by
+  // __tests__/superAdminLook.test.tsx.
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
@@ -1414,7 +1417,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   disabled={infoMessageSaving}
                   className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                     infoMessageSaving
-                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
                       : 'bg-amber-700 text-white hover:bg-amber-800'
                   }`}
                 >
@@ -1464,7 +1467,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   disabled={adminEmailSaving}
                   className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                     adminEmailSaving
-                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
                       : 'bg-green-700 text-white hover:bg-green-800'
                   }`}
                 >
@@ -1615,7 +1618,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     disabled={aiTesting || !aiApiUrl}
                     className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                       aiTesting || !aiApiUrl
-                        ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                        ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
                     }`}
                   >
@@ -1629,7 +1632,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     disabled={aiSaving || !aiApiUrl}
                     className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                       aiSaving || !aiApiUrl
-                        ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                        ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
                         : 'bg-violet-600 text-white hover:bg-violet-700'
                     }`}
                   >
@@ -1673,7 +1676,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               disabled={backupDownloading}
               className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                 backupDownloading
-                  ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                  ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
                   : 'bg-indigo-600 text-white hover:bg-indigo-700'
               }`}
             >
@@ -1725,7 +1728,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   disabled={restoreUploading || !restoreFile}
                   className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
                     restoreUploading || !restoreFile
-                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
                       : 'bg-amber-700 text-white hover:bg-amber-800'
                   }`}
                 >
@@ -2018,7 +2021,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
               {teams.length === 0 && (
                 <div className="text-center py-12 text-slate-500">
-                  <span className="material-symbols-outlined text-6xl mb-4 opacity-50">groups_off</span>
+                  <span className="material-symbols-outlined text-6xl mb-4 opacity-50">group_off</span>
                   <p>{t('adminTeams.empty')}</p>
                 </div>
               )}
@@ -2502,7 +2505,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   disabled={backupCreating}
                   className={`px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 ${
                     backupCreating
-                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
                       : 'bg-teal-700 text-white hover:bg-teal-800'
                   }`}
                 >
