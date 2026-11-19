@@ -710,8 +710,9 @@ const controlAt = (page: Page, at: { x: number; y: number }) => page.evaluate(({
 test('taps after one on a group’s title that closes an editor press nothing the layout moved under them, past the browser’s count', async ({ browser }) => {
   const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
   const context = await browser.newContext({ ...phone, locale: 'en-US' });
-  // The font CI renders in (it has no Inter), so that a run here lays the
-  // board out as CI does: the points below are measured, never assumed.
+  // One wide font, the one Linux falls back to, so that a run here lays the
+  // board out as CI does whatever fonts the machine has: the points below are
+  // measured, never assumed.
   await context.addInitScript(() => {
     document.addEventListener('DOMContentLoaded', () => {
       const style = document.createElement('style');

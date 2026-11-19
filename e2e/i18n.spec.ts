@@ -110,11 +110,13 @@ test.describe('template language', () => {
  *    in both languages, and below that the current phase stays in view, also
  *    after a resize or a language switch.
  *
- * The app asks for Inter, which a developer machine may have and CI does not:
- * CI fell back to a wider font and overflowed by a pixel where this machine
- * had 19 to spare. The test therefore renders in DejaVu Sans, the wide font
- * Linux falls back to, so it measures the same thing everywhere and a header
- * that fits it has room for the narrower fonts phones and laptops use.
+ * The app serves its own typeface (Geist, since 45.0), which falls back to the
+ * system font while its file is on its way or when it is blocked. The test
+ * therefore renders in DejaVu Sans, the wide font Linux falls back to: it
+ * measures the worst case, the same everywhere, and a header that fits it has
+ * room for the narrower fonts phones and laptops use. (Until 45.0 the app
+ * asked for Inter, which CI did not have: CI's fallback overflowed by a pixel
+ * where a developer's machine had 19 to spare.)
  */
 test.describe('headers fit in both languages', () => {
   const WIDTHS = [320, 390, 768, 1024, 1280];

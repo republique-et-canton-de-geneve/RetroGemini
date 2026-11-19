@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Route } from '@playwright/test';
 import { readFileSync, readdirSync } from 'fs';
 import { join, relative } from 'path';
 import { fileURLToPath } from 'url';
@@ -181,15 +181,34 @@ test('every icon name the application can draw is one glyph of the font', async 
   ).toEqual([]);
 });
 
-test('with the Rounded file unreachable, the icons come from the previous cut, never as words', async ({ page }) => {
-  // What a page of this release meets when a pod of 44.x answers during a
-  // rolling update: that pod has no Rounded file. The second `src` of the
-  // @font-face is the Outlined cut it does have.
-  await page.route('**/fonts/material-symbols-rounded.woff2', (route) => route.abort());
-  const fallback = page.waitForResponse((response) => response.url().endsWith('/fonts/material-symbols-outlined.woff2'));
-  await openApp(page);
-  const names = allNames();
-  const boxes = await measure(page, [...names.keys()]);
-  expect((await fallback).status()).toBe(200);
-  expect(tooWide(boxes).map((box) => `${box.name} (${Math.round(box.width)}px, ${names.get(box.name)})`)).toEqual([]);
-});
+// What a page of this release meets when a pod of 44.x answers during a
+// rolling update: that pod has no Rounded file. The second `src` of the
+// @font-face is the Outlined cut it does have. Two ways the first source can
+// fail, and both must fall through: the request dies, or (what such a pod
+// really does for a file it does not know outside /assets) it answers the
+// single-page application's HTML with a 200, which is not a font.
+const UNREACHABLE: ReadonlyArray<[string, (route: Route) => Promise<void>]> = [
+  ['refused', (route) => route.abort()],
+  [
+    'answered with the page of a pod that does not have it',
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html; charset=utf-8',
+        headers: { 'Cache-Control': 'no-cache' },
+        body: '<!doctype html><html><head><title>RetroGemini</title></head><body><div id="root"></div></body></html>',
+      }),
+  ],
+];
+
+for (const [how, answer] of UNREACHABLE) {
+  test(`with the Rounded file ${how}, the icons come from the previous cut, never as words`, async ({ page }) => {
+    await page.route('**/fonts/material-symbols-rounded.woff2', answer);
+    const fallback = page.waitForResponse((response) => response.url().endsWith('/fonts/material-symbols-outlined.woff2'));
+    await openApp(page);
+    const names = allNames();
+    const boxes = await measure(page, [...names.keys()]);
+    expect((await fallback).status()).toBe(200);
+    expect(tooWide(boxes).map((box) => `${box.name} (${Math.round(box.width)}px, ${names.get(box.name)})`)).toEqual([]);
+  });
+}
