@@ -3,7 +3,7 @@ import { describe, it, expect, vi, onTestFinished } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import LanguageProvider from '../i18n/LanguageProvider';
 import AvatarPicker from '../components/common/AvatarPicker';
-import { AVATAR_FAMILIES, AVATAR_FAMILY_LABEL_KEYS, AVATAR_NAME_KEYS } from '../components/common/avatars/avatarArt';
+import { AVATAR_FAMILIES, AVATAR_FAMILY_LABEL_KEYS, AVATAR_FAMILY_PITCH_KEYS, AVATAR_NAME_KEYS } from '../components/common/avatars/avatarArt';
 import { avatarColorClasses } from '../utils/participantColors';
 import { en, fr } from '../i18n/messages';
 import { classColor, effectivePair, tokenContrast } from './helpers/tailwindTheme';
@@ -217,6 +217,30 @@ describe('AvatarPicker', () => {
     expect(screen.getByRole('button', { name: 'Cat' }).getAttribute('aria-pressed')).toBe('true');
   });
 
+  // A change of the stored choice that came while a write ran (a pick made in
+  // another browser) is the stored one once that write fails: kept aside, the
+  // dialog marked the old choice, and a click on it went nowhere.
+  it('marks the stored choice after a failed write, a change made meanwhile included', async () => {
+    const first = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    const props = { open: true, onClose: vi.fn(), colorClasses: avatarColorClasses('bg-rose-500'), initials: 'LM', name: 'Léa Martin', onPick };
+    const { rerender } = render(
+      <LanguageProvider initialLanguage="en"><AvatarPicker {...props} currentAvatarId="owl" /></LanguageProvider>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Fox' }));
+    rerender(<LanguageProvider initialLanguage="en"><AvatarPicker {...props} currentAvatarId="cat" /></LanguageProvider>);
+    await act(async () => { first.reject(new Error(AVATAR_NOT_SAVED)); });
+    await screen.findByRole('alert');
+    expect(screen.getByRole('button', { name: 'Cat' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('button', { name: 'Fox' }).getAttribute('aria-pressed')).toBe('false');
+    // Going back to the previous choice is a write again.
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    expect(onPick).toHaveBeenCalledTimes(2);
+    expect(onPick).toHaveBeenLastCalledWith('owl');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('true'));
+  });
+
   it('writes nothing while the choice cannot be saved, and says why', () => {
     const { onPick } = renderPicker({ disabled: true });
     const owl = screen.getByRole('button', { name: 'Owl' });
@@ -282,11 +306,54 @@ describe('AvatarPicker', () => {
     expect(classColor(screen.getByRole('button', { name: 'Cat' }).className, 'bg')).toBe('white');
     expect(tokenContrast('indigo-600', 'indigo-50')).toBeGreaterThanOrEqual(3);
     expect(tokenContrast('indigo-600', 'white')).toBeGreaterThanOrEqual(3);
-    // Every control shows where the keyboard is.
+    // Every control shows where the keyboard is with a solid outline, as the
+    // phase bar does: a translucent ring measured 1.6:1, and forced colours
+    // drop a ring (a box-shadow) while they keep an outline.
     for (const control of within(dialog).getAllByRole('button').concat(screen.getAllByRole('tab'))) {
-      expect(control.className, control.textContent ?? '').toMatch(/focus-visible:ring/);
+      const classes = control.className.split(/\s+/);
+      expect(classes, control.textContent ?? '').toEqual(expect.arrayContaining([
+        'focus-visible:outline-2', 'focus-visible:outline-offset-2', 'focus-visible:outline-indigo-600',
+      ]));
+      expect(classes.filter((token) => /outline-(none|hidden)|focus-visible:ring/.test(token)), control.textContent ?? '').toEqual([]);
     }
+    // Offset by 2px, the outline lies on the dialog's white surface; the brand
+    // line clears 3:1 there and on the brand tint of a chosen tile.
+    expect(tokenContrast('indigo-600', 'white')).toBeGreaterThanOrEqual(3);
+    expect(tokenContrast('indigo-600', 'indigo-50')).toBeGreaterThanOrEqual(3);
     await act(async () => { first.resolve(); });
+  });
+
+  // The selected tab is told apart by more than its hue (WCAG 1.4.1): its
+  // words are underlined, the others' are not.
+  it('marks the selected family with an underline, not colour alone', () => {
+    renderPicker();
+    const tabs = screen.getAllByRole('tab');
+    for (const [index, tab] of tabs.entries()) {
+      fireEvent.click(tabs[index]);
+      for (const other of screen.getAllByRole('tab')) {
+        const underlined = other.className.split(/\s+/).includes('underline');
+        expect(underlined, `${other.textContent} while ${tab.textContent} is selected`).toBe(other === tab);
+      }
+    }
+  });
+
+  it.each([
+    ['en', en],
+    ['fr', fr],
+  ] as const)("says what the selected family holds, in the panel it describes (%s)", (language, messages) => {
+    renderPicker({}, language);
+    const tabs = screen.getAllByRole('tab');
+    for (const [index, family] of AVATAR_FAMILIES.entries()) {
+      fireEvent.click(tabs[index]);
+      const panel = screen.getByRole('tabpanel');
+      // Matched on the raw text: getByText normalises the French no-break spaces in the element only.
+      const sentence = messages[AVATAR_FAMILY_PITCH_KEYS[family.id]];
+      const pitch = within(panel).getByText((_content, element) => element?.tagName === 'P' && element.textContent === sentence);
+      // Read with the panel: a screen reader entering it hears the pitch.
+      expect(panel.getAttribute('aria-describedby')).toBe(pitch.id);
+      const pair = effectivePair(pitch);
+      expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it('lays the pictures out four to a row at least on a phone, each a 44px target', () => {

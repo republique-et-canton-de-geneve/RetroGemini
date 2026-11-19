@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
+  ACCEPTED_AVATAR_IDS,
+  ACCEPTED_ONLY_AVATAR_IDS,
   AVATAR_FAMILIES,
   AVATAR_IDS,
+  isAcceptedAvatarId,
   isAvatarId,
   memberAvatar,
   memberAvatarId,
@@ -72,6 +75,45 @@ describe('isAvatarId and toAvatarId', () => {
   ])('refuse %s', (_label, value) => {
     expect(isAvatarId(value)).toBe(false);
     expect(toAvatarId(value)).toBeNull();
+  });
+});
+
+// Adding a picture takes two releases: the first only accepts its id (every
+// pod of the rollout then stores it), the next offers and draws it. So the
+// route reads a list that may be wider than the one the picker shows, never
+// narrower: an offered id a pod refuses is a pick that cannot be saved.
+describe('the ids the route accepts', () => {
+  it('holds every offered id, then the accepted-only ones, each once', () => {
+    expect(ACCEPTED_AVATAR_IDS).toEqual([...AVATAR_IDS, ...ACCEPTED_ONLY_AVATAR_IDS]);
+    expect(new Set(ACCEPTED_AVATAR_IDS).size).toBe(ACCEPTED_AVATAR_IDS.length);
+    for (const id of AVATAR_IDS) expect(isAcceptedAvatarId(id), id).toBe(true);
+  });
+
+  it('keeps an accepted-only id out of every family, of the stored shape, and frozen', () => {
+    const offered = new Set<string>(AVATAR_IDS);
+    for (const id of ACCEPTED_ONLY_AVATAR_IDS) {
+      expect(offered.has(id), id).toBe(false);
+      expect(id).toMatch(/^[a-z]+(-[a-z]+)*$/);
+      expect(isAcceptedAvatarId(id), id).toBe(true);
+      // Accepted, never drawn: this release has no picture for it.
+      expect(isAvatarId(id), id).toBe(false);
+    }
+    expect(Object.isFrozen(ACCEPTED_ONLY_AVATAR_IDS)).toBe(true);
+    expect(Object.isFrozen(ACCEPTED_AVATAR_IDS)).toBe(true);
+  });
+
+  it.each([
+    ['null', null],
+    ['an empty string', ''],
+    ['another case', 'Fox'],
+    ['__proto__', '__proto__'],
+    ['toString', 'toString'],
+    ['a class string', 'fixed inset-0 z-50'],
+    ['a number', 7],
+    ['a String object', new String('fox')],
+    ['an id no release accepts yet', 'dragon']
+  ])('refuses %s', (_label, value) => {
+    expect(isAcceptedAvatarId(value)).toBe(false);
   });
 });
 

@@ -24,7 +24,7 @@ const avatars: Record<keyof typeof en, string> = {
   'avatars.name.frog': 'Grenouille',
   'avatars.name.bee': 'Abeille',
   'avatars.name.bear': 'Ours',
-  'avatars.name.penguin': 'Pingouin',
+  'avatars.name.penguin': 'Manchot',
   'avatars.name.rabbit': 'Lapin',
   'avatars.name.turtle': 'Tortue',
   'avatars.name.octopus': 'Poulpe',

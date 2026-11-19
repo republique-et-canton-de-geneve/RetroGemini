@@ -3150,13 +3150,21 @@ Rules:
   entry** with the team's choice when that choice is newer
   (`ownAvatarEntry`), through the screen's normal `updateSession`. Nobody
   writes another person's entry, and a team member row never gains an `avatar`
-  field.
+  field. When drawing, `sessionAvatarOf` takes the entry only when its
+  `avatarAt` is at least the team choice's `at` (an entry with no time counts
+  as 0), otherwise the team's: a pick made on the dashboard stamps no session,
+  and the session's copy must not outlive it.
 - **Values are copied as stored and checked only to draw.** `toAvatarId` is
   applied where a picture is drawn (`Avatar`, `sessionAvatarOf`,
   `memberAvatarId`), never where a value is copied: a tab or pod that does not
   know a newer id keeps it as it is, and draws the initials. Adding avatars
-  therefore takes **two releases**: every pod accepts the id, then the picker
-  offers it.
+  therefore takes **two releases**: first the id goes into
+  `ACCEPTED_ONLY_AVATAR_IDS` in `utils/avatars.js`, which the route accepts
+  (`isAcceptedAvatarId`) and the picker neither offers nor draws; the next
+  release moves it into its family with its art and its names. Offered at once,
+  a pick routed to a pod of the previous release during the rollout would be
+  refused for good (`invalid_avatar` is final). `__tests__/avatars.test.ts`
+  checks that the accepted set holds every offered id.
 - **An anonymous session draws no chosen avatar, anywhere.** One resolver
   decides, `sessionAvatarOf(session, team, memberId)`, and it answers `null`
   while the session is anonymous, wherever the session stores that (both
@@ -3165,7 +3173,11 @@ Rules:
   `App.tsx` and `components/` and refuses a read of `.avatar`, `.avatarAt` or
   `.memberAvatars` anywhere but in `sessionAvatars.ts` or inside a call to
   `sessionAvatarOf`, `ownAvatarEntry`, `memberAvatar` or `memberAvatarId`, so a
-  new screen cannot bypass the rule. Outside a session (the dashboard, the join
+  new screen cannot bypass the rule. Inside the session screens (`Session.tsx`,
+  `HealthCheckSession.tsx`, `components/session/**`, the resolver excepted) it
+  also reports any call to `memberAvatar` or `memberAvatarId`, which hide
+  nothing in an anonymous session: a session draws through `sessionAvatarOf`
+  only. Outside a session (the dashboard, the join
   screen) the callers use `memberAvatarId(team, id)`.
 - **A picture is data, never markup.** `components/common/avatars/avatarArt.ts`
   holds each picture as a list of shapes with a closed vocabulary (eight tags,

@@ -10,6 +10,18 @@ import {
 } from '../server/routes/teamAvatarRoutes.js';
 import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
+// The release that adds a picture first only accepts its id (utils/avatars.js
+// → ACCEPTED_ONLY_AVATAR_IDS, empty today). The route must read that list,
+// not the families the picker offers: 'space-whale' stands for such an id.
+const ACCEPTED_ONLY_FIXTURE = 'space-whale';
+vi.mock('../utils/avatars.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../utils/avatars.js')>();
+  return {
+    ...original,
+    isAcceptedAvatarId: (value: unknown) => value === ACCEPTED_ONLY_FIXTURE || original.isAcceptedAvatarId(value)
+  };
+});
+
 /**
  * One person's avatar, written by one narrow route (PLAN.md section 18.1).
  *
@@ -244,6 +256,12 @@ describe('POST /api/team/:teamId/member/avatar', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid_avatar' });
     expect(stored().memberAvatars).toBeUndefined();
+  });
+
+  it('stores an id this release accepts but does not offer yet, as sent', async () => {
+    const res = await pick({ memberId: 'p1', avatar: ACCEPTED_ONLY_FIXTURE });
+    expect(res.status).toBe(200);
+    expect(stored().memberAvatars).toEqual({ p1: { id: ACCEPTED_ONLY_FIXTURE, at: expect.any(Number) } });
   });
 
   it('lets two members choose at once, and both choices land', async () => {

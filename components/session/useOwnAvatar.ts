@@ -68,7 +68,14 @@ export function useOwnAvatar<S extends AvatarSession>({
       writtenKey.current = null;
       return;
     }
-    if (!canWrite || writtenKey.current === pendingKey) return;
+    // Offline, nothing is written, and a write tried just before is forgotten:
+    // the screen may have dropped it (it reads its own live flag, which goes
+    // false before this render's canWrite), so it goes out again once live.
+    if (!canWrite) {
+      writtenKey.current = null;
+      return;
+    }
+    if (writtenKey.current === pendingKey) return;
     writtenKey.current = pendingKey;
     updateRef.current((draft) => {
       const entry = ownAvatarEntry(draft, teamRef.current, me);

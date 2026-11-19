@@ -20,6 +20,12 @@ import ts from 'typescript';
  * `avatarColorSource.test.ts` does for the colour: a regular expression over
  * JSX miscounts.
  *
+ * Inside the session screens (`components/Session.tsx`,
+ * `components/HealthCheckSession.tsx` and `components/session/**`, the
+ * resolver excepted) a call to `memberAvatar` or `memberAvatarId` is reported
+ * too: they answer the team's choice with no anonymity check, so a session
+ * draws through `sessionAvatarOf` only.
+ *
  * It passed on the day it was written because nothing read the fields yet; it
  * binds whoever mounts the picker and draws the avatars.
  */
@@ -28,6 +34,12 @@ const REPO_ROOT = join(__dirname, '..');
 const RESOLVER_FILE = 'components/session/sessionAvatars.ts';
 const AVATAR_FIELDS = new Set(['avatar', 'avatarAt', 'memberAvatars']);
 const AVATAR_FUNCTIONS = new Set(['sessionAvatarOf', 'ownAvatarEntry', 'memberAvatar', 'memberAvatarId']);
+// The readers of the team's choice, which know nothing of a session's anonymity.
+const TEAM_READERS = new Set(['memberAvatar', 'memberAvatarId']);
+const isSessionScreen = (file: string): boolean =>
+  file === 'components/Session.tsx' ||
+  file === 'components/HealthCheckSession.tsx' ||
+  (file.startsWith('components/session/') && file !== RESOLVER_FILE);
 
 const sourceFilesUnder = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -93,7 +105,13 @@ const scan = (sources: ReadonlyArray<{ file: string; text: string }>): Offence[]
   for (const { file, text } of sources) {
     if (file === RESOLVER_FILE) continue;
     const sourceFile = parse(file, text);
+    const sessionScreen = isSessionScreen(file);
     visitAll(sourceFile, (node) => {
+      if (sessionScreen && ts.isCallExpression(node) && TEAM_READERS.has(calleeName(node) ?? '')) {
+        const line = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+        offences.push({ where: `${file}:${line}`, detail: node.getText(sourceFile) });
+        return;
+      }
       const field = fieldRead(node);
       if (!field || insideAvatarCall(node)) return;
       const line = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
@@ -169,6 +187,18 @@ describe('what the avatar guard catches, on fixtures', () => {
       const Row = ({ u }) => <Avatar colorClasses={avatarColorClasses(u.color)} initials="AB" size={32} avatarId={sessionAvatarOf(session, team, u.id)} />;
     `;
     expect(found(text)).toEqual([]);
+  });
+
+  it("reports a call to the team's readers in a session screen, which hides nothing in an anonymous session", () => {
+    const card = 'const Card = ({ a }) => <Avatar colorClasses={c} initials="AB" size={24} avatarId={memberAvatarId(team, a.id)} />;';
+    expect(found(card, 'components/Session.tsx')).toEqual(['memberAvatarId(team, a.id)']);
+    expect(found('const pic = memberAvatar(team, id)?.id;', 'components/HealthCheckSession.tsx')).toEqual(['memberAvatar(team, id)']);
+    expect(found('export const pictureOf = (team, id) => avatars.memberAvatarId(team, id);', 'components/session/panel/Row.tsx'))
+      .toEqual(['avatars.memberAvatarId(team, id)']);
+    // Outside a session, and in the resolver, they are the readers to use.
+    expect(found(card, 'components/Dashboard.tsx')).toEqual([]);
+    expect(found('const id = memberAvatarId(team, memberId);', RESOLVER_FILE)).toEqual([]);
+    expect(found('const shown = sessionAvatarOf(session, team, a.id);', 'components/Session.tsx')).toEqual([]);
   });
 
   it('lets the resolver file read the fields, and nobody else', () => {

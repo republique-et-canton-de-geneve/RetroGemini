@@ -1,6 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import { isValidRaterId } from '../../utils/actionImpact.js';
-import { isAvatarId, isMemberAvatarEntry, memberAvatar } from '../../utils/avatars.js';
+import { isAcceptedAvatarId, isMemberAvatarEntry, memberAvatar } from '../../utils/avatars.js';
 import { NO_OP_LIVE_SESSION_PATCH } from '../services/liveSessionRename.js';
 
 /**
@@ -139,7 +139,9 @@ const registerTeamAvatarRoutes = ({ app, authenticateTeam, atomicUpdateTeam, liv
       }
       // Refused, never coerced: an id this pod does not know may be one a
       // later release offers, and writing it as "none" would erase a choice.
-      if (avatar !== null && !isAvatarId(avatar)) {
+      // The accepted list may be wider than the offered one (two releases per
+      // picture, utils/avatars.js → ACCEPTED_ONLY_AVATAR_IDS).
+      if (avatar !== null && !isAcceptedAvatarId(avatar)) {
         return res.status(400).json({ error: 'invalid_avatar' });
       }
 

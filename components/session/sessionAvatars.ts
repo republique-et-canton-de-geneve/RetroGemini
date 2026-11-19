@@ -38,23 +38,32 @@ const entryOf = (session: MaybeSession, memberId: string): User | null => {
   return (entry as User | undefined) ?? null;
 };
 
-/**
- * The avatar id to draw for `memberId` in `session`, or null for initials.
- * An anonymous session shows none: a picture beside a card says who wrote it.
- * An entry that states an avatar (`null` included) wins over the team's
- * choice; without one, the team's. Outside a session, read `memberAvatarId`.
- */
-export const sessionAvatarOf = (session: MaybeSession, team: MaybeTeam, memberId: string): string | null => {
-  if (isAnonymousSession(session)) return null;
-  const entry = entryOf(session, memberId);
-  if (entry && Object.prototype.hasOwnProperty.call(entry, 'avatar')) return toAvatarId(entry.avatar);
-  return memberAvatarId(team, memberId);
-};
-
 /** An entry's `avatarAt`, or 0 when it never stated one (or stored something that is not a time). */
 const entryTime = (entry: User): number => {
   const at: unknown = entry.avatarAt;
   return typeof at === 'number' && Number.isFinite(at) ? at : 0;
+};
+
+/**
+ * The avatar id to draw for `memberId` in `session`, or null for initials.
+ * An anonymous session shows none: a picture beside a card says who wrote it.
+ * An entry that states an avatar (`null` included) wins over the team's
+ * choice when it is at least as new; otherwise, or without one, the team's: a
+ * pick made outside the session stamps no entry, and a viewer whose copy of
+ * the team holds it must not draw the older picture. Outside a session, read
+ * `memberAvatarId`.
+ */
+export const sessionAvatarOf = (session: MaybeSession, team: MaybeTeam, memberId: string): string | null => {
+  if (isAnonymousSession(session)) return null;
+  const entry = entryOf(session, memberId);
+  if (
+    entry &&
+    Object.prototype.hasOwnProperty.call(entry, 'avatar') &&
+    entryTime(entry) >= (memberAvatar(team, memberId)?.at ?? 0)
+  ) {
+    return toAvatarId(entry.avatar);
+  }
+  return memberAvatarId(team, memberId);
 };
 
 /**

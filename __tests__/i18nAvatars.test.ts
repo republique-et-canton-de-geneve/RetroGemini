@@ -13,7 +13,7 @@ import {
  * The "avatars" namespace: the names a picker reads out and the family labels.
  * i18nDictionaries.test.ts checks the namespace's shape with every other one;
  * this suite checks that it is registered and that each language says what the
- * picker will show.
+ * picker will show (a name per tile, a label per tab, a pitch under the tabs).
  */
 
 const enT = createTranslator('en');
@@ -32,6 +32,8 @@ describe('the avatars namespace', () => {
   it('names an avatar and a family in the reader’s language', () => {
     expect(enT(AVATAR_NAME_KEYS.fox)).toBe('Fox');
     expect(frT(AVATAR_NAME_KEYS.fox)).toBe('Renard');
+    // The bird the picture draws: a "pingouin" is the razorbill, which flies.
+    expect(frT(AVATAR_NAME_KEYS.penguin)).toBe('Manchot');
     expect(enT(AVATAR_FAMILY_LABEL_KEYS.monsters)).toBe('Little monsters');
     expect(frT(AVATAR_FAMILY_LABEL_KEYS.monsters)).toBe('Petits monstres');
   });

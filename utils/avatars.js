@@ -50,10 +50,23 @@ export const AVATAR_IDS = Object.freeze(AVATAR_FAMILIES.flatMap((entry) => entry
 // A Set, so `has` compares strings: no key of Object.prototype can match.
 const AVATAR_ID_SET = new Set(AVATAR_IDS);
 
-// The shape of an id some release may store. Wider than the list on purpose:
-// adding avatars takes two releases (every pod accepts the id, then the picker
-// offers it), and a tab or pod that does not know a newer id must keep it as
-// stored rather than erase it. It is never drawn unless the list has it.
+/**
+ * Ids this release accepts from the route but neither offers nor draws.
+ * Adding a picture takes two releases, because during a rolling update a new
+ * tab's pick can reach an older pod: first, a release puts its id here only
+ * (every pod then accepts it); next, a release moves it into its family, with
+ * its art and its names in both languages, and the picker offers it.
+ */
+export const ACCEPTED_ONLY_AVATAR_IDS = Object.freeze([]);
+
+/** Every id the route accepts: the offered ones, then the accepted-only ones. */
+export const ACCEPTED_AVATAR_IDS = Object.freeze([...AVATAR_IDS, ...ACCEPTED_ONLY_AVATAR_IDS]);
+
+const ACCEPTED_AVATAR_ID_SET = new Set(ACCEPTED_AVATAR_IDS);
+
+// The shape of an id some release may store. Wider than the lists on purpose:
+// a tab or pod that does not know a newer id must keep it as stored rather
+// than erase it. It is never drawn unless the families have it.
 const STORED_AVATAR_ID = /^[a-z]+(-[a-z]+)*$/;
 const STORED_AVATAR_ID_MAX_LENGTH = 64;
 
@@ -64,6 +77,15 @@ const STORED_AVATAR_ID_MAX_LENGTH = 64;
  * @returns {boolean}
  */
 export const isAvatarId = (value) => typeof value === 'string' && AVATAR_ID_SET.has(value);
+
+/**
+ * True when the route may store `value`: an offered id, or one this release
+ * accepts before a later one offers it (`ACCEPTED_ONLY_AVATAR_IDS`).
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export const isAcceptedAvatarId = (value) => typeof value === 'string' && ACCEPTED_AVATAR_ID_SET.has(value);
 
 /**
  * The avatar id `value` names, or `null` for anything this release cannot

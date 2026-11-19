@@ -5,6 +5,7 @@ import { motionAllowed } from './motion/effects';
 import {
   AVATAR_FAMILIES,
   AVATAR_FAMILY_LABEL_KEYS,
+  AVATAR_FAMILY_PITCH_KEYS,
   AVATAR_NAME_KEYS,
   type AvatarArtId,
   type AvatarFamilyId,
@@ -22,8 +23,8 @@ import { translateErrorMessage } from '../../i18n/errorMessages';
  *   meanwhile waits for it (the latest one, if several): two writes racing
  *   could land in either order.
  * - A choice is shown as made only once `onPick` resolved. A failure stays on
- *   screen in words until the next attempt, and the previous choice stays
- *   selected, because it is still the stored one.
+ *   screen in words until the next attempt, and the stored choice is the one
+ *   selected: the previous one, or the one the opener reported meanwhile.
  * - The dialog stays open after a choice, so the person can change their mind;
  *   "Done" closes it. ModalDialog gives the focus back to the opener.
  */
@@ -52,7 +53,9 @@ const familyOf = (choice: Choice): AvatarFamilyId => {
   return AVATAR_FAMILIES.find((family) => id !== null && (family.avatars as readonly string[]).includes(id))?.id ?? AVATAR_FAMILIES[0].id;
 };
 
-const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-600/30';
+// A solid outline, as the phase bar's: a translucent ring measured 1.6:1, and
+// forced colours drop a box-shadow but keep an outline.
+const FOCUS_RING = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600';
 const TILE_BASE = `grid place-items-center aspect-square min-h-11 p-1.5 rounded-xl border transition-shadow ${FOCUS_RING}`;
 const TILE_OFF = 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md';
 const TILE_ON = 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-600/20';
@@ -77,6 +80,7 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
   const titleId = `${baseId}-title`;
   const tabId = (family: AvatarFamilyId) => `${baseId}-tab-${family}`;
   const panelId = `${baseId}-panel`;
+  const pitchId = `${baseId}-pitch`;
 
   const [chosen, setChosen] = useState<Choice>(currentAvatarId ?? null);
   const [family, setFamily] = useState<AvatarFamilyId>(() => familyOf(currentAvatarId ?? null));
@@ -93,6 +97,10 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
   const onPickRef = useRef(onPick);
   onPickRef.current = onPick;
   const tabRefs = useRef<Partial<Record<AvatarFamilyId, HTMLButtonElement | null>>>({});
+  // The opener's latest word, also while a write runs: a failed write falls
+  // back to it, not to what was selected when the write began.
+  const storedRef = useRef<Choice>(currentAvatarId ?? null);
+  storedRef.current = currentAvatarId ?? null;
 
   // The opener's word for the stored choice, once no write of ours is pending.
   useEffect(() => {
@@ -143,6 +151,8 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
       }
     } catch (err) {
       setError(translateErrorMessage(err instanceof Error ? err.message : null, t));
+      chosenRef.current = storedRef.current;
+      setChosen(storedRef.current);
     }
     const next = waiting.current;
     waiting.current = null;
@@ -236,7 +246,7 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
               tabIndex={selected ? 0 : -1}
               onClick={() => setFamily(entry.id)}
               onKeyDown={(event) => onTabKeyDown(event, index)}
-              className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-sm font-semibold ${selected ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-100'} ${FOCUS_RING}`}
+              className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-sm font-semibold ${selected ? 'bg-indigo-50 text-indigo-700 underline decoration-2 underline-offset-4' : 'text-slate-600 hover:bg-slate-100'} ${FOCUS_RING}`}
             >
               {t(AVATAR_FAMILY_LABEL_KEYS[entry.id])}
             </button>
@@ -244,7 +254,8 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
         })}
       </div>
 
-      <div role="tabpanel" id={panelId} aria-labelledby={tabId(current.id)}>
+      <div role="tabpanel" id={panelId} aria-labelledby={tabId(current.id)} aria-describedby={pitchId}>
+        <p id={pitchId} className="mb-2 text-sm text-slate-600">{t(AVATAR_FAMILY_PITCH_KEYS[current.id])}</p>
         <div
           data-avatar-grid
           aria-busy={saving || undefined}

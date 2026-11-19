@@ -42,13 +42,27 @@ describe('sessionAvatarOf', () => {
     expect(sessionAvatarOf({ ...retro, settings: { isAnonymous: false } }, team, 'bob')).toBe('owl');
   });
 
-  it("takes the entry's avatar when the entry states one, before the team's", () => {
-    const session = sessionWith([person('ada', { avatar: 'cat', avatarAt: 50 })]);
-    expect(sessionAvatarOf(session, team, 'ada')).toBe('cat');
+  it("takes the entry's avatar when the entry is at least as new as the team's choice", () => {
+    expect(sessionAvatarOf(sessionWith([person('ada', { avatar: 'cat', avatarAt: 150 })]), team, 'ada')).toBe('cat');
+    // A tie is the same choice, written by the server into both: the entry's.
+    expect(sessionAvatarOf(sessionWith([person('ada', { avatar: 'cat', avatarAt: 100 })]), team, 'ada')).toBe('cat');
+    // An entry stating an avatar, with no team choice at all, is the only word.
+    expect(sessionAvatarOf(sessionWith([person('carol', { avatar: 'cat', avatarAt: 5 })]), team, 'carol')).toBe('cat');
   });
 
-  it('draws nothing for an entry that states null, even when the team holds a choice', () => {
-    const session = sessionWith([person('ada', { avatar: null, avatarAt: 50 })]);
+  // The newer `at` wins when drawing too: a pick made on the Dashboard of
+  // another tab stamps no session, so a viewer whose team copy holds it must
+  // not draw the older picture the entry still states.
+  it("takes the team's choice when it is newer than the entry's", () => {
+    expect(sessionAvatarOf(sessionWith([person('ada', { avatar: 'cat', avatarAt: 50 })]), team, 'ada')).toBe('fox');
+    expect(sessionAvatarOf(sessionWith([person('ada', { avatar: null, avatarAt: 50 })]), team, 'ada')).toBe('fox');
+    // An entry with no time (or one that is not a time) counts as 0.
+    expect(sessionAvatarOf(sessionWith([person('ada', { avatar: 'cat' })]), team, 'ada')).toBe('fox');
+    expect(sessionAvatarOf(sessionWith([person('ada', { avatar: 'cat', avatarAt: 'soon' as unknown as number })]), team, 'ada')).toBe('fox');
+  });
+
+  it('draws nothing for an entry that states null and is the newer word', () => {
+    const session = sessionWith([person('ada', { avatar: null, avatarAt: 150 })]);
     expect(sessionAvatarOf(session, team, 'ada')).toBeNull();
   });
 
@@ -59,13 +73,13 @@ describe('sessionAvatarOf', () => {
   });
 
   it('draws nothing for an id this release does not draw, from the entry or the team', () => {
-    expect(sessionAvatarOf(sessionWith([person('ada', { avatar: 'unicorn' })]), team, 'ada')).toBeNull();
+    expect(sessionAvatarOf(sessionWith([person('ada', { avatar: 'unicorn', avatarAt: 150 })]), team, 'ada')).toBeNull();
     expect(sessionAvatarOf(sessionWith([]), teamWith({ ada: { id: 'unicorn', at: 1 } }), 'ada')).toBeNull();
   });
 
   it('refuses intruder values and a hostile map', () => {
     for (const avatar of ['__proto__', 'constructor', 'fixed inset-0', '<svg>', 'Fox', ' fox']) {
-      expect(sessionAvatarOf(sessionWith([person('ada', { avatar })]), team, 'ada'), avatar).toBeNull();
+      expect(sessionAvatarOf(sessionWith([person('ada', { avatar, avatarAt: 150 })]), team, 'ada'), avatar).toBeNull();
     }
     const hostile = teamWith(JSON.parse('{"__proto__": {"id": "fox", "at": 1}, "ada": "fox", "bob": {"id": 3, "at": 1}}'));
     expect(sessionAvatarOf(sessionWith([]), hostile, 'ada')).toBeNull();
@@ -85,7 +99,7 @@ describe('sessionAvatarOf', () => {
   });
 
   it('is one function for both session types (it reads only isAnonymous and participants)', () => {
-    const healthCheck = { id: 'hc1', templateId: 'x', isAnonymous: false, participants: [person('ada', { avatar: 'bee' })] };
+    const healthCheck = { id: 'hc1', templateId: 'x', isAnonymous: false, participants: [person('ada', { avatar: 'bee', avatarAt: 150 })] };
     expect(sessionAvatarOf(healthCheck, team, 'ada')).toBe('bee');
     expect(sessionAvatarOf({ ...healthCheck, isAnonymous: true }, team, 'ada')).toBeNull();
   });
