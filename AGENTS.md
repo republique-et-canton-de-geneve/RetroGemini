@@ -3041,6 +3041,107 @@ and `server/services/teamRestore.js` (pure) decides the record it writes.
   recorded as `team.restore` — its own name, so the trail tells "the store was
   rolled back" from "one team was".
 
+## Avatars
+
+Each person can choose a picture, shown in place of their initials wherever
+they are drawn: on their cards, in the comments, in the participants panel, in
+the headers, on the dashboard's members tab and on the join screen. Six
+families of twenty pictures; the picture takes the person's own tone. The
+pieces: `utils/avatars.js` (the ids, shared by server and client),
+`server/routes/teamAvatarRoutes.js` (the one writer),
+`components/common/avatars/` (the pictures, as data, and `AvatarArt`),
+`components/common/Avatar.tsx` (draws a person: initials, or a picture when
+given an `avatarId`), `components/common/AvatarPicker.tsx` (the dialog),
+`components/session/sessionAvatars.ts` (which avatar a session shows, and the
+own-entry rule), `components/session/useOwnAvatar.ts` (what both session
+screens share) and `components/session/ViewerAvatarButton.tsx` (the opener).
+Rules:
+
+- **The choice is the team's, keyed by member, with a date.**
+  `Team.memberAvatars[memberId] = { id, at }`, written by
+  `POST /api/team/:teamId/member/avatar` alone (see the API table and *Data
+  Persistence Structure*). `at` is the server's clock and **the newer `at`
+  wins everywhere**: a browser holding an old copy of the team never pushes an
+  old choice back, and two browsers of one person write the same value. That
+  is why this feature needs **no own-change ledger slice**.
+- **A session shows its own copy.** A participant entry of a session carries
+  `avatar` and `avatarAt`. The route stamps the entry of the session the pick
+  came from (the room sees it at once); and on entering a session, or when the
+  team's map changes while in it, each client writes a **copy of its own
+  entry** with the team's choice when that choice is newer
+  (`ownAvatarEntry`), through the screen's normal `updateSession`. Nobody
+  writes another person's entry, and a team member row never gains an `avatar`
+  field.
+- **Values are copied as stored and checked only to draw.** `toAvatarId` is
+  applied where a picture is drawn (`Avatar`, `sessionAvatarOf`,
+  `memberAvatarId`), never where a value is copied: a tab or pod that does not
+  know a newer id keeps it as it is, and draws the initials. Adding avatars
+  therefore takes **two releases**: every pod accepts the id, then the picker
+  offers it.
+- **An anonymous session draws no chosen avatar, anywhere.** One resolver
+  decides, `sessionAvatarOf(session, team, memberId)`, and it answers `null`
+  while the session is anonymous, wherever the session stores that (both
+  session types keep it under `settings.isAnonymous`): a picture beside a card
+  would say who wrote it. `__tests__/avatarSource.test.ts` walks the AST of
+  `App.tsx` and `components/` and refuses a read of `.avatar`, `.avatarAt` or
+  `.memberAvatars` anywhere but in `sessionAvatars.ts` or inside a call to
+  `sessionAvatarOf`, `ownAvatarEntry`, `memberAvatar` or `memberAvatarId`, so a
+  new screen cannot bypass the rule. Outside a session (the dashboard, the join
+  screen) the callers use `memberAvatarId(team, id)`.
+- **A picture is data, never markup.** `components/common/avatars/avatarArt.ts`
+  holds each picture as a list of shapes with a closed vocabulary (eight tags,
+  seven classes, a fixed list of attributes), and `AvatarArt` draws them with
+  `React.createElement`: the id comes from a value another client stored, so
+  nothing of it may reach the DOM as a string. An id it does not know draws
+  nothing. The file is the source: to add or change a picture, edit its shapes
+  there, with its id in `utils/avatars.js` and its name in both `avatars`
+  dictionaries (`__tests__/avatarArt.test.tsx` checks the three agree).
+- **The picture is decoration; the person's name is the name.** An `Avatar`
+  without a `label` is hidden from assistive technology (a name is written
+  beside it); with one it is an image named by the person, never by the
+  picture. The opener is a button named "<name>, choose my avatar"; while it
+  shows initials they lead its name ("AL, Alice Roux, choose my avatar"), as
+  the picker's own initials tile does ("LM, My initials"): axe's
+  `label-content-name-mismatch` reads visible initials as the button's text
+  (WCAG 2.5.3).
+- **The opener is where the viewer's avatar is**: both session headers (every
+  width for a participant, from 360px for a facilitator, whose header also
+  carries invite and play) and the dashboard's top bar (every width), measured
+  by the header-fit spec. The picker writes one choice at a time, keeps the
+  latest pick made during a write, shows a choice only once it is stored, and
+  keeps its error on screen when the save fails. `App` puts the answered map
+  on a **new** team object, only for the team still open, so nothing survives a
+  sign-out.
+
+Residuals, stated on purpose:
+
+- **Everyone who logs in with the team password is one member** (the
+  facilitator's seat), and so shares one avatar, as that seat already shares
+  one name and colour.
+- **Any team credential can set any member's avatar.** "Your own" is a rule of
+  the screens; the route checks the credential, the member id's shape and the
+  avatar id, not who is asking (it cannot: a credential names a team, not a
+  person). `SECURITY.md` says so.
+- **A member who comes back under a new id starts without an avatar**, and a
+  pick made on a merge source after the merge does not reach the merged team.
+- **During a rolling update** a pod from before 45.0 answers the route with an
+  HTML 404, which the client retries for about seven seconds before saying the
+  avatar could not be saved; a 44.x tab ignores `memberAvatars` and draws
+  initials. After a rollback the map is inert and intact: no older writer
+  touches the key.
+- **In an anonymous session the comments dialog still names each comment's
+  author**, as it did before avatars; only the pictures are hidden there.
+
+The guards: `__tests__/avatars.test.ts`, `teamAvatarRoutes.test.ts`,
+`dataServiceAvatar.test.ts`, the avatar cases of `teamMerge.test.ts`,
+`teamRestore.test.ts` and `archiveContract.test.ts`, `avatarArt.test.tsx`,
+`i18nAvatars.test.ts`, `avatarComponent.test.tsx`, `avatarPicker.test.tsx`,
+`sessionAvatars.test.ts`, `avatarScreensWiring.test.tsx` (both session types:
+named, anonymous, the own-entry write), `avatarSource.test.ts`,
+`avatarColorSource.test.ts`, and `e2e/avatars.spec.ts` (two browsers: a pick
+reaching the other's panel and card, a reload, a clear, a refused save, an
+anonymous retrospective, and the picker in the axe audit).
+
 ## Jira
 
 Teams create their actions as Jira issues from the Review step (retrospective
