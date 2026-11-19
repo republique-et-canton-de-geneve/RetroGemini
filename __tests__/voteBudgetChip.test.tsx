@@ -30,20 +30,20 @@ afterEach(() => {
 
 describe('VoteBudget', () => {
   it('keeps the sentence exactly, as the only text of the chip', () => {
-    const { container } = render(<VoteBudget left={4} budget={5} unlimited={false} />);
+    const { container } = render(<VoteBudget left={4} cast={1} budget={5} unlimited={false} />);
     const chip = screen.getByText('4 votes remaining');
     expect(chip.getAttribute('data-vote-budget')).toBe('');
     expect(chip.textContent).toBe('4 votes remaining');
     expect(container.querySelectorAll('*')).not.toHaveLength(0);
-    render(<VoteBudget left={1} budget={5} unlimited={false} />);
+    render(<VoteBudget left={1} cast={4} budget={5} unlimited={false} />);
     expect(screen.getByText('1 vote remaining')).toBeTruthy();
   });
 
   it('keeps the French sentence exactly', () => {
     render(
       <LanguageProvider initialLanguage="fr">
-        <VoteBudget left={3} budget={5} unlimited={false} />
-        <VoteBudget left={1} budget={5} unlimited={false} />
+        <VoteBudget left={3} cast={2} budget={5} unlimited={false} />
+        <VoteBudget left={1} cast={4} budget={5} unlimited={false} />
       </LanguageProvider>,
     );
     // The no-break space before the colon, as the dictionary writes it.
@@ -54,13 +54,13 @@ describe('VoteBudget', () => {
   });
 
   it('never says a negative number', () => {
-    render(<VoteBudget left={-2} budget={3} unlimited={false} />);
+    render(<VoteBudget left={-2} cast={3} budget={3} unlimited={false} />);
     expect(screen.getByText('0 votes remaining')).toBeTruthy();
   });
 
   it.each([1, 5, MAX_VOTE_TOKENS])('draws one token per vote for a budget of %i, filled while left', (budget) => {
     const left = Math.ceil(budget / 2);
-    const { container } = render(<VoteBudget left={left} budget={budget} unlimited={false} />);
+    const { container } = render(<VoteBudget left={left} cast={budget - left} budget={budget} unlimited={false} />);
     const all = tokens(container);
     expect(all).toHaveLength(budget);
     expect(all.filter((t) => t.getAttribute('data-vote-token') === 'left')).toHaveLength(left);
@@ -72,8 +72,18 @@ describe('VoteBudget', () => {
     expect(row.textContent).toBe('');
   });
 
+  it('draws no token for a vote one vote per item leaves nowhere to place', () => {
+    // Five votes, three items, none voted: three left, and nothing cast.
+    const { container, rerender } = render(<VoteBudget left={3} cast={0} budget={5} unlimited={false} />);
+    expect(tokens(container).map((t) => t.getAttribute('data-vote-token'))).toEqual(['left', 'left', 'left']);
+    // All three voted: three outlines, for the three votes given.
+    rerender(<VoteBudget left={0} cast={3} budget={5} unlimited={false} />);
+    expect(tokens(container).map((t) => t.getAttribute('data-vote-token'))).toEqual(['cast', 'cast', 'cast']);
+    expect(screen.getByText('0 votes remaining')).toBeTruthy();
+  });
+
   it.each([
-    ['above ten votes', { left: 3, budget: MAX_VOTE_TOKENS + 1, unlimited: false }],
+    ['above ten votes', { left: 3, cast: 0, budget: MAX_VOTE_TOKENS + 1, unlimited: false }],
   ])('draws no row %s, and keeps the sentence', (_case, props) => {
     const { container } = render(<VoteBudget {...props} />);
     expect(container.querySelector(VOTE_BUDGET_HOOKS.row)).toBeNull();
@@ -83,12 +93,12 @@ describe('VoteBudget', () => {
   });
 
   it('draws nothing with unlimited votes', () => {
-    const { container } = render(<VoteBudget left={3} budget={5} unlimited />);
+    const { container } = render(<VoteBudget left={3} cast={0} budget={5} unlimited />);
     expect(container.innerHTML).toBe('');
   });
 
   it('points flights at the next token and home at the row', () => {
-    const { container } = render(<VoteBudget left={0} budget={3} unlimited={false} />);
+    const { container } = render(<VoteBudget left={0} cast={3} budget={3} unlimited={false} />);
     // Nothing left: no next token, the chip is the start.
     expect(container.querySelector(VOTE_BUDGET_HOOKS.next)).toBeNull();
     expect(voteFlightStart(container)).toBe(container.querySelector(VOTE_BUDGET_HOOKS.chip));
@@ -96,7 +106,7 @@ describe('VoteBudget', () => {
   });
 
   it('measures the sentence and the tokens against the chip', () => {
-    const { container } = render(<VoteBudget left={2} budget={4} unlimited={false} />);
+    const { container } = render(<VoteBudget left={2} cast={2} budget={4} unlimited={false} />);
     expect(effectivePair(screen.getByText('2 votes remaining')).ratio).toBeGreaterThanOrEqual(4.5);
     const chipBg = effectivePair(screen.getByText('2 votes remaining')).bg;
     const cast = container.querySelector('[data-vote-token="cast"]')!;
@@ -109,7 +119,7 @@ describe('VoteBudget', () => {
 
   it('shakes the chip when a vote is refused, and only with motion allowed', () => {
     vi.useFakeTimers();
-    const { container } = render(<VoteBudget left={0} budget={3} unlimited={false} />);
+    const { container } = render(<VoteBudget left={0} cast={3} budget={3} unlimited={false} />);
     const chip = container.querySelector(VOTE_BUDGET_HOOKS.chip)!;
     expect(shakeVoteBudget(container)).toBe(false);
     expect(chip.className).not.toContain('fx-nope');
@@ -123,12 +133,12 @@ describe('VoteBudget', () => {
   it('springs in the token a vote taken back refills, never on first draw', () => {
     vi.useFakeTimers();
     window.matchMedia = ((query: string) => ({ matches: query.includes('no-preference') })) as unknown as typeof window.matchMedia;
-    const { container, rerender } = render(<VoteBudget left={1} budget={3} unlimited={false} />);
+    const { container, rerender } = render(<VoteBudget left={1} cast={2} budget={3} unlimited={false} />);
     expect(container.querySelector('.fx-pop')).toBeNull();
-    rerender(<VoteBudget left={2} budget={3} unlimited={false} />);
+    rerender(<VoteBudget left={2} cast={1} budget={3} unlimited={false} />);
     expect(container.querySelector(VOTE_BUDGET_HOOKS.next)!.classList.contains('fx-pop')).toBe(true);
     act(() => { vi.runAllTimers(); });
-    rerender(<VoteBudget left={1} budget={3} unlimited={false} />);
+    rerender(<VoteBudget left={1} cast={2} budget={3} unlimited={false} />);
     expect(container.querySelector('.fx-pop')).toBeNull();
   });
 });

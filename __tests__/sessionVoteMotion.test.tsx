@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup as cleanupView, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import Session from '../components/Session';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { syncService } from '../services/syncService';
 import { RetroSession, Team, User } from '../types';
+import { effectivePair } from './helpers/tailwindTheme';
 
 /**
  * The session screen with the vote pieces and the board's motion mounted: the
@@ -20,6 +21,7 @@ vi.mock('../services/dataService', () => ({
     getTeam: vi.fn(() => null),
     updateSession: vi.fn(),
     persistParticipants: vi.fn(),
+    applyRemoteSession: vi.fn(),
   },
 }));
 
@@ -135,6 +137,15 @@ const pastTheQuietSeconds = () => {
   const start = Date.now();
   vi.spyOn(Date, 'now').mockReturnValue(start + 5_000);
 };
+/** Hands the screen the states the server sends, as syncService would. */
+const captureServerStates = () => {
+  let listener: ((state: RetroSession) => void) | null = null;
+  vi.mocked(syncService.onSessionUpdate).mockImplementation((callback) => {
+    listener = callback as (state: RetroSession) => void;
+    return () => {};
+  });
+  return (state: RetroSession) => listener?.(state);
+};
 const land = () => act(() => { animations.splice(0).forEach((animation) => animation.onfinish?.()); });
 
 beforeEach(() => {
@@ -203,6 +214,30 @@ describe('Session — the vote pieces, mounted', () => {
     expect(chip.textContent).toBe(sentence);
     expect(chip.querySelectorAll('[data-vote-token]')).toHaveLength(5);
     expect(chip.querySelector('[data-vote-tokens]')!.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('draws as cast only the votes the viewer gave, under one vote per item', async () => {
+    // Five votes, three items to give them to: two can never be placed.
+    await renderSession(createSession({
+      tickets: [
+        { id: 't1', colId: 'col-1', text: 'Great teamwork', authorId: 'p1', groupId: null, votes: [] },
+        { id: 't2', colId: 'col-1', text: 'Pairing', authorId: 'p1', groupId: 'g1', votes: [] },
+        { id: 't3', colId: 'col-1', text: 'Mobbing', authorId: 'p1', groupId: 'g1', votes: [] },
+        { id: 't4', colId: 'col-1', text: 'Demos', authorId: 'p1', groupId: null, votes: [] },
+      ],
+    }, { oneVotePerTicket: true }));
+    const chip = () => document.querySelector('[data-vote-budget]') as HTMLElement;
+    const drawn = (kind: string) => chip().querySelectorAll(`[data-vote-token="${kind}"]`).length;
+    expect(chip().textContent).toBe('3 votes remaining');
+    expect([drawn('left'), drawn('cast')]).toEqual([3, 0]);
+
+    await userEvent.click(within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' }));
+    expect([drawn('left'), drawn('cast')]).toEqual([2, 1]);
+    await userEvent.click(within(card('t4')).getByRole('button', { name: 'Add a vote to this ticket' }));
+    const group = document.querySelector('[data-group-id="g1"]') as HTMLElement;
+    await userEvent.click(within(group).getByRole('button', { name: 'Add a vote to this group' }));
+    expect(chip().textContent).toBe('0 votes remaining');
+    expect([drawn('left'), drawn('cast')]).toEqual([0, 3]);
   });
 
   it('says nothing to count with unlimited votes', async () => {
@@ -334,14 +369,56 @@ describe('Session — the vote’s flight', () => {
 describe('Session — the bar’s motion', () => {
   it('slides the phase title in at a phase change, never on the first paint', async () => {
     allowMotion();
+    const deliver = captureServerStates();
     await renderSession(createSession({ phase: 'BRAINSTORM' }));
     expect(effects()).toEqual([]);
+    act(() => deliver(createSession({ phase: 'BRAINSTORM' })));
     pastTheQuietSeconds();
     await userEvent.click(screen.getByRole('button', { name: 'Next Phase' }));
     const title = await screen.findByRole('heading', { level: 2, name: 'Group Ideas' });
     expect(title.querySelector('[data-phase-title]')!.classList.contains('fx-title-in')).toBe(true);
     // The heading clips it, so the slide never spills over the bar.
     expect(title.classList.contains('overflow-hidden')).toBe(true);
+  });
+
+  it('draws the Finished button that cannot be pressed as off, by its colours and never by an opacity', async () => {
+    // Every vote spent: the Vote phase finished the viewer and will not let
+    // them take it back. On a phone no cursor says so; the colours must.
+    await renderSession(createSession({
+      tickets: [{ id: 't1', colId: 'col-1', text: 'Great teamwork', authorId: 'p1', groupId: null, votes: ['facilitator-1'] }],
+      groups: [],
+      finishedUsers: ['facilitator-1'],
+    }, { maxVotes: 1 }));
+    const off = screen.getByRole('button', { name: /Finished!/ });
+    expect(off.hasAttribute('disabled')).toBe(true);
+    expect(off.className).not.toMatch(/(^|\s)(disabled:)?opacity-/);
+    // Not the look of the Finished button that can be pressed.
+    expect(off.className).not.toContain('bg-emerald-50');
+    expect(effectivePair(off).ratio).toBeGreaterThanOrEqual(4.5);
+    expect(effectivePair(off).bg).toBe('slate-100');
+
+    // With a vote left, the same button can be pressed and keeps its green.
+    cleanupView();
+    await renderSession(createSession({
+      tickets: [{ id: 't1', colId: 'col-1', text: 'Great teamwork', authorId: 'p1', groupId: null, votes: ['facilitator-1'] }],
+      groups: [],
+      finishedUsers: ['facilitator-1'],
+    }, { maxVotes: 2 }));
+    const on = screen.getByRole('button', { name: /Finished!/ });
+    expect(on.hasAttribute('disabled')).toBe(false);
+    expect(on.className).toContain('bg-emerald-50');
+    expect(effectivePair(on).ratio).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('never slides the title in from the cached seed to the server’s first state, however late it lands', async () => {
+    allowMotion();
+    const deliver = captureServerStates();
+    // The cache still says Brainstorm; the server, seconds later, says Group.
+    await renderSession(createSession({ phase: 'BRAINSTORM' }));
+    pastTheQuietSeconds();
+    act(() => deliver(createSession({ phase: 'GROUP' })));
+    await screen.findByRole('heading', { level: 2, name: 'Group Ideas' });
+    expect(effects()).toEqual([]);
   });
 
   it('answers a press of “I’m Finished”', async () => {

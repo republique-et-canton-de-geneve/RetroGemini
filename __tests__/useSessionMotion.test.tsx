@@ -28,8 +28,8 @@ const session = (over: Partial<RetroSession> = {}): RetroSession =>
     ...over,
   }) as unknown as RetroSession;
 
-const Board: React.FC<{ session: RetroSession; isLive: boolean; pending: ReadonlySet<string> | Map<string, unknown>; held?: ReadonlySet<string> }> = ({ session: shown, isLive, pending, held }) => {
-  useSessionMotion({ session: shown, viewerId: 'me', ownPendingIds: () => pending, isLive, heldVotes: held ? () => held : undefined });
+const Board: React.FC<{ session: RetroSession; isLive: boolean; pending: ReadonlySet<string> | Map<string, unknown>; held?: ReadonlySet<string>; ready?: boolean }> = ({ session: shown, isLive, pending, held, ready = true }) => {
+  useSessionMotion({ session: shown, viewerId: 'me', ownPendingIds: () => pending, isLive, ready, heldVotes: held ? () => held : undefined });
   return (
     <div>
       {shown.columns.map((col) => (
@@ -225,6 +225,26 @@ describe('useSessionMotion', () => {
     expect(decorated()).toEqual([]);
   });
 
+  it('never compares the cached seed with the first state from the server, however late it comes', () => {
+    // Drawn from the team cache first, which lags the session row.
+    const view = render(<Board session={session({ phase: 'OPEN_BOARD' })} isLive ready={false} pending={new Set()} />);
+    act(() => { vi.advanceTimersByTime(4_000); });
+    view.rerender(<Board session={session({ phase: 'OPEN_BOARD' })} isLive ready={false} pending={new Set()} />);
+    // The join snapshot, four seconds later on a slow phone: new cards, a new
+    // reaction and a vote total that moved are no news.
+    const snapshot = session({ phase: 'OPEN_BOARD', tickets: [ticket('t1', { votes: ['bob'], reactions: { '👍': ['ana'] } }), ticket('t2'), ticket('t3')] });
+    view.rerender(<Board session={snapshot} isLive pending={new Set()} />);
+    expect(decorated()).toEqual([]);
+    // The quiet seconds open there, not at the mount.
+    act(() => { vi.advanceTimersByTime(RECONNECT_QUIET_MS - 500); });
+    view.rerender(<Board session={session({ phase: 'OPEN_BOARD', tickets: [...snapshot.tickets, ticket('t4')] })} isLive pending={new Set()} />);
+    expect(decorated()).toEqual([]);
+    act(() => { vi.advanceTimersByTime(600); });
+    view.rerender(<Board session={session({ phase: 'OPEN_BOARD', tickets: [...snapshot.tickets, ticket('t4'), ticket('t5')] })} isLive pending={new Set()} />);
+    expect(card('t5').classList.contains('fx-card-in')).toBe(true);
+    expect(card('t4').classList.contains('fx-card-in')).toBe(false);
+  });
+
   it('decorates nothing at all when more than six cards arrive at once', () => {
     const { show } = mount(session());
     const many = Array.from({ length: 7 }, (_, i) => ticket(`n${i}`));
@@ -257,7 +277,7 @@ describe('useSessionMotion', () => {
 
   it('never throws on a malformed state', () => {
     const HookOnly: React.FC<{ shown: RetroSession }> = ({ shown }) => {
-      useSessionMotion({ session: shown, viewerId: 'me', ownPendingIds: () => new Set(), isLive: true });
+      useSessionMotion({ session: shown, viewerId: 'me', ownPendingIds: () => new Set(), isLive: true, ready: true });
       return null;
     };
     const view = render(<HookOnly shown={session()} />);

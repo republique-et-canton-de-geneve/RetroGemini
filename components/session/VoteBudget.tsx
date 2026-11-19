@@ -5,8 +5,10 @@ import { MAX_VOTE_TOKENS, TOKEN_CAST_CLASSES, TOKEN_LEFT_CLASSES, VOTE_BUDGET_CH
 
 /**
  * What the Vote bar says about the viewer's own votes: the sentence "N votes
- * remaining", and beside it one token per vote of the budget, filled while it
- * is left and an outline once it is cast.
+ * remaining", and beside it one token per vote: filled while it is left, an
+ * outline once it is cast. A vote one vote per item leaves no item to place on
+ * (five votes, three items) is neither: it is not drawn, so the outlines count
+ * only the votes the viewer really gave.
  *
  * The sentence is the information, exactly as before (tests and the e2e
  * suite read it, in both languages); the tokens repeat it for the eye and are
@@ -21,13 +23,15 @@ import { MAX_VOTE_TOKENS, TOKEN_CAST_CLASSES, TOKEN_LEFT_CLASSES, VOTE_BUDGET_CH
 interface VoteBudgetProps {
   /** Votes the viewer can still cast (the bar's "votes remaining" number). */
   left: number;
+  /** Votes the viewer has cast (`votesCastByVoter`), drawn as outlines. */
+  cast: number;
   /** Votes per person (`voteBudget(settings)`). */
   budget: number;
   /** Votes are unlimited: nothing is counted, nothing is drawn. */
   unlimited: boolean;
 }
 
-const VoteBudget: React.FC<VoteBudgetProps> = ({ left, budget, unlimited }) => {
+const VoteBudget: React.FC<VoteBudgetProps> = ({ left, cast, budget, unlimited }) => {
   const { tp } = useTranslation();
   const remaining = Math.max(0, Math.floor(left));
   const chipRef = useRef<HTMLDivElement>(null);
@@ -42,13 +46,14 @@ const VoteBudget: React.FC<VoteBudgetProps> = ({ left, budget, unlimited }) => {
   const total = Math.max(0, Math.floor(budget));
   const tokens = total > 0 && total <= MAX_VOTE_TOKENS;
   const filled = Math.min(remaining, total);
+  const spent = Math.min(Math.max(0, Math.floor(cast)), total - filled);
 
   return (
     <div ref={chipRef} data-vote-budget="" className={VOTE_BUDGET_CHIP_CLASSES}>
       {tp('session.board.votesRemaining', remaining)}
       {tokens && (
         <span data-vote-tokens="" aria-hidden="true" className="flex items-center gap-1">
-          {Array.from({ length: total }, (_, index) => {
+          {Array.from({ length: filled + spent }, (_, index) => {
             const isLeft = index < filled;
             return (
               <span

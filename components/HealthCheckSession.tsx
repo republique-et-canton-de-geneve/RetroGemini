@@ -154,6 +154,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     team.healthChecks?.find(h => h.id === sessionId)
   );
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
+  // The panel's rows come from the cached session until the server's first
+  // roster: its motion compares nothing before it (usePanelMotion).
+  const [rosterReceived, setRosterReceived] = useState(false);
   // Optimistic by default: pause editing only after a confirmed disconnect (see
   // Session.tsx) so the initial connecting window and tests still allow edits.
   const [isLive, setIsLive] = useState<boolean>(true);
@@ -444,6 +447,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     const unsubRoster = syncService.onRoster((roster) => {
       if (syncService.getCurrentSessionId() !== sessionId) return;
       setConnectedUsers(new Set(roster.map(r => r.id)));
+      setRosterReceived(true);
       mergeRoster(roster);
     });
 
@@ -1837,6 +1841,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           onToggleLeft={handleToggleParticipantLeft}
           getMemberDisplay={getMemberDisplay}
           isLive={isLive}
+          rosterReceived={rosterReceived}
           motionScope={session.phase}
         />
       </div>

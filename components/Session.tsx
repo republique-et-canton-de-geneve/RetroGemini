@@ -259,6 +259,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       ? contentLanguage
       : undefined;
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
+  // What the screen shows before the server first answers is a seed from the
+  // team cache, which lags the session row: the motion never compares it with
+  // what follows, and its quiet seconds open when the server's state lands.
+  const [serverStateApplied, setServerStateApplied] = useState(false);
+  const [rosterReceived, setRosterReceived] = useState(false);
   const presenceBroadcasted = useRef(false);
   // Live connection state. When offline we pause editing so no change is made
   // on a stale, disconnected snapshot (which the server would reject anyway).
@@ -599,7 +604,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // so two quick votes on one card each keep it held until their own landing.
   const flyingVotesRef = useRef<Map<string, number>>(new Map());
   const heldVotes = useCallback((): ReadonlySet<string> => new Set(flyingVotesRef.current.keys()), []);
-  useSessionMotion({ session, viewerId: currentUser.id, ownPendingIds, isLive, root: boardScrollerRef, heldVotes });
+  useSessionMotion({ session, viewerId: currentUser.id, ownPendingIds, isLive, ready: serverStateApplied, root: boardScrollerRef, heldVotes });
   const holdVote = (itemId: string) => flyingVotesRef.current.set(itemId, (flyingVotesRef.current.get(itemId) ?? 0) + 1);
   const releaseVote = (itemId: string) => {
       const left = (flyingVotesRef.current.get(itemId) ?? 1) - 1;
@@ -638,20 +643,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // The phase title slides in when the phase changes under the viewer's
   // eyes: never on the first state, a change of session, while offline, or in
-  // the seconds after a (re)connection, whose snapshot is no news.
+  // the seconds after a (re)connection, whose snapshot is no news — nor from
+  // the cached seed to the server's first state, however late it lands.
   const shownPhaseRef = useRef<{ id: string | null; phase: string | null }>({ id: null, phase: null });
   const liveSinceRef = useRef(0);
   useLayoutEffect(() => {
-      if (isLive) liveSinceRef.current = Date.now();
-  }, [isLive]);
+      if (isLive && serverStateApplied) liveSinceRef.current = Date.now();
+  }, [isLive, serverStateApplied]);
   useLayoutEffect(() => {
       const shown = shownPhaseRef.current;
       const next = { id: session?.id ?? null, phase: session?.phase ?? null };
-      shownPhaseRef.current = next;
-      if (!shown.phase || shown.id !== next.id || shown.phase === next.phase) return;
+      shownPhaseRef.current = serverStateApplied ? next : { id: null, phase: null };
+      if (!serverStateApplied || !shown.phase || shown.id !== next.id || shown.phase === next.phase) return;
       if (!isLive || Date.now() - liveSinceRef.current < RECONNECT_QUIET_MS) return;
       playEffect(document.querySelector('[data-phase-title]'), 'fx-title-in');
-  }, [session?.id, session?.phase, isLive]);
+  }, [session?.id, session?.phase, isLive, serverStateApplied]);
   // Edit Layout belongs to Brainstorm and to the open board, the two screens
   // where cards are written. setPhase closes it for this tab; a phase changed
   // from another facilitator tab must close it too, or the move, remove and
@@ -1092,6 +1098,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // persisted it. Re-persisting on every received broadcast multiplied
       // team-record writes by the participant count.
       dataService.applyRemoteSession(team.id, normalizedSession);
+      // In the same batch as the state: the commit that draws it is the motion's first.
+      setServerStateApplied(true);
     });
 
     // Listen for member events
@@ -1119,6 +1127,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (syncService.getCurrentSessionId() !== sessionId) return;
 
       setConnectedUsers(new Set(roster.map(r => r.id)));
+      setRosterReceived(true);
       mergeRoster(roster);
     });
 
@@ -3738,7 +3747,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   </div>
               );
           }
-          return <VoteBudget left={votesLeft} budget={voteBudget(session.settings)} unlimited={!!session.settings.unlimitedVotes} />;
+          return <VoteBudget left={votesLeft} cast={myVotesCast} budget={voteBudget(session.settings)} unlimited={!!session.settings.unlimitedVotes} />;
       };
 
       const renderEditLayoutButton = () => (
@@ -3894,10 +3903,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 }}
                                 disabled={mode === 'VOTE' && isFinished && votesLeft === 0}
                                 // Finished: the soft green of a done state, under its
-                                // dark ink (white on emerald-500 measured 2.5:1).
+                                // dark ink (white on emerald-500 measured 2.5:1). Finished
+                                // for good (every vote spent) it cannot be pressed, and its
+                                // muted fill says so where no cursor shows, without fading
+                                // its words below 4.5:1 as an opacity would.
                                 className={`flex items-center gap-1.5 px-4 py-2 rounded-lg border font-semibold text-sm transition-colors whitespace-nowrap ${
                                     isFinished
-                                        ? `bg-emerald-50 border-emerald-300 text-emerald-800 ${mode === 'VOTE' && votesLeft === 0 ? 'cursor-not-allowed' : 'hover:bg-emerald-100'}`
+                                        ? (mode === 'VOTE' && votesLeft === 0
+                                            ? 'bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed'
+                                            : 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100')
                                         : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50'
                                 }`}
                             >
@@ -4825,6 +4839,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             onToggleLeft={handleToggleParticipantLeft}
             getMemberDisplay={getMemberDisplay}
             isLive={isLive}
+            rosterReceived={rosterReceived}
           />
         </div>
         {/* Ticket Comments Modal */}

@@ -77,6 +77,12 @@ interface Props {
    * Omit for a panel that counts as live.
    */
   isLive?: boolean;
+  /**
+   * The server's first roster has been applied: until then the rows come from
+   * the cached session and nothing animates, and the quiet seconds open when
+   * it lands. Omit for a panel that counts as ready from its mount.
+   */
+  rosterReceived?: boolean;
   /** Changes when a change of the whole panel is not news: the phase. Omit for none. */
   motionScope?: string;
   onToggleCollapse: () => void;
@@ -249,6 +255,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
   footer,
   headingKey = 'phases.participants.title',
   isLive = true,
+  rosterReceived = true,
   motionScope,
   onToggleCollapse,
   onInvite,
@@ -306,6 +313,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
     count: activeParticipants.length,
     isCollapsed,
     isLive,
+    ready: rosterReceived,
     scope: motionScope,
     currentUserId: currentUser.id,
   });

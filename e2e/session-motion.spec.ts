@@ -180,6 +180,8 @@ test.describe('the board’s motion', () => {
       await expect(participant.getByRole('heading', { level: 2, name: 'Brainstorm' })).toBeVisible({ timeout: 10_000 });
       const phaseEffects = (await effectsSince(facilitator, beforePhase)).map((e) => e.cls);
       expect(phaseEffects.filter((cls) => cls !== 'fx-title-in')).toEqual([]);
+      // ...and the title did slide in: an empty record would pass the line above.
+      expect(phaseEffects.filter((cls) => cls === 'fx-title-in')).toHaveLength(1);
       await expectNothingLeft(facilitator);
 
       await facilitator.reload();
@@ -241,16 +243,14 @@ test.describe('the board’s motion', () => {
       const plus = plusOf(voted);
       const beforeVote = await now(facilitator);
       await plus.click();
-      const flight = await facilitator.evaluate(() => ({
-        layers: document.querySelectorAll('.fx-layer').length,
-        tokens: document.querySelectorAll('.fx-layer .fx-token').length,
-      }));
-      expect(flight).toEqual({ layers: 1, tokens: 1 });
       await expect(facilitator.getByText('4 votes remaining')).toBeVisible();
       await expectNothingLeft(facilitator);
       await expect(plus).toBeFocused();
+      // Read from the record, never from the page: the token lives for half a
+      // second, and a slow runner's round trip can land after it has gone.
       const voteEffects = await effectsSince(facilitator, beforeVote);
       expect(voteEffects.filter((e) => e.cls === 'fx-layer')).toHaveLength(1);
+      expect(voteEffects.filter((e) => e.cls === 'fx-token')).toHaveLength(1);
       expect(voteEffects.filter((e) => e.cls === 'fx-ring')).toHaveLength(1);
 
       // ---- (d) An empty budget shakes, and nothing flies ----

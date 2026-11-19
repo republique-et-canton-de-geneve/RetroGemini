@@ -69,6 +69,23 @@ describe('the arrival', () => {
     expect(result.current.arriving.size).toBe(0);
   });
 
+  it('compares nothing with the rows drawn before the server’s first roster, however late it lands', () => {
+    // Drawn from the cached session; the roster comes four seconds later.
+    const { result, rerender } = mount({ ...base, presentIds: ['me'], ready: false });
+    act(() => { vi.advanceTimersByTime(QUIET_MS + 1000); });
+    rerender({ ...base, presentIds: ['me', 'a', 'b'], checkedIds: ['a'], count: 4, ready: true });
+    expect(result.current.arriving.size).toBe(0);
+    expect(result.current.finishing.size).toBe(0);
+    expect(result.current.bump).toBe(0);
+    // The quiet seconds open at the roster, not at the mount.
+    act(() => { vi.advanceTimersByTime(QUIET_MS - 500); });
+    rerender({ ...base, presentIds: ['me', 'a', 'b', 'c'], checkedIds: ['a'], count: 4, ready: true });
+    expect(result.current.arriving.size).toBe(0);
+    act(() => { vi.advanceTimersByTime(600); });
+    rerender({ ...base, presentIds: ['me', 'a', 'b', 'c', 'd'], checkedIds: ['a'], count: 4, ready: true });
+    expect([...result.current.arriving]).toEqual(['d']);
+  });
+
   it('never plays for the viewer', () => {
     const { result, rerender } = mount({ ...base, presentIds: ['a'] });
     settle();

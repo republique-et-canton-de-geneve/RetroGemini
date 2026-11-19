@@ -37,6 +37,8 @@ interface Props {
   getMemberDisplay: (member: User) => { displayName: string; initials: string; avatarId?: string | null };
   /** The viewer's own connection: the panel animates nothing while it is down, nor just after (SessionParticipantsPanel). */
   isLive?: boolean;
+  /** The server's first roster has been applied (SessionParticipantsPanel). */
+  rosterReceived?: boolean;
 }
 
 const ParticipantsPanel: React.FC<Props> = ({
@@ -52,7 +54,8 @@ const ParticipantsPanel: React.FC<Props> = ({
   onInvite,
   onToggleLeft,
   getMemberDisplay,
-  isLive
+  isLive,
+  rosterReceived
 }) => {
   const { t, tp } = useTranslation();
 
@@ -79,6 +82,7 @@ const ParticipantsPanel: React.FC<Props> = ({
         memberStatus={() => null}
         headingKey="phases.participants.connectedTitle"
         isLive={isLive}
+        rosterReceived={rosterReceived}
         motionScope={session.phase}
         footer={t('phases.participants.footerConnected')}
         onToggleCollapse={onToggleCollapse}
@@ -202,6 +206,7 @@ const ParticipantsPanel: React.FC<Props> = ({
       memberLine={memberLine}
       footer={footer}
       isLive={isLive}
+      rosterReceived={rosterReceived}
       motionScope={session.phase}
       onToggleCollapse={onToggleCollapse}
       onInvite={onInvite}

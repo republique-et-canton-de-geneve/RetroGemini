@@ -14,9 +14,10 @@ import { motionAllowed } from '../common/motion/effects';
  * an element was drawn (a collapsed panel expanded, a phase change). And it
  * stays quiet when a change is not news:
  *
- * - on the first population (`arrivedPeople` answers nobody when it has no
- *   previous list) and for `QUIET_MS` after the panel mounts, when the roster
- *   arrives from the server a moment after the first paint;
+ * - before the server's first roster (`ready`): the rows drawn until then come
+ *   from the cached session, and are never compared with what it says; then
+ *   on that first population (`arrivedPeople` answers nobody when it has no
+ *   previous list) and for `QUIET_MS` after it, however late it lands;
  * - for `QUIET_MS` after the viewer's own connection comes back, when every
  *   roster is delivered again;
  * - when more than two people arrive, or more than two finish, at once (a
@@ -49,6 +50,12 @@ export interface PanelMotionInput {
   isLive: boolean;
   /** Changes whenever a change of the whole board is not news (the phase). */
   scope?: string;
+  /**
+   * The server's first roster has been applied. Until then nothing is
+   * compared, and the quiet seconds open when it turns true. Without it the
+   * panel counts as ready from its mount.
+   */
+  ready?: boolean;
   currentUserId: string;
 }
 
@@ -66,7 +73,7 @@ const EMPTY: ReadonlySet<string> = new Set();
 const sortedKey = (ids: readonly string[]) => [...ids].sort().join('\u0000');
 
 export function usePanelMotion(input: PanelMotionInput): PanelMotion {
-  const { presentIds, activeIds, checkedIds, count, isCollapsed, isLive, scope, currentUserId } = input;
+  const { presentIds, activeIds, checkedIds, count, isCollapsed, isLive, scope, currentUserId, ready = true } = input;
   const [arriving, setArriving] = useState<ReadonlySet<string>>(EMPTY);
   const [finishing, setFinishing] = useState<ReadonlySet<string>>(EMPTY);
   const [bump, setBump] = useState(0);
@@ -100,6 +107,11 @@ export function usePanelMotion(input: PanelMotionInput): PanelMotion {
   // painted once without it, the row would flash in place before sliding.
   useLayoutEffect(() => {
     const now = Date.now();
+    // The seed drawn before the server's first roster is never a "before".
+    if (!ready) {
+      previous.current = null;
+      return;
+    }
     const before = previous.current;
     const present = presentIds.filter((id) => id !== currentUserId);
     const checked = [...checkedIds];
@@ -160,7 +172,7 @@ export function usePanelMotion(input: PanelMotionInput): PanelMotion {
     }
     // The keys stand for the lists: a new array of the same people is no change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presentKey, activeKey, checkedKey, count, isCollapsed, isLive, scope, currentUserId]);
+  }, [presentKey, activeKey, checkedKey, count, isCollapsed, isLive, scope, currentUserId, ready]);
 
   useEffect(() => {
     const pending = timers.current;

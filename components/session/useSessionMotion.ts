@@ -16,7 +16,10 @@ import { MAX_CARD_BURST, NO_MOTION, diffSessionMotion, staggerDelays, type Sessi
  *
  * It stays quiet while the connection is down and for three seconds after the
  * viewer's own (re)connection: a rolling update reconnects everybody, and the
- * snapshot that comes back is no news.
+ * snapshot that comes back is no news. Nothing is compared before the first
+ * state from the server is applied (`ready`): the screen is drawn first from
+ * the team cache, which lags the session row, and the join snapshot can come
+ * seconds later; its differences from that seed are no news either.
  */
 
 /** The data attributes the board carries for its effects. One table, so the markup and this hook agree. */
@@ -54,6 +57,12 @@ export interface SessionMotionInput {
   ownPendingIds: () => PendingIds;
   /** The session is connected and receiving. */
   isLive: boolean;
+  /**
+   * The first state from the server has been applied. Before it the screen
+   * shows a seed from the cache, never compared with what follows; the quiet
+   * seconds open when it turns true.
+   */
+  ready: boolean;
   /** Where the board lies; the whole document when absent. */
   root?: RefObject<HTMLElement | null>;
   /**
@@ -228,18 +237,22 @@ const isBurst = (prev: RetroSession, next: RetroSession): boolean => {
 interface Shown {
   session: RetroSession | null;
   wasLive: boolean;
+  wasReady: boolean;
   quietUntil: number;
 }
 
-export function useSessionMotion({ session, viewerId, ownPendingIds, isLive, root, heldVotes }: SessionMotionInput): void {
-  const shown = useRef<Shown>({ session: null, wasLive: false, quietUntil: 0 });
+export function useSessionMotion({ session, viewerId, ownPendingIds, isLive, ready, root, heldVotes }: SessionMotionInput): void {
+  const shown = useRef<Shown>({ session: null, wasLive: false, wasReady: false, quietUntil: 0 });
 
   useLayoutEffect(() => {
     const state = shown.current;
     const now = Date.now();
     if (isLive && !state.wasLive) state.quietUntil = now + RECONNECT_QUIET_MS;
+    if (ready && !state.wasReady) state.quietUntil = Math.max(state.quietUntil, now + RECONNECT_QUIET_MS);
     state.wasLive = isLive;
-    const prev = state.session;
+    // The seed shown before the server's first state is never a "before".
+    const prev = state.wasReady ? state.session : null;
+    state.wasReady = ready;
     const next = session ?? null;
     state.session = next;
 
@@ -253,5 +266,5 @@ export function useSessionMotion({ session, viewerId, ownPendingIds, isLive, roo
     } catch {
       // Decoration: a malformed state never breaks the screen.
     }
-  }, [session, isLive, viewerId, ownPendingIds, root, heldVotes]);
+  }, [session, isLive, ready, viewerId, ownPendingIds, root, heldVotes]);
 }
