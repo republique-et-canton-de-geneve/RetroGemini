@@ -375,12 +375,13 @@ rules:
   imperatively: it costs no render of a component of nearly 5,000 lines, a
   remounted element simply has no class, and the unit tests of the screens
   keep seeing the class strings React wrote. `motionAllowed()` reads the
-  reader's setting live; the board's effects and the vote's flights ask it
-  first and play nothing when it says no or cannot tell (jsdom has no
-  `matchMedia`). Whatever a component writes into a class from a render (a
-  dialog's entrance, an arriving row, the writing pencil) is still bound by
-  the CSS gate above, which is the guarantee: a script's check only saves it
-  work.
+  reader's setting live, and **every effect asks it first**: the board's, the
+  vote's flight, a dialog's entrance, an arriving row, the writing pencil, the
+  avatar picker's swap. A reader who asked for less motion, or a browser that
+  cannot tell (jsdom has no `matchMedia`), is given no `fx-*` class at all;
+  the CSS gate above remains the guarantee. Tests state the preference with
+  `__tests__/helpers/motionPreference.ts`, whose queries match exactly (a stub
+  that matched "reduce" inside "reduced-motion" tested nothing).
 - **Quiet by default.** Nothing plays on first paint, on a phase change or a
   change of session, while the connection is down, in the three seconds after
   it comes back (a rolling update reconnects everybody), or for a burst: more
@@ -389,7 +390,12 @@ rules:
 - **An effect never changes a box that a test measures or a click aims at.**
   Rings and washes are drawn on pseudo-elements; a participant's row may
   animate only opacity, a pseudo-element and `translateX`, never its height or
-  `y`; a card's hover is a deeper shadow, never a lift. Nothing animates on the
+  `y`; a card's hover is a deeper shadow, never a lift. One exception, on
+  purpose: **a card that arrives rises into its own place** (`fx-card-in`: 14px
+  and three percent of scale, for half a second). Its place in the layout is
+  taken at once, nothing around it moves, and only that card's own controls are
+  a few pixels off until it settles: the arrival is what the owner asked to
+  see. Nothing animates on the
   way out: a deleted card's place is taken at once, and a dialog gives focus
   back at once.
 - **A vote's flight follows the write, it never decides it.** In the guided
@@ -437,7 +443,8 @@ block of its `position: fixed` descendants. A dialog whose panel holds a fixed
 child while it opens passes `entrance="fade"` (opacity only), as the image
 gallery does for its close button. `DIALOG_OVERLAY_CLASS` and
 `DIALOG_PANEL_CLASS` are the frame of the look, for a call site with no reason
-to differ.
+to differ; `__tests__/dialogFrameConsistency.test.ts` reads every call site and
+requires that veil and that panel (the image gallery is the stated exception).
 
 > Its focusable-element check walks ancestors instead of reading `offsetParent`
 > or `getClientRects()`. Those need a layout engine, so under jsdom they report
@@ -1708,8 +1715,7 @@ things about that test are load-bearing:
   Geist itself, but Geist falls back to the system font when its file is
   blocked or still on its way (`font-display: swap`), so the test keeps the
   wide font as the worst case, and awaits `document.fonts.ready` before it
-  measures. (Two spec comments still name Inter as the app's font: read them
-  as history.)
+  measures.
 - **Leave headroom.** A header that fits DejaVu Sans by a few pixels fits the
   narrower fonts phones and laptops use, but not by much; extend the test when a
   control joins a header.
@@ -3200,8 +3206,11 @@ Residuals, stated on purpose:
 - **During a rolling update** a pod from before 45.0 answers the route with an
   HTML 404, which the client retries for about seven seconds before saying the
   avatar could not be saved; a 44.x tab ignores `memberAvatars` and draws
-  initials. After a rollback the map is inert and intact: no older writer
-  touches the key.
+  initials. A pod from before 45.0 does not know the map: its single-team
+  restore puts the archive's map back (or removes it, when the archive predates
+  45.0), and its merge carries the primary's map without re-keying it. So, as
+  for Jira, **do not merge or restore while such a pod runs**, during the
+  rollout or after a rollback; nothing else an older pod does touches the key.
 - **In an anonymous session the comments dialog still names each comment's
   author**, as it did before avatars; only the pictures are hidden there.
 
