@@ -376,6 +376,83 @@ describe('planTeamMerge — the session parents of sessionParent mode', () => {
   });
 });
 
+// Each member's avatar (PLAN.md section 18.1) is keyed by member id, and the
+// merge rewrites the secondary's ids. Carried as an unknown key, the
+// primary's map would win whole and every choice of the second team would be
+// reported as a conflict and lost; a reminted member would wear another
+// person's avatar.
+describe('planTeamMerge — each member\'s avatar', () => {
+  const choice = (id: string | null, at: number) => ({ id, at });
+  const reminted = (team: Record<string, any>) => team.members.find((m: Record<string, any>) => m.name === 'Sophie').id;
+
+  it('re-keys the second team\'s choices through the member id map, the main team\'s winning for a unified member', () => {
+    const primary = primaryTeam() as Record<string, any>;
+    primary.memberAvatars = { 'admin-aaa111': choice('fox', 10), 'a-jean': choice('owl', 10), 'a-paul': choice('cat', 10) };
+    const secondary = secondaryTeam() as Record<string, any>;
+    secondary.memberAvatars = {
+      // Unified into the primary facilitator, who has a choice: the primary's wins.
+      'admin-bbb222': choice('rocket', 99),
+      // Unified by name into a-jean, who has one too.
+      'b-jean': choice('bee', 99),
+      // Unified by email into a-marie, who has none: the secondary's is used.
+      'b-marie': choice('moon', 20),
+      // Kept as a member of their own.
+      'b-luc': choice('dice', 20),
+      // Same id as a primary member, another person: reminted, and so is the key.
+      'a-paul': choice('kite', 20)
+    };
+
+    const { team, report } = merge({ primary, secondary });
+
+    expect(team.memberAvatars).toEqual({
+      'admin-aaa111': choice('fox', 10),
+      'a-jean': choice('owl', 10),
+      'a-paul': choice('cat', 10),
+      'a-marie': choice('moon', 20),
+      'b-luc': choice('dice', 20),
+      [reminted(team)]: choice('kite', 20)
+    });
+    expect(report.unknownKeys.carried).not.toContain('memberAvatars');
+    expect(report.unknownKeys.conflicting).not.toContain('memberAvatars');
+  });
+
+  it('keeps a cleared choice of the main team over the second team\'s choice: a clear is a choice', () => {
+    const primary = primaryTeam() as Record<string, any>;
+    primary.memberAvatars = { 'a-jean': choice(null, 10) };
+    const secondary = secondaryTeam() as Record<string, any>;
+    secondary.memberAvatars = { 'b-jean': choice('bee', 99) };
+    expect(merge({ primary, secondary }).team.memberAvatars).toEqual({ 'a-jean': choice(null, 10) });
+  });
+
+  it('carries no entry it cannot read, and never lands an off-roster entry of the second team on a member of the first', () => {
+    const primary = primaryTeam() as Record<string, any>;
+    primary.memberAvatars = { 'a-jean': 'owl', __proto__x: choice('fox', 1), 'a-old': choice('owl', 3) };
+    const secondary = secondaryTeam() as Record<string, any>;
+    // 'a-marie' is no member of the second team: whoever it was, it is not the first team's Marie.
+    secondary.memberAvatars = { 'a-marie': choice('moon', 5), 'b-gone': choice('star', 5) };
+
+    expect(merge({ primary, secondary }).team.memberAvatars).toEqual({
+      __proto__x: choice('fox', 1),
+      'a-old': choice('owl', 3),
+      'b-gone': choice('star', 5)
+    });
+  });
+
+  it('stores no map when neither team has a choice', () => {
+    expect(merge().team).not.toHaveProperty('memberAvatars');
+    const odd = primaryTeam() as Record<string, any>;
+    odd.memberAvatars = ['fox'];
+    expect(merge({ primary: odd }).team).not.toHaveProperty('memberAvatars');
+  });
+
+  it('leaves the preview fingerprint alone: a pick between the preview and the merge is not a change of plan', async () => {
+    const { fingerprintMergePlanInput } = await import('../server/services/teamMerge.js');
+    const before = primaryTeam() as Record<string, any>;
+    const after = { ...primaryTeam(), memberAvatars: { 'a-jean': choice('owl', 10) } };
+    expect(fingerprintMergePlanInput(after)).toBe(fingerprintMergePlanInput(before));
+  });
+});
+
 describe('planTeamMerge — the sources are never written', () => {
   it('leaves both inputs exactly as they were', () => {
     const primary = primaryTeam();

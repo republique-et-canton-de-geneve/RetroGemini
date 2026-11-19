@@ -18,6 +18,7 @@ const errors: Record<keyof typeof en, string> = {
   'errors.recoveryEmailRequired': 'Saisissez un e-mail de récupération\u00a0: c’est le seul moyen de réinitialiser le mot de passe en cas d’oubli',
   'errors.deleteTeamFailed': "L'équipe n'a pas pu être supprimée. Veuillez réessayer.",
   'errors.recoveryEmailNotSaved': "L'e-mail de récupération n'a pas pu être enregistré. Veuillez réessayer.",
+  'errors.avatarNotSaved': "L'avatar n'a pas pu être enregistré.",
   'errors.invalidInviteLink': "Impossible de rejoindre l'équipe\u00a0: lien d'invitation invalide",
   'errors.inviteRateLimited': 'Trop de tentatives pour rejoindre cette équipe depuis ce réseau. Patientez quelques minutes, puis réessayez.',
   'errors.inviteUnavailable': 'Impossible de rejoindre l’équipe pour le moment. Réessayez dans un instant.',

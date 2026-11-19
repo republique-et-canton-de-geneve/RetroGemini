@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
-import { withoutUnstoredJiraLinks } from '../../utils/actionImpact.js';
+import { isValidRaterId, withoutUnstoredJiraLinks } from '../../utils/actionImpact.js';
+import { isMemberAvatarEntry } from '../../utils/avatars.js';
 import { parseEmailInput } from '../../utils/emailAddress.js';
 import { isJiraLinked, isJiraUncertain } from '../../utils/jira.js';
 import { valuesEqual } from './sessionGuard.js';
@@ -777,6 +778,9 @@ const KNOWN_TEAM_KEYS = new Set([
   // parent issue is keyed by the session's id, and the merged team gives every
   // session a new one (`mergedJiraParents`).
   'jiraParents',
+  // Known for the same reason: each member's avatar is keyed by member id,
+  // and the secondary's ids are rewritten (`mergedMemberAvatars`).
+  'memberAvatars',
   '_rev',
   '_updatedAt'
 ]);
@@ -836,6 +840,39 @@ const mergedJiraParents = (sources) => {
   }
   if (backlog !== undefined) entries.push(['backlog', structuredClone(backlog)]);
   return entries.length > 0 ? Object.fromEntries(entries) : null;
+};
+
+const rosterIdSet = (team) =>
+  new Set([...asArray(team?.members), ...asArray(team?.archivedMembers)]
+    .filter((member) => isPlainObject(member) && typeof member.id === 'string')
+    .map((member) => member.id));
+
+/**
+ * Both sources' avatar choices (`memberAvatars`), keyed by the merged team's
+ * member ids: the main team's as they are, the second's through its user-id
+ * map. For a member the merge unified, the main team's entry wins — a clear
+ * included, which is a choice — and the second's is used when the main team
+ * has none (PLAN.md D17). An entry of the second team for an id on neither of
+ * its roster lists is carried only when that id is not one of the main
+ * team's members: the id map knows only roster members, so such an entry
+ * would otherwise land on someone else. Entries that are not `{ id, at }`
+ * under a plausible member id are not carried.
+ *
+ * @returns {Record<string, { id: string | null, at: number }> | null}
+ */
+const mergedMemberAvatars = (primary, secondary, secondaryUserIds) => {
+  const entries = new Map();
+  const readable = (team) => (isPlainObject(team.memberAvatars) ? Object.entries(team.memberAvatars) : [])
+    .filter(([memberId, entry]) => isValidRaterId(memberId) && isMemberAvatarEntry(entry));
+  for (const [memberId, entry] of readable(primary)) entries.set(memberId, { id: entry.id, at: entry.at });
+  const primaryRoster = rosterIdSet(primary);
+  const secondaryRoster = rosterIdSet(secondary);
+  for (const [memberId, entry] of readable(secondary)) {
+    if (!secondaryRoster.has(memberId) && primaryRoster.has(memberId)) continue;
+    const mergedId = secondaryUserIds.get(memberId) ?? memberId;
+    if (!entries.has(mergedId)) entries.set(mergedId, { id: entry.id, at: entry.at });
+  }
+  return entries.size > 0 ? Object.fromEntries(entries) : null;
 };
 
 const laterDate = (a, b) => {
@@ -1032,6 +1069,7 @@ const planTeamMerge = ({
 
   const unknown = carryUnknownKeys(primary, secondary);
   const jiraParents = mergedJiraParents(sources);
+  const memberAvatars = mergedMemberAvatars(primary, secondary, memberPlan.userIds);
   const lastConnectionDate = laterDate(primary.lastConnectionDate, secondary.lastConnectionDate);
   const noticeDismissedAt = earlierDate(primary.actionImpactNoticeDismissedAt, secondary.actionImpactNoticeDismissedAt);
   const ratingDisabled = primary.actionImpactRatingEnabled === false || secondary.actionImpactRatingEnabled === false;
@@ -1072,6 +1110,7 @@ const planTeamMerge = ({
     ...(ratingDisabled ? { actionImpactRatingEnabled: false } : {}),
     ...(noticeDismissedAt ? { actionImpactNoticeDismissedAt: noticeDismissedAt } : {}),
     ...(jiraParents ? { jiraParents } : {}),
+    ...(memberAvatars ? { memberAvatars } : {}),
     mergedFrom: [provenance(a), provenance(b)]
   });
 

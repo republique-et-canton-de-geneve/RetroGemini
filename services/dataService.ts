@@ -1,10 +1,11 @@
 import { appFetch, appUrl } from './publicPath';
 
-import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink, JiraParentLink } from '../types';
+import { Team, TeamSummary, User, RetroSession, ActionItem, ActionImpactVote, Column, Template, HealthCheckSession, HealthCheckTemplate, TeamFeedback, FeedbackComment, JiraLink, JiraParentLink, MemberAvatarChoice } from '../types';
 import { randomId } from '../utils/randomId';
 import { BOARD_START_SETTINGS, CARD_AND_VOTE_START_SETTINGS, OPEN_BOARD_PHASE } from '../utils/openBoard';
 import { PARTICIPANT_PALETTE } from '../utils/participantColors';
 import { isJiraIssueKey, isJiraIssueTypeId, isJiraLinked, isJiraParentScope, isJiraUncertain } from '../utils/jira.js';
+import { isAvatarId } from '../utils/avatars.js';
 import {
   DEFAULT_TIMER_SECONDS,
   createTimerSettings,
@@ -72,6 +73,8 @@ let inviteCredentialCache: { teamId: string; credential: string; fetchedAt: numb
 export const TEAM_DELETE_FAILED = 'The team could not be deleted. Please try again.';
 // Thrown by `updateFacilitatorEmail` when the server did not store the address.
 export const RECOVERY_EMAIL_NOT_SAVED = 'The recovery email could not be saved. Please try again.';
+// Thrown by `setMemberAvatar` when the server did not store the choice.
+export const AVATAR_NOT_SAVED = 'The avatar could not be saved.';
 
 // When the cache last received the whole team from a login, a creation, a
 // restore or an invite join, or `null`. The Dashboard reuses that load once,
@@ -591,18 +594,27 @@ const ROLLOUT_RETRIES = 4;
 const postAcrossRollout = async (
   endpoint: string,
   body: Record<string, unknown>,
+  isFinal: (error: string) => boolean
+): Promise<string | null> => (await postAcrossRolloutFor(endpoint, body, isFinal)).error;
+
+// The same retry, for a caller that reads the answer too. `data` is null
+// whenever `error` is set, and when the credentials went mid-window.
+const postAcrossRolloutFor = async <T>(
+  endpoint: string,
+  body: Record<string, unknown>,
   isFinal: (error: string) => boolean,
   attempt = 0
-): Promise<string | null> => {
-  if (!hasTeamCredentials()) return null;
+): Promise<{ data: T | null; error: string | null }> => {
+  if (!hasTeamCredentials()) return { data: null, error: null };
 
-  const { error } = await apiCall(endpoint, body);
+  const answer = await apiCall<T>(endpoint, body);
+  const { error } = answer;
 
   // A revoked token is final: no pod will take it (decision D3b).
-  if (!error || isFinal(error) || error === SESSION_REVOKED || attempt >= ROLLOUT_RETRIES) return error;
+  if (!error || isFinal(error) || error === SESSION_REVOKED || attempt >= ROLLOUT_RETRIES) return answer;
 
   await new Promise(resolve => setTimeout(resolve, 500 * 2 ** attempt));
-  return postAcrossRollout(endpoint, body, isFinal, attempt + 1);
+  return postAcrossRolloutFor<T>(endpoint, body, isFinal, attempt + 1);
 };
 
 /**
@@ -2551,6 +2563,56 @@ export const dataService = {
     const current = getAuthenticatedTeam();
     if (current && current.id === teamId) current.facilitatorEmail = parsed.email;
     return parsed.email;
+  },
+
+  /**
+   * Store one member's avatar (`null` for their initials) through its own
+   * route, and resolve with the team's map as the server stored it.
+   *
+   * Awaited like the recovery address, so a screen says "saved" only once the
+   * server has it. `sessionId` names the live session the choice was made in,
+   * which the server then stamps (PLAN.md section 18.1). It rides the
+   * rolling-update retry: a pod of the previous release answers an HTML 404,
+   * while `invalid_avatar` and `invalid_member` are the route's own and final.
+   * Not queued behind the session saves: it writes a key nothing else writes.
+   *
+   * The cached team's `memberAvatars` is then replaced by the answer, as a new
+   * object. Nothing is written onto a cached member row, and the roster is
+   * never posted: `/members` replaces the rows wholesale, so a field there
+   * would ride, and be lost by, every roster post.
+   */
+  setMemberAvatar: async (
+    memberId: string,
+    avatar: string | null,
+    sessionId?: string
+  ): Promise<Record<string, MemberAvatarChoice>> => {
+    const team = getAuthenticatedTeam();
+    if (!team || !hasTeamCredentials()) throw new Error(AVATAR_NOT_SAVED);
+    if (typeof memberId !== 'string' || !memberId || (avatar !== null && !isAvatarId(avatar))) {
+      throw new Error(AVATAR_NOT_SAVED);
+    }
+    const teamId = team.id;
+
+    const { data, error } = await postAcrossRolloutFor<{ memberAvatars?: unknown }>(
+      `/api/team/${teamId}/member/avatar`,
+      { memberId, avatar, ...(typeof sessionId === 'string' && sessionId ? { sessionId } : {}) },
+      (code) => code === 'invalid_avatar' || code === 'invalid_member'
+    );
+    if (error || !data) {
+      if (error) console.warn('[dataService] Failed to save avatar', error);
+      throw new Error(AVATAR_NOT_SAVED);
+    }
+
+    const answered = data.memberAvatars;
+    const current = getAuthenticatedTeam();
+    if (!answered || typeof answered !== 'object' || Array.isArray(answered)) {
+      return { ...(current?.memberAvatars ?? {}) };
+    }
+    const map = { ...(answered as Record<string, MemberAvatarChoice>) };
+    // Signed out, or another team logged in, while the write ran: the answer
+    // is not this cache's.
+    if (current && current.id === teamId) current.memberAvatars = map;
+    return { ...map };
   },
 
   changeTeamPassword: async (teamId: string, newPassword: string, currentPassword?: string): Promise<void> => {

@@ -22,6 +22,20 @@ export interface User {
   email?: string;
   inviteToken?: string;
   joinedBefore?: boolean;
+  // Only on a session's participant copies (`participants[i]`), never on a
+  // team's `members` or `archivedMembers` rows, which `/members` replaces
+  // wholesale: the avatar the person chose (`null` for their initials) and the
+  // server's time of that choice in ms, the newer of which wins. Absent means
+  // never stated in this session; the truth is `Team.memberAvatars`. Data any
+  // client can write: read through `toAvatarId` (utils/avatars.js) to draw.
+  avatar?: string | null;
+  avatarAt?: number;
+}
+
+/** One member's avatar choice: the id or `null` for initials, and its server time in ms. */
+export interface MemberAvatarChoice {
+  id: string | null;
+  at: number;
 }
 
 export interface Column {
@@ -487,6 +501,11 @@ export interface Team {
   // Written only by /api/team/:teamId/jira/issues; /update ignores it. (The
   // claims on parents being created are server-only and not typed here.)
   jiraParents?: Record<JiraParentScope, JiraParentLink>;
+  // Each member's avatar, keyed by member id. Written only by
+  // /api/team/:teamId/member/avatar; /update ignores it. Read through
+  // `memberAvatar` / `memberAvatarId` (utils/avatars.js): any team credential
+  // can post anything, so an entry is data until checked.
+  memberAvatars?: Record<string, MemberAvatarChoice>;
 }
 
 export interface TeamMergeSource {
