@@ -20,10 +20,10 @@
  *   and a value such as `fixed inset-0 z-50` used to land on every screen. A
  *   value this release does not know renders in the neutral tone.
  *
- * One other reader, on purpose (design A6): `Session.tsx`'s
- * `TAILWIND_COLOR_MAP` also reads it, as a lookup key for the colour-by-author
- * card background, painted as a hex `style`. An unknown key gives the default
- * card. `participantToneHex` hands the same tones out as hex for that card.
+ * The colour-by-author card reads its author's tone through
+ * `participantToneHex` (its `pop`), which `utils/cardTones.ts` turns into the
+ * card's tint and inks, painted as a hex `style`; an unknown colour gives the
+ * neutral tone.
  *
  * A colour an earlier release stored and this palette does not hold (or a
  * later release's new colour, seen by this one during a rolling update) also

@@ -47,12 +47,13 @@ import { COLOR_TOKEN_PATTERN } from './helpers/tailwindTheme';
  *     between those. A string or a template there would be rule 2's override
  *     under another name, and `Avatar` itself declares no `className`.
  *
- * Deliberately outside what this guards: `Session.tsx`'s `TAILWIND_COLOR_MAP`
- * reads the colour as a key (rule 4) to paint the colour-by-author card
- * background as a hex `style` (design A6). An unknown key gives the default
- * card, and that card's text colour is measured by `bestTextColorOn`. And two
- * spellings no AST rule here follows: destructuring (`const { color } = user`)
- * and an element access (`user['color']`).
+ * The colour-by-author card reads its author's tone through
+ * `participantToneHex` (rule 1 and 4), and `utils/cardTones.ts` turns it into
+ * the card's tint and inks, painted as a hex `style`; an unknown colour gives
+ * the neutral tone. (`Session.tsx`'s `TAILWIND_COLOR_MAP`, the map key rule 4
+ * still allows, went with 45.0's card colours.) Deliberately outside what this
+ * guards: two spellings no AST rule here follows, destructuring
+ * (`const { color } = user`) and an element access (`user['color']`).
  */
 
 const REPO_ROOT = join(__dirname, '..');

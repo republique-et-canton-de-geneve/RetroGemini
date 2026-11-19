@@ -7,7 +7,9 @@ import { dataService } from '../services/dataService';
 import { noteRevokedResponse } from '../services/sessionRevocation';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
-import { bestTextColorOn, readableTextColor } from '../utils/colorUtils';
+import { cardTones } from '../utils/cardTones';
+import { columnHue } from '../utils/columnHue';
+import { columnIconName } from './iconPickerIcons';
 import { randomId } from '../utils/randomId';
 import { ticketQuote } from '../utils/textCut';
 import {
@@ -125,7 +127,7 @@ import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessi
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import SyncStalledBanner from './session/SyncStalledBanner';
 import { jiraLinkFields, sameJiraLink, withJiraLinkFrom } from './jira/jiraLinkMerge';
-import { avatarColorClasses } from '../utils/participantColors';
+import { avatarColorClasses, participantToneHex } from '../utils/participantColors';
 import Avatar from './common/Avatar';
 
 const generateLocalId = () => randomId();
@@ -167,18 +169,6 @@ const PHASES: string[] = [...GUIDED_RETRO_PHASES];
 // it, or the open board, which carries all three activities at once.
 type BoardMode = 'BRAINSTORM' | 'GROUP' | 'VOTE' | 'BOARD';
 const EMOJIS = ['👍', '👎', '❤️', '🎉', '👏', '😄', '😮', '🤔', '😡', '😢'];
-
-// Map Tailwind color classes to hex values
-const TAILWIND_COLOR_MAP: Record<string, string> = {
-  'bg-indigo-500': '#6366f1',
-  'bg-emerald-500': '#10b981',
-  'bg-amber-500': '#f59e0b',
-  'bg-rose-500': '#f43f5e',
-  'bg-cyan-500': '#06b6d4',
-  'bg-fuchsia-500': '#d946ef',
-  'bg-lime-500': '#84cc16',
-  'bg-pink-500': '#ec4899'
-};
 
 const isRetroSession = (session: unknown): session is RetroSession => {
   if (!session || typeof session !== 'object') return false;
@@ -2932,31 +2922,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // column it was written in, and an explicit "from ..." chip names it.
       const originColumn = getTicketOriginColumn(t, session.columns);
       const topicColumn = originColumn ?? column;
-      let cardBgHex: string | null = null;
-
-      if (colorBy === 'author' && author && visible) {
-        // Use author's color for background
-        cardBgHex = TAILWIND_COLOR_MAP[author.color] || null;
-      } else if (colorBy === 'topic' && topicColumn?.customColor && visible) {
-        // Use the (origin) column's custom color for background
-        cardBgHex = topicColumn.customColor;
-      }
-
-      // Determine text color based on background brightness
-      const cardTextColor = cardBgHex
-        // Chosen by measured contrast, not by a brightness average: the latter
-        // called the default rose "Stop" column dark and painted its text white
-        // at 3.67:1 (H42).
-        // `text-black`, not `text-slate-900`: the class must paint the colour the
-        // measurement was made on, or the guarantee is about a colour the user
-        // never sees (Codex, PR #436).
-        ? (bestTextColorOn(cardBgHex) === '#FFFFFF' ? 'text-white' : 'text-black')
-        : 'text-slate-900'; // Default white background needs dark text
+      // The card takes a soft tint of its hue and keeps the look's ink for
+      // its words (utils/cardTones.ts: measured for any hex); its controls
+      // take the hue's own ink, which reads on the tint. A card hidden from
+      // its reader is tinted by its topic only: its author's tone would name
+      // who wrote it. No hue at all gives the white card.
+      const cardTonesOf = colorBy === 'author' && visible
+        ? (author ? cardTones(participantToneHex(author.color).pop) : null)
+        : cardTones(columnHue(topicColumn));
+      // What a control on the card is painted in: the hue's ink, inline, on a
+      // tinted card; on the white card, its own classes.
+      const controlInk = cardTonesOf ? { color: cardTonesOf.ink } : undefined;
 
       const cardAppearance = {
         isDragTarget,
         isSelected,
-        cardBgHex,
+        tones: cardTonesOf,
         isDraggable: isDraggableCard
       };
 
@@ -3130,7 +3111,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             e.currentTarget.blur();
                         }
                     }}
-                    className="w-full text-sm outline-hidden bg-slate-50 border border-indigo-300 rounded-sm p-1 resize-none"
+                    className="w-full text-[14.5px] leading-[1.45] font-medium text-slate-900 bg-white border border-indigo-600 rounded-lg px-2 py-1 resize-none outline-hidden focus:ring-4 focus:ring-indigo-600/15"
                     rows={2}
                  />
             ) : (
@@ -3142,7 +3123,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     {!visible && <span className="sr-only">{tr('session.ticket.hidden')}</span>}
                     <div
                         aria-hidden={visible ? undefined : true}
-                        className={`text-sm w-full whitespace-pre-wrap wrap-break-word ${!visible ? 'ticket-blur' : cardTextColor} ${showsAuthor ? 'pr-8' : ''}`}
+                        className={`text-[14.5px] leading-[1.45] font-medium w-full whitespace-pre-wrap wrap-break-word ${!visible ? 'ticket-blur' : 'text-slate-900'} ${showsAuthor ? 'pr-8' : ''}`}
                     >
                         {/* The edit control below sits at the end of the first
                             line — in view on a phone, on hover on a computer —
@@ -3162,17 +3143,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 setEditingTicketId(t.id);
                                 if (isBoard) setSearchKeptTicketIds(kept => (kept.has(t.id) ? kept : new Set([...kept, t.id])));
                             }}
-                            // The card's own measured text colour on a coloured
-                            // card, as the comment button: an icon a phone always
-                            // shows must be seen (1.4.11), and slate-300 measured
-                            // 1.48:1 on white.
+                            // The hue's ink on a tinted card, as the comment
+                            // button: an icon a phone always shows must be seen
+                            // (1.4.11), and slate-300 measured 1.48:1 on white.
                             // Beside the author's avatar, or in its corner when
-                            // there is none: over the float either way.
-                            className={`absolute top-0 ${showsAuthor ? 'right-8' : 'right-0'} ${cardBgHex ? cardTextColor : 'text-slate-500 hover:text-indigo-600'} [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus:opacity-100 transition`}
+                            // there is none: over the float either way, and of
+                            // its size (24px).
+                            className={`absolute top-0 ${showsAuthor ? 'right-8' : 'right-0'} w-6 h-6 flex items-center justify-center rounded-md ${cardTonesOf ? 'hover:bg-white' : 'text-slate-500 hover:text-indigo-600 hover:bg-slate-100'} [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus:opacity-100 transition`}
+                            style={controlInk}
                             title={tr('session.ticket.editTitle')}
                             aria-label={tr('session.ticket.editAria')}
                         >
-                            <span className="material-symbols-outlined text-sm">edit</span>
+                            <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">edit</span>
                         </button>
                     )}
                 </div>
@@ -3187,14 +3169,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             {showsAuthor && (
                 <div className="absolute top-2 right-2">
                     {/* Named: it is the card's only sign of who wrote it. */}
-                    <div className="flex rounded-full shadow-xs ring-1 ring-white">
-                        <Avatar colorClasses={avatarColorClasses(author.color)} initials={author.name.substring(0,2).toUpperCase()} size={24} label={author.name} />
+                    <div className="flex rounded-full ring-2 ring-white">
+                        <Avatar colorClasses={avatarColorClasses(author.color)} initials={author.name.substring(0,2).toUpperCase()} size={28} label={author.name} />
                     </div>
                 </div>
             )}
 
+            {/* One foot row: the reactions, the control that adds one, and
+                the comments. */}
             {visible && !isEditing && (
-                <div className="mt-2 flex flex-wrap gap-1 relative">
+                <div className="mt-2 flex flex-wrap items-center gap-1 relative">
                     {Object.entries(t.reactions || {}).map(([emoji, users]: [string, string[]]) => (
                         <button
                             key={emoji}
@@ -3215,9 +3199,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     }
                                 });
                             }}
-                            className={`text-base px-2 py-1 rounded-sm border ${users.includes(currentUser.id) ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-100'}`}
+                            className={`inline-flex items-center gap-1 h-7 px-2 rounded-full border text-sm transition-colors ${users.includes(currentUser.id) ? 'bg-indigo-50 border-indigo-300 text-indigo-800' : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'}`}
                         >
-                            {emoji} <span className="text-xs font-bold text-slate-500">{users.length}</span>
+                            {emoji} <span className="text-xs font-bold tabular-nums">{users.length}</span>
                         </button>
                     ))}
                     <div className="relative">
@@ -3227,28 +3211,29 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 e.stopPropagation();
                                 setEmojiPickerOpenId(isPickerOpen ? null : t.id);
                             }}
-                            // The card's own measured text colour on a coloured
-                            // card, as the pencil and the comment button: a
-                            // fixed slate-500 measured 1.0 to 1.6:1 on the
-                            // columns' colours, every card's default look
-                            // (pass 17 of 42.1).
-                            className={`rounded-full w-8 h-8 flex items-center justify-center transition ${
-                                cardBgHex
-                                    ? `${cardTextColor} hover:bg-black/10 ${isPickerOpen ? 'bg-black/10' : ''}`
+                            // The hue's ink on a tinted card, as the pencil and
+                            // the comment button: a fixed slate-500 measured
+                            // 1.0 to 1.6:1 on the columns' saturated colours
+                            // (pass 17 of 42.1). Open, it stands on the stronger
+                            // tint, where the ink is measured too.
+                            className={`rounded-lg w-7 h-7 flex items-center justify-center transition-colors ${
+                                cardTonesOf
+                                    ? (isPickerOpen ? '' : 'hover:bg-white')
                                     : isPickerOpen ? 'bg-slate-100 text-slate-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'
                             }`}
+                            style={cardTonesOf ? { color: cardTonesOf.ink, ...(isPickerOpen ? { backgroundColor: cardTonesOf.tintStrong } : {}) } : undefined}
                             aria-label={tr('session.ticket.addReaction')}
                         >
-                            <span className="material-symbols-outlined text-base">add_reaction</span>
+                            <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">add_reaction</span>
                         </button>
 
                         {isPickerOpen && (
-                            <div ref={emojiPickerRef} className="absolute top-full left-0 bg-white border border-slate-200 shadow-xl rounded-lg p-2 grid grid-cols-5 gap-1 z-50 w-max mt-1">
+                            <div ref={emojiPickerRef} className="absolute top-full left-0 bg-white border border-slate-200 shadow-xl rounded-xl p-2 grid grid-cols-5 gap-1 z-50 w-max mt-1">
                                 {EMOJIS.map(e => (
                                     <button
                                         key={e}
                                         data-testid="emoji-option"
-                                        className="hover:bg-slate-100 p-1.5 rounded-sm text-lg transition transform hover:scale-125"
+                                        className="hover:bg-slate-100 p-1.5 rounded-lg text-lg transition transform hover:scale-125"
                                         onClick={(evt) => {
                                             evt.stopPropagation();
                                             updateSession(s => {
@@ -3268,6 +3253,27 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             </div>
                         )}
                     </div>
+                    {/* The comments, in the same row. Its first comment is
+                        added from a control shown on hover, on focus, and
+                        always where nothing hovers. */}
+                    <div className={`flex items-center ${(t.comments?.length || 0) > 0 ? '' : '[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100'} transition-opacity`}>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setFocusedTicketId(t.id); }}
+                            className={`flex items-center gap-1 h-7 text-xs font-semibold px-1.5 rounded-lg transition-colors ${
+                                cardTonesOf
+                                    ? 'hover:bg-white'
+                                    : (t.comments?.length || 0) > 0 ? 'text-indigo-600 hover:bg-slate-100' : 'text-slate-500 hover:text-slate-600 hover:bg-slate-100'
+                            }`}
+                            style={controlInk}
+                            title={tr('session.ticket.comments')}
+                            data-testid="ticket-comment-btn"
+                        >
+                            <span className="material-symbols-outlined text-lg! leading-none">comment</span>
+                            {(t.comments?.length || 0) > 0 && (
+                                <span className="font-bold tabular-nums" data-testid="comment-count">{t.comments!.length}</span>
+                            )}
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -3282,32 +3288,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             {canDeleteCard && !isEditing && !(isBoard && !isGrouped) && (
                 <button
                     onClick={deleteCard}
-                    className="absolute bottom-2 right-2 w-6 h-6 flex items-center justify-center rounded-sm bg-white/90 text-slate-500 hover:text-red-600 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                    className="absolute bottom-2 right-2 w-7 h-7 flex items-center justify-center rounded-lg bg-white text-slate-600 hover:text-rose-700 hover:bg-rose-50 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
                     aria-label={tr('session.ticket.delete')}
                 >
-                    <span className="material-symbols-outlined text-sm">delete</span>
+                    <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">delete</span>
                 </button>
-            )}
-
-            {/* Comment badge & button */}
-            {visible && !isEditing && (
-                <div className={`flex items-center mt-1 ${(t.comments?.length || 0) > 0 ? '' : '[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100'} transition`}>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); setFocusedTicketId(t.id); }}
-                        className={`flex items-center space-x-1 text-xs px-1.5 py-0.5 rounded transition ${
-                            cardBgHex
-                                ? `${cardTextColor} hover:bg-black/10`
-                                : (t.comments?.length || 0) > 0 ? 'text-indigo-600 hover:bg-slate-100' : 'text-slate-500 hover:text-slate-600 hover:bg-slate-100'
-                        }`}
-                        title={tr('session.ticket.comments')}
-                        data-testid="ticket-comment-btn"
-                    >
-                        <span className="material-symbols-outlined text-sm">comment</span>
-                        {(t.comments?.length || 0) > 0 && (
-                            <span className="font-bold" data-testid="comment-count">{t.comments!.length}</span>
-                        )}
-                    </button>
-                </div>
             )}
 
             {/* The keyboard path, and **only** the keyboard path.
@@ -3335,10 +3320,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         isSelected
                     }, tr)}
                     aria-pressed={isSelected}
-                    className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-1 focus:px-2 focus:text-[11px] focus:font-bold focus:rounded focus:border ${
+                    className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-1 focus:px-2 focus:text-xs focus:font-semibold focus:rounded-lg focus:border ${
                         isSelected
-                            ? 'focus:bg-blue-600 focus:text-white focus:border-blue-700'
-                            : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-400'
+                            ? 'focus:bg-indigo-600 focus:text-white focus:border-indigo-700'
+                            : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-600'
                     }`}
                 >
                     {getGroupingButtonText({ hasSelection: !!draggedTicket, isSelected }, tr)}
@@ -3367,10 +3352,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         isSelected
                     }, tr)}
                     aria-pressed={isSelected}
-                    className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-1 focus:px-2 focus:text-[11px] focus:font-bold focus:rounded focus:border ${
+                    className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-1 focus:px-2 focus:text-xs focus:font-semibold focus:rounded-lg focus:border ${
                         isSelected
-                            ? 'focus:bg-blue-600 focus:text-white focus:border-blue-700'
-                            : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-400'
+                            ? 'focus:bg-indigo-600 focus:text-white focus:border-indigo-700'
+                            : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-600'
                     }`}
                 >
                     {getBrainstormMoveButtonText({ target: 'item', isSelected }, tr)}
@@ -3400,10 +3385,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     {canDeleteCard ? (
                         <button
                             onClick={deleteCard}
-                            className="w-6 h-6 flex items-center justify-center rounded-sm bg-white/90 text-slate-500 hover:text-red-600 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg bg-white text-slate-600 hover:text-rose-700 hover:bg-rose-50 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
                             aria-label={tr('session.ticket.delete')}
                         >
-                            <span className="material-symbols-outlined text-sm">delete</span>
+                            <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">delete</span>
                         </button>
                     ) : <span />}
                     <BoardVoteControl
@@ -3436,7 +3421,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       <div className={`flex items-center ${placement === 'bar' ? `space-x-2 ${BAR_RULE}` : 'justify-between gap-3'}`}>
         <label
           htmlFor={`color-by-${placement}`}
-          className={placement === 'bar' ? 'text-xs text-slate-500 font-medium whitespace-nowrap' : 'text-sm font-medium text-slate-800'}
+          className={placement === 'bar' ? 'text-sm text-slate-600 font-medium whitespace-nowrap' : 'text-sm font-medium text-slate-800'}
         >
           {tr('session.board.colorBy')}
         </label>
@@ -3450,7 +3435,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           disabled={!isLive}
           value={session.settings.isAnonymous ? 'topic' : (session.settings.colorBy || 'topic')}
           onChange={(e) => updateSession(s => s.settings.colorBy = e.target.value as 'author' | 'topic')}
-          className={`${placement === 'bar' ? 'text-xs' : 'text-sm'} bg-white border border-slate-300 rounded-sm px-2 py-1 text-slate-700 font-medium cursor-pointer hover:border-slate-400`}
+          className={`text-sm bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-800 font-semibold cursor-pointer hover:border-slate-400 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 disabled:cursor-not-allowed`}
         >
           <option value="topic">{tr('session.board.colorByTopic')}</option>
           <option value="author" disabled={session.settings.isAnonymous}>{tr('session.board.colorByAuthor')}</option>
@@ -3503,22 +3488,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const label = (
           <label
               htmlFor={`max-votes-${placement}`}
-              className={placement === 'bar' ? 'px-2' : 'text-sm font-medium text-slate-800'}
+              className={placement === 'bar' ? 'px-2 text-slate-700' : 'text-sm font-medium text-slate-800'}
           >
               {visibleLabel}
           </label>
       );
       const stepper = (
-            <div className="flex items-center bg-slate-100 rounded-sm overflow-hidden text-sm focus-within:ring-2 focus-within:ring-indigo-500">
+            <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden text-sm focus-within:border-indigo-600 focus-within:ring-2 focus-within:ring-indigo-600">
                 {placement === 'bar' && label}
                 <button
                     onClick={() => stepMaxVotes(-1)}
                     disabled={off}
-                    className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="px-1.5 py-1 text-slate-600 hover:bg-slate-100 transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
                     title={tr('session.board.decreaseMaxVotes')}
                     aria-label={tr('session.board.decreaseMaxVotes')}
                 >
-                    <span className="material-symbols-outlined text-sm">keyboard_arrow_down</span>
+                    <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">keyboard_arrow_down</span>
                 </button>
                 <input
                     id={`max-votes-${placement}`}
@@ -3528,7 +3513,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     // would be no name at all (axe `label`, critical).
                     aria-label={inputLabel}
                     disabled={off}
-                    className="w-12 bg-transparent text-center font-bold outline-hidden text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-12 bg-transparent text-center font-bold tabular-nums outline-hidden text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed"
                     value={maxVotesInput}
                     onChange={(e) => {
                         const val = e.target.value;
@@ -3547,11 +3532,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <button
                     onClick={() => stepMaxVotes(1)}
                     disabled={off}
-                    className="px-2 py-1 hover:bg-slate-200 transition flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="px-1.5 py-1 text-slate-600 hover:bg-slate-100 transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
                     title={tr('session.board.increaseMaxVotes')}
                     aria-label={tr('session.board.increaseMaxVotes')}
                 >
-                    <span className="material-symbols-outlined text-sm">keyboard_arrow_up</span>
+                    <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">keyboard_arrow_up</span>
                 </button>
             </div>
       );
@@ -3638,21 +3623,21 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const renderEditLayoutButton = () => (
           <button
                onClick={() => setIsEditingColumns(!isEditingColumns)}
-               className={`flex items-center space-x-1 px-3 py-1 rounded-sm text-sm font-bold transition ${isEditingColumns ? 'bg-indigo-100 text-indigo-700' : 'text-slate-500 hover:bg-slate-100'}`}
+               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${isEditingColumns ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-100'}`}
           >
-              <span className="material-symbols-outlined text-sm">view_column</span>
+              <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">view_column</span>
               <span>{isEditingColumns ? tr('session.board.doneEditingLayout') : tr('session.board.editLayout')}</span>
           </button>
       );
 
       const renderVoteSettings = () => (
-           <div className={`flex flex-wrap items-center gap-2 text-sm text-slate-600 ${BAR_RULE}`}>
-                <label className="flex items-center space-x-1 cursor-pointer">
-                    <input type="checkbox" disabled={!isLive} checked={session.settings.oneVotePerTicket} onChange={(e) => handleToggleOneVote(e.target.checked)} />
+           <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 text-sm font-medium text-slate-700 ${BAR_RULE}`}>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-indigo-600" disabled={!isLive} checked={session.settings.oneVotePerTicket} onChange={(e) => handleToggleOneVote(e.target.checked)} />
                     <span>{tr('session.board.oneVotePerItem')}</span>
                 </label>
-                <label className="flex items-center space-x-1 cursor-pointer">
-                    <input type="checkbox" disabled={!isLive} checked={!!session.settings.unlimitedVotes} onChange={(e) => handleToggleUnlimitedVotes(e.target.checked)} />
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" className="w-4 h-4 accent-indigo-600" disabled={!isLive} checked={!!session.settings.unlimitedVotes} onChange={(e) => handleToggleUnlimitedVotes(e.target.checked)} />
                     <span className="whitespace-nowrap">{tr('session.board.unlimitedVotes')}</span>
                 </label>
                 {renderMaxVotesStepper(tr('session.board.maxVotes'), tr('session.board.maxVotesInput'))}
@@ -3667,7 +3652,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               onClick={switchToOpenBoard}
               disabled={!isLive}
               title={tr('session.openBoard.switchToBoardHint')}
-              className="flex items-center gap-1 px-3 py-2 rounded-sm border border-slate-200 text-sm font-bold text-slate-600 whitespace-nowrap hover:bg-slate-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 py-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
               <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">view_kanban</span>
               <span>{tr('session.openBoard.switchToBoard')}</span>
@@ -3680,8 +3665,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // (BoardSettingsDialog). e2e/i18n.spec.ts measures it at every width, in
       // both languages.
       const renderBoardActionBar = () => (
-          <div data-testid="phase-action-bar" className="bg-white border-b px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0 shadow-xs z-30 sticky top-0">
-              <h2 className="font-bold text-slate-700 text-lg">{tr('session.openBoard.title')}</h2>
+          <div data-testid="phase-action-bar" className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0 z-30 sticky top-0">
+              <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{tr('session.openBoard.title')}</h2>
               {renderVotesRemaining()}
               <BoardViewControls
                   search={boardSearch}
@@ -3697,7 +3682,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                           type="button"
                           onClick={() => setBoardSettingsOpen(true)}
                           aria-haspopup="dialog"
-                          className="flex items-center gap-1 px-3 py-1 rounded-sm text-sm font-bold text-slate-600 hover:bg-slate-100 transition"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
                       >
                           <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">tune</span>
                           <span>{tr('session.openBoard.settingsButton')}</span>
@@ -3717,7 +3702,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                       // `ml-auto`: at the end of the line it lands on, where a
                       // guided bar keeps its phase controls. Its label may wrap:
                       // on a phone it is wider than the bar.
-                      className="ml-auto flex items-center gap-1 px-3 py-2 rounded-sm border border-slate-200 text-sm font-bold text-left text-slate-600 hover:bg-slate-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="ml-auto flex items-center gap-1.5 px-3 py-2 text-left rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                       <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">event_note</span>
                       <span>{tr('session.openBoard.switchToGuided')}</span>
@@ -3727,28 +3712,30 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       );
 
       const renderPhaseActionBar = () => isBoard ? renderBoardActionBar() : (
-          <div data-testid="phase-action-bar" className="bg-white border-b px-6 py-3 flex flex-wrap justify-between items-center gap-x-4 gap-y-2 shrink-0 shadow-xs z-30 sticky top-0">
-               <div className="flex items-center space-x-4">
+          <div data-testid="phase-action-bar" className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex flex-wrap justify-between items-center gap-x-4 gap-y-2 shrink-0 z-30 sticky top-0">
+               {/* Wraps within itself too: the settings of a facilitator's
+                   Brainstorm bar are wider than a narrow screen's bar. */}
+               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                    {mode === 'BRAINSTORM' && (
-                       <h2 className="font-bold text-slate-700 text-lg">{tr('session.board.brainstormTitle')}</h2>
+                       <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{tr('session.board.brainstormTitle')}</h2>
                    )}
                    {mode === 'GROUP' && (
                        <div className="flex items-center gap-3">
-                           <h2 className="font-bold text-slate-700 text-lg">{tr('session.board.groupTitle')}</h2>
+                           <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{tr('session.board.groupTitle')}</h2>
                            {isFacilitator && aiEnabled && renderSuggestGroupsButton()}
                        </div>
                    )}
                    {mode === 'VOTE' && (
                        <div className="flex items-center">
-                           <h2 className="font-bold text-slate-700 text-lg mr-4">{tr('session.board.voteTitle')}</h2>
+                           <h2 className="font-semibold tracking-tight text-slate-900 text-lg mr-4">{tr('session.board.voteTitle')}</h2>
                            {renderVotesRemaining()}
                        </div>
                    )}
 
                    {mode === 'BRAINSTORM' && isFacilitator && (
                        <>
-                           <label className="flex items-center space-x-2 text-sm text-slate-500 cursor-pointer border-l border-slate-200 pl-4">
-                               <input type="checkbox" checked={session.settings.revealBrainstorm} onChange={(e) => updateSession(s => s.settings.revealBrainstorm = e.target.checked)} />
+                           <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer border-l border-slate-200 pl-4">
+                               <input type="checkbox" className="w-4 h-4 accent-indigo-600" checked={session.settings.revealBrainstorm} onChange={(e) => updateSession(s => s.settings.revealBrainstorm = e.target.checked)} />
                                <span className="whitespace-nowrap">{tr('session.board.revealCards')}</span>
                            </label>
                            {renderColorBySelect()}
@@ -3763,9 +3750,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                    narrow for both halves. It used to be pushed out of view
                    instead, and it holds Next Phase: the switch to an open board
                    hid it at 1024 and 1280px (e2e/i18n.spec.ts measures it). */}
-               <div className="ml-auto flex items-center space-x-3">
+               <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                    {(mode === 'BRAINSTORM' || mode === 'VOTE') && (
-                       <div className="flex items-center space-x-2 mr-4">
+                       <div className="flex items-center">
                             <button
                                 onClick={() => updateSession(s => {
                                     if(!s.finishedUsers) s.finishedUsers = [];
@@ -3779,12 +3766,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     }
                                 })}
                                 disabled={mode === 'VOTE' && isFinished && votesLeft === 0}
-                                className={`px-4 py-2 rounded-lg font-bold text-sm shadow transition whitespace-nowrap ${
+                                // Finished: the soft green of a done state, under its
+                                // dark ink (white on emerald-500 measured 2.5:1).
+                                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg border font-semibold text-sm transition-colors whitespace-nowrap ${
                                     isFinished
-                                        ? `bg-emerald-500 text-white ${mode === 'VOTE' && votesLeft === 0 ? 'opacity-60 cursor-not-allowed' : 'hover:bg-emerald-600'}`
-                                        : 'bg-white text-slate-700 hover:bg-slate-100'
+                                        ? `bg-emerald-50 border-emerald-300 text-emerald-800 ${mode === 'VOTE' && votesLeft === 0 ? 'cursor-not-allowed' : 'hover:bg-emerald-100'}`
+                                        : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300 hover:bg-slate-50'
                                 }`}
                             >
+                                {isFinished && <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">check</span>}
                                 {isFinished ? tr('session.board.finished') : tr('session.board.imFinished')}
                             </button>
                        </div>
@@ -3799,7 +3789,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 else if(mode === 'GROUP') setPhase('VOTE');
                                 else if(mode === 'VOTE') setPhase('DISCUSS');
                             }} 
-                            className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm whitespace-nowrap hover:bg-retro-primaryHover"
+                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] transition"
                        >
                            {tr('session.board.nextPhase')}
                        </button>
@@ -3866,8 +3856,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             // The whole row of the column's grid: a group grows
                                             // with every card put in it, and beside one short
                                             // card it would leave a hole the height of the group.
-                                            className={`col-span-full bg-indigo-50/50 p-3 rounded-xl border-2 relative group-container transition-all
-                                                ${isGroupDragTarget ? 'border-indigo-500 ring-4 ring-indigo-200 z-20 scale-105' : isGroupSelected ? 'border-blue-500 ring-4 ring-blue-200 z-10' : 'border-dashed border-indigo-300'}
+                                            // A soft panel on the column's white; a drop target
+                                            // and a held group are ringed, never scaled, so nothing
+                                            // beside them moves.
+                                            className={`col-span-full bg-slate-50 p-3 rounded-2xl border-2 relative group-container transition-[border-color,box-shadow]
+                                                ${isGroupDragTarget ? 'border-indigo-600 ring-4 ring-indigo-200 z-20' : isGroupSelected ? 'border-indigo-600 ring-4 ring-indigo-200 z-10' : 'border-dashed border-slate-300'}
                                                 ${isDraggableGroup ? 'cursor-grab active:cursor-grabbing' : ''}
                                             `}
                                             onDragOver={(e) => (receivesCards && boardDrags()) ? handleDragOverItem(e, g.id) : undefined}
@@ -3932,15 +3925,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             }}
                                         >
                                             {isGroupDragTarget && (
-                                                <div className="absolute inset-0 bg-indigo-100/80 z-20 flex items-center justify-center rounded-xl pointer-events-none">
-                                                     <div className="text-indigo-800 font-bold bg-white/80 px-2 py-1 rounded-sm">{tr('session.group.addToGroup')}</div>
+                                                <div className="absolute inset-0 bg-indigo-50/80 z-20 flex items-center justify-center rounded-[14px] pointer-events-none">
+                                                     <div className="text-indigo-800 font-semibold bg-white px-3 py-1.5 rounded-lg shadow-sm">{tr('session.group.addToGroup')}</div>
                                                 </div>
                                             )}
 
-                                            <div className="flex items-center justify-between mb-2 pb-2 border-b border-indigo-200/50">
+                                            <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-200">
                                                 <div className="flex flex-col w-full">
-                                                    <div className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-1 flex items-center">
-                                                        <span className="material-symbols-outlined text-sm mr-1">layers</span> {tr('session.group.label')}
+                                                    <div className="text-xs font-semibold text-slate-600 mb-1 flex items-center gap-1">
+                                                        <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">layers</span> {tr('session.group.label')}
                                                     </div>
                                                     {/* Named by whoever can read it: a group holding a
                                                         card hidden from this viewer keeps its title, as it
@@ -3976,14 +3969,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                                 updateSession(s => {const grp = s.groups.find(x => x.id === g.id); if(grp) grp.title = e.target.value;});
                                                             }}
                                                             placeholder={aiSuggestingGroupId === g.id ? tr('session.group.aiSuggestingPlaceholder') : tr('session.group.namePlaceholder')}
-                                                            className="w-full text-sm font-bold text-slate-700 border-none focus:ring-0 bg-transparent p-0 placeholder-indigo-300"
+                                                            // Its placeholder is its only instruction: slate-500
+                                                            // reads on the panel (indigo-300 measured 1.9:1). An
+                                                            // outline shows where the keyboard is (2.4.7).
+                                                            className="w-full text-sm font-semibold text-slate-900 border-none focus:ring-0 bg-transparent p-0 rounded-sm placeholder:text-slate-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                                                           />
                                                           {aiSuggestingGroupId === g.id && (
-                                                            <span className="material-symbols-outlined text-sm text-violet-400 animate-spin">progress_activity</span>
+                                                            <span className="material-symbols-outlined text-sm! leading-none text-violet-600 animate-spin" aria-hidden="true">progress_activity</span>
                                                           )}
                                                         </div>
                                                     ) : (
-                                                        <div className="font-bold text-slate-800 text-sm">{g.title || tr('session.group.untitled')}</div>
+                                                        <div className="font-semibold text-slate-900 text-sm">{g.title || tr('session.group.untitled')}</div>
                                                     )}
                                                 </div>
                                                 {/* The cards stay, and the votes go to the group's
@@ -3995,8 +3991,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         updateSession(s => {
                                                             deleteGroup(s, g.id);
                                                         });
-                                                    }} className="text-slate-500 hover:text-red-500 p-1"
-                                                    aria-label={tr('session.group.delete')}><span className="material-symbols-outlined text-lg">delete</span></button>
+                                                    }} className="w-7 h-7 shrink-0 flex items-center justify-center rounded-lg text-slate-600 hover:text-rose-700 hover:bg-rose-50 transition-colors"
+                                                    aria-label={tr('session.group.delete')}><span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">delete</span></button>
                                                 )}
                                             </div>
 
@@ -4020,7 +4016,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         hasSelection: true,
                                                         isSelected: false
                                                     }, tr)}
-                                                    className="sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-2 focus:px-3 focus:text-xs focus:font-bold focus:text-indigo-700 focus:bg-white focus:border-2 focus:border-indigo-400 focus:rounded-lg"
+                                                    className="sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-2 focus:px-3 focus:text-xs focus:font-semibold focus:text-indigo-700 focus:bg-white focus:border-2 focus:border-indigo-600 focus:rounded-xl"
                                                 >
                                                     {tr('session.group.addSelectedCard')}
                                                 </button>
@@ -4042,10 +4038,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         isSelected: isGroupSelected
                                                     }, tr)}
                                                     aria-pressed={isGroupSelected}
-                                                    className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-2 focus:px-3 focus:text-xs focus:font-bold focus:rounded-lg focus:border-2 ${
+                                                    className={`sr-only focus:not-sr-only focus:mt-2 focus:w-full focus:py-2 focus:px-3 focus:text-xs focus:font-semibold focus:rounded-xl focus:border-2 ${
                                                         isGroupSelected
-                                                            ? 'focus:bg-blue-600 focus:text-white focus:border-blue-700'
-                                                            : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-400'
+                                                            ? 'focus:bg-indigo-600 focus:text-white focus:border-indigo-700'
+                                                            : 'focus:bg-white focus:text-indigo-700 focus:border-indigo-600'
                                                     }`}
                                                 >
                                                     {getBrainstormMoveButtonText({ target: 'item', isSelected: isGroupSelected }, tr)}
@@ -4087,7 +4083,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             {renderPhaseActionBar()}
             {boardColumns.overflowing && (
                 <BoardColumnNavigator
-                    columns={session.columns.map(col => ({ id: col.id, title: col.title, lang: contentTitleLanguage(col.title) }))}
+                    columns={session.columns.map(col => ({ id: col.id, title: col.title, lang: contentTitleLanguage(col.title), ink: cardTones(columnHue(col))?.ink ?? null }))}
                     visibleIds={boardColumns.visibleIds}
                     canScrollLeft={boardColumns.canScrollLeft}
                     canScrollRight={boardColumns.canScrollRight}
@@ -4101,10 +4097,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 // the wide layout never showed it. `role="status"` is the part
                 // that is new — it announces the pick-up to a screen reader
                 // without putting anything on screen (H42).
-                <div className="px-6 pt-3 md:hidden">
+                <div className="px-4 pt-3 md:hidden">
                     <div
                         role="status"
-                        className={`text-xs rounded-lg border p-3 shadow-xs ${selectThenDropActive ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}
+                        className={`text-xs rounded-xl border p-3 ${selectThenDropActive ? 'border-indigo-300 bg-indigo-50 text-indigo-800' : 'border-slate-200 bg-white text-slate-600'}`}
                     >
                         {selectThenDropActive
                             ? tr('session.hint.groupSelected')
@@ -4115,10 +4111,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             {isBoard && (
                 // The board holds both: a card for grouping (the Group phase's
                 // hint), a group to move whole (Brainstorm's), and says which.
-                <div className="px-6 pt-3 md:hidden">
+                <div className="px-4 pt-3 md:hidden">
                     <div
                         role="status"
-                        className={`text-xs rounded-lg border p-3 shadow-xs ${selectThenDropActive || movingItem ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}
+                        className={`text-xs rounded-xl border p-3 ${selectThenDropActive || movingItem ? 'border-indigo-300 bg-indigo-50 text-indigo-800' : 'border-slate-200 bg-white text-slate-600'}`}
                     >
                         {selectThenDropActive
                             ? tr('session.hint.groupSelected')
@@ -4134,10 +4130,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 // Same affordance, same reason as the Group phase's hint above:
                 // on a phone nothing else says a card can travel. `md:hidden`
                 // because the wide layout drags instead (H42).
-                <div className="px-6 pt-3 md:hidden">
+                <div className="px-4 pt-3 md:hidden">
                     <div
                         role="status"
-                        className={`text-xs rounded-lg border p-3 shadow-xs ${movingItem ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600'}`}
+                        className={`text-xs rounded-xl border p-3 ${movingItem ? 'border-indigo-300 bg-indigo-50 text-indigo-800' : 'border-slate-200 bg-white text-slate-600'}`}
                     >
                         {movingItem
                             ? tr('session.hint.moveSelected')
@@ -4150,7 +4146,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             <div
                 ref={boardScrollerRef}
                 data-group-columns-scroller
-                className="grow overflow-x-auto bg-slate-50 p-6 flex space-x-6 items-start h-auto min-h-0 justify-start"
+                className="grow overflow-x-auto bg-slate-50 px-4 py-4 md:px-6 md:py-5 flex gap-4 items-start h-auto min-h-0 justify-start"
                 onWheel={(e) => {
                     // Allow mouse wheel scrolling during drag — including a
                     // Brainstorm move, whose whole point is reaching a column
@@ -4180,6 +4176,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         };
                     const tickets = session.tickets.filter(t => t.colId === col.id && !t.groupId);
                     const groups = session.groups.filter(g => g.colId === col.id);
+                    // The column's accents: its icon's tile and its add field.
+                    const columnTones = cardTones(columnHue(col));
 
                     // In Brainstorm the column is the *only* drop target: a card
                     // dropped anywhere in it lands in that column, ungrouped. A
@@ -4200,8 +4198,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             // columns left a third of a wide screen empty. A wide
                             // column puts its cards side by side (below). Phones
                             // keep one swipeable column at a time.
-                            className={`flex flex-col w-80 shrink-0 md:w-auto md:grow md:shrink md:basis-0 md:min-w-64 bg-white rounded-xl border shadow-xs relative pb-3 h-fit max-h-none transition-colors
-                                ${isColumnDragTarget ? 'border-indigo-500 bg-indigo-50 border-2' : 'border-slate-200'}
+                            // A drop target is ringed, never given a wider
+                            // border: its content would move by a pixel.
+                            className={`flex flex-col w-80 shrink-0 md:w-auto md:grow md:shrink md:basis-0 md:min-w-64 rounded-2xl border shadow-xs relative pb-1 h-fit max-h-none transition-[background-color,border-color,box-shadow]
+                                ${isColumnDragTarget ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-600' : 'border-slate-200 bg-white'}
                             `}
                             onDragOver={(e) => {
                                 // A drag the board did not start is refused
@@ -4235,15 +4235,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         >
                             {/* Explicit Drop Overlay for Columns */}
                             {isColumnDragTarget && (
-                                <div className="absolute inset-0 bg-indigo-100/50 z-20 flex items-center justify-center rounded-xl pointer-events-none border-2 border-indigo-400 border-dashed m-2">
-                                     <div className="bg-white px-4 py-2 rounded-sm shadow-sm text-indigo-700 font-bold flex items-center">
-                                         <span className="material-symbols-outlined mr-2">move_item</span>
+                                <div className="absolute inset-0 bg-indigo-50/60 z-20 flex items-center justify-center rounded-xl pointer-events-none border-2 border-indigo-600 border-dashed m-2">
+                                     <div className="bg-white px-4 py-2 rounded-lg shadow-sm text-indigo-700 font-semibold flex items-center">
+                                         <span className="material-symbols-outlined text-lg! leading-none mr-2" aria-hidden="true">move_item</span>
                                          {tr('session.column.moveTo', { title: col.title })}
                                      </div>
                                 </div>
                             )}
 
-                            <div className="p-3 border-b border-slate-100 font-bold flex items-center justify-between bg-white">
+                            <div className="px-3 pt-3 flex items-center justify-between gap-2">
                                 {isEditingColumns && (
                                     <ColumnMoveButtons
                                         index={columnIndex}
@@ -4277,19 +4277,23 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                 setFocusColumnId(null);
                                             }
                                         }}
-                                        className="bg-white/50 border border-slate-300 rounded-sm px-2 py-1 text-sm w-full mr-8"
+                                        className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-sm font-semibold text-slate-900 w-full mr-8 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
                                     />
                                 ) : (
-                                    <div
-                                        className={`flex items-center ${!col.customColor ? col.text : ''}`}
-                                        // Darkened only as far as WCAG AA needs (H42): the
-                                        // facilitator's hue is kept, the title stays readable.
-                                        style={col.customColor ? { color: readableTextColor(col.customColor) } : undefined}
-                                    >
-                                        <span className="material-symbols-outlined mr-2">{col.icon}</span> <span data-column-title lang={contentTitleLanguage(col.title)}>{col.title}</span>
+                                    // The hue moves to the icon's tile (its ink on the
+                                    // stronger tint, measured for any hex); the title is
+                                    // written in the look's ink.
+                                    <div className="flex items-center min-w-0 text-[15px] font-semibold text-slate-900">
+                                        <span
+                                            className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center mr-2 ${columnTones ? '' : 'bg-slate-100 text-slate-600'}`}
+                                            style={columnTones ? { backgroundColor: columnTones.tintStrong, color: columnTones.ink } : undefined}
+                                            aria-hidden="true"
+                                        >
+                                            <span className="material-symbols-outlined text-lg! leading-none">{columnIconName(col.icon)}</span>
+                                        </span>{' '}<span data-column-title lang={contentTitleLanguage(col.title)}>{col.title}</span>
                                     </div>
                                 )}
-                                <span className="bg-slate-100 px-2 py-0.5 rounded-full text-xs font-bold text-slate-600">{tickets.length + groups.length}</span>
+                                <span className="shrink-0 min-w-6 px-2 py-0.5 rounded-full bg-slate-100 text-xs font-semibold text-slate-700 tabular-nums text-center">{tickets.length + groups.length}</span>
                             </div>
 
                             {/* After the header in the DOM, so the tab order follows what is
@@ -4301,10 +4305,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             {isEditingColumns && (session.columns.length > 1 || tickets.length + groups.length === 0) && (
                                 <button
                                     onClick={() => updateSession(s => { removeColumn(s, col.id); })}
-                                    className="absolute top-2 right-2 z-10 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-sm hover:bg-red-600"
+                                    className="absolute top-2 right-2 z-10 bg-white border border-slate-200 text-rose-700 w-7 h-7 rounded-lg flex items-center justify-center shadow-xs hover:bg-rose-50 hover:border-rose-300 transition-colors"
                                     aria-label={columnLabels.remove}
                                 >
-                                    <span className="material-symbols-outlined text-sm">close</span>
+                                    <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">close</span>
                                 </button>
                             )}
                             {/* As many cards per row as fit at 18rem each: one in a
@@ -4312,22 +4316,19 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 reading order (row by row, the DOM and tab order).
                                 Cards in a row stretch to its height and a group takes
                                 the whole row, so a row never leaves a hole. */}
-                            <div className="p-3 grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3 bg-slate-50/50 relative">
+                            <div className="p-3 grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3 relative">
                                 {(mode === 'BRAINSTORM' || isBoard) && (
-                                    <div
-                                        className={`col-span-full bg-white p-3 rounded-sm border shadow-xs focus-within:ring-2 transition ${!col.customColor ? 'border-slate-200 ' + col.ring : ''}`}
-                                        style={col.customColor ? {
-                                            borderColor: col.customColor + '40',
-                                            '--tw-ring-color': col.customColor + '30'
-                                        } as React.CSSProperties : undefined}
-                                    >
+                                    // The field's outline is its only edge: slate-400
+                                    // reaches 3:1 on white (1.4.11). The focus is the
+                                    // brand's ring, whatever the column's hue.
+                                    <div className="col-span-full bg-white px-3 pt-2.5 pb-2 rounded-xl border border-slate-400 focus-within:border-indigo-600 focus-within:ring-4 focus-within:ring-indigo-600/15 transition-[border-color,box-shadow]">
                                         <textarea
                                             placeholder={isLive
                                                 ? tr('session.column.addIdeaPlaceholder')
                                                 // Refused (a revoked token, a denied join): no reconnection is coming.
                                                 : deniedReason ? tr('session.column.pausedPlaceholder') : tr('session.column.reconnectingPlaceholder')}
                                             disabled={!isLive}
-                                            className="w-full text-sm resize-none outline-hidden bg-transparent text-slate-900 auto-textarea disabled:opacity-60 disabled:cursor-not-allowed"
+                                            className="w-full text-sm resize-none outline-hidden bg-transparent text-slate-900 placeholder:text-slate-500 auto-textarea disabled:opacity-60 disabled:cursor-not-allowed"
                                             data-brainstorm-input={col.id}
                                             rows={1}
                                             onInput={(e) => reportMyDraft('brainstorm', e.currentTarget.value, e.currentTarget)}
@@ -4351,12 +4352,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             }}
                                         />
                                         <div className="flex items-center justify-between mt-1">
-                                            <span className="text-[11px] text-slate-500 select-none">{tr('session.column.pressEnterToAdd')}</span>
+                                            <span className="text-xs text-slate-500 select-none">{tr('session.column.pressEnterToAdd')}</span>
                                             <button
                                                 type="button"
                                                 aria-label={tr('session.column.addIdea')}
                                                 disabled={!isLive}
-                                                className="text-slate-500 hover:text-retro-primary transition-colors p-0.5 rounded-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                className="w-7 h-7 shrink-0 rounded-full flex items-center justify-center bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-indigo-50 disabled:hover:text-indigo-700"
                                                 onClick={(e) => {
                                                     const textarea = (e.currentTarget.parentElement!.parentElement!.querySelector('textarea') as HTMLTextAreaElement);
                                                     const val = textarea.value.trim();
@@ -4373,7 +4374,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                     }
                                                 }}
                                             >
-                                                <span className="material-symbols-outlined text-lg">add_circle</span>
+                                                <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">add</span>
                                             </button>
                                         </div>
                                     </div>
@@ -4403,7 +4404,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             hasSelection: true,
                                             isSelected: false
                                         }, tr)}
-                                        className="col-span-full w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-xs hover:border-indigo-400 transition"
+                                        className="col-span-full w-full py-2 px-3 text-xs font-semibold text-indigo-700 bg-indigo-50 border-2 border-dashed border-indigo-300 rounded-xl hover:border-indigo-600 transition-colors"
                                     >
                                         {tr('session.column.moveSelectedCardHere')}
                                     </button>
@@ -4423,7 +4424,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             heldKind: movingItem.kind,
                                             isSelected: false
                                         }, tr)}
-                                        className="col-span-full w-full py-2 px-3 text-xs font-bold text-indigo-700 bg-white border-2 border-indigo-200 rounded-lg shadow-xs hover:border-indigo-400 transition"
+                                        className="col-span-full w-full py-2 px-3 text-xs font-semibold text-indigo-700 bg-indigo-50 border-2 border-dashed border-indigo-300 rounded-xl hover:border-indigo-600 transition-colors"
                                     >
                                         {getBrainstormMoveButtonText({ target: 'column', isSelected: false }, tr)}
                                     </button>
@@ -4443,7 +4444,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 }));
                                 setFocusColumnId(newId);
                             }}
-                            className="w-full h-12 border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center text-slate-500 font-bold hover:border-retro-primary hover:text-retro-primary transition"
+                            className="w-full h-12 border-2 border-dashed border-slate-300 rounded-2xl flex items-center justify-center text-slate-600 font-semibold hover:border-indigo-600 hover:text-indigo-700 hover:bg-white transition-colors"
                         >
                             {tr('session.column.addColumn')}
                         </button>
@@ -4705,15 +4706,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             const focusedAuthor = participants.find(m => m.id === focusedTicket.authorId);
             const focusedCol = getTicketOriginColumn(focusedTicket, session.columns)
                 ?? session.columns.find(c => c.id === focusedTicket.colId);
-            let modalBgHex: string | null = null;
-            if (colorBy === 'author' && focusedAuthor) {
-                modalBgHex = TAILWIND_COLOR_MAP[focusedAuthor.color] || null;
-            } else if (colorBy === 'topic' && focusedCol?.customColor) {
-                modalBgHex = focusedCol.customColor;
-            }
-            const modalTextColor = modalBgHex
-                ? (bestTextColorOn(modalBgHex) === '#FFFFFF' ? 'text-white' : 'text-black')
-                : 'text-slate-900';
+            // The card as the board draws it: its tint, under the look's ink.
+            const modalTones = colorBy === 'author'
+                ? (focusedAuthor ? cardTones(participantToneHex(focusedAuthor.color).pop) : null)
+                : cardTones(columnHue(focusedCol));
+            const modalBgHex = modalTones?.tint ?? null;
+            const modalTextColor = 'text-slate-900';
             return (
                 <TicketCommentsModal
                     ticket={focusedTicket}
