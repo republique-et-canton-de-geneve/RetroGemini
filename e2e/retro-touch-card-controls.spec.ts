@@ -234,7 +234,11 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
     await page.keyboard.type(' again');
     sent.length = 0;
     const box = (await group.boundingBox())!;
-    await group.tap({ position: { x: box.width - 6, y: box.height - 6 } });
+    // The middle of the group's bottom padding: blank whatever the radius of
+    // its corners. A tap 6px from the corner stopped reaching the group once
+    // the look rounded it at 14px instead of 12px: the column under it took
+    // the tap.
+    await group.tap({ position: { x: box.width / 2, y: box.height - 6 } });
     await expect(group.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
     await expect(page.getByText('Slow rollbacks again', { exact: true })).toBeVisible();
     await expect(page.locator('textarea:not([placeholder])')).toHaveCount(0);

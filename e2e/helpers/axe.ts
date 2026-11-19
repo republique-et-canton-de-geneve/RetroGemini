@@ -160,12 +160,59 @@ const contrastPairs = (nodes: Array<{ any: Array<{ id: string; data: unknown }>;
   return [...pairs.values()].sort((a, b) => b.nodes - a.nodes);
 };
 
+/** Long enough for every entrance of the look (the longest is under 2 s), short enough to fail a stuck one. */
+const ANIMATION_SETTLE_TIMEOUT_MS = 5_000;
+
+/**
+ * Waits until every finite animation of the page has ended. axe measures text
+ * under CSS opacity at its blended colour, so a fade or an entrance caught
+ * half-way reads as a `color-contrast` finding on a screen capped at zero.
+ * Animations that repeat for ever (the typing dots) never end and are not
+ * waited for; a finite one still running after the bound fails the audit with
+ * its name and target, rather than letting the run hang or measure it mid-way.
+ */
+export const waitForFiniteAnimations = async (
+  page: Page,
+  { timeoutMs = ANIMATION_SETTLE_TIMEOUT_MS }: { timeoutMs?: number } = {},
+) => {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const running = await page.evaluate(() =>
+      document.getAnimations()
+        .filter((animation) => {
+          const { endTime } = animation.effect?.getComputedTiming() ?? {};
+          return animation.playState === 'running'
+            && typeof endTime === 'number' && Number.isFinite(endTime);
+        })
+        .map((animation) => {
+          const name = (animation as CSSAnimation).animationName
+            || (animation as CSSTransition).transitionProperty
+            || animation.id || 'animation';
+          const target = (animation.effect as KeyframeEffect | null)?.target;
+          const where = target
+            ? `${target.tagName.toLowerCase()}${target.id ? `#${target.id}` : ''}`
+            : 'no target';
+          return `${name} on ${where}`;
+        }));
+    if (running.length === 0) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `axe audit: ${running.length} animation(s) still running after ${timeoutMs} ms: ${running.join(', ')}. `
+          + 'An audit would measure them half-way.',
+      );
+    }
+    await page.waitForTimeout(50);
+  }
+};
+
 export const audit = async (page: Page, testInfo: TestInfo, screen: string, { scope }: AuditOptions = {}) => {
   // A screen with no cap would be compared with `undefined` and fail with a
   // message that names nothing useful: say what is missing instead.
   if (!Object.prototype.hasOwnProperty.call(BASELINE, screen)) {
     throw new Error(`axe audit: "${screen}" has no entry in BASELINE (e2e/helpers/axe.ts); add it at 0.`);
   }
+
+  await waitForFiniteAnimations(page);
 
   const builder = new AxeBuilder({ page }).withTags(WCAG_TAGS);
   if (scope) {

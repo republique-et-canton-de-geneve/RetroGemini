@@ -1,5 +1,25 @@
 import { defineConfig, devices } from '@playwright/test';
 
+/**
+ * The specs that also run with motion on, in the "motion" project. Every
+ * animation of the look is declared under `prefers-reduced-motion:
+ * no-preference`, so the default project (reduced motion) sees none of them;
+ * these are the specs whose touch timings, box measurements and axe audits an
+ * animation can actually change, plus the spec that proves the animations run.
+ * A name that matches no file is no error: `session-motion.spec.ts` joins the
+ * project the day it is written.
+ */
+const MOTION_SPECS = [
+  'retro-touch-card-controls.spec.ts',
+  'retro-full-flow.spec.ts',
+  'retro-wide-board.spec.ts',
+  'accessibility-audit.spec.ts',
+  'session-motion.spec.ts',
+];
+
+/** Written to opt into motion: it means nothing with motion reduced. */
+const MOTION_ONLY_SPECS = ['session-motion.spec.ts'];
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -19,6 +39,11 @@ export default defineConfig({
     // reads English whatever locale the CI runner or a developer's machine has;
     // e2e/i18n.spec.ts opts into French explicitly.
     locale: 'en-US',
+    // Pinned for the same reason: an animation follows the operating system's
+    // setting, and 22 specs measure a box or audit contrast right after an
+    // element appears, so a card still rising or a row still fading would be
+    // measured half-way. The "motion" project below turns it back on.
+    reducedMotion: 'reduce',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: process.env.CI ? 'on' : 'on-first-retry',
@@ -31,9 +56,21 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: MOTION_ONLY_SPECS,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1280, height: 900 },
+      },
+    },
+    {
+      // The product as most people see it, animations on, for the specs an
+      // animation can break (decision D3 of the Clarté plan).
+      name: 'motion',
+      testMatch: MOTION_SPECS,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1280, height: 900 },
+        reducedMotion: 'no-preference',
       },
     },
   ],
