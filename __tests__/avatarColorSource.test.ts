@@ -45,7 +45,9 @@ import { COLOR_TOKEN_PATTERN } from './helpers/tailwindTheme';
  *     as `colorClasses`. That prop is the module's word and nothing else: a
  *     call to `avatarColorClasses`, one of its two constants, or a choice
  *     between those. A string or a template there would be rule 2's override
- *     under another name, and `Avatar` itself declares no `className`.
+ *     under another name, and `Avatar` itself declares no `className`. The
+ *     avatar picker takes the same prop under the same rule and hands it on
+ *     to the avatars it draws: the one place a forwarded value is accepted.
  *
  * The colour-by-author card reads its author's tone through
  * `participantToneHex` (rule 1 and 4), and `utils/cardTones.ts` turns it into
@@ -175,6 +177,17 @@ const isAvatarClassesExpression = (node: ts.Expression): boolean => {
 
 const jsxTagOf = (attribute: ts.JsxAttribute) => attribute.parent.parent.tagName.getText();
 
+/**
+ * The tags whose `colorClasses` must be the module's word: `Avatar`, and the
+ * avatar picker, which hands its own `colorClasses` prop on to the avatars it
+ * draws. That one forwarding is legal only inside the picker's file, so the
+ * classes are still checked where the picker is mounted.
+ */
+const AVATAR_CLASS_TAGS = new Set(['Avatar', 'AvatarPicker']);
+const FORWARDING_FILE = 'components/common/AvatarPicker.tsx';
+const isForwardedAvatarClasses = (file: string, tag: string, expression: ts.Expression) =>
+  file === FORWARDING_FILE && tag === 'Avatar' && ts.isIdentifier(expression) && expression.text === 'colorClasses';
+
 interface Offence {
   where: string;
   rule: 'raw-color' | 'avatar-override' | 'dot-text-color' | 'avatar-classes';
@@ -208,9 +221,10 @@ const scan = (sources: ReadonlyArray<{ file: string; text: string }>) => {
         }
       });
 
-      if (jsxTagOf(node) === 'Avatar' && (attribute === 'colorClasses' || attribute === 'className')) {
+      if (AVATAR_CLASS_TAGS.has(jsxTagOf(node)) && (attribute === 'colorClasses' || attribute === 'className')) {
         const expression = ts.isJsxExpression(initializer) ? initializer.expression : undefined;
-        if (attribute === 'className' || !expression || !isAvatarClassesExpression(expression)) {
+        const forwarded = !!expression && isForwardedAvatarClasses(file, jsxTagOf(node), expression);
+        if (attribute === 'className' || !expression || (!forwarded && !isAvatarClassesExpression(expression))) {
           offences.push({ where: `${file}:${lineOf(sourceFile, node)}`, rule: 'avatar-classes', detail: node.getText(sourceFile) });
         }
       }
@@ -329,6 +343,14 @@ describe('what the guard catches, on fixtures', () => {
     expect(rulesIn('const A = ({ u }) => <Avatar colorClasses={`${avatarColorClasses(u.color)} opacity-50`} initials="AB" size={32} />;')).toEqual(['avatar-classes']);
     expect(rulesIn('const A = ({ u, c }) => <Avatar colorClasses={c} initials="AB" size={32} />;')).toEqual(['avatar-classes']);
     expect(rulesIn('const A = ({ u }) => <Avatar colorClasses={avatarColorClasses(u.color)} className="opacity-50" initials="AB" size={32} />;')).toEqual(['avatar-classes']);
+  });
+
+  it("checks the picker's colorClasses where it is mounted, and lets the picker alone forward its own", () => {
+    expect(rulesIn('const A = ({ c }) => <AvatarPicker colorClasses={c} initials="AB" />;')).toEqual(['avatar-classes']);
+    expect(rulesIn('const A = ({ u }) => <AvatarPicker colorClasses={avatarColorClasses(u.color)} initials="AB" />;')).toEqual([]);
+    const forwarding = 'const P = ({ colorClasses }) => <Avatar colorClasses={colorClasses} initials="AB" size={40} />;';
+    expect(rulesIn(forwarding, 'components/common/AvatarPicker.tsx')).toEqual([]);
+    expect(rulesIn(forwarding, 'components/OtherPicker.tsx')).toEqual(['avatar-classes']);
   });
 
   it("accepts an <Avatar> in the person's tone, the neutral one, or a choice between them", () => {

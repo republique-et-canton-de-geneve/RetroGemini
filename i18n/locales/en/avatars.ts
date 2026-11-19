@@ -1,7 +1,17 @@
 // English messages for the "avatars" namespace: the names of the avatar
 // pictures a person can choose, and the label and pitch of each family
-// (the pictures are in components/common/avatars/avatarArt.ts).
+// (the pictures are in components/common/avatars/avatarArt.ts), and the
+// avatar picker (components/common/AvatarPicker.tsx).
 const avatars = {
+  // The picker
+  'avatars.picker.title': 'Choose my avatar',
+  'avatars.picker.hint': 'People in your sessions see it beside your cards and in the participants list, except in an anonymous session.',
+  'avatars.picker.families': 'Avatar families',
+  'avatars.picker.initials': 'My initials',
+  'avatars.picker.done': 'Done',
+  'avatars.picker.saving': 'Saving…',
+  'avatars.picker.saved': 'Avatar saved.',
+  'avatars.picker.unavailable': 'Your avatar cannot be saved right now.',
   // Animals
   'avatars.family.animals': 'Animals',
   'avatars.familyPitch.animals': 'Twenty animals pared down to their most telling outline, from a winking fox to a koala halfway through its nap.',

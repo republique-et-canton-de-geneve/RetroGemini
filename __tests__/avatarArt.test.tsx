@@ -81,7 +81,8 @@ describe('avatar art data', () => {
       ...AVATAR_FAMILIES.flatMap(f => [`avatars.family.${f.id}`, `avatars.familyPitch.${f.id}`]),
     ].sort();
     for (const messages of [en, fr]) {
-      expect(Object.keys(messages).filter(key => key.startsWith('avatars.')).sort()).toEqual(expected);
+      // The picker's own strings (avatars.picker.*) live in the namespace too; every other key is a picture's or a family's.
+      expect(Object.keys(messages).filter(key => key.startsWith('avatars.') && !key.startsWith('avatars.picker.')).sort()).toEqual(expected);
     }
   });
 

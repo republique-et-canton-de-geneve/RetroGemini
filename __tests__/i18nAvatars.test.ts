@@ -22,7 +22,10 @@ const frT = createTranslator('fr');
 describe('the avatars namespace', () => {
   it('is registered, with the same keys in both languages', () => {
     const [enMessages, frMessages] = NAMESPACES.avatars;
-    expect(Object.keys(enMessages)).toHaveLength(AVATAR_ART_IDS.length + 2 * AVATAR_FAMILIES.length);
+    // A name per picture, a label and a pitch per family; the picker's own
+    // strings (avatars.picker.*) share the namespace.
+    const ofThePictures = Object.keys(enMessages).filter(key => !key.startsWith('avatars.picker.'));
+    expect(ofThePictures).toHaveLength(AVATAR_ART_IDS.length + 2 * AVATAR_FAMILIES.length);
     expect(Object.keys(frMessages).sort()).toEqual(Object.keys(enMessages).sort());
   });
 

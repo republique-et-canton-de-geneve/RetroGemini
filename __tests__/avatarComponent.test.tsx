@@ -13,7 +13,7 @@ import { effectivePair } from './helpers/tailwindTheme';
  */
 
 const FLOOR = 4.5;
-const AVATAR_SIZES: readonly AvatarSize[] = [20, 24, 28, 32, 36, 40];
+const AVATAR_SIZES: readonly AvatarSize[] = [20, 24, 28, 32, 36, 40, 64];
 
 const disc = (initials: string) => screen.getByText(initials);
 
@@ -27,6 +27,7 @@ describe('Avatar', () => {
     [32, 'w-8 h-8', 'text-xs'],
     [36, 'w-9 h-9', 'text-sm'],
     [40, 'w-10 h-10', 'text-base'],
+    [64, 'w-16 h-16', 'text-2xl'],
   ] as const)('size %i is %s with %s initials', (size, box, text) => {
     render(<Avatar colorClasses={avatarColorClasses('bg-lime-500')} initials="LI" size={size} />);
     const classes = disc('LI').className.split(/\s+/);
@@ -72,5 +73,73 @@ describe('Avatar', () => {
     render(<Avatar colorClasses={colorClasses} initials="AB" size={20} />);
     const pair = effectivePair(disc('AB'));
     expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(FLOOR);
+  });
+
+  describe('with a chosen picture', () => {
+    const picture = (container: HTMLElement) => container.querySelector('svg.avatar-art');
+
+    it('draws a known picture in place of the initials, in the tone of the person', () => {
+      const { container } = render(<Avatar colorClasses={avatarColorClasses('bg-rose-500')} initials="RO" size={32} avatarId="fox" />);
+      expect(picture(container)).not.toBeNull();
+      expect(screen.queryByText('RO')).toBeNull();
+      const box = container.firstElementChild as HTMLElement;
+      const classes = box.className.split(/\s+/);
+      // The picture brings its own shape: no disc behind it, the tone for its colours.
+      expect(classes).toContain('tone-rose');
+      expect(classes.filter((token) => token.startsWith('bg-'))).toEqual([]);
+      expect(classes).not.toContain('rounded-full');
+      for (const token of ['w-8', 'h-8', 'shrink-0']) expect(classes).toContain(token);
+      expect(box.getAttribute('data-avatar-art')).toBe('fox');
+    });
+
+    it.each(AVATAR_SIZES)('fills the box at size %i', (size) => {
+      const { container } = render(<Avatar colorClasses={avatarColorClasses('bg-lime-500')} initials="LI" size={size} avatarId="owl" />);
+      expect(picture(container)?.getAttribute('class')).toBe('avatar-art');
+      expect(screen.queryByText('LI')).toBeNull();
+    });
+
+    it.each([
+      ['an unknown id', 'unicorn'],
+      ['null', null],
+      ['undefined', undefined],
+      ['an intruder value', '__proto__'],
+      ['a class string', 'fixed inset-0 z-50'],
+      ['markup', '<img src=x onerror=alert(1)>'],
+    ])('draws the initials for %s, exactly as without one', (_what, avatarId) => {
+      const { container } = render(<Avatar colorClasses={avatarColorClasses('bg-rose-500')} initials="RO" size={32} avatarId={avatarId as string | null | undefined} />);
+      expect(picture(container)).toBeNull();
+      const disc = screen.getByText('RO');
+      expect(disc.className.split(/\s+/)).toContain('rounded-full');
+      expect(disc.hasAttribute('data-avatar-art')).toBe(false);
+      const html = container.innerHTML;
+      if (typeof avatarId === 'string') expect(html).not.toContain(avatarId.replace(/[<>"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!));
+      expect(effectivePair(disc).ratio).toBeGreaterThanOrEqual(FLOOR);
+    });
+
+    it("is decoration without a label, an image named by the person's name with one", () => {
+      const { container, rerender } = render(<Avatar colorClasses={avatarColorClasses('bg-rose-500')} initials="RO" size={32} avatarId="fox" />);
+      const box = container.firstElementChild as HTMLElement;
+      expect(box.getAttribute('aria-hidden')).toBe('true');
+      expect(screen.queryByRole('img')).toBeNull();
+      rerender(<Avatar colorClasses={avatarColorClasses('bg-rose-500')} initials="RO" size={32} avatarId="fox" label="Rose" />);
+      // Named by the person, never by the picture: the svg itself stays hidden.
+      expect(screen.getByRole('img', { name: 'Rose' })).toBe(container.firstElementChild);
+      expect(picture(container)?.getAttribute('aria-hidden')).toBe('true');
+      expect(screen.queryByRole('img', { name: /fox/i })).toBeNull();
+    });
+
+    it('draws a departed person in the neutral tone, with no opacity or grayscale', () => {
+      const { container } = render(<Avatar colorClasses={DEPARTED_AVATAR_CLASSES} initials="DE" size={32} avatarId="bee" />);
+      const box = container.firstElementChild as HTMLElement;
+      expect(box.className).toContain('tone-neutral');
+      expect(box.className).not.toMatch(/\bopacity-\d+|\bgrayscale\b/);
+    });
+
+    it('takes no class from an intruder colour, a picture or not', () => {
+      const { container } = render(<Avatar colorClasses={avatarColorClasses('fixed inset-0 z-50')} initials="XA" size={32} avatarId="fox" />);
+      const classes = (container.firstElementChild as HTMLElement).className.split(/\s+/);
+      for (const token of ['fixed', 'inset-0', 'z-50']) expect(classes).not.toContain(token);
+      expect(classes).toContain('tone-neutral');
+    });
   });
 });

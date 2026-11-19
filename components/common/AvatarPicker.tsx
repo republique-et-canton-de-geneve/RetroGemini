@@ -1,0 +1,292 @@
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import ModalDialog from './ModalDialog';
+import Avatar from './Avatar';
+import {
+  AVATAR_FAMILIES,
+  AVATAR_FAMILY_LABEL_KEYS,
+  AVATAR_NAME_KEYS,
+  type AvatarArtId,
+  type AvatarFamilyId,
+} from './avatars/avatarArt';
+import { toAvatarId } from '../../utils/avatars.js';
+import { useTranslation } from '../../i18n/I18nContext';
+import { translateErrorMessage } from '../../i18n/errorMessages';
+
+/**
+ * The viewer's own avatar picker: six families as tabs, twenty pictures each
+ * and "My initials". It writes through `onPick` and nothing else, so it knows
+ * no route and no session; the opener decides where the choice goes.
+ *
+ * - One write per choice. While one runs the grid is busy and a pick made
+ *   meanwhile waits for it (the latest one, if several): two writes racing
+ *   could land in either order.
+ * - A choice is shown as made only once `onPick` resolved. A failure stays on
+ *   screen in words until the next attempt, and the previous choice stays
+ *   selected, because it is still the stored one.
+ * - The dialog stays open after a choice, so the person can change their mind;
+ *   "Done" closes it. ModalDialog gives the focus back to the opener.
+ */
+
+export interface AvatarPickerProps {
+  open: boolean;
+  onClose: () => void;
+  /** What `avatarColorClasses` returned for the viewer. */
+  colorClasses: string;
+  initials: string;
+  /** The viewer's name, shown beside the big avatar. */
+  name: string;
+  /** The stored choice as it is (an id or null); an id this release does not draw reads as initials. */
+  currentAvatarId: string | null;
+  /** Store a choice (`null` for initials); rejects when it was not stored. */
+  onPick: (avatarId: string | null) => Promise<unknown>;
+  /** True while a choice cannot be stored (the session reconnects, the credential was revoked). */
+  disabled?: boolean;
+}
+
+/** One choice: a picture id, or null for initials. */
+type Choice = string | null;
+
+const familyOf = (choice: Choice): AvatarFamilyId => {
+  const id = toAvatarId(choice);
+  return AVATAR_FAMILIES.find((family) => id !== null && (family.avatars as readonly string[]).includes(id))?.id ?? AVATAR_FAMILIES[0].id;
+};
+
+const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-600/30';
+const TILE_BASE = `grid place-items-center aspect-square min-h-11 p-1.5 rounded-xl border transition-shadow ${FOCUS_RING}`;
+const TILE_OFF = 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md';
+const TILE_ON = 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-600/20';
+
+// The big avatar's swap lasts 0.5s (index.css, .fx-swap); this takes the class
+// off where no animation runs (reduced motion) and so no animationend comes.
+const SWAP_FALLBACK_MS = 700;
+
+const AvatarPicker: React.FC<AvatarPickerProps> = ({
+  open,
+  onClose,
+  colorClasses,
+  initials,
+  name,
+  currentAvatarId,
+  onPick,
+  disabled = false,
+}) => {
+  const { t } = useTranslation();
+  const baseId = useId();
+  const titleId = `${baseId}-title`;
+  const tabId = (family: AvatarFamilyId) => `${baseId}-tab-${family}`;
+  const panelId = `${baseId}-panel`;
+
+  const [chosen, setChosen] = useState<Choice>(currentAvatarId ?? null);
+  const [family, setFamily] = useState<AvatarFamilyId>(() => familyOf(currentAvatarId ?? null));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [swapping, setSwapping] = useState(false);
+  const [swapCount, setSwapCount] = useState(0);
+
+  const chosenRef = useRef<Choice>(chosen);
+  chosenRef.current = chosen;
+  const inFlight = useRef(false);
+  const waiting = useRef<{ choice: Choice } | null>(null);
+  const onPickRef = useRef(onPick);
+  onPickRef.current = onPick;
+  const tabRefs = useRef<Partial<Record<AvatarFamilyId, HTMLButtonElement | null>>>({});
+
+  // The opener's word for the stored choice, once no write of ours is pending.
+  useEffect(() => {
+    if (!inFlight.current) setChosen(currentAvatarId ?? null);
+  }, [currentAvatarId]);
+
+  // A new opening starts from the stored choice, with nothing said yet.
+  useEffect(() => {
+    if (!open) return;
+    setFamily(familyOf(chosenRef.current));
+    setError(null);
+    setSaved(false);
+    setSwapping(false);
+    // Only when the dialog opens: the family is the person's to change after that.
+  }, [open]);
+
+  // The swap's class comes off when its own animation ends (a native listener:
+  // React picks the event's name once from what the environment supports), or
+  // after a while where no animation runs.
+  const swapRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!swapping) return;
+    const element = swapRef.current;
+    const settle = (event: Event) => {
+      if (event.target === element) setSwapping(false);
+    };
+    element?.addEventListener('animationend', settle);
+    const timer = window.setTimeout(() => setSwapping(false), SWAP_FALLBACK_MS);
+    return () => {
+      element?.removeEventListener('animationend', settle);
+      window.clearTimeout(timer);
+    };
+  }, [swapping, swapCount]);
+
+  const write = useCallback(async (choice: Choice) => {
+    inFlight.current = true;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await onPickRef.current(choice);
+      chosenRef.current = choice;
+      setChosen(choice);
+      setSaved(true);
+      setSwapping(true);
+      setSwapCount((count) => count + 1);
+    } catch (err) {
+      setError(translateErrorMessage(err instanceof Error ? err.message : null, t));
+    }
+    const next = waiting.current;
+    waiting.current = null;
+    if (next && next.choice !== chosenRef.current) {
+      void write(next.choice);
+      return;
+    }
+    inFlight.current = false;
+    setSaving(false);
+  }, [t]);
+
+  const pick = (choice: Choice) => {
+    if (disabled) return;
+    if (inFlight.current) {
+      waiting.current = { choice };
+      return;
+    }
+    if (choice === chosenRef.current) return;
+    void write(choice);
+  };
+
+  const onTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const last = AVATAR_FAMILIES.length - 1;
+    const target =
+      event.key === 'ArrowRight' ? (index === last ? 0 : index + 1)
+        : event.key === 'ArrowLeft' ? (index === 0 ? last : index - 1)
+          : event.key === 'Home' ? 0
+            : event.key === 'End' ? last
+              : null;
+    if (target === null) return;
+    event.preventDefault();
+    const next = AVATAR_FAMILIES[target].id;
+    setFamily(next);
+    tabRefs.current[next]?.focus();
+  };
+
+  if (!open) return null;
+
+  const drawn = toAvatarId(chosen);
+  const pictureName = drawn ? t(AVATAR_NAME_KEYS[drawn as AvatarArtId]) : t('avatars.picker.initials');
+  const current = AVATAR_FAMILIES.find((entry) => entry.id === family) ?? AVATAR_FAMILIES[0];
+  const tileClass = (on: boolean) => `${TILE_BASE} ${on ? TILE_ON : TILE_OFF} ${disabled ? 'cursor-not-allowed' : ''}`;
+  const status = saving ? t('avatars.picker.saving') : saved ? t('avatars.picker.saved') : '';
+
+  return (
+    <ModalDialog
+      labelledBy={titleId}
+      onClose={onClose}
+      overlayClassName="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/45 p-2 sm:p-6"
+      panelClassName="flex flex-col gap-4 w-full max-w-2xl max-h-full overflow-y-auto bg-white text-slate-900 rounded-2xl shadow-2xl border border-slate-200 p-4 sm:p-5"
+    >
+      <div className="flex items-center gap-3">
+        <h2 id={titleId} className="flex-1 text-lg font-semibold text-slate-900">{t('avatars.picker.title')}</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t('common.close')}
+          className={`grid place-items-center w-9 h-9 rounded-lg text-slate-600 hover:bg-slate-100 ${FOCUS_RING}`}
+        >
+          <span className="material-symbols-outlined text-xl! leading-none" aria-hidden="true">close</span>
+        </button>
+      </div>
+
+      <div className="flex items-center gap-3.5 p-3 rounded-xl bg-slate-50">
+        <span
+          key={swapCount}
+          ref={swapRef}
+          className={`inline-flex ${swapping ? 'fx-swap' : ''}`}
+        >
+          <Avatar colorClasses={colorClasses} initials={initials} size={64} avatarId={chosen} />
+        </span>
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <span className="font-semibold text-slate-900 truncate">{name}</span>
+          <span className="text-sm font-semibold text-indigo-700">{pictureName}</span>
+          <span className="text-xs text-slate-600">{t('avatars.picker.hint')}</span>
+        </div>
+      </div>
+
+      <div role="tablist" aria-label={t('avatars.picker.families')} className="flex gap-1.5 overflow-x-auto -mx-1 px-1 py-1">
+        {AVATAR_FAMILIES.map((entry, index) => {
+          const selected = entry.id === family;
+          return (
+            <button
+              key={entry.id}
+              ref={(node) => { tabRefs.current[entry.id] = node; }}
+              type="button"
+              role="tab"
+              id={tabId(entry.id)}
+              aria-selected={selected}
+              aria-controls={panelId}
+              tabIndex={selected ? 0 : -1}
+              onClick={() => setFamily(entry.id)}
+              onKeyDown={(event) => onTabKeyDown(event, index)}
+              className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-sm font-semibold ${selected ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-100'} ${FOCUS_RING}`}
+            >
+              {t(AVATAR_FAMILY_LABEL_KEYS[entry.id])}
+            </button>
+          );
+        })}
+      </div>
+
+      <div role="tabpanel" id={panelId} aria-labelledby={tabId(current.id)}>
+        <div
+          data-avatar-grid
+          aria-busy={saving || undefined}
+          className="grid grid-cols-[repeat(auto-fill,minmax(3.5rem,1fr))] gap-1.5 sm:gap-2"
+        >
+          <button
+            type="button"
+            aria-pressed={drawn === null}
+            aria-disabled={disabled || undefined}
+            aria-label={t('avatars.picker.initials')}
+            onClick={() => pick(null)}
+            className={tileClass(drawn === null)}
+          >
+            <Avatar colorClasses={colorClasses} initials={initials} size={40} />
+          </button>
+          {current.avatars.map((id) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={drawn === id}
+              aria-disabled={disabled || undefined}
+              aria-label={t(AVATAR_NAME_KEYS[id])}
+              onClick={() => pick(id)}
+              className={tileClass(drawn === id)}
+            >
+              <Avatar colorClasses={colorClasses} initials={initials} size={40} avatarId={id} />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {disabled && <p className="text-sm text-slate-600">{t('avatars.picker.unavailable')}</p>}
+      {error && <p role="alert" className="text-sm font-medium text-rose-800 bg-rose-50 rounded-lg px-3 py-2">{error}</p>}
+
+      <div className="flex items-center justify-between gap-3">
+        <p role="status" className="text-sm text-slate-600">{status}</p>
+        <button
+          type="button"
+          onClick={onClose}
+          className={`shrink-0 px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] ${FOCUS_RING}`}
+        >
+          {t('avatars.picker.done')}
+        </button>
+      </div>
+    </ModalDialog>
+  );
+};
+
+export default AvatarPicker;
