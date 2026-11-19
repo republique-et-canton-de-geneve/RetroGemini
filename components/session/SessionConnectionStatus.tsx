@@ -47,8 +47,13 @@ const CHIP_ICON_CLASS = 'material-symbols-outlined text-lg! leading-none';
 const CHIP_LABEL_CLASS = 'text-xs font-semibold sr-only md:not-sr-only';
 
 // The bands under the header: a light tint, a line of its hue below it, and the
-// way out as a small white button rather than an underlined word.
-const BANNER_CLASS = 'border-b text-sm font-medium px-4 sm:px-6 py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5';
+// way out as a small white button rather than an underlined word. The
+// Dashboard's "password changed" band is the same one (DashboardRevokedBanner).
+export const BANNER_CLASS = 'border-b text-sm font-medium px-4 sm:px-6 py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5';
+/** The tint of a band that says nothing is saved any more. */
+export const BANNER_ALERT_CLASS = 'bg-rose-50 border-rose-200 text-rose-900';
+/** A band's icon: decoration, the sentence beside it says the state. */
+export const BANNER_ICON_CLASS = 'material-symbols-outlined text-lg! leading-none';
 export const BANNER_ACTION_CLASS =
   'rounded-lg border border-rose-300 bg-white px-2.5 py-1 text-xs font-semibold text-rose-800 transition hover:bg-rose-100';
 
@@ -151,9 +156,9 @@ export const SessionConnectionBanner: React.FC<BannerProps> = ({
     return (
       <div
         role="alert"
-        className={`${BANNER_CLASS} bg-rose-50 border-rose-200 text-rose-900`}
+        className={`${BANNER_CLASS} ${BANNER_ALERT_CLASS}`}
       >
-        <span className="material-symbols-outlined text-lg! leading-none">lock</span>
+        <span className={BANNER_ICON_CLASS} aria-hidden="true">lock</span>
         <span>{deniedCopy(joinDeniedReason, t)}</span>
         <button
           type="button"
@@ -172,7 +177,7 @@ export const SessionConnectionBanner: React.FC<BannerProps> = ({
         role="status"
         className={`${BANNER_CLASS} bg-amber-50 border-amber-200 text-amber-900`}
       >
-        <span className="material-symbols-outlined text-lg! leading-none motion-safe:animate-pulse">cloud_off</span>
+        <span className={`${BANNER_ICON_CLASS} motion-safe:animate-pulse`} aria-hidden="true">cloud_off</span>
         <span>{t('phases.sync.reconnectingBanner')}</span>
       </div>
     );

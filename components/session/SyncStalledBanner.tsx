@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
 import { useSyncHealth } from './useSyncHealth';
-import { BANNER_ACTION_CLASS } from './SessionConnectionStatus';
+import { BANNER_ACTION_CLASS, BANNER_ALERT_CLASS, BANNER_CLASS, BANNER_ICON_CLASS } from './SessionConnectionStatus';
 
 /**
  * "Your changes are not being saved" — shared by the retrospective and the
@@ -34,9 +34,9 @@ const SyncStalledBanner: React.FC = () => {
     <div
       role="alert"
       // The signed-out banner's band and button: one look for "not saved".
-      className="bg-rose-50 border-b border-rose-200 text-rose-900 text-sm font-medium px-4 sm:px-6 py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5"
+      className={`${BANNER_CLASS} ${BANNER_ALERT_CLASS}`}
     >
-      <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">error</span>
+      <span className={BANNER_ICON_CLASS} aria-hidden="true">error</span>
       <span>{t('phases.sync.notSaved')}</span>
       <button
         type="button"

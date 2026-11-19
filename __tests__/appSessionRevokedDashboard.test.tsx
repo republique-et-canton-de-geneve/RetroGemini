@@ -4,6 +4,8 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from '../App';
 import DashboardRevokedBanner from '../components/dashboard/DashboardRevokedBanner';
+import { BANNER_ACTION_CLASS, JOIN_DENIED_REVOKED, SessionConnectionBanner } from '../components/session/SessionConnectionStatus';
+import { effectivePair } from './helpers/tailwindTheme';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { dataService } from '../services/dataService';
 import { clearSessionRevoked, isSessionRevoked, markSessionRevoked } from '../services/sessionRevocation';
@@ -183,6 +185,51 @@ describe('the Dashboard when the team password is changed elsewhere (decision D3
 
     expect(revokedBanner()).toBeUndefined();
     expect(screen.getByRole('button', { name: /New Feedback/ })).toBeTruthy();
+  });
+});
+
+describe('the Dashboard banner and the session’s are one band', () => {
+  // The same revocation is said on the Dashboard and in a session (decision
+  // D3b): one look for it. The Dashboard's copy kept the pre-45.0 band (a
+  // stronger rose, an underlined word for the way out) while the session's
+  // took the light tint and the small white button.
+  const classesOf = (element: Element) => new Set((element.getAttribute('class') ?? '').split(/\s+/).filter(Boolean));
+
+  it('draws the band, the icon and the way out as the session banner does', () => {
+    // Each banner is read inside its own container: both are alerts of one document.
+    const dashboard = within(render(<DashboardRevokedBanner onLogInAgain={vi.fn()} />).container);
+    const dashboardBand = dashboard.getByRole('alert');
+    const dashboardAction = dashboard.getByRole('button', { name: 'Log in again' });
+    const dashboardIcon = dashboardBand.querySelector('.material-symbols-outlined')!;
+    const session = within(render(
+      <SessionConnectionBanner isLive joinDeniedReason={JOIN_DENIED_REVOKED} onReturnToLogin={vi.fn()} />
+    ).container);
+    const sessionBand = session.getByRole('alert');
+    const sessionAction = session.getByRole('button', { name: 'Log in again' });
+    const sessionIcon = sessionBand.querySelector('.material-symbols-outlined')!;
+
+    // The Dashboard's band also keeps its height in App's column (`shrink-0`): nothing else differs.
+    const band = classesOf(dashboardBand);
+    band.delete('shrink-0');
+    expect([...band].sort()).toEqual([...classesOf(sessionBand)].sort());
+    expect(dashboardAction.getAttribute('class')).toBe(sessionAction.getAttribute('class'));
+    expect(dashboardAction.getAttribute('class')).toBe(BANNER_ACTION_CLASS);
+    expect(dashboardIcon.getAttribute('class')).toBe(sessionIcon.getAttribute('class'));
+    // An icon's size needs the important modifier (the icon rule is unlayered), and the icon is decoration.
+    expect(dashboardIcon.getAttribute('class')).toContain('text-lg!');
+    // In an alert, an icon that is not hidden is read out as its ligature ("lock").
+    expect(dashboardIcon.getAttribute('aria-hidden')).toBe('true');
+    expect(sessionIcon.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('reads at 4.5:1, the sentence on the band and the words on the button', () => {
+    const { getByRole } = render(<DashboardRevokedBanner onLogInAgain={vi.fn()} />);
+    const band = effectivePair(getByRole('alert'));
+    expect(band.bg).toBe('rose-50');
+    expect(band.ratio, `${band.fg} on ${band.bg}`).toBeGreaterThanOrEqual(4.5);
+    const action = effectivePair(getByRole('button', { name: 'Log in again' }));
+    expect(action.bg).toBe('white');
+    expect(action.ratio, `${action.fg} on ${action.bg}`).toBeGreaterThanOrEqual(4.5);
   });
 });
 
