@@ -66,7 +66,10 @@ import { evaluateLintBudget } from './lintBudget.mjs';
 // 98 -> 95: App renders its main shell only for a team screen it can show, so
 // the three `currentUser!` handed to the Dashboard and both sessions are
 // narrowed instead of asserted.
-const BUDGET = 95;
+// 95 -> 94: the health check's end-to-end flow read the header's name block
+// into a `facilitatorName` it never used; the line went with the header's
+// restyle.
+const BUDGET = 94;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);
