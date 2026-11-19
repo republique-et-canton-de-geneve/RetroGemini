@@ -290,6 +290,37 @@ another look. Six rules:
   a class: an arbitrary colour is invisible to the helper and to the next
   retune.
 
+### A card's colour
+
+Until 45.0 a card was painted in its column's saturated colour with white or
+black text. It is now a **soft tint of a hue**, with dark words, and three pure
+modules decide it:
+
+- **`utils/columnHue.ts` → `columnHue(column)`**: the column's stored
+  `customColor` when it is a hex (short hex too), else the hue its Tailwind
+  classes name through a fixed table (a custom template made by an old release
+  stores classes only), else `null`. Nothing is written back to the column.
+- **`utils/cardTones.ts` → `cardTones(hue)`**: `tint` (the card's background),
+  `tintStrong` (an icon tile, an open control), `line` (the border) and `ink`
+  (the hue darkened until it reads on both tints), for **any** colour a
+  facilitator can pick. `CARD_INK` (slate-900) is the colour of a card's words.
+  `__tests__/cardTones.test.ts` measures hundreds of hues: the words at 7:1, the
+  ink at 4.5:1. The three strengths (12, 22 and 36 percent of the hue on white)
+  are the one place to retune how strong the board looks.
+- **The hue's source**: the topic column (the origin column first) when the
+  board is coloured by topic; `participantToneHex(author.color).pop` when it is
+  coloured by author. No hue gives the white card.
+
+What the screens do with them: a card's background, border and controls are an
+inline `style` (so their tests read the style and use `contrastRatio`, since
+`effectivePair` reads classes); the column head's icon tile is `tintStrong`
+with the ink, and the column's title is plain slate-900 (it used to be painted
+in the column's colour); a Discuss topic and the comments dialog's card show
+the same tint as the board. Three rules the old model had and the new one
+keeps: **an anonymous session is never coloured by author**, **a card hidden
+from its reader takes its topic's tint only, never its author's**, and a hidden
+card's filler keeps its shape.
+
 ## Accessibility (audit H42)
 
 WCAG 2.1 AA is a conformance obligation for a Geneva public-sector deployment
@@ -302,7 +333,17 @@ Call sites pass their own `overlayClassName`/`panelClassName`, so adopting it
 changes behaviour without moving a pixel. Hand-rolling `fixed inset-0` again is
 exactly how the product reached **thirteen** overlays with **one**
 `role="dialog"` between them. A dialog holding unsaved text may pass
-`closeOnBackdropClick={false}` — never remove Escape.
+`closeOnBackdropClick={false}` — never remove Escape. It also gives every
+dialog its **entrance** (45.0): the veil fades in and the panel rises a few
+pixels, once, when the dialog mounts, and nothing plays on the way out (an exit
+would delay the return of focus and keep the focus trap alive). The effect
+classes come off at their own `animationend`, and their fill mode is
+`backwards`, so no transform remains: a transformed panel is the containing
+block of its `position: fixed` descendants. A dialog whose panel holds a fixed
+child while it opens passes `entrance="fade"` (opacity only), as the image
+gallery does for its close button. `DIALOG_OVERLAY_CLASS` and
+`DIALOG_PANEL_CLASS` are the frame of the look, for a call site with no reason
+to differ.
 
 > Its focusable-element check walks ancestors instead of reading `offsetParent`
 > or `getClientRects()`. Those need a layout engine, so under jsdom they report
@@ -456,8 +497,9 @@ focus:opacity-100` (`focus-within:` for a wrapper) — the participants panel's
 pattern — so a touch screen always shows it. Tailwind already applies
 `group-hover:` only where a pointer can hover; a bare `opacity-0` has no such
 guard. A control a phone always shows must then be seen and must not hide the
-content: the card's pencil takes the card's measured text colour (slate-300
-measured 1.48:1), a float of its size (`ticket-edit-room`) ends the first line
+content: the card's pencil takes the ink of the card's hue, measured on its
+tint (slate-300 measured 1.48:1), a float of its size (`ticket-edit-room`) ends
+the first line
 before it on every screen — kept on a computer too, where the pencil used to
 appear over the last words of the line under the pointer — and the corner
 delete is not drawn while the card is edited, where it would lie over the
@@ -472,10 +514,11 @@ icon ligatures, so no audit reports them. **Measure a card's control on a
 coloured card**: every column a template or Edit Layout makes has a colour,
 and cards are coloured by topic by default, so the white card is the rare
 one. *Add reaction* took slate-500 there too, at 1.0 to 1.6:1 on the columns'
-colours, worse than the slate-300 it replaced: it takes the card's measured
-text colour, as the pencil and the comment button do, and its test measures it
-against the card's own background, which `effectivePair` cannot read (an
-inline style).
+colours, worse than the slate-300 it replaced. Since 45.0 a card is a soft tint
+of its hue, and its pencil, *Add reaction* and comment button all take that
+hue's ink (`cardTones(hue).ink`, see *A card's colour*), painted inline; their
+test measures each against the card's own background, which `effectivePair`
+cannot read (an inline style).
 `__tests__/sessionOpenBoard.test.tsx` pins the classes and measures the
 colours, `__tests__/sessionActionControlsContrast.test.tsx` the action rows,
 and `e2e/retro-touch-card-controls.spec.ts` the layout, on an emulated phone
@@ -547,34 +590,45 @@ below 0.183, and the ranges overlap). The brand primary is indigo-600, not
 **A participant's colour is data, and as a class it reaches the screen
 through one module.** `User.color` is a Tailwind class written by the team
 record and by every participant's own client into the session blob, so it is
-never interpolated into `className`: `utils/participantColors.ts` →
-`avatarColorClasses` (an avatar's background *and* its initials' colour) and
-`participantColorClass` (background only, for the non-text dots). White
-initials failed on seven of the eight palette colours, so the initials' colour
-is chosen per colour by measured contrast — white where white clears 4.5:1
-(the facilitator's indigo), black elsewhere — and
-`__tests__/participantColors.test.ts` measures every pair from
-`node_modules/tailwindcss/theme.css` with **axe-core's own colour engine** (the
-copy the e2e gate injects), so a Tailwind bump that moves a colour fails the
-build. A value the palette does not know renders neutral (`bg-slate-600`,
-white initials), which also keeps a participant from writing classes such as
-`fixed inset-0 z-50` onto everyone's screen; a colour an older release stored
-renders neutral too, so grey avatars on an old team are expected, and nothing
-is migrated. A departed participant's avatar is neutral grey, never faded, and
+never interpolated into `className`. The stored class never changes; since 45.0
+it names a *tone* (a pastel body, a dark ink of the same hue, a brighter
+accent: the `person-*` tokens of `index.css`), and `utils/participantColors.ts`
+is the only way from one to the other: `avatarColorClasses` (the body and the
+initials' ink, plus the `tone-*` class a picture reads), `participantColorClass`
+(the ink alone, for the non-text dots) and `participantToneHex` (the same tone
+as hex, for a surface painted with a `style`). White initials failed on seven
+of the eight palette colours; the initials are now the ink on the body of one
+tone, and `__tests__/participantColors.test.ts` measures every pair from
+Tailwind's `theme.css` and then the `@theme` blocks of `index.css`, with
+**axe-core's own colour engine** (the copy the e2e gate injects): the initials
+at 4.5:1, the dots at 3:1 on white and on the reader's own row. A token that
+moves fails the build. A value the palette does not know renders in the neutral
+tone (`bg-person-neutral`, `text-person-neutral-ink`), which also keeps a
+participant from writing classes such as `fixed inset-0 z-50` onto everyone's
+screen; a colour an older release stored renders neutral too, so grey avatars
+on an old team are expected, and nothing is migrated. **Every person is drawn
+by `components/common/Avatar.tsx`**, which takes its classes as `colorClasses`
+(what `avatarColorClasses` or `DEPARTED_AVATAR_CLASSES` returned) and has no
+`className`: margins, rings and visibility belong to a wrapper at the call
+site.
+A departed participant's avatar is neutral, never faded, and
 nothing adds opacity, `grayscale` or a second text colour beside the call —
 `__tests__/avatarColorSource.test.ts` walks the AST of `App.tsx` and every
 `.ts`/`.tsx` file under `components/` and fails on a raw `.color` in any JSX
 attribute but `style` and `key` (the dots take theirs through a `colorClass`
 prop, which a `className`-only guard never saw) — and on one anywhere else that
-is not inside those two functions, a roster copy (`color: member.color`, with
+is not inside those three functions, a roster copy (`color: member.color`, with
 an optional `||`/`??` fallback) or a key into a colour map, because a class
 built in a local variable and interpolated later reads `.color` outside every
-attribute. The colour-by-author card takes its author's tone through
+attribute. It also fails on an `<Avatar>` whose `colorClasses` is anything but
+the module's word (its function, one of its two constants, or a choice between
+them); only the avatar picker may hand its own `colorClasses` prop on. The
+colour-by-author card takes its author's tone through
 `participantToneHex(color).pop`, and `utils/cardTones.ts` gives the card its
 tint, its line and the ink of its controls, painted as a hex `style` (see *A
-card's colour* below). A `color` destructured out of a user escapes the guard;
-do not write one. The health-check score
-tooltip's digits follow the same measurement (`utils/healthRatingColors.ts`),
+card's colour* in *The look*). A `color` destructured out of a user escapes the
+guard; do not write one. The health-check score tooltip's digits follow the
+same measurement (`utils/healthRatingColors.ts`),
 and because a measured table proves nothing about the line that reads it,
 `__tests__/healthRatingTooltipContrast.test.tsx` renders the tooltip and
 measures what it paints — as `__tests__/teamLoginInviteContrast.test.tsx` does
@@ -1182,9 +1236,10 @@ change to it lands in both.**
   with `votesCastByVoter` too), so a person who voted on every item is
   finished on their own instead of being shown "1 vote left" no item will
   take; it is never a card's total. Once they finish, the row goes back to its
-  role and the check. The check, the only sign that a person is done, is
-  emerald-700 (strong) or emerald-600 (soft): 3:1 on white and on the reader's
-  `bg-indigo-50` row (1.4.11), where -500 and -400 measured 1.73 to 2.46:1.
+  role and the check. The check, the only sign that a person is done, is a
+  disc of emerald-700 (strong) or emerald-600 (soft) holding a white tick: 3:1
+  on white and on the reader's `bg-indigo-100` row (1.4.11), where -500 and
+  -400 measured 1.73 to 2.46:1.
 
   `typingKind` comes from `utils/typingNow.ts` → `typingKindForPhase`: cards in
   Brainstorm and on an open board, proposals in Discuss, nothing anywhere else.
@@ -1283,7 +1338,7 @@ change to it lands in both.**
   (what both headers render). Health checks had no timer at all; they now get
   the retro's, not a copy of it, and `__tests__/sessionTimerShared.test.ts`
   fails the build if timer logic reappears in `Session.tsx`,
-  `HealthCheckSession.tsx` or `SessionHeader.tsx`. Five rules:
+  `HealthCheckSession.tsx` or `SessionHeader.tsx`. Six rules:
   - **The five `settings.timer*` fields are a wire contract.** Nothing is
     written per tick; every client derives the remaining time from
     `timerStartedAt`, and the previous release's clients read the same fields
@@ -1314,6 +1369,13 @@ change to it lands in both.**
     `HEALTH_CHECK_PHASE_TIMER_SECONDS`. Three phase ids exist in both
     (DISCUSS, REVIEW, CLOSE), so a shared lookup would silently hand one
     session type the other's timeboxes.
+  - **The ring is a view of the same fields.** The timer's chip draws a
+    progress ring from the remaining time and the run's length:
+    `useSessionTimer` also returns `initial`, `timerRingFraction` (pure) turns
+    the two into the ring's fraction, and nothing is written for it. The last
+    ten seconds of a run (`isTimerEnding`) add a frame to the chip: a sign that
+    is not a colour alone. The time keeps the classes `font-mono font-bold
+    text-lg`, which the header-fit spec finds it by.
 
   The timer is not in the own-change ledger, on purpose: it is shared state
   where the server wins, and a facilitator's "running" claim against a
@@ -1356,7 +1418,6 @@ that test in hand.
 | Geist Mono | `public/fonts/geist-mono-latin.woff2`, `geist-mono-latin-ext.woff2` | Digits that change: the timer, counts (variable; SIL OFL 1.1) |
 | Typeface licence | `public/fonts/OFL-Geist.txt` | The licence asks that its text travels with the fonts; `__tests__/lookTokens.test.ts` checks it is there |
 | Timer alert sound | `public/assets/timer-alert.mp3` | Audio notification when a retrospective or health check timer ends |
-| Background texture | `public/assets/cubes.png` | Decorative pattern on login page |
 
 ### When Adding New Features
 1. **Check for external resource dependencies** — if a new library or feature loads something from the internet, find an offline alternative
@@ -1496,9 +1557,15 @@ gives way (it shrinks, scrolls, and brings the current phase back into view when
 the phase, the window size or the language changes); the back arrow sits in a
 protected `min-w-9` group, the right-hand cluster is `shrink-0`, and secondary
 controls appear at staggered breakpoints, the same in both session headers
-since both carry the timer (the "live" chip from 400px, the initials from `sm`,
-timer +30/+1 and the retro's tips button from `md`, the user's name and the
-captions of the tips and participants chips from `2xl`). `e2e/i18n.spec.ts` →
+since both carry the timer (the "live" chip from 400px, timer +30/+1 and the
+retro's tips button from `md`, the user's name and the captions of the tips and
+participants chips from `2xl`; the timer's progress ring from `sm` to `lg` and
+again from 1440px, since it is the first thing to give way). The viewer's
+avatar, which opens the avatar picker, shows at every width for a participant
+and from 360px for a facilitator, whose header also carries invite and play
+(`data-viewer-avatar`). The phase labels are drawn in mixed case by CSS from
+the dictionary's capitals, so every accessible name and every test that clicks
+a phase by its name is unchanged. `e2e/i18n.spec.ts` →
 *headers fit in both languages* asserts it for the dashboard, retro and health check headers
 and the administration console's title row (the e2e server sets a test-only
 `SUPER_ADMIN_PASSWORD` in `playwright.config.ts` to reach it) at
@@ -1594,7 +1661,7 @@ half-way; `e2e/axe-animations.spec.ts` holds that wait.
 ```
 /
 ├── components/          # React components
-│   ├── common/         # Shared UI primitives (ModalDialog — see Accessibility)
+│   ├── common/         # Shared UI primitives (ModalDialog, Avatar, the avatar pictures, the motion kit)
 │   └── jira/           # Jira controls, settings card and status hook (see Jira)
 ├── i18n/               # EN/FR interface dictionaries, language detection, bilingual retro content
 ├── services/           # Business logic (dataService, syncService)
