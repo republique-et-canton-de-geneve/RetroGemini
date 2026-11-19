@@ -479,6 +479,20 @@ describe('SessionTimer — setting the duration', () => {
     expect(screen.getByRole('button', { name: '2:30, set the timer' })).toHaveFocus();
   });
 
+  it('keeps an outline that forced colours paint on both fields', () => {
+    // `outline-none` is `outline-style: none`: in forced colours the ring (a
+    // box-shadow) is dropped and the border recoloured, and only the caret said
+    // which field had the focus (WCAG 2.4.7). `outline-hidden` keeps a
+    // transparent outline the system paints there.
+    renderTimer(createTimerSettings(300), { isFacilitator: true });
+    const { minutes, seconds } = openEditor();
+    for (const field of [minutes, seconds]) {
+      const tokens = field.className.split(/\s+/);
+      expect(tokens.some((token) => /(^|:)outline-none$/.test(token)), field.className).toBe(false);
+      expect(tokens.some((token) => /(^|:)outline-(hidden|\d+)$/.test(token)), field.className).toBe(true);
+    }
+  });
+
   it('cancels on Escape without writing', () => {
     // Guards: Escape saving what was typed.
     const { recorder, display } = renderTimer(createTimerSettings(300), { isFacilitator: true });

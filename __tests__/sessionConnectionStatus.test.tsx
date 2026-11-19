@@ -313,6 +313,27 @@ describe('the chips and banners as painted', () => {
     noBarePulse(container);
   });
 
+  // Below md the words step out of sight to save room, but the icon is
+  // aria-hidden, so they must stay in the accessibility tree: hidden by
+  // `display: none` the chip said nothing to a screen reader from 400px to md.
+  it.each([...chips(), { state: 'stalled', ui: null, label: 'Not saving', icon: 'sync_problem' }].map(
+    (chip) => [chip.state, chip] as const
+  ))('keeps the %s chip named at every width', (state, chip) => {
+    if (state === 'stalled') {
+      vi.spyOn(syncService, 'getSyncHealth').mockReturnValue('stalled');
+      vi.spyOn(syncService, 'onSyncHealth').mockImplementation(() => () => {});
+    }
+    render(chip.ui ?? <SessionSyncChip isLive joinDeniedReason={null} />);
+    const label = screen.getByText(chip.label);
+    const tokens = label.className.split(/\s+/);
+    expect(tokens).not.toContain('hidden');
+    expect(tokens).toEqual(expect.arrayContaining(['sr-only', 'md:not-sr-only']));
+    // Nothing above it takes the words out of the tree either.
+    for (let el: HTMLElement | null = label; el; el = el.parentElement) {
+      expect(el).not.toHaveAttribute('aria-hidden', 'true');
+    }
+  });
+
   it('keeps the live chip still at rest', () => {
     // A pulse that never stops says nothing new; "Live" is the state where
     // nothing is happening.

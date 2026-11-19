@@ -40,9 +40,11 @@ const deniedCopy = (reason: string | null, t: Translator) => {
 
 // Every chip is a pill on a tint of its own hue. The breakpoints are the
 // header's: below 400px every state steps aside, the label shows from md.
+// Below md the label is out of sight, never out of the accessibility tree: the
+// icon is aria-hidden, so the words are the chip's only name.
 const CHIP_CLASS = 'hidden min-[400px]:flex items-center gap-1.5 h-8 px-2 md:px-2.5 rounded-full';
 const CHIP_ICON_CLASS = 'material-symbols-outlined text-lg! leading-none';
-const CHIP_LABEL_CLASS = 'text-xs font-semibold hidden md:inline';
+const CHIP_LABEL_CLASS = 'text-xs font-semibold sr-only md:not-sr-only';
 
 // The bands under the header: a light tint, a line of its hue below it, and the
 // way out as a small white button rather than an underlined word.

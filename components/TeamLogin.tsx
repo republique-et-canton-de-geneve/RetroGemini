@@ -1039,6 +1039,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                             <button
                                                 key={member.id}
                                                 type="button"
+                                                // The check mark is hidden from assistive technology, so the
+                                                // button says itself which member is chosen.
+                                                aria-pressed={selectedMemberId === member.id}
                                                 onClick={() => {
                                                     setSelectedMemberId(member.id);
                                                     setName(member.name);

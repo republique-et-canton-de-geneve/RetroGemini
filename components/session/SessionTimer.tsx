@@ -128,7 +128,7 @@ const SessionTimer: React.FC<Props> = ({ settings, phase, fallbackSeconds, isFac
     if (value === '' || /^\d+$/.test(value)) set(value);
   };
   const inputClass =
-    'w-12 sm:w-14 h-8 text-lg border border-slate-400 rounded-md px-1 bg-white text-slate-900 text-center font-bold tabular-nums focus:border-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-600/15';
+    'w-12 sm:w-14 h-8 text-lg border border-slate-400 rounded-md px-1 bg-white text-slate-900 text-center font-bold tabular-nums focus:border-indigo-600 focus:outline-hidden focus:ring-4 focus:ring-indigo-600/15';
 
   return (
     <div

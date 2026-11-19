@@ -272,8 +272,10 @@ const ProposalActionRow: React.FC<Props> = ({
   const upVoteClass = myVote === 'up'
     ? (isDark ? 'bg-emerald-900/70 text-emerald-300 shadow-xs' : 'bg-emerald-100 text-emerald-800 shadow-xs')
     : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-600');
+  // The chosen neutral needs a fill of its own: white, the hover of every
+  // unchosen button, read 1.16:1 on the box and could not be told apart.
   const neutralVoteClass = myVote === 'neutral'
-    ? (isDark ? 'bg-slate-700 text-slate-100 shadow-xs' : 'bg-white text-slate-900 shadow-xs')
+    ? (isDark ? 'bg-slate-700 text-slate-100 shadow-xs' : 'bg-slate-600 text-white shadow-xs')
     : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-600');
   const downVoteClass = myVote === 'down'
     ? (isDark ? 'bg-rose-900/70 text-rose-300 shadow-xs' : 'bg-rose-100 text-rose-800 shadow-xs')
@@ -377,6 +379,7 @@ const ProposalActionRow: React.FC<Props> = ({
               <div className={voteBoxClass}>
                 <button
                   onClick={() => onVote('up')}
+                  aria-pressed={myVote === 'up'}
                   className={`px-2 py-1 rounded-md flex items-center transition ${upVoteClass}`}
                 >
                   <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
@@ -384,6 +387,7 @@ const ProposalActionRow: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => onVote('neutral')}
+                  aria-pressed={myVote === 'neutral'}
                   className={`px-2 py-1 rounded-md flex items-center transition ${neutralVoteClass}`}
                 >
                   <span className="material-symbols-outlined text-sm mr-1">remove</span>
@@ -391,6 +395,7 @@ const ProposalActionRow: React.FC<Props> = ({
                 </button>
                 <button
                   onClick={() => onVote('down')}
+                  aria-pressed={myVote === 'down'}
                   className={`px-2 py-1 rounded-md flex items-center transition ${downVoteClass}`}
                 >
                   <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>

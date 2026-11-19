@@ -8,7 +8,7 @@ import SessionHeader from '../components/session/SessionHeader';
 import { HealthCheckSession as HealthCheckSessionType, RetroSession, Team, User } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
-import { effectivePair } from './helpers/tailwindTheme';
+import { classColor, effectivePair, tokenContrast } from './helpers/tailwindTheme';
 
 /**
  * The health check screen in the 45.0 look ("Clarté"): what it paints,
@@ -117,6 +117,21 @@ const measured = (element: Element, floor = TEXT) => {
   expect(pair.ratio, `${element.textContent?.trim() || element.tagName}: ${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(floor);
 };
 
+/**
+ * The edge a control shows at rest, measured against the surface it sits on:
+ * the one border colour with no variant (a `hover:` or `focus:` edge is not
+ * what is painted at rest), on the control's own background, white when it has
+ * none. A control whose only edge is its border needs 3:1 (WCAG 1.4.11).
+ */
+const restingEdge = (element: Element, floor = NON_TEXT) => {
+  const className = element.getAttribute('class') ?? '';
+  const edges = className.split(/\s+/).filter((token) => /^border-[a-z]+-\d+$/.test(token));
+  expect(edges, `one resting border colour in "${className}"`).toHaveLength(1);
+  const edge = edges[0].replace(/^border-/, '');
+  const surface = classColor(className, 'bg') ?? 'white';
+  expect(tokenContrast(edge, surface), `${edge} edge on ${surface}`).toBeGreaterThanOrEqual(floor);
+};
+
 const iconButton = (scope: HTMLElement, ligature: string) =>
   [...scope.querySelectorAll('button')].find((button) => button.textContent?.includes(ligature)) as HTMLButtonElement;
 
@@ -221,7 +236,7 @@ describe('the survey', () => {
       expect(button.getAttribute('aria-pressed')).toBe(button.textContent === '5' ? 'true' : 'false');
       measured(button);
       // An unchosen score is a control on white: its edge must be seen.
-      if (button.getAttribute('aria-pressed') === 'false') expect(button.className).toContain('border-slate-400');
+      if (button.getAttribute('aria-pressed') === 'false') restingEdge(button);
     }
   });
 
@@ -244,7 +259,7 @@ describe('the survey', () => {
   it('gives the comment field an edge of 3:1 and a visible focus', () => {
     renderSession(createSession());
     for (const field of screen.getAllByPlaceholderText('Additional comments (optional)...')) {
-      expect(field.className).toContain('border-slate-400');
+      restingEdge(field);
       expect(field.className).toContain('focus:ring-4');
       expect(field.className).not.toContain('focus:outline-hidden focus:border');
     }
@@ -342,7 +357,7 @@ describe('Discuss', () => {
     expect(submit.disabled).toBe(true);
     measured(submit);
     const field = within(bare).getByPlaceholderText('Add a comment...');
-    expect(field.className).toContain('border-slate-400');
+    restingEdge(field);
   });
 
   it('reads an accepted action and shows its delete control at 3:1', () => {
@@ -365,7 +380,7 @@ describe('Discuss', () => {
   it('reads the propose field and its buttons', () => {
     discuss();
     const field = screen.getByPlaceholderText('Propose an action...');
-    expect(field.className).toContain('border-slate-400');
+    restingEdge(field);
     expect(field.className).toContain('focus:ring-4');
     measured(screen.getByRole('button', { name: 'Propose' }));
     const direct = screen.getByRole('button', { name: 'Directly accept action' });
@@ -404,7 +419,7 @@ describe('Review', () => {
     measured(screen.getByRole('button', { name: 'Mark action as done' }).querySelector('.material-symbols-outlined') as Element, NON_TEXT);
     measured(screen.getByRole('button', { name: 'Mark action as not done' }).querySelector('.material-symbols-outlined') as Element, NON_TEXT);
     for (const select of screen.getAllByRole('combobox')) {
-      expect(select.className).toContain('border-slate-400');
+      restingEdge(select);
       measured(select);
     }
   });
