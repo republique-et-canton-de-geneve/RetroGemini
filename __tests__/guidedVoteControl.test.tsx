@@ -166,6 +166,33 @@ describe('GuidedVoteControl', () => {
     rerender(<GuidedVoteControl kind="ticket" mine={0} canAdd onAdd={onAdd} onRemove={vi.fn()} />);
     act(() => { plus.click(); });
     expect(onAdd).toHaveBeenCalledTimes(1);
+    // It answers once the vote is drawn: the class that vote writes on the
+    // button (the last one turns the plus off) would wipe an effect put on
+    // during the click.
+    rerender(<GuidedVoteControl kind="ticket" mine={1} canAdd={false} onAdd={onAdd} onRemove={vi.fn()} />);
     expect(plus.classList.contains('fx-press')).toBe(true);
+    act(() => { vi.runAllTimers(); });
+    // A vote that comes from elsewhere (another browser of the viewer's) is no press.
+    rerender(<GuidedVoteControl kind="ticket" mine={2} canAdd={false} onAdd={onAdd} onRemove={vi.fn()} />);
+    expect(plus.classList.contains('fx-press')).toBe(false);
+  });
+
+  it('tells the screen of a plus pressed while it cannot add, and adds nothing', async () => {
+    const onAdd = vi.fn();
+    const onRefused = vi.fn();
+    const { rerender } = render(<GuidedVoteControl kind="ticket" mine={0} canAdd={false} onAdd={onAdd} onRemove={vi.fn()} onRefused={onRefused} />);
+    const plus = screen.getByRole('button', { name: 'Add a vote to this ticket' });
+    await userEvent.click(plus);
+    expect(onRefused).toHaveBeenCalledTimes(1);
+    expect(onAdd).not.toHaveBeenCalled();
+    // The keyboard path is the same click.
+    plus.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(onRefused).toHaveBeenCalledTimes(2);
+    expect(document.activeElement).toBe(plus);
+    rerender(<GuidedVoteControl kind="ticket" mine={0} canAdd onAdd={onAdd} onRemove={vi.fn()} onRefused={onRefused} />);
+    await userEvent.click(plus);
+    expect(onAdd).toHaveBeenCalledTimes(1);
+    expect(onRefused).toHaveBeenCalledTimes(2);
   });
 });

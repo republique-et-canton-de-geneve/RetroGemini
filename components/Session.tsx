@@ -1,6 +1,6 @@
 import { appFetch } from '../services/publicPath';
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { Team, User, RetroSession, Ticket, ActionItem, ActionImpactVote, Group, ParticipantActivity, JiraLink } from '../types';
 import { dataService } from '../services/dataService';
@@ -50,6 +50,12 @@ import ShowAuthorsDialog from './session/ShowAuthorsDialog';
 import BoardSettingsDialog from './session/BoardSettingsDialog';
 import BoardViewControls from './session/BoardViewControls';
 import BoardVoteControl from './session/BoardVoteControl';
+import GuidedVoteControl from './session/GuidedVoteControl';
+import VoteBudget from './session/VoteBudget';
+import { VOTE_BUDGET_HOOKS, shakeVoteBudget, voteFlightHome, voteFlightStart } from './session/voteControls';
+import { RECONNECT_QUIET_MS, playLandedVote, useSessionMotion, voteTargetOf } from './session/useSessionMotion';
+import { FLIGHT_BACK_MS, fly } from './common/motion/flight';
+import { motionAllowed, playEffect } from './common/motion/effects';
 import TicketOriginBadge from './session/TicketOriginBadge';
 import { getAssignableMembers } from './session/assignableMembers';
 import { JOIN_DENIED_REVOKED, SessionConnectionBanner } from './session/SessionConnectionStatus';
@@ -201,7 +207,7 @@ const applyMaxVotes = (s: RetroSession, newVal: number) => {
 
 const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
   // Named `tr`, not `t`: `t` is the ticket variable throughout this file.
-  const { t: tr, tp: trp } = useTranslation();
+  const { t: tr } = useTranslation();
   const [session, setSession] = useState<RetroSession | undefined>(() => {
     const retro = team.retrospectives.find(r => r.id === sessionId);
     if (!retro) return undefined;
@@ -578,6 +584,69 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     boardScrollerRef,
     `${session?.phase}|${isEditingColumns}|${(session?.columns ?? []).map((col) => col.id).join(',')}`
   );
+
+  // The board's motion: what just happened, read from two states
+  // (useSessionMotion). Decoration only — every state it accompanies is
+  // already on screen in words or in a count, and nothing here is written.
+  const ownPendingIds = useCallback(() => pendingCreationsRef.current, []);
+  // A vote of the viewer's that a token is carrying between the budget and a
+  // card: the hook leaves its marks to the landing (playLandedVote). Counted,
+  // so two quick votes on one card each keep it held until their own landing.
+  const flyingVotesRef = useRef<Map<string, number>>(new Map());
+  const heldVotes = useCallback((): ReadonlySet<string> => new Set(flyingVotesRef.current.keys()), []);
+  useSessionMotion({ session, viewerId: currentUser.id, ownPendingIds, isLive, root: boardScrollerRef, heldVotes });
+  const holdVote = (itemId: string) => flyingVotesRef.current.set(itemId, (flyingVotesRef.current.get(itemId) ?? 0) + 1);
+  const releaseVote = (itemId: string) => {
+      const left = (flyingVotesRef.current.get(itemId) ?? 1) - 1;
+      if (left > 0) flyingVotesRef.current.set(itemId, left);
+      else flyingVotesRef.current.delete(itemId);
+  };
+  // Decoration a click asked for, played once its write is drawn and before
+  // it is painted: an effect class put on during the click would be wiped by
+  // the class React writes in that commit, and the dot a vote adds can only be
+  // measured, and hidden until its token arrives, once it exists.
+  const afterDrawRef = useRef<Array<() => void>>([]);
+  useLayoutEffect(() => {
+      for (const play of afterDrawRef.current.splice(0)) play();
+  }, [session]);
+  const flyVote = (itemId: string, out: boolean, from: DOMRect | null) => {
+      if (!out) {
+          fly(from, voteFlightHome(), { duration: FLIGHT_BACK_MS, onArrive: () => releaseVote(itemId) });
+          return;
+      }
+      const target = voteTargetOf(document, itemId);
+      const dot = target?.dot as HTMLElement | null | undefined;
+      if (dot) {
+          // Its control springs it in at once, from no size at all: that waits
+          // for the token, and the dot is measured at its place.
+          dot.classList.remove('fx-pop');
+          dot.style.visibility = 'hidden';
+      }
+      fly(from, dot ?? target?.count, {
+          onArrive: () => {
+              if (dot) dot.style.removeProperty('visibility');
+              releaseVote(itemId);
+              playLandedVote(document, itemId);
+          },
+      });
+  };
+
+  // The phase title slides in when the phase changes under the viewer's
+  // eyes: never on the first state, a change of session, while offline, or in
+  // the seconds after a (re)connection, whose snapshot is no news.
+  const shownPhaseRef = useRef<{ id: string | null; phase: string | null }>({ id: null, phase: null });
+  const liveSinceRef = useRef(0);
+  useLayoutEffect(() => {
+      if (isLive) liveSinceRef.current = Date.now();
+  }, [isLive]);
+  useLayoutEffect(() => {
+      const shown = shownPhaseRef.current;
+      const next = { id: session?.id ?? null, phase: session?.phase ?? null };
+      shownPhaseRef.current = next;
+      if (!shown.phase || shown.id !== next.id || shown.phase === next.phase) return;
+      if (!isLive || Date.now() - liveSinceRef.current < RECONNECT_QUIET_MS) return;
+      playEffect(document.querySelector('[data-phase-title]'), 'fx-title-in');
+  }, [session?.id, session?.phase, isLive]);
   // Edit Layout belongs to Brainstorm and to the open board, the two screens
   // where cards are written. setPhase closes it for this tab; a phase changed
   // from another facilitator tab must close it too, or the move, remove and
@@ -1480,6 +1549,36 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     return newSession;
   };
 
+  // A vote of the viewer's, added or taken back by `write`, and the motion
+  // that follows it. The write goes first and alone decides (mayAddVote judges
+  // the vote on the state it is built on); the motion only follows what the
+  // state did. In the guided Vote phase, while the budget draws its tokens, a
+  // token flies from the next one to the card and back home for a vote taken
+  // back. A vote refused for lack of votes shakes the budget.
+  const castVote = (itemId: string, add: boolean, write: () => RetroSession | null) => {
+      const mine = (s: RetroSession | null) => {
+          const item = s?.tickets.find(x => x.id === itemId) ?? s?.groups.find(x => x.id === itemId);
+          return item ? item.votes.filter(v => v === currentUser.id).length : 0;
+      };
+      const before = mine(sessionRef.current);
+      const flies = sessionRef.current?.phase === 'VOTE' && motionAllowed()
+          && !!document.querySelector(VOTE_BUDGET_HOOKS.row);
+      // Measured before the write: the token it uses turns into a cast one,
+      // and the dot a vote taken back leaves is gone once it is drawn.
+      const from = !flies ? null : add
+          ? voteFlightStart()?.getBoundingClientRect() ?? null
+          : voteTargetOf(document, itemId)?.count?.lastElementChild?.getBoundingClientRect() ?? null;
+      const written = write();
+      const after = mine(written);
+      if (add ? after > before : after < before) {
+          if (!flies) return;
+          holdVote(itemId);
+          afterDrawRef.current.push(() => flyVote(itemId, add, from));
+      } else if (add && written && voteBudget(written.settings) - (votesCastByVoter(written).get(currentUser.id) ?? 0) <= 0) {
+          shakeVoteBudget();
+      }
+  };
+
   // A tap the board acts on cancels the mouse a browser emulates for it: the
   // tap lays the board out again under the finger, and the click went to
   // whatever control came there. The mousedown it cancels did more, and that
@@ -1571,6 +1670,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   const votesLeftToCast = session && pendingMaxVotes !== null
     ? voteBudget({ ...session.settings, maxVotes: pendingMaxVotes }) - myVotesCast
     : budgetLeft;
+  // A vote button pressed while it cannot add: the budget shakes when the
+  // reason is the budget, never "one vote per item" (castVote above).
+  const refuseVote = () => {
+      if (votesLeftToCast <= 0) shakeVoteBudget();
+  };
 
   // Auto Finish / Unfinish Effect: finished once the reader can place no more
   // votes (votesLeft above), un-finished when one can be placed again (a vote
@@ -2894,8 +2998,15 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // Judged again on the state the write is built on: a number left in the
       // votes field for this button joins its write, and the button was
       // enabled under the old number (utils/voteBudget.ts → mayAddVote).
-      const addMyVote = () => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick && mayAddVote(s, tick, currentUser.id)) tick.votes.push(currentUser.id); });
-      const removeMyVote = () => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) { const idx = tick.votes.indexOf(currentUser.id); if(idx>-1) tick.votes.splice(idx,1); } });
+      const addMyVote = () => castVote(t.id, true, () => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick && mayAddVote(s, tick, currentUser.id)) tick.votes.push(currentUser.id); }));
+      const removeMyVote = () => castVote(t.id, false, () => updateSession(s => { const tick = s.tickets.find(x => x.id === t.id); if(tick) { const idx = tick.votes.indexOf(currentUser.id); if(idx>-1) tick.votes.splice(idx,1); } }));
+      // The guided Vote phase's pill. `aria-disabled`, not `disabled`, as on
+      // the board (BoardVoteControl): the vote cast with the keyboard that used
+      // the last one disabled the very button it was cast with, and the focus
+      // fell to the page (2.4.3).
+      const renderGuidedVote = () => (
+          <GuidedVoteControl kind="ticket" mine={myVotesOnThis} canAdd={canVote} onAdd={addMyVote} onRemove={removeMyVote} onRefused={refuseVote} />
+      );
       // On a board: voting off leaves the total alone. A card this viewer
       // cannot read takes no vote, but the votes they gave it while it was
       // shown are still theirs to take back — they count against a limit, and
@@ -3183,6 +3294,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         <button
                             key={emoji}
                             data-testid="ticket-reaction"
+                            data-reaction={emoji}
                             onClick={(e) => {
                                 e.stopPropagation();
                                 updateSession(s => {
@@ -3274,6 +3386,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             )}
                         </button>
                     </div>
+                    {/* The Vote phase's pill closes the row, at its end. */}
+                    {mode === 'VOTE' && !isGrouped && (
+                        <div className="ml-auto">{renderGuidedVote()}</div>
+                    )}
                 </div>
             )}
 
@@ -3362,18 +3478,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 </button>
             )}
 
-            {mode === 'VOTE' && !isGrouped && (
-                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-end">
-                    {/* `aria-disabled`, not `disabled`, as on the board
-                        (BoardVoteControl): the vote cast with the keyboard that
-                        used the last one disabled the very button it was cast
-                        with, and the focus fell to the page (2.4.3). */}
-                    <div className="flex items-center bg-indigo-50 rounded-lg p-1 shadow-xs">
-                        <button aria-disabled={myVotesOnThis === 0} onClick={() => { if (myVotesOnThis > 0) removeMyVote(); }} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent" aria-label={tr('session.ticket.removeVote')}><span className="material-symbols-outlined text-sm">remove</span></button>
-                        <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                        <button aria-disabled={!canVote} onClick={() => { if (canVote) addMyVote(); }} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-200 rounded-sm aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent" aria-label={tr('session.ticket.addVote')}><span className="material-symbols-outlined text-sm">add</span></button>
-                    </div>
-                </div>
+            {/* A card whose foot row is not drawn still takes its vote. */}
+            {mode === 'VOTE' && !isGrouped && !(visible && !isEditing) && (
+                <div className="mt-2 flex items-center justify-end">{renderGuidedVote()}</div>
             )}
 
             {/* The Vote phase keeps its votes to itself; a board is voted on
@@ -3381,7 +3488,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 everyone (BoardVoteControl). A row with nothing in it is not
                 drawn: voting off, the totals hidden and no delete. */}
             {isBoard && !isGrouped && (showsBoardVotes || canDeleteCard) && (
-                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                <div className="mt-2 flex items-center justify-between gap-2">
                     {canDeleteCard ? (
                         <button
                             onClick={deleteCard}
@@ -3402,6 +3509,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         disabled={!isLive}
                         onAdd={addMyVote}
                         onRemove={removeMyVote}
+                        onRefused={refuseVote}
                     />
                 </div>
             )}
@@ -3409,16 +3517,16 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       );
   };
 
-  // A guided bar separates its settings with a rule; the board's settings
-  // dialog lists them one per line, with none.
-  const BAR_RULE = 'border-l border-slate-200 pl-4';
+  // A guided bar separates its settings with space alone, never a rule: the
+  // bar wraps on a narrow screen, and a rule then opens a line on its own.
+  // The board's settings dialog lists them one per line.
 
   // Where a setting control is drawn: a guided phase's bar, or the board's
   // settings dialog, whose labels read like its other settings.
   type SettingPlacement = 'bar' | 'dialog';
 
   const renderColorBySelect = (placement: SettingPlacement = 'bar') => (
-      <div className={`flex items-center ${placement === 'bar' ? `space-x-2 ${BAR_RULE}` : 'justify-between gap-3'}`}>
+      <div className={`flex items-center ${placement === 'bar' ? 'space-x-2' : 'justify-between gap-3'}`}>
         <label
           htmlFor={`color-by-${placement}`}
           className={placement === 'bar' ? 'text-sm text-slate-600 font-medium whitespace-nowrap' : 'text-sm font-medium text-slate-800'}
@@ -3612,12 +3720,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   </div>
               );
           }
-          if (session.settings.unlimitedVotes) return null;
-          return (
-              <div className="text-sm font-medium bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-200 whitespace-nowrap">
-                  {trp('session.board.votesRemaining', Math.max(0, votesLeft))}
-              </div>
-          );
+          return <VoteBudget left={votesLeft} budget={voteBudget(session.settings)} unlimited={!!session.settings.unlimitedVotes} />;
       };
 
       const renderEditLayoutButton = () => (
@@ -3631,7 +3734,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       );
 
       const renderVoteSettings = () => (
-           <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 text-sm font-medium text-slate-700 ${BAR_RULE}`}>
+           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm font-medium text-slate-700">
                 <label className="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" className="w-4 h-4 accent-indigo-600" disabled={!isLive} checked={session.settings.oneVotePerTicket} onChange={(e) => handleToggleOneVote(e.target.checked)} />
                     <span>{tr('session.board.oneVotePerItem')}</span>
@@ -3666,7 +3769,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // both languages.
       const renderBoardActionBar = () => (
           <div data-testid="phase-action-bar" className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0 z-30 sticky top-0">
-              <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{tr('session.openBoard.title')}</h2>
+              <h2 className="font-semibold tracking-tight text-slate-900 text-lg overflow-hidden"><span data-phase-title="" className="block">{tr('session.openBoard.title')}</span></h2>
               {renderVotesRemaining()}
               <BoardViewControls
                   search={boardSearch}
@@ -3714,27 +3817,28 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       const renderPhaseActionBar = () => isBoard ? renderBoardActionBar() : (
           <div data-testid="phase-action-bar" className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex flex-wrap justify-between items-center gap-x-4 gap-y-2 shrink-0 z-30 sticky top-0">
                {/* Wraps within itself too: the settings of a facilitator's
-                   Brainstorm bar are wider than a narrow screen's bar. */}
-               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                   Brainstorm bar are wider than a narrow screen's bar. Its
+                   wider gap is what sets the settings apart. */}
+               <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
                    {mode === 'BRAINSTORM' && (
-                       <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{tr('session.board.brainstormTitle')}</h2>
+                       <h2 className="font-semibold tracking-tight text-slate-900 text-lg overflow-hidden"><span data-phase-title="" className="block">{tr('session.board.brainstormTitle')}</span></h2>
                    )}
                    {mode === 'GROUP' && (
                        <div className="flex items-center gap-3">
-                           <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{tr('session.board.groupTitle')}</h2>
+                           <h2 className="font-semibold tracking-tight text-slate-900 text-lg overflow-hidden"><span data-phase-title="" className="block">{tr('session.board.groupTitle')}</span></h2>
                            {isFacilitator && aiEnabled && renderSuggestGroupsButton()}
                        </div>
                    )}
                    {mode === 'VOTE' && (
                        <div className="flex items-center">
-                           <h2 className="font-semibold tracking-tight text-slate-900 text-lg mr-4">{tr('session.board.voteTitle')}</h2>
+                           <h2 className="font-semibold tracking-tight text-slate-900 text-lg overflow-hidden mr-4"><span data-phase-title="" className="block">{tr('session.board.voteTitle')}</span></h2>
                            {renderVotesRemaining()}
                        </div>
                    )}
 
                    {mode === 'BRAINSTORM' && isFacilitator && (
                        <>
-                           <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer border-l border-slate-200 pl-4">
+                           <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
                                <input type="checkbox" className="w-4 h-4 accent-indigo-600" checked={session.settings.revealBrainstorm} onChange={(e) => updateSession(s => s.settings.revealBrainstorm = e.target.checked)} />
                                <span className="whitespace-nowrap">{tr('session.board.revealCards')}</span>
                            </label>
@@ -3754,17 +3858,22 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                    {(mode === 'BRAINSTORM' || mode === 'VOTE') && (
                        <div className="flex items-center">
                             <button
-                                onClick={() => updateSession(s => {
-                                    if(!s.finishedUsers) s.finishedUsers = [];
-                                    if(!s.autoFinishedUsers) s.autoFinishedUsers = s.autoFinishedUsers ?? [];
-                                    if(s.finishedUsers.includes(currentUser.id)) {
-                                        s.finishedUsers = s.finishedUsers.filter(id => id !== currentUser.id);
-                                        s.autoFinishedUsers = (s.autoFinishedUsers || []).filter(id => id !== currentUser.id);
-                                    } else {
-                                        s.finishedUsers.push(currentUser.id);
-                                        s.autoFinishedUsers = (s.autoFinishedUsers || []).filter(id => id !== currentUser.id);
-                                    }
-                                })}
+                                onClick={(e) => {
+                                    const button = e.currentTarget;
+                                    const written = updateSession(s => {
+                                        if(!s.finishedUsers) s.finishedUsers = [];
+                                        if(!s.autoFinishedUsers) s.autoFinishedUsers = s.autoFinishedUsers ?? [];
+                                        if(s.finishedUsers.includes(currentUser.id)) {
+                                            s.finishedUsers = s.finishedUsers.filter(id => id !== currentUser.id);
+                                            s.autoFinishedUsers = (s.autoFinishedUsers || []).filter(id => id !== currentUser.id);
+                                        } else {
+                                            s.finishedUsers.push(currentUser.id);
+                                            s.autoFinishedUsers = (s.autoFinishedUsers || []).filter(id => id !== currentUser.id);
+                                        }
+                                    });
+                                    // The button answers the press it wrote; the panel's tick says the rest.
+                                    if (written) afterDrawRef.current.push(() => playEffect(button, 'fx-press'));
+                                }}
                                 disabled={mode === 'VOTE' && isFinished && votesLeft === 0}
                                 // Finished: the soft green of a done state, under its
                                 // dark ink (white on emerald-500 measured 2.5:1).
@@ -3815,8 +3924,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           const groupTakeBackOnly = !groupVotingOff && !groupReadable;
           const showsGroupVotes = !session.settings.voteCountHidden
               || (!groupVotingOff && (groupReadable || myVotesOnThis > 0));
-          const addGroupVote = () => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp && mayAddVote(s, grp, currentUser.id)) grp.votes.push(currentUser.id); });
-          const removeGroupVote = () => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) { const idx = grp.votes.indexOf(currentUser.id); if(idx>-1) grp.votes.splice(idx,1); } });
+          const addGroupVote = () => castVote(g.id, true, () => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp && mayAddVote(s, grp, currentUser.id)) grp.votes.push(currentUser.id); }));
+          const removeGroupVote = () => castVote(g.id, false, () => updateSession(s => { const grp = s.groups.find(x => x.id === g.id); if(grp) { const idx = grp.votes.indexOf(currentUser.id); if(idx>-1) grp.votes.splice(idx,1); } }));
           const isGroupDragTarget = receivesCards && dragTarget?.type === 'ITEM' && dragTarget.id === g.id;
           // Brainstorm: the group travels as one, so the container itself is
           // what the pointer picks up — the cards inside it are inert there.
@@ -3845,6 +3954,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           return (
                                         <div
                                             key={g.id}
+                                            // Found by its id by the board's motion (a ring on
+                                            // `::after`, which is why the container stays `relative`).
+                                            data-group-id={g.id}
                                             // The keyboard's place once a vote is taken back
                                             // from a group that takes no vote (BoardVoteControl).
                                             {...(isBoard && groupTakeBackOnly ? { 'data-vote-focus-host': '', tabIndex: -1 } : {})}
@@ -4049,17 +4161,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             )}
 
                                             {mode === 'VOTE' && (
-                                                <div className="mt-2 pt-2 border-t border-indigo-100 flex items-center justify-end">
-                                                    <div className="flex items-center bg-white rounded-lg p-1 shadow-xs border border-indigo-100">
-                                                        {/* `aria-disabled`, as on a card's above. */}
-                                                        <button aria-disabled={myVotesOnThis === 0} onClick={() => { if (myVotesOnThis > 0) removeGroupVote(); }} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent" aria-label={tr('session.group.removeVote')}><span className="material-symbols-outlined text-sm">remove</span></button>
-                                                        <span className="mx-2 font-bold text-indigo-800 w-4 text-center">{myVotesOnThis}</span>
-                                                        <button aria-disabled={!canVote} onClick={() => { if (canVote) addGroupVote(); }} className="w-6 h-6 flex items-center justify-center text-indigo-600 hover:bg-indigo-50 rounded-sm aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent" aria-label={tr('session.group.addVote')}><span className="material-symbols-outlined text-sm">add</span></button>
-                                                    </div>
+                                                <div className="mt-2 pt-2 border-t border-slate-200 flex items-center justify-end">
+                                                    {/* `aria-disabled`, as on a card's above. */}
+                                                    <GuidedVoteControl kind="group" mine={myVotesOnThis} canAdd={canVote} onAdd={addGroupVote} onRemove={removeGroupVote} onRefused={refuseVote} />
                                                 </div>
                                             )}
                                             {isBoard && showsGroupVotes && (
-                                                <div className="mt-2 pt-2 border-t border-indigo-100 flex items-center justify-end">
+                                                <div className="mt-2 pt-2 border-t border-slate-200 flex items-center justify-end">
                                                     <BoardVoteControl
                                                         kind="group"
                                                         total={g.votes.length}
@@ -4071,6 +4179,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         disabled={!isLive}
                                                         onAdd={addGroupVote}
                                                         onRemove={removeGroupVote}
+                                                        onRefused={refuseVote}
                                                     />
                                                 </div>
                                             )}
@@ -4293,7 +4402,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                         </span>{' '}<span data-column-title lang={contentTitleLanguage(col.title)}>{col.title}</span>
                                     </div>
                                 )}
-                                <span className="shrink-0 min-w-6 px-2 py-0.5 rounded-full bg-slate-100 text-xs font-semibold text-slate-700 tabular-nums text-center">{tickets.length + groups.length}</span>
+                                <span data-column-count={col.id} className="shrink-0 min-w-6 px-2 py-0.5 rounded-full bg-slate-100 text-xs font-semibold text-slate-700 tabular-nums text-center">{tickets.length + groups.length}</span>
                             </div>
 
                             {/* After the header in the DOM, so the tab order follows what is

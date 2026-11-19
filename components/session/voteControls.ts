@@ -11,6 +11,9 @@ import { playEffect } from '../common/motion/effects';
 /** Past this many, one's own votes read as a dot and a number (both controls). */
 export const MAX_VOTE_DOTS = 3;
 
+/** A vote drawn this soon after its button was pressed is that press's: the button answers it (ms). */
+export const PRESS_ANSWER_MS = 1000;
+
 /**
  * `BoardVoteControl`, on an open board. The pill carries an edge of 3:1 on any
  * card tint; the add button is filled by the viewer's own vote, in the brand

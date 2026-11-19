@@ -158,10 +158,26 @@ describe('BoardVoteControl', () => {
     expect(document.querySelector('[class*="fx-"]')).toBeNull();
     act(() => { screen.getByTestId('vote-add').click(); });
     expect(onAdd).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('vote-add').classList.contains('fx-press')).toBe(true);
     rerender(<BoardVoteControl {...props({ mine: 2, onAdd })} />);
+    // The press is answered once the vote is drawn: the class a first vote
+    // gives the thumb would wipe an effect put on during the click.
+    expect(screen.getByTestId('vote-add').classList.contains('fx-press')).toBe(true);
     expect(screen.getByTestId('my-votes').lastElementChild!.classList.contains('fx-pop')).toBe(true);
     act(() => { vi.runAllTimers(); });
     expect(document.querySelector('[class*="fx-"]')).toBeNull();
+  });
+
+  it('tells the screen of a thumb pressed while it cannot add, never while reconnecting', async () => {
+    const onAdd = vi.fn();
+    const onRefused = vi.fn();
+    const { rerender } = render(<BoardVoteControl {...props({ canAdd: false, onAdd, onRefused })} />);
+    await userEvent.click(screen.getByTestId('vote-add'));
+    expect(onRefused).toHaveBeenCalledTimes(1);
+    expect(onAdd).not.toHaveBeenCalled();
+    // Offline, nothing is refused for lack of votes: the vote is paused.
+    rerender(<BoardVoteControl {...props({ canAdd: true, disabled: true, onAdd, onRefused })} />);
+    await userEvent.click(screen.getByTestId('vote-add'));
+    expect(onRefused).toHaveBeenCalledTimes(1);
+    expect(onAdd).not.toHaveBeenCalled();
   });
 });

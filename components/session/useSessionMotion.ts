@@ -56,6 +56,12 @@ export interface SessionMotionInput {
   isLive: boolean;
   /** Where the board lies; the whole document when absent. */
   root?: RefObject<HTMLElement | null>;
+  /**
+   * Cards and groups whose own vote a flight is carrying right now: the screen
+   * plays their marks where the token lands (`playLandedVote`), so a ring does
+   * not close on the card while the token is still on its way.
+   */
+  heldVotes?: () => ReadonlySet<string>;
 }
 
 const toSet = (ids: PendingIds): ReadonlySet<string> => (ids instanceof Set ? ids : new Set((ids as ReadonlyMap<string, unknown>).keys()));
@@ -121,8 +127,47 @@ const visibleVoteChanges = (motion: SessionMotion, prev: RetroSession, next: Ret
   return motion.voteTotals.filter((id) => votesOf(before.get(id), viewerId) !== votesOf(after.get(id), viewerId));
 };
 
+/** The card or group of this id under `root` (ids are compared, never put in a selector). */
+const itemOf = (root: Document | Element, id: string): Element | null =>
+  indexBy(root, MOTION_HOOKS.card).get(id)?.[0] ?? indexBy(root, MOTION_HOOKS.group).get(id)?.[0] ?? null;
+
+/**
+ * A vote of the viewer's has landed on a card or a group, carried by a
+ * flight: the dot it added springs in (a count with no dot to show, past the
+ * dots a control draws, bumps) and a ring closes on the item. Answers whether
+ * the item was found.
+ */
+export function playLandedVote(root: Document | Element, itemId: string): boolean {
+  const target = voteTargetOf(root, itemId);
+  if (!target) return false;
+  if (target.dot) playEffect(target.dot, 'fx-pop');
+  else playEffect(target.count, 'fx-bump');
+  playEffect(target.item, 'fx-ring', ringOptions(target.item));
+  return true;
+}
+
+/**
+ * Where a vote lands on a card or a group: the item, the vote count its
+ * control shows the viewer, and that count's last dot (a dot is an empty
+ * element; the number drawn past the dots is not one).
+ */
+export function voteTargetOf(root: Document | Element, itemId: string): { item: Element; count: Element | null; dot: Element | null } | null {
+  const item = itemOf(root, itemId);
+  if (!item) return null;
+  const count = partOf(item, `[${MOTION_HOOKS.voteCount}]`);
+  const last = count?.lastElementChild ?? null;
+  return { item, count, dot: last && !last.textContent ? last : null };
+}
+
 /** Puts each effect of `motion` on its element under `root`. Exported for the tests. */
-export function playSessionMotion(root: Document | Element, motion: SessionMotion, prev: RetroSession, next: RetroSession, viewerId: string): void {
+export function playSessionMotion(
+  root: Document | Element,
+  motion: SessionMotion,
+  prev: RetroSession,
+  next: RetroSession,
+  viewerId: string,
+  heldVotes: ReadonlySet<string> = new Set(),
+): void {
   const cards = indexBy(root, MOTION_HOOKS.card);
   const groups = indexBy(root, MOTION_HOOKS.group);
   const first = (index: Map<string, Element[]>, id: string) => index.get(id)?.[0] ?? null;
@@ -161,6 +206,7 @@ export function playSessionMotion(root: Document | Element, motion: SessionMotio
   }
 
   for (const id of visibleVoteChanges(motion, prev, next, viewerId)) {
+    if (heldVotes.has(id)) continue;
     const item = first(cards, id) ?? first(groups, id);
     if (!item) continue;
     playEffect(partOf(item, `[${MOTION_HOOKS.voteCount}]`), 'fx-bump');
@@ -185,7 +231,7 @@ interface Shown {
   quietUntil: number;
 }
 
-export function useSessionMotion({ session, viewerId, ownPendingIds, isLive, root }: SessionMotionInput): void {
+export function useSessionMotion({ session, viewerId, ownPendingIds, isLive, root, heldVotes }: SessionMotionInput): void {
   const shown = useRef<Shown>({ session: null, wasLive: false, quietUntil: 0 });
 
   useLayoutEffect(() => {
@@ -203,9 +249,9 @@ export function useSessionMotion({ session, viewerId, ownPendingIds, isLive, roo
     try {
       const motion = diffSessionMotion(prev, next, { viewerId, ownPendingIds: toSet(ownPendingIds()) });
       if (motion === NO_MOTION || isBurst(prev, next)) return;
-      playSessionMotion(root?.current ?? document, motion, prev, next, viewerId);
+      playSessionMotion(root?.current ?? document, motion, prev, next, viewerId, heldVotes?.());
     } catch {
       // Decoration: a malformed state never breaks the screen.
     }
-  }, [session, isLive, viewerId, ownPendingIds, root]);
+  }, [session, isLive, viewerId, ownPendingIds, root, heldVotes]);
 }

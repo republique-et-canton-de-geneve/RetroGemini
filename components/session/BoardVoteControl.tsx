@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
 import { playEffect } from '../common/motion/effects';
-import { BOARD_VOTE_CLASSES, MAX_VOTE_DOTS as MAX_DOTS } from './voteControls';
+import { BOARD_VOTE_CLASSES, MAX_VOTE_DOTS as MAX_DOTS, PRESS_ANSWER_MS } from './voteControls';
 
 /**
  * How a card or a group is voted on, on an open board — EasyRetro's shape: one
@@ -44,6 +44,8 @@ interface Props {
   disabled: boolean;
   onAdd: () => void;
   onRemove: () => void;
+  /** The thumb was pressed while it could not add, connected: the screen says why (the budget shakes). */
+  onRefused?: () => void;
 }
 
 const BoardVoteControl: React.FC<Props> = ({
@@ -56,12 +58,16 @@ const BoardVoteControl: React.FC<Props> = ({
   countHidden,
   disabled,
   onAdd,
-  onRemove
+  onRemove,
+  onRefused
 }) => {
   const { t, tp } = useTranslation();
   const addRef = useRef<HTMLButtonElement>(null);
   const dotsRef = useRef<HTMLSpanElement>(null);
   const shownMine = useRef(mine);
+  // When the thumb was last pressed: it answers once the vote is drawn, since
+  // the class that vote gives the button would wipe an effect put on before.
+  const pressedAt = useRef(0);
   // The dot a vote just added springs in (the number bumps past three dots).
   // Compared with what was shown, so a remount (a phase change) plays nothing.
   useLayoutEffect(() => {
@@ -69,7 +75,9 @@ const BoardVoteControl: React.FC<Props> = ({
       const dots = dotsRef.current;
       if (mine <= MAX_DOTS) playEffect(dots?.lastElementChild, 'fx-pop');
       else playEffect(dots, 'fx-bump');
+      if (Date.now() - pressedAt.current < PRESS_ANSWER_MS) playEffect(addRef.current, 'fx-press');
     }
+    pressedAt.current = 0;
     shownMine.current = mine;
   }, [mine]);
 
@@ -139,8 +147,11 @@ const BoardVoteControl: React.FC<Props> = ({
           data-testid="vote-add"
           onClick={(e) => {
             e.stopPropagation();
-            if (!addable) return;
-            playEffect(e.currentTarget, 'fx-press');
+            if (!addable) {
+              if (!disabled) onRefused?.();
+              return;
+            }
+            pressedAt.current = Date.now();
             onAdd();
           }}
           aria-disabled={!addable}

@@ -2,7 +2,7 @@ import React from 'react';
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Group, RetroSession, Ticket } from '../types';
-import { MOTION_HOOKS, RECONNECT_QUIET_MS, useSessionMotion } from '../components/session/useSessionMotion';
+import { MOTION_HOOKS, RECONNECT_QUIET_MS, playLandedVote, useSessionMotion } from '../components/session/useSessionMotion';
 
 /**
  * The hook compares the session it showed with the one it shows and puts the
@@ -28,8 +28,8 @@ const session = (over: Partial<RetroSession> = {}): RetroSession =>
     ...over,
   }) as unknown as RetroSession;
 
-const Board: React.FC<{ session: RetroSession; isLive: boolean; pending: ReadonlySet<string> | Map<string, unknown> }> = ({ session: shown, isLive, pending }) => {
-  useSessionMotion({ session: shown, viewerId: 'me', ownPendingIds: () => pending, isLive });
+const Board: React.FC<{ session: RetroSession; isLive: boolean; pending: ReadonlySet<string> | Map<string, unknown>; held?: ReadonlySet<string> }> = ({ session: shown, isLive, pending, held }) => {
+  useSessionMotion({ session: shown, viewerId: 'me', ownPendingIds: () => pending, isLive, heldVotes: held ? () => held : undefined });
   return (
     <div>
       {shown.columns.map((col) => (
@@ -160,6 +160,37 @@ describe('useSessionMotion', () => {
     show(session({ ...base, tickets: [ticket('t1', { votes: ['bob'] }), ticket('t2', { votes: ['me'] })] }));
     expect(card('t1').className).toBe('group relative');
     expect(card('t2').classList.contains('fx-ring')).toBe(true);
+  });
+
+  it('leaves a vote a flight carries to the screen, which plays it where the token lands', () => {
+    const held = new Set(['t2']);
+    const view = render(<Board session={session({ phase: 'VOTE', tickets: [ticket('t1'), ticket('t2')] })} isLive pending={new Set()} held={held} />);
+    act(() => { vi.advanceTimersByTime(RECONNECT_QUIET_MS + 1); });
+    view.rerender(<Board session={session({ phase: 'VOTE', tickets: [ticket('t1', { votes: ['me'] }), ticket('t2', { votes: ['me'] })] })} isLive pending={new Set()} held={held} />);
+    // The vote no flight carries is marked at once; the carried one waits.
+    expect(card('t1').classList.contains('fx-ring')).toBe(true);
+    expect(card('t2').classList.contains('fx-ring')).toBe(false);
+    expect(card('t2').querySelector(`[${MOTION_HOOKS.voteCount}]`)!.classList.contains('fx-bump')).toBe(false);
+
+    expect(playLandedVote(document, 't2')).toBe(true);
+    expect(card('t2').classList.contains('fx-ring')).toBe(true);
+    // A count with no dot in it answers with a bump.
+    expect(card('t2').querySelector(`[${MOTION_HOOKS.voteCount}]`)!.classList.contains('fx-bump')).toBe(true);
+  });
+
+  it('pops the dot a landed vote added, on a card or a group, and finds nothing for an unknown id', () => {
+    document.body.innerHTML = `
+      <div ${MOTION_HOOKS.group}="g1" class="group-container relative">
+        <div ${MOTION_HOOKS.card}="in" class="group relative"><span ${MOTION_HOOKS.voteCount}=""><span id="card-dot"></span></span></div>
+        <span ${MOTION_HOOKS.voteCount}=""><span></span><span id="last-dot"></span></span>
+      </div>`;
+    expect(playLandedVote(document, 'g1')).toBe(true);
+    expect(document.getElementById('last-dot')!.classList.contains('fx-pop')).toBe(true);
+    expect(document.querySelector(`[${MOTION_HOOKS.group}="g1"]`)!.classList.contains('fx-ring')).toBe(true);
+    // The group's own control, never the one of a card nested in it.
+    expect(document.getElementById('card-dot')!.classList.contains('fx-pop')).toBe(false);
+    expect(playLandedVote(document, 'missing')).toBe(false);
+    document.body.innerHTML = '';
   });
 
   it('plays nothing on the first state, a phase change or a change of session', () => {
