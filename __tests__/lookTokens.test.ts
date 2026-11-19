@@ -116,6 +116,24 @@ describe('one source for a colour', () => {
     }
   });
 
+  // A copy of a token's value is a second source too, whatever it is written
+  // in: `rgb(79 63 240 / 0.4)` under a primary button is the brand colour of
+  // the day it was written, and stays so when the token is retuned. Outside the
+  // tokens a colour is a `var(--color-…)`, mixed with `color-mix` when it must
+  // be translucent; only pure white and pure black are written as they are.
+  it('index.css writes no colour of its own outside its tokens', () => {
+    const outsideTheme = themeBlocks(CSS).reduce((css, block) => css.replace(block, ''), CSS).replace(/\/\*[\s\S]*?\*\//g, '');
+    const written = [
+      ...outsideTheme.matchAll(/#[0-9a-fA-F]{3,8}\b/g),
+      ...outsideTheme.matchAll(/rgba?\([^)]*\)/g),
+      ...outsideTheme.matchAll(/hsla?\([^)]*\)/g),
+    ].map((match) => match[0]);
+    const pure = (colour: string) =>
+      /^#(?:f{3,4}|f{6}(?:[0-9a-f]{2})?|0{3,4}|0{6}(?:[0-9a-f]{2})?)$/i.test(colour) ||
+      /^rgba?\(\s*(?:255[\s,]+255[\s,]+255|0[\s,]+0[\s,]+0)\b/.test(colour);
+    expect(written.filter((colour) => !pure(colour))).toEqual([]);
+  });
+
   it('serves every font from this deployment', () => {
     const sources = [...CSS.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)].map((match) => match[1]);
     expect(sources.length).toBeGreaterThan(0);
