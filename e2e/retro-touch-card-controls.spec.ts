@@ -786,13 +786,25 @@ test('taps after one on a group’s title that closes an editor press nothing th
     // Inside the board's fingertip (24 px), with room to spare.
     expect(pair.distance).toBeLessThanOrEqual(18);
     const { first, next: at } = pair;
+    // The card as it stands when it has grown back: where `at` was measured.
+    const grown = await rectOf(card(page, `${long} too`));
     // The editor took its Edit off the page when it opened: a tap on the Edit
     // that came back, at the same point within half a second of the first, is
     // the next of a double tap on another element, and presses nothing
     // (doubleGestureGuard). A person closes the editor with a gesture of their
     // own, which starts over; the test closed it with none.
     await page.waitForTimeout(600);
-    await openEditor(`${long} too`, ' again');
+    // The second edit changes the text (it must be written) without changing
+    // what the card measures: the same three letters in another order, so the
+    // last line keeps its width. A longer text ("too again") wrapped onto one
+    // more line as soon as a look made the card's text a little narrower: the
+    // card grew back 21 px taller than measured, and no control was under the
+    // later taps.
+    await card(page, `${long} too`).getByRole('button', { name: 'Edit ticket' }).tap();
+    await expect(editor).toBeFocused();
+    await editor.press('Control+End');
+    for (let letter = 0; letter < 3; letter += 1) await page.keyboard.press('Backspace');
+    await page.keyboard.type('oto');
     expect(await rectOf(title)).toEqual(titleRect);
     await page.waitForTimeout(700);
     const before = sent.length;
@@ -824,7 +836,10 @@ test('taps after one on a group’s title that closes an editor press nothing th
     expect(lifts).toHaveLength(3);
     for (const n of [1, 2]) expect(presses[n].at - lifts[n - 1].at).toBeLessThanOrEqual(500);
 
-    const edited = `${long} too again`;
+    const edited = `${long} oto`;
+    // The premise of the points above, said out loud: the card grew back to
+    // exactly the box they were measured in.
+    expect(await rectOf(card(page, edited)), 'the card grew back to the box the taps were aimed at').toEqual(grown);
     // What the later taps reached: a control of the card that grew back.
     expect((await controlAt(page, at)).card).toContain(edited);
     await expect(editor).toHaveCount(0);
