@@ -8,14 +8,12 @@ import Session from './components/Session';
 import HealthCheckSession from './components/HealthCheckSession';
 import SuperAdmin from './components/SuperAdmin';
 import AnnouncementModal from './components/AnnouncementModal';
-import LanguageSwitcher from './components/common/LanguageSwitcher';
+import AppHeader from './components/AppHeader';
 import DashboardRevokedBanner from './components/dashboard/DashboardRevokedBanner';
 import { useTranslation } from './i18n/I18nContext';
 import { isSessionInProgress } from './utils/sessionStatus';
 import { isSessionRevoked, newerToken, onSessionRevokedChange, onSessionTokenChanged } from './services/sessionRevocation';
 import type { Notice } from './i18n/notice';
-import { avatarColorClasses } from './utils/participantColors';
-import Avatar from './components/common/Avatar';
 
 const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
 // Shared with dataService, which patches the blob's teamPassword in place
@@ -714,54 +712,15 @@ const App: React.FC = () => {
   const renderHeader = (isSession: boolean) => {
     if (!currentUser || !currentTeam) return null;
     return (
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-6 shrink-0 z-50 shadow-xs">
-            <div
-              className={`flex items-center ${currentUser.role === 'participant' ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-              onClick={() => currentUser.role !== 'participant' && setView('DASHBOARD')}
-            >
-                <div className="w-8 h-8 bg-linear-to-br from-indigo-500 to-purple-600 rounded-sm flex items-center justify-center text-white font-bold mr-3 text-lg">R</div>
-                <div className="font-bold text-slate-700 text-lg hidden md:block">RetroGemini <span className="text-slate-500 font-normal text-sm mx-2">/</span> {currentTeam.name}</div>
-            </div>
-
-            <div className="flex items-center space-x-2 sm:space-x-4">
-                {/* What's New Button - Only for facilitators */}
-                {currentUser.role === 'facilitator' && versionInfo && (
-                    <button
-                        onClick={handleOpenAnnouncements}
-                        className="relative flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                        title={t('app.whatsNew')}
-                    >
-                        <span className="material-symbols-outlined text-lg">auto_awesome</span>
-                        <span className="hidden sm:inline">{t('app.whatsNew')}</span>
-                        {hasUnreadAnnouncements && (
-                            <span className="absolute -top-1 -right-1 w-5 h-5 bg-linear-to-r from-rose-500 to-pink-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-md">
-                                {unreadAnnouncements.reduce((acc, a) => acc + a.items.length, 0)}
-                            </span>
-                        )}
-                    </button>
-                )}
-
-                <LanguageSwitcher />
-
-                {/* On phones the name column yields to the language switcher; the
-                    initials stay, so Logout never leaves the screen. */}
-                <div className="flex items-center border-l pl-2 sm:pl-4 border-slate-200">
-                    <div className="hidden sm:flex flex-col items-end mr-2">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase leading-none mb-1">{t('app.user')}</span>
-                        <div className="text-sm font-bold text-slate-700">{currentUser.name}</div>
-                    </div>
-                    {/* Named: on a phone the name beside it is hidden. */}
-                    <div className="flex shrink-0 rounded-full shadow-md ring-2 ring-white">
-                        <Avatar colorClasses={avatarColorClasses(currentUser.color)} initials={currentUser.name.substring(0, 2).toUpperCase()} size={32} label={currentUser.name} />
-                    </div>
-                </div>
-                {!isSession && (
-                     <button onClick={handleLogout} className="ml-1 sm:ml-4 text-slate-500 hover:text-red-500" title={t('app.logoutTeam')} aria-label={t('app.logoutTeam')}>
-                        <span className="material-symbols-outlined">logout</span>
-                    </button>
-                )}
-            </div>
-        </header>
+        <AppHeader
+            teamName={currentTeam.name}
+            currentUser={currentUser}
+            onHome={() => setView('DASHBOARD')}
+            announcementsAvailable={!!versionInfo}
+            unreadCount={hasUnreadAnnouncements ? unreadAnnouncements.reduce((acc, a) => acc + a.items.length, 0) : null}
+            onOpenAnnouncements={handleOpenAnnouncements}
+            onLogout={isSession ? undefined : handleLogout}
+        />
     );
   };
 
