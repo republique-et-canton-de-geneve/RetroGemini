@@ -17,6 +17,7 @@ import adminLogsEn from './locales/en/adminLogs';
 import adminBackupsEn from './locales/en/adminBackups';
 import adminTeamMergeEn from './locales/en/adminTeamMerge';
 import appEn from './locales/en/app';
+import avatarsEn from './locales/en/avatars';
 import commonEn from './locales/en/common';
 import dashboardEn from './locales/en/dashboard';
 import errorsEn from './locales/en/errors';
@@ -37,6 +38,7 @@ import adminLogsFr from './locales/fr/adminLogs';
 import adminBackupsFr from './locales/fr/adminBackups';
 import adminTeamMergeFr from './locales/fr/adminTeamMerge';
 import appFr from './locales/fr/app';
+import avatarsFr from './locales/fr/avatars';
 import commonFr from './locales/fr/common';
 import dashboardFr from './locales/fr/dashboard';
 import errorsFr from './locales/fr/errors';
@@ -60,6 +62,7 @@ export const NAMESPACES = {
   adminBackups: [adminBackupsEn, adminBackupsFr],
   adminTeamMerge: [adminTeamMergeEn, adminTeamMergeFr],
   app: [appEn, appFr],
+  avatars: [avatarsEn, avatarsFr],
   common: [commonEn, commonFr],
   dashboard: [dashboardEn, dashboardFr],
   errors: [errorsEn, errorsFr],
@@ -83,6 +86,7 @@ export const en = {
   ...adminBackupsEn,
   ...adminTeamMergeEn,
   ...appEn,
+  ...avatarsEn,
   ...commonEn,
   ...dashboardEn,
   ...errorsEn,
@@ -109,6 +113,7 @@ export const fr: Messages = {
   ...adminBackupsFr,
   ...adminTeamMergeFr,
   ...appFr,
+  ...avatarsFr,
   ...commonFr,
   ...dashboardFr,
   ...errorsFr,
