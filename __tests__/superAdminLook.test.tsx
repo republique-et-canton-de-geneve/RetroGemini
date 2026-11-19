@@ -2,7 +2,7 @@ import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import SuperAdmin from '../components/SuperAdmin';
-import { effectivePair } from './helpers/tailwindTheme';
+import { effectivePair, tokenContrast } from './helpers/tailwindTheme';
 
 /**
  * The console under the 45.0 tokens: what no audit walks. The axe audit of
@@ -42,10 +42,20 @@ describe('the console under the new look', () => {
 
   // A disabled button is exempt from 1.4.3, but its words still say what it
   // will do once it can: slate-500 on the slate-200 fill measured 4.33:1.
+  // The buttons take the dashboard's recipes, whose disabled state is a pair
+  // of its own (`disabled:bg-*`, `disabled:text-*`): that pair is what a
+  // disabled button paints, so it is the one measured.
   it.each([/Upload & Restore/, /Test Connection/, /Save Settings/])('keeps the words of the disabled %s button readable', async (name) => {
     await renderConsole();
     await waitFor(() => expect(screen.getByRole('button', { name })).toBeDisabled());
-    expect(effectivePair(screen.getByRole('button', { name })).ratio).toBeGreaterThanOrEqual(4.5);
+    const tokens = (screen.getByRole('button', { name }).getAttribute('class') ?? '').split(/\s+/);
+    const disabledColour = (kind: 'text' | 'bg') => {
+      const found = tokens.filter((token) => new RegExp(`^disabled:${kind}-(white|black|[a-z]+-\\d{2,3})$`).test(token));
+      expect(found, `disabled:${kind}-`).toHaveLength(1);
+      return found[0].slice(`disabled:${kind}-`.length);
+    };
+    expect(tokens.some((token) => /opacity-/.test(token))).toBe(false);
+    expect(tokenContrast(disabledColour('text'), disabledColour('bg'))).toBeGreaterThanOrEqual(4.5);
   });
 
   it('keeps the page subtitle readable on the grey page', async () => {

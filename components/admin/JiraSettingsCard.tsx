@@ -5,6 +5,8 @@ import { useTranslation } from '../../i18n/I18nContext';
 import { noticeText, type Notice } from '../../i18n/notice';
 import { translateErrorMessage } from '../../i18n/errorMessages';
 import type { MessageKey, Translator } from '../../i18n/translate';
+import { CARD, FIELD, FIELD_LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON, SETTING_ICON } from '../dashboard/dashboardLook';
+import { ADMIN_CARD_TITLE, ADMIN_SETTING_TITLE, ADMIN_SUBTITLE_ICON, adminSwitchKnob, adminSwitchTrack } from './adminLook';
 
 // The test is an anonymous `serverInfo` against the address in the field, so
 // these codes say something about that address. Their shared sentences
@@ -371,21 +373,23 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
   const loadFailed = loadState === 'failed' && !!loadError;
 
   const describedBy = [ids.hint, addressChanges ? ids.warning : null, fieldError ? ids.error : null].filter(Boolean).join(' ');
-  const switchClass = (on: boolean) =>
-    `relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${on ? 'bg-indigo-600' : 'bg-slate-400'}`;
-  const knobClass = (on: boolean) =>
-    `inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`;
+  // The console's switches, the brand colour when on (adminLook.ts).
+  const switchClass = adminSwitchTrack;
+  const knobClass = adminSwitchKnob;
+  // A button busy with its own request is aria-disabled, never disabled (the
+  // keyboard stays on it), and drawn in colours of its own, never faded.
+  const BUSY = 'aria-disabled:bg-slate-200 aria-disabled:text-slate-600 aria-disabled:shadow-none aria-disabled:border-slate-200';
 
   return (
-    <section aria-labelledby={ids.title} className="mb-6 rounded-xl bg-white p-6 shadow-lg">
+    <section aria-labelledby={ids.title} className={`${CARD} mb-6 p-6`}>
       <div className="flex flex-col gap-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 id={ids.title} className="flex items-center gap-2 text-xl font-bold text-slate-800">
-              <span className="material-symbols-outlined text-indigo-600" aria-hidden="true">integration_instructions</span>
+            <h2 id={ids.title} className={ADMIN_CARD_TITLE}>
+              <span className={SETTING_ICON} aria-hidden="true">integration_instructions</span>
               {t('admin.jira.title')}
             </h2>
-            <p className="mt-1 text-sm text-slate-600">{t('admin.jira.description')}</p>
+            <p className="mt-1 text-sm text-slate-500">{t('admin.jira.description')}</p>
           </div>
           <button
             type="button"
@@ -403,7 +407,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
         </div>
 
         <div className="flex flex-col gap-2 border-t border-slate-200 pt-4">
-          <label htmlFor={ids.baseUrl} className="text-sm font-medium text-slate-700">{t('admin.jira.baseUrlLabel')}</label>
+          <label htmlFor={ids.baseUrl} className={FIELD_LABEL}>{t('admin.jira.baseUrlLabel')}</label>
           <input
             ref={baseUrlRef}
             id={ids.baseUrl}
@@ -419,22 +423,22 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
               setBaseUrl(e.target.value);
               setFieldError(null);
             }}
-            className="w-full rounded-lg border border-slate-400 px-4 py-2 text-sm outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 aria-invalid:border-red-500"
+            className={`${FIELD} text-sm aria-invalid:border-rose-600`}
           />
           <p id={ids.hint} className="text-xs text-slate-600">{t('admin.jira.baseUrlHint')}</p>
           {addressChanges && (
             <p id={ids.warning} className="flex items-start gap-1 text-xs text-amber-800">
-              <span className="material-symbols-outlined text-sm" aria-hidden="true">warning</span>
+              <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">warning</span>
               {t('admin.jira.addressChangeWarning')}
             </p>
           )}
-          {fieldError && <p id={ids.error} role="alert" className="text-xs text-red-700">{noticeText(fieldError, t)}</p>}
+          {fieldError && <p id={ids.error} role="alert" className="text-xs text-rose-700">{noticeText(fieldError, t)}</p>}
         </div>
 
         <div className="flex items-center justify-between gap-4 border-t border-slate-200 pt-3">
           <div>
-            <h3 id={ids.selfSignedTitle} className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <span className="material-symbols-outlined text-base text-indigo-600" aria-hidden="true">verified_user</span>
+            <h3 id={ids.selfSignedTitle} className={ADMIN_SETTING_TITLE}>
+              <span className={ADMIN_SUBTITLE_ICON} aria-hidden="true">verified_user</span>
               {t('admin.jira.selfSignedTitle')}
             </h3>
             <p id={ids.selfSignedDescription} className="mt-1 text-xs text-slate-600">{t('admin.jira.selfSignedDescription')}</p>
@@ -462,9 +466,9 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
             onClick={() => { void test(); }}
             aria-disabled={testing ? true : undefined}
             aria-describedby={ids.testHint}
-            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-slate-100 px-4 py-2 font-semibold text-slate-700 hover:bg-slate-200 aria-disabled:cursor-wait aria-disabled:opacity-70"
+            className={`${SECONDARY_BUTTON} px-4 py-2 text-sm aria-disabled:cursor-wait ${BUSY}`}
           >
-            <span className="material-symbols-outlined text-base" aria-hidden="true">{testing ? 'sync' : 'science'}</span>
+            <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">{testing ? 'sync' : 'science'}</span>
             {testing ? t('admin.jira.testing') : t('admin.jira.test')}
           </button>
           <button
@@ -472,21 +476,21 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
             onClick={() => { void save(); }}
             aria-disabled={saving || loadState !== 'loaded' ? true : undefined}
             aria-describedby={loadFailed ? ids.loadError : undefined}
-            className={`flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 btn-brand-glow aria-disabled:opacity-70 ${loadFailed ? 'aria-disabled:cursor-not-allowed' : 'aria-disabled:cursor-wait'}`}
+            className={`${PRIMARY_BUTTON} px-4 py-2 text-sm ${BUSY} ${loadFailed ? 'aria-disabled:cursor-not-allowed' : 'aria-disabled:cursor-wait'}`}
           >
-            <span className="material-symbols-outlined text-base" aria-hidden="true">{saving ? 'sync' : 'save'}</span>
+            <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">{saving ? 'sync' : 'save'}</span>
             {saving ? t('admin.saving') : t('admin.jira.save')}
           </button>
         </div>
 
         <div role="status" className="flex flex-col gap-2">
           {loadFailed && (
-            <p id={ids.loadError} className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            <p id={ids.loadError} className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
               {noticeText(loadError, t)}
             </p>
           )}
           {lines.length > 0 && (
-            <div className={`rounded-lg border p-3 text-sm ${success ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800'}`}>
+            <div className={`rounded-lg border p-3 text-sm ${success ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
               {lines.map((line, index) => <p key={index}>{line}</p>)}
             </div>
           )}
@@ -498,7 +502,7 @@ const JiraSettingsCard: React.FC<Props> = ({ sessionToken }) => {
               type="button"
               onClick={retryLoad}
               aria-disabled={loadState === 'loading' ? true : undefined}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 aria-disabled:cursor-wait aria-disabled:opacity-70"
+              className={`${SECONDARY_BUTTON} px-4 py-2 text-sm aria-disabled:cursor-wait ${BUSY}`}
             >
               {t('admin.jira.retry')}
             </button>

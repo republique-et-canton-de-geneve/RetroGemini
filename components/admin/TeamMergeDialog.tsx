@@ -4,6 +4,7 @@ import { useTranslation } from '../../i18n/I18nContext';
 import { Notice, noticeText } from '../../i18n/notice';
 import type { MessageKey } from '../../i18n/translate';
 import type { Team } from '../../types';
+import { DIALOG_TITLE, ERROR_NOTICE, FIELD, PRIMARY_BUTTON, SECONDARY_BUTTON } from '../dashboard/dashboardLook';
 import { PASSWORD_MIN_LENGTH, isPasswordLongEnough } from '../../utils/passwordPolicy.js';
 import { parseEmailInput } from '../../utils/emailAddress.js';
 import { TEAM_NAME_MAX_LENGTH } from '../../utils/teamNamePolicy.js';
@@ -46,8 +47,8 @@ interface Props {
   onMerged: (name: string) => void;
 }
 
-const inputClass = 'w-full border border-slate-400 rounded-lg px-3 py-2 text-sm bg-white text-slate-900';
-const sectionTitleClass = 'text-sm font-bold text-slate-700 mb-2';
+const inputClass = `${FIELD} text-sm`;
+const sectionTitleClass = 'text-sm font-semibold text-slate-900 mb-2';
 
 // Codes the server reports, mapped rather than spliced into a key: a code from
 // a newer pod during a rolling update reads as a sentence, never as a raw key.
@@ -261,14 +262,14 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
       overlayClassName="fixed inset-0 bg-slate-900/45 z-100 flex items-center justify-center p-4"
       panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6"
     >
-      <h2 id={ids.title} className="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2">
+      <h2 id={ids.title} className={`${DIALOG_TITLE} mb-2 flex items-center gap-2`}>
         <span className="material-symbols-outlined text-indigo-600" aria-hidden="true">merge</span>
         {t('adminTeamMerge.title')}
       </h2>
       <p className="text-sm text-slate-600 mb-4">{t('adminTeamMerge.intro')}</p>
 
       {error && (
-        <div ref={errorRef} role="alert" className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">
+        <div ref={errorRef} role="alert" className={`${ERROR_NOTICE} mb-4`}>
           {noticeText(error, t)}
         </div>
       )}
@@ -314,14 +315,14 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
           <div className="flex flex-wrap justify-end gap-2">
             <button
               onClick={onClose}
-              className="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg font-bold hover:bg-slate-200"
+              className={`${SECONDARY_BUTTON} px-4 py-2`}
             >
               {t('common.cancel')}
             </button>
             <button
               onClick={() => loadPreview()}
               disabled={!primaryId || !secondaryId || busy !== null}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className={`${PRIMARY_BUTTON} px-4 py-2`}
             >
               {busy === 'preview' ? t('adminTeamMerge.loading') : t('adminTeamMerge.continue')}
             </button>
@@ -332,24 +333,24 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
           <section className="mb-5">
             <h3 ref={summaryHeadingRef} tabIndex={-1} className={sectionTitleClass + ' outline-hidden'}>{t('adminTeamMerge.summary')}</h3>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm border border-slate-200 rounded-lg" data-testid="team-merge-summary">
+              <table className="w-full text-sm border border-slate-200" data-testid="team-merge-summary">
                 <thead className="bg-slate-50">
                   <tr>
-                    <th scope="col" className="text-left p-2 font-bold text-slate-700">{t('adminTeamMerge.column.item')}</th>
+                    <th scope="col" className="text-left p-2 font-semibold text-slate-700">{t('adminTeamMerge.column.item')}</th>
                     {preview.report.sources.map((source) => (
-                      <th key={source.id} scope="col" className="text-right p-2 font-bold text-slate-700 wrap-anywhere">{source.name}</th>
+                      <th key={source.id} scope="col" className="text-right p-2 font-semibold text-slate-700 wrap-anywhere">{source.name}</th>
                     ))}
-                    <th scope="col" className="text-right p-2 font-bold text-indigo-700">{t('adminTeamMerge.column.merged')}</th>
+                    <th scope="col" className="text-right p-2 font-semibold text-indigo-700">{t('adminTeamMerge.column.merged')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {COUNT_ROWS.map(({ field, key }) => (
-                    <tr key={field} className="border-t border-slate-100">
+                    <tr key={field} className="border-t border-slate-200">
                       <th scope="row" className="text-left p-2 font-normal text-slate-700">{t(key)}</th>
                       {preview.report.sources.map((source) => (
                         <td key={source.id} className="text-right p-2 text-slate-700 tabular-nums">{source.counts[field]}</td>
                       ))}
-                      <td className="text-right p-2 font-bold text-slate-800 tabular-nums">
+                      <td className="text-right p-2 font-semibold text-slate-900 tabular-nums">
                         {field === 'feedbacks'
                           ? <span className="font-normal text-xs text-slate-600">{t('adminTeamMerge.feedbacksMoveLater')}</span>
                           : preview.report.merged[field]}
@@ -381,7 +382,7 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
             )}
             {preview.report.members.keptSameName.length > 0 && (
               <>
-                <h4 className="text-sm font-bold text-slate-700 mt-3 mb-1">{t('adminTeamMerge.keptApartTitle')}</h4>
+                <h4 className="text-sm font-semibold text-slate-900 mt-3 mb-1">{t('adminTeamMerge.keptApartTitle')}</h4>
                 <ul className="text-sm text-slate-700 list-disc pl-5 space-y-1">
                   {preview.report.members.keptSameName.map((entry) => (
                     <li key={entry.secondaryId}>
@@ -395,7 +396,7 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
 
           {warnings.length > 0 && (
             <section className="mb-5 bg-amber-50 border border-amber-200 rounded-lg p-3">
-              <h3 className="text-sm font-bold text-amber-800 mb-1">{t('adminTeamMerge.warningsTitle')}</h3>
+              <h3 className="text-sm font-semibold text-amber-800 mb-1">{t('adminTeamMerge.warningsTitle')}</h3>
               <ul className="text-sm text-amber-900 list-disc pl-5 space-y-1">
                 {warnings.map((warning) => <li key={warning}>{warning}</li>)}
               </ul>
@@ -487,14 +488,14 @@ const TeamMergeDialog: React.FC<Props> = ({ teams, sessionToken, onClose, onMerg
             <button
               onClick={() => { setPreview(null); setError(null); }}
               disabled={busy !== null}
-              className="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg font-bold hover:bg-slate-200 disabled:opacity-50"
+              className={`${SECONDARY_BUTTON} px-4 py-2`}
             >
               {t('adminTeamMerge.back')}
             </button>
             <button
               onClick={submit}
               disabled={busy !== null}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className={`${PRIMARY_BUTTON} px-4 py-2`}
             >
               {busy === 'merge' ? t('adminTeamMerge.creating') : t('adminTeamMerge.create')}
             </button>

@@ -23,6 +23,40 @@ import { sizeRefusalNotice } from './admin/backupImportApi';
 import { formatBackupSize, megabytesText, withLocalizedMax } from './admin/backupFormat';
 import { ariaSortOf, retrospectiveCountOf, sortIconOf, sortTeams } from './admin/teamSort';
 import type { SortDirection, TeamSortColumn } from './admin/teamSort';
+import {
+  CARD,
+  CHIP,
+  DANGER_BUTTON,
+  DANGER_ICON_BUTTON,
+  DANGER_SECONDARY_BUTTON,
+  DIALOG_OVERLAY,
+  DIALOG_PANEL,
+  DIALOG_TITLE,
+  EMPTY_STATE,
+  FIELD,
+  FIELD_BOX,
+  FIELD_LABEL,
+  FILTER_PILL,
+  FILTER_PILL_OFF,
+  FILTER_PILL_ON,
+  ICON_BUTTON,
+  PRIMARY_BUTTON,
+  SECONDARY_BUTTON,
+  SETTING_ICON,
+  feedbackStatusChip,
+  feedbackTypeChip
+} from './dashboard/dashboardLook';
+import {
+  ADMIN_CARD_TITLE,
+  ADMIN_SETTING_TITLE,
+  ADMIN_SUBTITLE_ICON,
+  ROW_BUTTON_SIZE,
+  TAB_COUNT,
+  TAB_ICON,
+  TEAM_HEADER_CELL,
+  adminSwitchKnob,
+  adminSwitchTrack
+} from './admin/adminLook';
 
 // Codes the server stores and the console shows: named in the reader's
 // language, and shown as they came when this build does not know them.
@@ -1253,13 +1287,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   // the sorted column only; the arrow is decoration — an icon is not a name
   // (audit H52), and its ligature was read as the end of the button's.
   const sortableHeader = (column: TeamSortColumn, label: string) => (
-    <th className="text-left p-4 font-bold text-slate-700" aria-sort={ariaSortOf(column, teamSortColumn, teamSortDirection)}>
+    <th className={`text-left ${TEAM_HEADER_CELL}`} aria-sort={ariaSortOf(column, teamSortColumn, teamSortDirection)}>
       <button
         onClick={() => handleTeamSort(column)}
-        className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
+        className="inline-flex items-center gap-1 rounded-sm hover:text-indigo-700 transition-colors cursor-pointer"
       >
         {label}
-        <span className="material-symbols-outlined text-base" aria-hidden="true">
+        <span className="material-symbols-outlined text-base! leading-none text-slate-500" aria-hidden="true">
           {sortIconOf(column, teamSortColumn, teamSortDirection)}
         </span>
       </button>
@@ -1283,15 +1317,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     });
   };
 
+  // The Feedback Hub's chips, so a status reads the same on both boards.
   const getStatusBadge = (status: TeamFeedback['status']) => {
-    const colors = {
-      pending: 'bg-yellow-100 text-yellow-800',
-      in_progress: 'bg-blue-100 text-blue-800',
-      resolved: 'bg-green-100 text-green-800',
-      rejected: 'bg-red-100 text-red-800'
-    };
     return (
-      <span className={`px-2 py-1 text-xs rounded-full ${colors[status]}`}>
+      <span className={`${CHIP} ${feedbackStatusChip(status)}`}>
         {t(FEEDBACK_STATUS_KEYS[status])}
       </span>
     );
@@ -1299,13 +1328,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   const getTypeBadge = (feedbackType: 'bug' | 'feature') => {
     return feedbackType === 'bug' ? (
-      <span className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">
-        <span className="material-symbols-outlined text-xs align-middle mr-1">bug_report</span>
+      <span className={`${CHIP} ${feedbackTypeChip('bug')}`}>
+        <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">bug_report</span>
         {t('feedback.type.bug')}
       </span>
     ) : (
-      <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
-        <span className="material-symbols-outlined text-xs align-middle mr-1">new_releases</span>
+      <span className={`${CHIP} ${feedbackTypeChip('feature')}`}>
+        <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">new_releases</span>
         {t('feedback.type.featureBadge')}
       </span>
     );
@@ -1334,6 +1363,11 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   const livePhase = (session: ActiveSession) =>
     session.phase === LIVE_PLACEHOLDER.phase ? t('adminLive.unknownPhase') : codeLabel(PHASE_KEYS, session.phase);
 
+  // The tabs are the dashboard's: the same shape and the same `.dash-tab`
+  // hook, one colour for every tab.
+  const tabClass = (id: TabType) =>
+    `dash-tab -mb-px px-4 py-3 font-semibold text-sm flex items-center gap-2 rounded-t-lg transition whitespace-nowrap ${tab === id ? 'active' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`;
+
   // Contrast is decided by the surface a token lands on (audit H42): muted
   // text is `text-slate-500` on the white cards (5.41:1 with the 45.0 tokens)
   // and `text-slate-600` on this grey page and on tinted panels (slate-500
@@ -1343,7 +1377,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   // audit skips (disabled buttons, an empty list) by
   // __tests__/superAdminLook.test.tsx.
   return (
-    <div className="min-h-screen bg-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-slate-50 p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
         {/* The row wraps on phones: the language switcher joined the exit
             button here, and side by side they no longer fit at 390px. */}
@@ -1351,44 +1385,42 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           <div className="min-w-0">
             {/* Smaller on phones: « administrateur » is one word too wide for
                 a 320px screen at text-3xl beside the icon. */}
-            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 flex items-center">
-              <span className="material-symbols-outlined mr-3 text-red-600">shield_person</span>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 flex items-center">
+              <span className="material-symbols-outlined mr-3 text-indigo-600" aria-hidden="true">shield_person</span>
               {t('admin.header.title')}
             </h1>
+            {/* slate-600: this line sits on the page's grey, where slate-500 falls under 4.5:1. */}
             <p className="text-slate-600 text-sm mt-1">{t('admin.header.subtitle')}</p>
           </div>
           <div className="flex items-center gap-3 ml-auto">
             <LanguageSwitcher className="shrink-0" />
-            <button
-              onClick={onExit}
-              className="bg-slate-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-slate-700 flex items-center"
-            >
-              <span className="material-symbols-outlined mr-2">logout</span>
+            <button onClick={onExit} className={`${SECONDARY_BUTTON} px-4 py-2 text-sm`}>
+              <span className="material-symbols-outlined text-xl! leading-none" aria-hidden="true">logout</span>
               {t('admin.header.exit')}
             </button>
           </div>
         </div>
 
         {error && (
-          <div className="bg-red-50 text-red-700 p-4 rounded-lg mb-4 flex items-center">
-            <span className="material-symbols-outlined mr-2">error</span>
+          <div className="bg-rose-50 border border-rose-200 text-rose-800 p-4 rounded-lg mb-4 flex items-center">
+            <span className="material-symbols-outlined mr-2" aria-hidden="true">error</span>
             {noticeText(withLocalizedMax(error, locale), t)}
           </div>
         )}
 
         {successMessage && (
-          <div className="bg-green-50 text-green-700 p-4 rounded-lg mb-4 flex items-center">
-            <span className="material-symbols-outlined mr-2">check_circle</span>
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-lg mb-4 flex items-center">
+            <span className="material-symbols-outlined mr-2" aria-hidden="true">check_circle</span>
             {noticeText(successMessage, t)}
           </div>
         )}
 
         {/* Info Message Configuration */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+        <div className={`${CARD} p-6 mb-6`}>
           <div className="flex flex-col gap-4">
             <div>
-              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <span className="material-symbols-outlined text-amber-500">campaign</span>
+              <h2 className={ADMIN_CARD_TITLE}>
+                <span className={SETTING_ICON} aria-hidden="true">campaign</span>
                 {t('admin.info.title')}
               </h2>
               <p className="text-sm text-slate-500 mt-1">
@@ -1400,7 +1432,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 value={infoMessage}
                 onChange={(e) => setInfoMessage(e.target.value)}
                 placeholder={t('admin.info.placeholder')}
-                className="w-full border border-slate-400 rounded-lg p-3 text-sm resize-none h-24 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-hidden"
+                className={`${FIELD} text-sm resize-none h-24`}
               />
               {infoMessage && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -1415,13 +1447,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 <button
                   onClick={handleSaveInfoMessage}
                   disabled={infoMessageSaving}
-                  className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
-                    infoMessageSaving
-                      ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
-                      : 'bg-amber-700 text-white hover:bg-amber-800'
-                  }`}
+                  className={`${PRIMARY_BUTTON} px-4 py-2 text-sm`}
                 >
-                  <span className="material-symbols-outlined text-base">
+                  <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">
                     {infoMessageSaving ? 'sync' : 'save'}
                   </span>
                   {infoMessageSaving ? t('admin.saving') : t('admin.info.save')}
@@ -1432,11 +1460,11 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         </div>
 
         {/* Admin Email Notification Configuration */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+        <div className={`${CARD} p-6 mb-6`}>
           <div className="flex flex-col gap-4">
             <div>
-              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <span className="material-symbols-outlined text-green-600">mail</span>
+              <h2 className={ADMIN_CARD_TITLE}>
+                <span className={SETTING_ICON} aria-hidden="true">mail</span>
                 {t('admin.notifications.title')}
               </h2>
               <p className="text-sm text-slate-500 mt-1">
@@ -1445,7 +1473,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             </div>
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-2">
-                <label htmlFor="admin-email-address" className="text-sm font-medium text-slate-700">{t('admin.notifications.emailLabel')}</label>
+                <label htmlFor="admin-email-address" className={FIELD_LABEL}>{t('admin.notifications.emailLabel')}</label>
                 <input
                   id="admin-email-address"
                   type="email"
@@ -1455,7 +1483,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   autoCapitalize="none"
                   spellCheck={false}
                   placeholder={t('admin.notifications.emailPlaceholder')}
-                  className="w-full md:w-96 border border-slate-400 rounded-lg px-4 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-hidden"
+                  className={`${FIELD_BOX} w-full md:w-96 text-sm`}
                 />
                 <p className="text-xs text-slate-500">
                   {t('admin.notifications.emailHint')}
@@ -1465,13 +1493,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 <button
                   onClick={handleSaveAdminEmail}
                   disabled={adminEmailSaving}
-                  className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
-                    adminEmailSaving
-                      ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
-                      : 'bg-green-700 text-white hover:bg-green-800'
-                  }`}
+                  className={`${PRIMARY_BUTTON} px-4 py-2 text-sm`}
                 >
-                  <span className="material-symbols-outlined text-base">
+                  <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">
                     {adminEmailSaving ? 'sync' : 'save'}
                   </span>
                   {adminEmailSaving ? t('admin.saving') : t('admin.notifications.saveEmail')}
@@ -1482,8 +1506,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <div className="border-t border-slate-200 pt-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                      <span className="material-symbols-outlined text-base text-green-600">group_add</span>
+                    <h3 className={ADMIN_SETTING_TITLE}>
+                      <span className={ADMIN_SUBTITLE_ICON} aria-hidden="true">group_add</span>
                       {t('admin.notifications.newTeamTitle')}
                     </h3>
                     <p className="text-xs text-slate-500 mt-1">
@@ -1493,18 +1517,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <button
                     onClick={handleToggleNotifyNewTeam}
                     disabled={notifyNewTeamSaving || !adminEmail}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
-                      notifyNewTeamSaving || !adminEmail
-                        ? 'cursor-not-allowed opacity-50'
-                        : 'cursor-pointer'
-                    } ${notifyNewTeam ? 'bg-green-600' : 'bg-slate-400'}`}
+                    className={adminSwitchTrack(notifyNewTeam)}
                     title={!adminEmail ? t('admin.notifications.newTeamNeedsEmail') : notifyNewTeam ? t('admin.notifications.newTeamDisable') : t('admin.notifications.newTeamEnable')}
                   >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        notifyNewTeam ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
+                    <span className={adminSwitchKnob(notifyNewTeam)} />
                   </button>
                 </div>
               </div>
@@ -1513,12 +1529,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         </div>
 
         {/* AI / LLM Configuration */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+        <div className={`${CARD} p-6 mb-6`}>
           <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                  <span className="material-symbols-outlined text-violet-600">smart_toy</span>
+                <h2 className={ADMIN_CARD_TITLE}>
+                  <span className={SETTING_ICON} aria-hidden="true">smart_toy</span>
                   {t('admin.ai.title')}
                 </h2>
                 <p className="text-sm text-slate-500 mt-1">
@@ -1539,24 +1555,24 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     } catch { /* ignore */ }
                   }
                 }}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiEnabled ? 'bg-violet-600' : 'bg-slate-400'}`}
+                className={adminSwitchTrack(aiEnabled)}
                 title={aiEnabled ? t('admin.ai.disable') : t('admin.ai.enable')}
               >
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                <span className={adminSwitchKnob(aiEnabled)} />
               </button>
             </div>
 
             {aiEnabled && (
               <div className="flex flex-col gap-3 border-t border-slate-200 pt-4">
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="ai-api-url" className="text-sm font-medium text-slate-700">{t('admin.ai.apiUrlLabel')} <span className="text-red-700">*</span></label>
+                  <label htmlFor="ai-api-url" className={FIELD_LABEL}>{t('admin.ai.apiUrlLabel')} <span className="text-rose-700">*</span></label>
                   <input
                     id="ai-api-url"
                     type="url"
                     value={aiApiUrl}
                     onChange={(e) => setAiApiUrl(e.target.value)}
                     placeholder={t('admin.ai.apiUrlPlaceholder')}
-                    className="w-full border border-slate-400 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
+                    className={`${FIELD} text-sm`}
                   />
                   <p className="text-xs text-slate-500">
                     {t('admin.ai.apiUrlHint')}
@@ -1564,14 +1580,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="ai-api-key" className="text-sm font-medium text-slate-700">{t('admin.ai.apiKeyLabel')}</label>
+                  <label htmlFor="ai-api-key" className={FIELD_LABEL}>{t('admin.ai.apiKeyLabel')}</label>
                   <input
                     id="ai-api-key"
                     type="password"
                     value={aiApiKey}
                     onChange={(e) => setAiApiKey(e.target.value)}
                     placeholder={t('admin.ai.apiKeyPlaceholder')}
-                    className="w-full border border-slate-400 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
+                    className={`${FIELD} text-sm`}
                   />
                   <p className="text-xs text-slate-500">
                     {t('admin.ai.apiKeyHint')}
@@ -1579,14 +1595,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="ai-model" className="text-sm font-medium text-slate-700">{t('admin.ai.modelLabel')}</label>
+                  <label htmlFor="ai-model" className={FIELD_LABEL}>{t('admin.ai.modelLabel')}</label>
                   <input
                     id="ai-model"
                     type="text"
                     value={aiModel}
                     onChange={(e) => setAiModel(e.target.value)}
                     placeholder={t('admin.ai.modelPlaceholder')}
-                    className="w-full border border-slate-400 rounded-lg px-4 py-2 text-sm focus:border-violet-500 focus:ring-1 focus:ring-violet-500 outline-hidden"
+                    className={`${FIELD} text-sm`}
                   />
                   <p className="text-xs text-slate-500">
                     {t('admin.ai.modelHint')}
@@ -1595,8 +1611,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
                 <div className="flex items-center justify-between border-t border-slate-200 pt-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                      <span className="material-symbols-outlined text-base text-violet-600">verified_user</span>
+                    <h3 className={ADMIN_SETTING_TITLE}>
+                      <span className={ADMIN_SUBTITLE_ICON} aria-hidden="true">verified_user</span>
                       {t('admin.ai.selfSignedTitle')}
                     </h3>
                     <p className="text-xs text-slate-500 mt-1">
@@ -1605,10 +1621,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   </div>
                   <button
                     onClick={() => setAiAllowSelfSignedCerts(!aiAllowSelfSignedCerts)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-hidden focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 cursor-pointer ${aiAllowSelfSignedCerts ? 'bg-violet-600' : 'bg-slate-400'}`}
+                    className={adminSwitchTrack(aiAllowSelfSignedCerts)}
                     title={aiAllowSelfSignedCerts ? t('admin.ai.selfSignedDisable') : t('admin.ai.selfSignedEnable')}
                   >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiAllowSelfSignedCerts ? 'translate-x-6' : 'translate-x-1'}`} />
+                    <span className={adminSwitchKnob(aiAllowSelfSignedCerts)} />
                   </button>
                 </div>
 
@@ -1616,13 +1632,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <button
                     onClick={handleTestAi}
                     disabled={aiTesting || !aiApiUrl}
-                    className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
-                      aiTesting || !aiApiUrl
-                        ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-                    }`}
+                    className={`${SECONDARY_BUTTON} px-4 py-2 text-sm`}
                   >
-                    <span className="material-symbols-outlined text-base">
+                    <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">
                       {aiTesting ? 'sync' : 'science'}
                     </span>
                     {aiTesting ? t('admin.ai.testing') : t('admin.ai.test')}
@@ -1630,13 +1642,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <button
                     onClick={handleSaveAiSettings}
                     disabled={aiSaving || !aiApiUrl}
-                    className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
-                      aiSaving || !aiApiUrl
-                        ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
-                        : 'bg-violet-600 text-white hover:bg-violet-700'
-                    }`}
+                    className={`${PRIMARY_BUTTON} px-4 py-2 text-sm`}
                   >
-                    <span className="material-symbols-outlined text-base">
+                    <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">
                       {aiSaving ? 'sync' : 'save'}
                     </span>
                     {aiSaving ? t('admin.saving') : t('admin.ai.save')}
@@ -1644,8 +1652,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </div>
 
                 {aiTestResult && (
-                  <div className={`p-3 rounded-lg text-sm ${aiTestResult.success ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                    <span className="material-symbols-outlined text-base mr-1 align-middle">
+                  <div className={`p-3 rounded-lg text-sm ${aiTestResult.success ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
+                    <span className="material-symbols-outlined text-base mr-1 align-middle" aria-hidden="true">
                       {aiTestResult.success ? 'check_circle' : 'error'}
                     </span>
                     {noticeText(aiTestResult.notice, t)}
@@ -1660,11 +1668,11 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             settings it follows: an address and the TLS option, no secret. */}
         <JiraSettingsCard sessionToken={sessionToken} />
 
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6 space-y-6">
+        <div className={`${CARD} p-6 mb-6 space-y-6`}>
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <span className="material-symbols-outlined text-indigo-600">cloud_download</span>
+              <h2 className={ADMIN_CARD_TITLE}>
+                <span className={SETTING_ICON} aria-hidden="true">cloud_download</span>
                 {t('admin.data.title')}
               </h2>
               <p className="text-sm text-slate-500 mt-1">
@@ -1674,13 +1682,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             <button
               onClick={handleDownloadBackup}
               disabled={backupDownloading}
-              className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
-                backupDownloading
-                  ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
-                  : 'bg-indigo-600 text-white hover:bg-indigo-700'
-              }`}
+              className={`${PRIMARY_BUTTON} px-4 py-2 text-sm shrink-0`}
             >
-              <span className="material-symbols-outlined text-base">
+              <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">
                 {backupDownloading ? 'sync' : 'download'}
               </span>
               {backupDownloading ? t('admin.data.preparing') : t('admin.data.download')}
@@ -1690,8 +1694,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           <div className="border-t border-slate-200 pt-6">
             <div className="flex flex-col gap-4">
               <div>
-                <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-                  <span className="material-symbols-outlined text-amber-500">warning</span>
+                <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-amber-700" aria-hidden="true">warning</span>
                   {t('admin.data.restoreTitle')}
                 </h3>
                 <p className="text-sm text-slate-500 mt-1">
@@ -1709,7 +1713,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       name, and two same-named file inputs on one page, one of
                       them a whole-store replace, are indistinguishable in a
                       screen reader's list of form fields. */}
-                  <label htmlFor="admin-restore-file" className="block text-sm font-medium text-slate-700 mb-1">
+                  <label htmlFor="admin-restore-file" className={`${FIELD_LABEL} mb-1`}>
                     {t('admin.data.fileLabel')}
                   </label>
                   <input
@@ -1720,19 +1724,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       const file = event.target.files?.[0] ?? null;
                       setRestoreFile(file);
                     }}
-                    className="w-full text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                    className="w-full text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border file:border-slate-200 file:text-sm file:font-semibold file:bg-white file:text-slate-700 hover:file:bg-slate-50 hover:file:border-slate-300"
                   />
                 </div>
                 <button
                   onClick={handleRestoreBackup}
                   disabled={restoreUploading || !restoreFile}
-                  className={`px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 ${
-                    restoreUploading || !restoreFile
-                      ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
-                      : 'bg-amber-700 text-white hover:bg-amber-800'
-                  }`}
+                  className={`${DANGER_BUTTON} px-4 py-2 text-sm shrink-0`}
                 >
-                  <span className="material-symbols-outlined text-base">
+                  <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">
                     {restoreUploading ? 'sync' : 'upload'}
                   </span>
                   {restoreUploading ? t('admin.data.restoring') : t('admin.data.upload')}
@@ -1742,81 +1742,48 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-slate-200 mb-6 flex-wrap">
-          <button
-            onClick={() => setTab('TEAMS')}
-            className={`px-6 py-3 font-bold text-sm flex items-center transition ${
-              tab === 'TEAMS'
-                ? 'border-b-2 border-indigo-600 text-indigo-600'
-                : 'text-slate-600 hover:text-indigo-600'
-            }`}
-          >
-            <span className="material-symbols-outlined mr-2">groups</span>
+        {/* Tabs: the dashboard's (`.dash-tab.active` in index.css draws the
+            current one in the brand colour); the others are slate-600, which
+            reads on the page's grey where slate-500 does not. */}
+        <div className="flex gap-1 border-b border-slate-200 mb-6 overflow-x-auto">
+          <button onClick={() => setTab('TEAMS')} className={tabClass('TEAMS')}>
+            <span className={TAB_ICON} aria-hidden="true">groups</span>
             {t('admin.tabs.teams', { count: teams.length })}
           </button>
-          <button
-            onClick={() => setTab('FEEDBACKS')}
-            className={`px-6 py-3 font-bold text-sm flex items-center transition relative ${
-              tab === 'FEEDBACKS'
-                ? 'border-b-2 border-indigo-600 text-indigo-600'
-                : 'text-slate-600 hover:text-indigo-600'
-            }`}
-          >
-            <span className="material-symbols-outlined mr-2">feedback</span>
+          <button onClick={() => setTab('FEEDBACKS')} className={tabClass('FEEDBACKS')}>
+            <span className={TAB_ICON} aria-hidden="true">feedback</span>
             {t('admin.tabs.feedbacks', { count: feedbacks.length })}
             {unreadCount > 0 && (
-              <span className="ml-2 bg-red-600 text-white text-xs rounded-full px-2 py-0.5">
+              <span className={`${TAB_COUNT} bg-rose-700 text-white`}>
                 {unreadCount}
               </span>
             )}
           </button>
-          <button
-            onClick={() => setTab('LIVE')}
-            className={`px-6 py-3 font-bold text-sm flex items-center transition ${
-              tab === 'LIVE'
-                ? 'border-b-2 border-green-800 text-green-800'
-                : 'text-slate-600 hover:text-green-800'
-            }`}
-          >
-            <span className="material-symbols-outlined mr-2">stream</span>
+          <button onClick={() => setTab('LIVE')} className={tabClass('LIVE')}>
+            <span className={TAB_ICON} aria-hidden="true">stream</span>
             {t('admin.tabs.live')}
             {/* No pulse: an opacity animation is measured at a random moment,
                 and a count that moves forever is a WCAG 2.2.2 concern. */}
             {activeSessions.length > 0 && (
-              <span className="ml-2 bg-green-700 text-white text-xs rounded-full px-2 py-0.5">
+              <span className={`${TAB_COUNT} bg-emerald-700 text-white`}>
                 {activeSessions.length}
               </span>
             )}
           </button>
-          <button
-            onClick={() => setTab('LOGS')}
-            className={`px-6 py-3 font-bold text-sm flex items-center transition ${
-              tab === 'LOGS'
-                ? 'border-b-2 border-orange-700 text-orange-700'
-                : 'text-slate-600 hover:text-orange-700'
-            }`}
-          >
-            <span className="material-symbols-outlined mr-2">terminal</span>
+          <button onClick={() => setTab('LOGS')} className={tabClass('LOGS')}>
+            <span className={TAB_ICON} aria-hidden="true">terminal</span>
             {t('admin.tabs.logs')}
             {serverLogs.filter(l => l.level === 'error').length > 0 && (
-              <span className="ml-2 bg-red-600 text-white text-xs rounded-full px-2 py-0.5">
+              <span className={`${TAB_COUNT} bg-rose-700 text-white`}>
                 {serverLogs.filter(l => l.level === 'error').length}
               </span>
             )}
           </button>
-          <button
-            onClick={() => setTab('BACKUPS')}
-            className={`px-6 py-3 font-bold text-sm flex items-center transition ${
-              tab === 'BACKUPS'
-                ? 'border-b-2 border-teal-700 text-teal-700'
-                : 'text-slate-600 hover:text-teal-700'
-            }`}
-          >
-            <span className="material-symbols-outlined mr-2">backup</span>
+          <button onClick={() => setTab('BACKUPS')} className={tabClass('BACKUPS')}>
+            <span className={TAB_ICON} aria-hidden="true">backup</span>
             {t('admin.tabs.backups')}
             {backups.length > 0 && (
-              <span className="ml-2 bg-teal-100 text-teal-700 text-xs rounded-full px-2 py-0.5">
+              <span className={`${TAB_COUNT} bg-slate-200 text-slate-700`}>
                 {backups.length}
               </span>
             )}
@@ -1825,20 +1792,22 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
         {loading && tab === 'TEAMS' ? (
           <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+            <div className="inline-block motion-safe:animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
             <p className="text-slate-600 mt-4">{t('adminTeams.loading')}</p>
           </div>
         ) : tab === 'TEAMS' ? (
-          <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-            <div className="bg-linear-to-r from-indigo-600 to-purple-700 text-white p-4 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-xl font-bold">{t('adminTeams.heading', { count: teams.length })}</h2>
+          <div className={`${CARD} overflow-hidden`}>
+            {/* The card's title and its one action, on white: a band of colour
+                over the table said nothing the title does not. */}
+            <div className="px-4 py-3 sm:px-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+              <h2 className={ADMIN_CARD_TITLE}>{t('adminTeams.heading', { count: teams.length })}</h2>
               <button
                 onClick={() => setMergeDialogOpen(true)}
                 disabled={teams.length < 2}
-                className="inline-flex items-center gap-1 bg-white text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                className={`${SECONDARY_BUTTON} px-3 py-1.5 text-sm`}
                 title={t('adminTeamMerge.openTitle')}
               >
-                <span className="material-symbols-outlined text-base" aria-hidden="true">merge</span>
+                <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">merge</span>
                 {t('adminTeamMerge.open')}
               </button>
             </div>
@@ -1850,42 +1819,42 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     {sortableHeader('name', t('adminTeams.column.name'))}
                     {sortableHeader('members', t('adminTeams.column.members'))}
                     {sortableHeader('retrospectives', t('adminTeams.column.retrospectives'))}
-                    <th className="text-left p-4 font-bold text-slate-700">{t('adminTeams.column.email')}</th>
+                    <th className={`text-left ${TEAM_HEADER_CELL}`}>{t('adminTeams.column.email')}</th>
                     {sortableHeader('lastActive', t('adminTeams.column.lastActive'))}
-                    <th className="text-right p-4 font-bold text-slate-700">{t('admin.actions')}</th>
+                    <th className={`text-right ${TEAM_HEADER_CELL}`}>{t('admin.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sortedTeams.map((team) => (
-                    <tr key={team.id} className="border-b border-slate-100 hover:bg-slate-50">
-                      <td className="p-4">
+                    <tr key={team.id} className="border-b border-slate-200 last:border-b-0 hover:bg-slate-50">
+                      <td className="px-4 py-3">
                         {editingNameTeamId === team.id ? (
                           <div className="flex gap-2">
                             <input
                               type="text"
                               value={editName}
                               onChange={(e) => setEditName(e.target.value)}
-                              className="flex-1 border border-slate-400 rounded-sm px-2 py-1 text-sm"
+                              className={`${FIELD_BOX} flex-1 min-w-0 text-sm`}
                               placeholder={t('adminTeams.namePlaceholder')}
                               // eslint-disable-next-line jsx-a11y/no-autofocus -- the rename button it replaces is unmounted by this very click
                               autoFocus
                             />
                             <button
                               onClick={() => handleRenameTeam(team.id)}
-                              className="bg-green-700 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-800"
+                              className={`${PRIMARY_BUTTON} ${ROW_BUTTON_SIZE}`}
                             >
                               {t('common.save')}
                             </button>
                             <button
                               onClick={cancelEdit}
-                              className="bg-slate-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-700"
+                              className={`${SECONDARY_BUTTON} ${ROW_BUTTON_SIZE}`}
                             >
                               {t('common.cancel')}
                             </button>
                           </div>
                         ) : (
                           <>
-                            <div className="font-bold text-slate-800">{team.name}</div>
+                            <div className="font-semibold text-slate-900">{team.name}</div>
                             <div className="text-xs text-slate-500">{t('adminTeams.id', { id: team.id })}</div>
                             {team.mergedFrom && team.mergedFrom.length > 0 && (
                               <div className="text-xs text-indigo-700 mt-1">
@@ -1904,13 +1873,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                           </>
                         )}
                       </td>
-                      <td className="p-4 text-slate-600">
+                      <td className="px-4 py-3 text-sm text-slate-600 tabular-nums">
                         {tp('adminTeams.memberCount', team.members.length)}
                       </td>
-                      <td className="p-4 text-slate-600">
+                      <td className="px-4 py-3 text-sm text-slate-600 tabular-nums">
                         {retrospectiveCountText(team)}
                       </td>
-                      <td className="p-4">
+                      <td className="px-4 py-3 text-sm">
                         {editingTeamId === team.id ? (
                           <div className="flex gap-2">
                             <input
@@ -1919,20 +1888,20 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                               onChange={(e) => setEditEmail(e.target.value)}
                               autoCapitalize="none"
                               spellCheck={false}
-                              className="flex-1 border border-slate-400 rounded-sm px-2 py-1 text-sm"
+                              className={`${FIELD_BOX} flex-1 min-w-0 text-sm`}
                               placeholder={t('adminTeams.emailPlaceholder')}
                               // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click
                               autoFocus
                             />
                             <button
                               onClick={() => handleUpdateEmail(team.id)}
-                              className="bg-green-700 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-800"
+                              className={`${PRIMARY_BUTTON} ${ROW_BUTTON_SIZE}`}
                             >
                               {t('common.save')}
                             </button>
                             <button
                               onClick={cancelEdit}
-                              className="bg-slate-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-700"
+                              className={`${SECONDARY_BUTTON} ${ROW_BUTTON_SIZE}`}
                             >
                               {t('common.cancel')}
                             </button>
@@ -1947,12 +1916,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                           </div>
                         )}
                       </td>
-                      <td className="p-4 text-slate-600 text-sm">
+                      <td className="px-4 py-3 text-slate-600 text-sm tabular-nums">
                         {team.lastConnectionDate
                           ? new Date(team.lastConnectionDate).toLocaleDateString(locale)
                           : t('adminTeams.never')}
                       </td>
-                      <td className="p-4">
+                      <td className="px-4 py-3">
                         <div className="flex flex-col gap-2">
                           {editingPasswordTeamId === team.id ? (
                             <div className="flex gap-2">
@@ -1960,20 +1929,20 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                                 type="password"
                                 value={editPassword}
                                 onChange={(e) => setEditPassword(e.target.value)}
-                                className="flex-1 border border-slate-400 rounded-sm px-2 py-1 text-sm"
+                                className={`${FIELD_BOX} flex-1 min-w-0 text-sm`}
                                 placeholder={t('adminTeams.passwordPlaceholder', { min: PASSWORD_MIN_LENGTH })}
                                 // eslint-disable-next-line jsx-a11y/no-autofocus -- the change-password button it replaces is unmounted by this very click
                                 autoFocus
                               />
                               <button
                                 onClick={() => handleUpdatePassword(team.id)}
-                                className="bg-green-700 text-white px-3 py-1 rounded-sm text-sm hover:bg-green-800"
+                                className={`${PRIMARY_BUTTON} ${ROW_BUTTON_SIZE}`}
                               >
                                 {t('common.save')}
                               </button>
                               <button
                                 onClick={cancelEdit}
-                                className="bg-slate-600 text-white px-3 py-1 rounded-sm text-sm hover:bg-slate-700"
+                                className={`${SECONDARY_BUTTON} ${ROW_BUTTON_SIZE}`}
                               >
                                 {t('common.cancel')}
                               </button>
@@ -1982,28 +1951,28 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             <div className="flex justify-end gap-2 flex-wrap">
                               <button
                                 onClick={() => startEditName(team)}
-                                className="text-purple-600 hover:text-purple-800 px-3 py-1 rounded-sm border border-purple-600 hover:bg-purple-50 text-sm font-medium"
+                                className={`${SECONDARY_BUTTON} ${ROW_BUTTON_SIZE}`}
                                 title={t('adminTeams.renameTitle')}
                               >
                                 {t('adminTeams.rename')}
                               </button>
                               <button
                                 onClick={() => startEditPassword(team)}
-                                className="text-amber-700 hover:text-amber-800 px-3 py-1 rounded-sm border border-amber-700 hover:bg-amber-50 text-sm font-medium"
+                                className={`${SECONDARY_BUTTON} ${ROW_BUTTON_SIZE}`}
                                 title={t('adminTeams.changePasswordTitle')}
                               >
                                 {t('adminTeams.changePassword')}
                               </button>
                               <button
                                 onClick={() => startEditEmail(team)}
-                                className="text-indigo-600 hover:text-indigo-800 px-3 py-1 rounded-sm border border-indigo-600 hover:bg-indigo-50 text-sm font-medium"
+                                className={`${SECONDARY_BUTTON} ${ROW_BUTTON_SIZE}`}
                                 title={t('adminTeams.editEmailTitle')}
                               >
                                 {t('adminTeams.editEmail')}
                               </button>
                               <button
                                 onClick={() => setTeamToDelete(team)}
-                                className="text-red-700 hover:text-red-800 px-3 py-1 rounded-sm border border-red-600 hover:bg-red-50 text-sm font-medium"
+                                className={`${DANGER_SECONDARY_BUTTON} ${ROW_BUTTON_SIZE}`}
                                 title={t('adminTeamMerge.deleteTitle')}
                                 // "Delete", N times down the table, says nothing about which team.
                                 aria-label={t('adminTeamMerge.deleteNamed', { name: team.name })}
@@ -2021,7 +1990,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
               {teams.length === 0 && (
                 <div className="text-center py-12 text-slate-500">
-                  <span className="material-symbols-outlined text-6xl mb-4 opacity-50">group_off</span>
+                  <span className="material-symbols-outlined text-6xl! leading-none mb-4 text-slate-400" aria-hidden="true">group_off</span>
                   <p>{t('adminTeams.empty')}</p>
                 </div>
               )}
@@ -2033,44 +2002,28 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         {tab === 'FEEDBACKS' && (
           <div>
             {/* Type Filters */}
-            <div className="mb-4 flex gap-2 flex-wrap">
+            <div className="mb-3 flex gap-2 flex-wrap">
               <button
                 onClick={() => setFeedbackFilter('all')}
-                className={`px-4 py-2 rounded-lg font-medium text-sm ${
-                  feedbackFilter === 'all'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-50'
-                }`}
+                className={`${FILTER_PILL} ${feedbackFilter === 'all' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
               >
                 {t('adminFeedbacks.filter.all', { count: feedbacks.length })}
               </button>
               <button
                 onClick={() => setFeedbackFilter('unread')}
-                className={`px-4 py-2 rounded-lg font-medium text-sm ${
-                  feedbackFilter === 'unread'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-50'
-                }`}
+                className={`${FILTER_PILL} ${feedbackFilter === 'unread' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
               >
                 {t('adminFeedbacks.filter.unread', { count: unreadCount })}
               </button>
               <button
                 onClick={() => setFeedbackFilter('bug')}
-                className={`px-4 py-2 rounded-lg font-medium text-sm ${
-                  feedbackFilter === 'bug'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-50'
-                }`}
+                className={`${FILTER_PILL} ${feedbackFilter === 'bug' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
               >
                 {t('adminFeedbacks.filter.bugs', { count: feedbacks.filter(f => f.type === 'bug').length })}
               </button>
               <button
                 onClick={() => setFeedbackFilter('feature')}
-                className={`px-4 py-2 rounded-lg font-medium text-sm ${
-                  feedbackFilter === 'feature'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-white text-slate-600 hover:bg-slate-50'
-                }`}
+                className={`${FILTER_PILL} ${feedbackFilter === 'feature' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
               >
                 {t('adminFeedbacks.filter.features', { count: feedbacks.filter(f => f.type === 'feature').length })}
               </button>
@@ -2078,15 +2031,15 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
             {/* Status Filters */}
             <div className="mb-6 flex gap-2 flex-wrap items-center">
-              <span className="text-sm text-slate-600 mr-2">{t('adminFeedbacks.filter.statusLabel')}</span>
+              <span className="text-sm font-semibold text-slate-600 mr-1">{t('adminFeedbacks.filter.statusLabel')}</span>
               {(['all', 'pending', 'in_progress', 'resolved', 'rejected'] as const).map((status) => (
                 <button
                   key={status}
                   onClick={() => setStatusFilter(status)}
-                  className={`px-3 py-1.5 rounded-lg font-medium text-xs ${
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
                     statusFilter === status
-                      ? 'bg-slate-700 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      ? 'bg-slate-800 border-slate-800 text-white'
+                      : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:text-slate-900'
                   }`}
                 >
                   {status === 'all' ? t('adminFeedbacks.filter.statusAll') : t(FEEDBACK_STATUS_KEYS[status])}
@@ -2098,32 +2051,32 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {/* Feedbacks List */}
             <div className="space-y-4">
               {getFilteredFeedbacks().length === 0 ? (
-                <div className="bg-white rounded-xl shadow-sm p-12 text-center text-slate-500">
-                  <span className="material-symbols-outlined text-6xl mb-4 opacity-50">feedback</span>
+                <div className={EMPTY_STATE}>
+                  <span className="material-symbols-outlined text-6xl! leading-none mb-4 text-slate-400" aria-hidden="true">feedback</span>
                   <p>{t('adminFeedbacks.empty')}</p>
                 </div>
               ) : (
                 getFilteredFeedbacks().map((feedback) => (
                   <div
                     key={feedback.id}
-                    className={`bg-white rounded-xl shadow-md p-6 ${
+                    className={`${CARD} p-5 sm:p-6 ${
                       !feedback.isRead ? 'border-l-4 border-l-indigo-600' : ''
                     }`}
                   >
                     <div className="flex justify-between items-start mb-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         {getTypeBadge(feedback.type)}
                         {getStatusBadge(feedback.status)}
                         {!feedback.isRead && (
-                          <span className="px-2 py-1 text-xs rounded-full bg-indigo-100 text-indigo-800">
+                          <span className={`${CHIP} bg-indigo-50 text-indigo-700`}>
                             {t('adminFeedbacks.card.new')}
                           </span>
                         )}
                       </div>
-                      <span className="text-sm text-slate-500">{formatDate(feedback.submittedAt)}</span>
+                      <span className="text-sm text-slate-500 tabular-nums shrink-0">{formatDate(feedback.submittedAt)}</span>
                     </div>
 
-                    <h3 className="text-lg font-semibold text-slate-800 mb-2">{feedback.title}</h3>
+                    <h3 className="text-lg font-semibold text-slate-900 mb-2">{feedback.title}</h3>
                     <p className="text-slate-600 mb-3 whitespace-pre-wrap">{feedback.description}</p>
 
                     {feedback.images && feedback.images.length > 0 && (
@@ -2140,12 +2093,12 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     {/* Comments Section */}
                     {feedback.comments && feedback.comments.length > 0 && (
                       <div className="mb-3 space-y-2">
-                        <p className="text-sm font-medium text-slate-600">{t('adminFeedbacks.card.comments', { count: feedback.comments.length })}</p>
+                        <p className="text-sm font-semibold text-slate-600">{t('adminFeedbacks.card.comments', { count: feedback.comments.length })}</p>
                         {feedback.comments.map((comment) => (
-                          <div key={comment.id} className={`p-3 rounded-sm ${comment.isAdmin ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
+                          <div key={comment.id} className={`p-3 rounded-lg border ${comment.isAdmin ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
                             <div className="text-sm">
                               {comment.isAdmin && (
-                                <span className="material-symbols-outlined text-xs align-middle mr-1 text-amber-600">admin_panel_settings</span>
+                                <span className="material-symbols-outlined text-sm! leading-none align-middle mr-1 text-amber-700" aria-hidden="true">admin_panel_settings</span>
                               )}
                               <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{commentAuthorName(comment, t)}</span>
                               {!comment.isAdmin && (
@@ -2168,7 +2121,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       {!feedback.isRead && (
                         <button
                           onClick={() => handleMarkAsRead(feedback)}
-                          className="px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-sm text-sm font-medium hover:bg-indigo-200"
+                          className={`${SECONDARY_BUTTON} px-3 py-1.5 text-sm`}
                         >
                           {t('adminFeedbacks.card.markRead')}
                         </button>
@@ -2180,7 +2133,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                         onChange={(e) =>
                           handleUpdateFeedbackStatus(feedback, e.target.value as TeamFeedback['status'])
                         }
-                        className="px-3 py-1.5 bg-white border border-slate-400 rounded-sm text-sm"
+                        className={`${FIELD_BOX} py-1.5! text-sm`}
                       >
                         <option value="pending">{t('feedback.status.pending')}</option>
                         <option value="in_progress">{t('feedback.status.inProgress')}</option>
@@ -2190,14 +2143,14 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
                       <button
                         onClick={() => setSelectedFeedback(feedback)}
-                        className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-sm text-sm font-medium hover:bg-blue-200"
+                        className={`${SECONDARY_BUTTON} px-3 py-1.5 text-sm`}
                       >
                         {t('adminFeedbacks.addComment')}
                       </button>
 
                       <button
                         onClick={() => handleDeleteFeedback(feedback)}
-                        className="px-3 py-1.5 bg-red-100 text-red-700 rounded-sm text-sm font-medium hover:bg-red-200"
+                        className={`${DANGER_SECONDARY_BUTTON} px-3 py-1.5 text-sm`}
                       >
                         {t('common.delete')}
                       </button>
@@ -2212,41 +2165,41 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         {/* Live Sessions Tab */}
         {tab === 'LIVE' && (
           <div>
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex justify-between items-center gap-3 mb-4">
               <div className="flex items-center gap-3">
-                <h2 className="text-lg font-bold text-slate-700">{t('adminLive.heading')}</h2>
+                <h2 className={ADMIN_CARD_TITLE}>{t('adminLive.heading')}</h2>
               </div>
               <button
                 onClick={loadActiveSessions}
-                className="px-3 py-1.5 bg-green-100 text-green-800 rounded-sm text-sm font-medium hover:bg-green-200 flex items-center gap-1"
+                className={`${SECONDARY_BUTTON} px-3 py-1.5 text-sm`}
               >
-                <span className="material-symbols-outlined text-base">refresh</span>
+                <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">refresh</span>
                 {t('admin.refresh')}
               </button>
             </div>
 
             {liveLoadFailed ? (
-              <div role="alert" className="bg-white rounded-xl shadow-sm p-12 text-center">
-                <span className="material-symbols-outlined text-6xl mb-4 text-amber-600" aria-hidden="true">warning</span>
+              <div role="alert" className={`${CARD} p-12 text-center`}>
+                <span className="material-symbols-outlined text-6xl! leading-none mb-4 text-amber-700" aria-hidden="true">warning</span>
                 <p className="text-slate-700 text-lg">{t('adminLive.loadFailed')}</p>
                 <p className="text-slate-600 text-sm mt-2">{t('adminLive.loadFailedHint')}</p>
               </div>
             ) : activeSessions.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-                <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">cloud_off</span>
+              <div className={`${CARD} p-12 text-center`}>
+                <span className="material-symbols-outlined text-6xl! leading-none mb-4 text-slate-400" aria-hidden="true">cloud_off</span>
                 <p className="text-slate-500 text-lg">{t('adminLive.empty')}</p>
                 <p className="text-slate-500 text-sm mt-2">
                   {t('adminLive.emptyHint')}
                 </p>
-                <div className="mt-6 p-4 bg-green-50 rounded-lg text-sm text-green-700">
-                  <span className="material-symbols-outlined text-base align-middle mr-1">check_circle</span>
+                <div className="mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
+                  <span className="material-symbols-outlined text-base align-middle mr-1" aria-hidden="true">check_circle</span>
                   {t('adminLive.safeToDeploy')}
                 </div>
               </div>
             ) : (
               <div className="space-y-4">
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
-                  <span className="material-symbols-outlined text-amber-600 mt-0.5">warning</span>
+                  <span className="material-symbols-outlined text-amber-700 mt-0.5" aria-hidden="true">warning</span>
                   <div>
                     <p className="text-amber-800 font-medium">{t('adminLive.warningTitle')}</p>
                     <p className="text-amber-700 text-sm mt-1">
@@ -2259,33 +2212,33 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </div>
 
                 {activeSessions.map((session) => (
-                  <div key={session.sessionId} className="bg-white rounded-xl shadow-md p-6">
+                  <div key={session.sessionId} className={`${CARD} p-5 sm:p-6`}>
                     <div className="flex justify-between items-start mb-4">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
-                          <span className={`material-symbols-outlined text-lg ${
+                          <span aria-hidden="true" className={`material-symbols-outlined text-lg! leading-none ${
                             session.type === 'healthcheck' ? 'text-emerald-700' : 'text-indigo-600'
                           }`}>
                             {session.type === 'healthcheck' ? 'health_and_safety' : 'psychology'}
                           </span>
-                          <span className={`text-xs font-bold uppercase px-2 py-0.5 rounded ${
+                          <span className={`${CHIP} ${
                             session.type === 'healthcheck'
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-indigo-100 text-indigo-700'
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : 'bg-indigo-50 text-indigo-700'
                           }`}>
                             {session.type === 'healthcheck' ? t('adminLive.type.healthcheck') : t('adminLive.type.retrospective')}
                           </span>
-                          <span className="flex items-center gap-1 text-green-700">
-                            <span className="w-2 h-2 rounded-full bg-green-500 motion-safe:animate-pulse"></span>
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 motion-safe:animate-pulse" aria-hidden="true"></span>
                             <span className="text-xs font-medium">{t('adminLive.live')}</span>
                           </span>
                         </div>
-                        <h3 className="text-lg font-bold text-slate-800">{liveSessionName(session)}</h3>
+                        <h3 className="text-lg font-semibold text-slate-900">{liveSessionName(session)}</h3>
                         <p className="text-sm text-slate-500">{t('adminLive.team', { team: liveTeamName(session) })}</p>
                       </div>
                       <div className="text-right">
                         <div className="bg-slate-100 rounded-lg px-3 py-2">
-                          <p className="text-2xl font-bold text-slate-800">{session.connectedCount}</p>
+                          <p className="text-2xl font-bold text-slate-900 tabular-nums">{session.connectedCount}</p>
                           <p className="text-xs text-slate-600">{t('adminLive.connected')}</p>
                         </div>
                       </div>
@@ -2293,28 +2246,28 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
                     <div className="flex items-center gap-4 mb-4">
                       <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-sm text-slate-500">flag</span>
+                        <span className="material-symbols-outlined text-base! leading-none text-slate-500" aria-hidden="true">flag</span>
                         <span className="text-sm text-slate-600">
                           {tRich('adminLive.phaseLine', { phase: <span className="font-medium">{livePhase(session)}</span> })}
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-sm text-slate-500">schedule</span>
+                        <span className="material-symbols-outlined text-base! leading-none text-slate-500" aria-hidden="true">schedule</span>
                         <span className="text-sm text-slate-600">
                           {tRich('adminLive.statusLine', { status: <span className="font-medium">{codeLabel(SESSION_STATUS_KEYS, session.status)}</span> })}
                         </span>
                       </div>
                     </div>
 
-                    <div className="border-t border-slate-100 pt-4">
+                    <div className="border-t border-slate-200 pt-4">
                       <p className="text-xs text-slate-500 mb-2">{t('adminLive.participants')}</p>
                       <div className="flex flex-wrap gap-2">
                         {session.participants.map((p) => (
                           <span
                             key={p.id}
-                            className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 rounded-full text-sm text-slate-700"
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-slate-100 rounded-full text-sm text-slate-700"
                           >
-                            <span className="material-symbols-outlined text-sm">person</span>
+                            <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">person</span>
                             {p.name}
                           </span>
                         ))}
@@ -2330,35 +2283,35 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         {/* Server Logs Tab */}
         {tab === 'LOGS' && (
           <div>
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex justify-between items-center gap-3 mb-4">
               <div className="flex items-center gap-3">
-                <h2 className="text-lg font-bold text-slate-700">{t('adminLogs.heading')}</h2>
+                <h2 className={ADMIN_CARD_TITLE}>{t('adminLogs.heading')}</h2>
                 {logsLoading && (
-                  <span className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-orange-600"></span>
+                  <span className="inline-block motion-safe:animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></span>
                 )}
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <button
                   onClick={loadServerLogs}
-                  className="px-3 py-1.5 bg-orange-100 text-orange-800 rounded-sm text-sm font-medium hover:bg-orange-200 flex items-center gap-1"
+                  className={`${SECONDARY_BUTTON} px-3 py-1.5 text-sm`}
                 >
-                  <span className="material-symbols-outlined text-base">refresh</span>
+                  <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">refresh</span>
                   {t('admin.refresh')}
                 </button>
                 <button
                   onClick={handleClearLogs}
-                  className="px-3 py-1.5 bg-red-100 text-red-700 rounded-sm text-sm font-medium hover:bg-red-200 flex items-center gap-1"
+                  className={`${DANGER_SECONDARY_BUTTON} px-3 py-1.5 text-sm`}
                 >
-                  <span className="material-symbols-outlined text-base">delete</span>
+                  <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">delete</span>
                   {t('adminLogs.clear')}
                 </button>
               </div>
             </div>
 
             {/* Log Filters */}
-            <div className="bg-white rounded-lg shadow-sm p-4 mb-4 flex flex-wrap gap-4">
+            <div className={`${CARD} p-4 mb-4 flex flex-wrap items-center gap-4`}>
               <div className="flex items-center gap-2">
-                <label htmlFor="log-filter-level" className="text-sm font-medium text-slate-600">{t('adminLogs.levelLabel')}</label>
+                <label htmlFor="log-filter-level" className="text-sm font-semibold text-slate-700">{t('adminLogs.levelLabel')}</label>
                 <select
                   id="log-filter-level"
                   value={logFilter.level || ''}
@@ -2366,7 +2319,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     setLogFilter({ ...logFilter, level: e.target.value || undefined });
                     setTimeout(loadServerLogs, 100);
                   }}
-                  className="border border-slate-400 rounded-sm px-2 py-1 text-sm"
+                  className={`${FIELD_BOX} py-1.5! text-sm`}
                 >
                   <option value="">{t('adminLogs.levelAll')}</option>
                   <option value="error">{t('adminLogs.levelFilter.error')}</option>
@@ -2375,7 +2328,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </select>
               </div>
               <div className="flex items-center gap-2">
-                <label htmlFor="log-filter-source" className="text-sm font-medium text-slate-600">{t('adminLogs.sourceLabel')}</label>
+                <label htmlFor="log-filter-source" className="text-sm font-semibold text-slate-700">{t('adminLogs.sourceLabel')}</label>
                 <select
                   id="log-filter-source"
                   value={logFilter.source || ''}
@@ -2383,7 +2336,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     setLogFilter({ ...logFilter, source: e.target.value || undefined });
                     setTimeout(loadServerLogs, 100);
                   }}
-                  className="border border-slate-400 rounded-sm px-2 py-1 text-sm"
+                  className={`${FIELD_BOX} py-1.5! text-sm`}
                 >
                   <option value="">{t('adminLogs.sourceAll')}</option>
                   <option value="postgres">{t('adminLogs.sourceFilter.postgres')}</option>
@@ -2392,63 +2345,56 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   <option value="email">{t('adminLogs.sourceFilter.email')}</option>
                 </select>
               </div>
-              <div className="text-sm text-slate-500 ml-auto">
+              <div className="text-sm text-slate-500 ml-auto tabular-nums">
                 {tp('adminLogs.entries', serverLogs.length)}
               </div>
             </div>
 
             {serverLogs.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-                <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">article</span>
+              <div className={`${CARD} p-12 text-center`}>
+                <span className="material-symbols-outlined text-6xl! leading-none mb-4 text-slate-400" aria-hidden="true">article</span>
                 <p className="text-slate-500 text-lg">{t('adminLogs.empty')}</p>
                 <p className="text-slate-500 text-sm mt-2">
                   {t('adminLogs.emptyHint')}
                 </p>
               </div>
             ) : (
-              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+              <div className={`${CARD} overflow-hidden`}>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
-                        <th className="text-left p-3 font-semibold text-slate-600 w-40">{t('adminLogs.column.timestamp')}</th>
-                        <th className="text-left p-3 font-semibold text-slate-600 w-20">{t('adminLogs.column.level')}</th>
-                        <th className="text-left p-3 font-semibold text-slate-600 w-24">{t('adminLogs.column.source')}</th>
-                        <th className="text-left p-3 font-semibold text-slate-600">{t('adminLogs.column.message')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-700 w-40">{t('adminLogs.column.timestamp')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-700 w-20">{t('adminLogs.column.level')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-700 w-24">{t('adminLogs.column.source')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-700">{t('adminLogs.column.message')}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {serverLogs.map((log) => (
                         <tr
                           key={log.id}
-                          className={`border-b border-slate-100 hover:bg-slate-50 ${
-                            log.level === 'error' ? 'bg-red-50' : log.level === 'warn' ? 'bg-amber-50' : ''
+                          className={`border-b border-slate-200 last:border-b-0 ${
+                            log.level === 'error' ? 'bg-rose-50' : log.level === 'warn' ? 'bg-amber-50' : 'hover:bg-slate-50'
                           }`}
                         >
                           <td className="p-3 text-slate-600 font-mono text-xs whitespace-nowrap">
                             {new Date(log.timestamp).toLocaleString(locale)}
                           </td>
                           <td className="p-3">
-                            <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
+                            <span className={`${CHIP} uppercase ${
                               log.level === 'error'
-                                ? 'bg-red-100 text-red-700'
+                                ? 'bg-rose-100 text-rose-800'
                                 : log.level === 'warn'
                                 ? 'bg-amber-100 text-amber-800'
-                                : 'bg-blue-100 text-blue-700'
+                                : 'bg-sky-100 text-sky-800'
                             }`}>
                               {codeLabel(LOG_LEVEL_KEYS, log.level)}
                             </span>
                           </td>
                           <td className="p-3">
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                              log.source === 'postgres'
-                                ? 'bg-indigo-100 text-indigo-700'
-                                : log.source === 'socket'
-                                ? 'bg-purple-100 text-purple-700'
-                                : log.source === 'email'
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-slate-100 text-slate-700'
-                            }`}>
+                            {/* A source is a fact, not a state: one neutral chip, its word says which. */}
+                            <span className={`${CHIP} bg-slate-100 text-slate-700`}>
                               {codeLabel(LOG_SOURCE_KEYS, log.source)}
                             </span>
                           </td>
@@ -2471,45 +2417,41 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
           <div>
             {/* Backup Configuration Summary */}
             {backupConfig && (
-              <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
-                <h3 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                  <span className="material-symbols-outlined text-base text-teal-600">settings</span>
+              <div className={`${CARD} p-4 mb-4`}>
+                <h3 className={`${ADMIN_SETTING_TITLE} mb-2`}>
+                  <span className={ADMIN_SUBTITLE_ICON} aria-hidden="true">settings</span>
                   {t('adminBackups.config.title')}
                 </h3>
                 <div className="flex flex-wrap gap-4 text-sm text-slate-600">
-                  <span>{tRich('adminBackups.config.auto', { value: <span className={`font-medium ${backupConfig.enabled ? 'text-green-700' : 'text-red-600'}`}>{backupConfig.enabled ? t('adminBackups.config.enabled') : t('adminBackups.config.disabled')}</span> })}</span>
+                  <span>{tRich('adminBackups.config.auto', { value: <span className={`font-medium ${backupConfig.enabled ? 'text-emerald-700' : 'text-rose-700'}`}>{backupConfig.enabled ? t('adminBackups.config.enabled') : t('adminBackups.config.disabled')}</span> })}</span>
                   <span>{tRich('adminBackups.config.interval', { value: <span className="font-medium">{t('adminBackups.config.hours', { hours: backupConfig.intervalHours })}</span> })}</span>
                   <span>{tRich('adminBackups.config.maxCount', { value: <span className="font-medium">{backupConfig.maxCount}</span> })}</span>
-                  <span>{tRich('adminBackups.config.onStartup', { value: <span className={`font-medium ${backupConfig.onStartup ? 'text-green-700' : 'text-slate-500'}`}>{backupConfig.onStartup ? t('common.yes') : t('common.no')}</span> })}</span>
+                  <span>{tRich('adminBackups.config.onStartup', { value: <span className={`font-medium ${backupConfig.onStartup ? 'text-emerald-700' : 'text-slate-600'}`}>{backupConfig.onStartup ? t('common.yes') : t('common.no')}</span> })}</span>
                 </div>
               </div>
             )}
 
             {/* Create Checkpoint */}
-            <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                <span className="material-symbols-outlined text-base text-teal-600">add_circle</span>
+            <div className={`${CARD} p-4 mb-6`}>
+              <h3 className={`${ADMIN_SETTING_TITLE} mb-3`}>
+                <span className={ADMIN_SUBTITLE_ICON} aria-hidden="true">add_circle</span>
                 {t('adminBackups.checkpoint.create')}
               </h3>
-              <div className="flex gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row">
                 <input
                   type="text"
                   value={checkpointLabel}
                   onChange={(e) => setCheckpointLabel(e.target.value)}
                   placeholder={t('adminBackups.checkpoint.placeholder')}
-                  className="flex-1 border border-slate-400 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                  className={`${FIELD_BOX} flex-1 min-w-0 text-sm`}
                   maxLength={100}
                 />
                 <button
                   onClick={handleCreateCheckpoint}
                   disabled={backupCreating}
-                  className={`px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 ${
-                    backupCreating
-                      ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
-                      : 'bg-teal-700 text-white hover:bg-teal-800'
-                  }`}
+                  className={`${PRIMARY_BUTTON} px-4 py-2 text-sm shrink-0`}
                 >
-                  <span className="material-symbols-outlined text-base">
+                  <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">
                     {backupCreating ? 'sync' : 'save'}
                   </span>
                   {backupCreating ? t('adminBackups.checkpoint.creating') : t('adminBackups.checkpoint.create')}
@@ -2528,45 +2470,45 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             {/* Backups List */}
             {backupsLoading ? (
               <div className="text-center py-12">
-                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-teal-600"></div>
+                <div className="inline-block motion-safe:animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
                 <p className="text-slate-600 mt-4">{t('adminBackups.loading')}</p>
               </div>
             ) : backups.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-                <span className="material-symbols-outlined text-6xl mb-4 text-slate-300">cloud_off</span>
+              <div className={`${CARD} p-12 text-center`}>
+                <span className="material-symbols-outlined text-6xl! leading-none mb-4 text-slate-400" aria-hidden="true">cloud_off</span>
                 <p className="text-slate-500 text-lg">{t('adminBackups.empty')}</p>
                 <p className="text-slate-500 text-sm mt-2">
                   {t('adminBackups.emptyHint')}
                 </p>
               </div>
             ) : (
-              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+              <div className={`${CARD} overflow-hidden`}>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
-                        <th className="text-left p-3 font-semibold text-slate-600">{t('adminBackups.column.type')}</th>
-                        <th className="text-left p-3 font-semibold text-slate-600">{t('adminBackups.column.label')}</th>
-                        <th className="text-left p-3 font-semibold text-slate-600">{t('adminBackups.column.teams')}</th>
-                        <th className="text-left p-3 font-semibold text-slate-600">{t('adminBackups.column.size')}</th>
-                        <th className="text-center p-3 font-semibold text-slate-600">{t('adminBackups.column.protected')}</th>
-                        <th className="text-right p-3 font-semibold text-slate-600">{t('admin.actions')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-700">{t('adminBackups.column.type')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-700">{t('adminBackups.column.label')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-700">{t('adminBackups.column.teams')}</th>
+                        <th className="text-left p-3 font-semibold text-slate-700">{t('adminBackups.column.size')}</th>
+                        <th className="text-center p-3 font-semibold text-slate-700">{t('adminBackups.column.protected')}</th>
+                        <th className="text-right p-3 font-semibold text-slate-700">{t('admin.actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {backups.map((backup) => (
-                        <tr key={backup.id} className="border-b border-slate-100 hover:bg-slate-50">
+                        <tr key={backup.id} className="border-b border-slate-200 last:border-b-0 hover:bg-slate-50">
                           <td className="p-3">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold uppercase ${
+                            <span className={`${CHIP} uppercase ${
                               backup.type === 'manual'
-                                ? 'bg-teal-100 text-teal-700'
+                                ? 'bg-teal-100 text-teal-800'
                                 : backup.type === 'startup'
-                                ? 'bg-blue-100 text-blue-700'
+                                ? 'bg-sky-100 text-sky-800'
                                 : backup.type === 'imported'
                                 ? 'bg-violet-100 text-violet-700'
-                                : 'bg-slate-100 text-slate-600'
+                                : 'bg-slate-100 text-slate-700'
                             }`}>
-                              <span className="material-symbols-outlined text-xs">
+                              <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">
                                 {backup.type === 'manual'
                                   ? 'flag'
                                   : backup.type === 'startup'
@@ -2580,25 +2522,25 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                           </td>
                           <td className="p-3">
                             {backup.label && (
-                              <div className="font-medium text-slate-800">{backupLabel(backup)}</div>
+                              <div className="font-semibold text-slate-900">{backupLabel(backup)}</div>
                             )}
-                            <div className="text-xs text-slate-500">
+                            <div className="text-xs text-slate-500 tabular-nums">
                               {new Date(backup.createdAt).toLocaleString(locale)}
                             </div>
                           </td>
-                          <td className="p-3 text-slate-600">{backup.teamCount}</td>
+                          <td className="p-3 text-slate-600 tabular-nums">{backup.teamCount}</td>
                           <td className="p-3 text-slate-600 font-mono text-xs">{formatBackupSize(backup.sizeBytes, t, locale)}</td>
                           <td className="p-3 text-center">
                             <button
                               onClick={() => handleToggleProtected(backup)}
-                              className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition ${
+                              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold transition ${
                                 backup.protected
-                                  ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
-                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                  ? 'bg-amber-100 border-amber-200 text-amber-800 hover:bg-amber-200'
+                                  : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
                               }`}
                               title={backup.protected ? t('adminBackups.protected.on') : t('adminBackups.protected.off')}
                             >
-                              <span className="material-symbols-outlined text-xs">
+                              <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">
                                 {backup.protected ? 'lock' : 'lock_open'}
                               </span>
                               {backup.protected ? t('common.yes') : t('common.no')}
@@ -2608,43 +2550,39 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             <div className="flex justify-end gap-1">
                               <button
                                 onClick={() => handleDownloadServerBackup(backup.id)}
-                                className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-sm"
+                                className={ICON_BUTTON}
                                 title={t('adminBackups.download')}
                                 aria-label={t('adminBackups.downloadLabel')}
                               >
-                                <span className="material-symbols-outlined text-base">download</span>
+                                <span className="material-symbols-outlined text-xl! leading-none" aria-hidden="true">download</span>
                               </button>
                               <button
                                 onClick={() => handleRestoreServerBackup(backup)}
                                 disabled={backupRestoring === backup.id}
-                                className={`p-1.5 rounded ${
-                                  backupRestoring === backup.id
-                                    ? 'text-slate-300 cursor-not-allowed'
-                                    : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50'
-                                }`}
+                                className={`${ICON_BUTTON} disabled:text-slate-400 disabled:hover:bg-transparent disabled:cursor-not-allowed`}
                                 title={t('adminBackups.restore')}
                                 aria-label={t('adminBackups.restoreLabel')}
                               >
-                                <span className="material-symbols-outlined text-base">
+                                <span className="material-symbols-outlined text-xl! leading-none" aria-hidden="true">
                                   {backupRestoring === backup.id ? 'sync' : 'restore'}
                                 </span>
                               </button>
                               <button
                                 onClick={() => setTeamRestoreBackup(backup)}
-                                className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-sm"
+                                className={ICON_BUTTON}
                                 title={t('adminBackups.restoreTeam')}
                                 aria-label={t('adminBackups.restoreTeamLabel')}
                                 data-testid={`restore-team-${backup.id}`}
                               >
-                                <span className="material-symbols-outlined text-base">groups</span>
+                                <span className="material-symbols-outlined text-xl! leading-none" aria-hidden="true">groups</span>
                               </button>
                               <button
                                 onClick={() => handleDeleteServerBackup(backup)}
-                                className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-sm"
+                                className={DANGER_ICON_BUTTON}
                                 title={t('adminBackups.delete')}
                                 aria-label={t('adminBackups.deleteLabel')}
                               >
-                                <span className="material-symbols-outlined text-base">delete</span>
+                                <span className="material-symbols-outlined text-xl! leading-none" aria-hidden="true">delete</span>
                               </button>
                             </div>
                           </td>
@@ -2666,17 +2604,17 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             // The comment is unsaved text: a stray backdrop click must not throw
             // it away. Escape is the deliberate way out.
             closeOnBackdropClick={false}
-            overlayClassName="fixed inset-0 bg-slate-900/45 flex items-center justify-center z-50 p-4"
-            panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6"
+            overlayClassName={DIALOG_OVERLAY}
+            panelClassName={`${DIALOG_PANEL} max-w-2xl p-6`}
           >
             <>
-              <h3 id="admin-comment-title" className="text-xl font-bold text-slate-800 mb-4">{t('adminFeedbacks.addComment')}</h3>
+              <h3 id="admin-comment-title" className={`${DIALOG_TITLE} mb-4`}>{t('adminFeedbacks.addComment')}</h3>
               <p className="text-sm text-slate-600 mb-4">
                 {tRich('adminFeedbacks.comment.feedback', { title: <span className="font-semibold">{selectedFeedback.title}</span> })}
               </p>
               <textarea
                 placeholder={t('adminFeedbacks.comment.placeholder')}
-                className="w-full px-3 py-2 border border-slate-400 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                className={FIELD}
                 rows={4}
                 id="admin-comment-input"
                 maxLength={1000}
@@ -2688,13 +2626,13 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                     const input = document.getElementById('admin-comment-input') as HTMLTextAreaElement;
                     handleAddAdminComment(selectedFeedback, input.value);
                   }}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                  className={`${PRIMARY_BUTTON} px-4 py-2`}
                 >
                   {t('adminFeedbacks.addComment')}
                 </button>
                 <button
                   onClick={() => setSelectedFeedback(null)}
-                  className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300"
+                  className={`${SECONDARY_BUTTON} px-4 py-2`}
                 >
                   {t('common.cancel')}
                 </button>
