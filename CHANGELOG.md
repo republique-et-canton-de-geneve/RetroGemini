@@ -7,8 +7,8 @@ Version follows `X.Y` format where X increments for new features and Y for bug f
 
 ## [45.0] - 2026-11-19
 
-### Changed
-- Enjoy a refreshed interface on every screen: a new typeface, a calmer colour palette, softer corners and shadows, and rounder icons
+### Added
+- Enjoy a brand-new look on every screen, with softly tinted cards, a new typeface, rounder icons and gentle animations when someone joins, a card arrives or a vote is cast; and choose your own avatar from 120 drawings, shown on your cards and in the participants panel
 
 ## [44.0] - 2026-11-18
 

@@ -6,8 +6,8 @@ translates the releases it already lists.
 
 ## [45.0] - 2026-11-19
 
-### Changed
-- Profitez d'une interface rafraîchie sur tous les écrans : une nouvelle police, une palette de couleurs plus calme, des coins et des ombres plus doux, et des icônes plus rondes
+### Added
+- Profitez d'une toute nouvelle apparence sur tous les écrans, avec des cartes aux teintes douces, une nouvelle police, des icônes plus rondes et de légères animations quand quelqu'un rejoint la session, qu'une carte arrive ou qu'un vote est donné ; et choisissez votre avatar parmi 120 dessins, affiché sur vos cartes et dans le panneau des participants
 
 ## [44.0] - 2026-11-18
 
