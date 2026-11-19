@@ -463,6 +463,12 @@ gallery does for its close button. `DIALOG_OVERLAY_CLASS` and
 `DIALOG_PANEL_CLASS` are the frame of the look, for a call site with no reason
 to differ; `__tests__/dialogFrameConsistency.test.ts` reads every call site and
 requires that veil and that panel (the image gallery is the stated exception).
+A call site writes its classes out or names a recipe (`DIALOG_OVERLAY` and
+`DIALOG_PANEL` of `dashboardLook.ts`, as the Dashboard and the console do): the
+suite follows the name through the file's own import to its value, and
+**fails on classes it cannot read** (a local variable, a conditional) rather
+than pass them unread, which is how nine dialogs went unchecked while it read
+string literals only.
 
 > Its focusable-element check walks ancestors instead of reading `offsetParent`
 > or `getClientRects()`. Those need a layout engine, so under jsdom they report
@@ -659,15 +665,18 @@ there `title` *is* accepted, because with no content it is the last resort the
 algorithm actually reaches. **In new code, an icon beside a label is
 `aria-hidden` too**: without it the ligature becomes part of the button's name,
 as the console's sortable Teams headers did ("Members unfold_more"). It is a
-rule for new code, not a fact about the codebase: 23 older buttons still
-announce their icon beside their label (51 before 45.0, whose restyle hid the
-icon wherever it carried no state; 17 of the 23 are in the console),
-`ACCESSIBILITY.md` → *Known gaps* 3,
-left for a judgement per site (some icons carry a state the label does not, a
-spinner or a lock), and **no test guards them** — `iconButtonNames.test.tsx`
-checks icon-only and nameless buttons alone. An icon that is the only carrier
-of a state gets that state another way (words, `aria-pressed`) before it is
-hidden. **A choice that stays chosen says so as a state, not only as a
+fact about the codebase since 45.0, and the same suite holds it (its third
+family, `beside`): 51 buttons read an icon beside their label on the release
+before, none does now, and the next one fails the build. The suite knows an
+icon span by its class, written out or one of the look's icon recipes, which
+are all named `…ICON…` (`TAB_ICON`, `CHIP_ICON_CLASS`, `BANNER_ICON_CLASS`):
+name a new icon recipe that way, or the guard reads the icon as the button's
+words. An icon that is the only carrier of a state gets that state another way
+(words, `aria-pressed`, `aria-busy`) before it is hidden; and **a button whose
+only content is an icon and a count is named in words, the count it shows
+first** (WCAG 2.5.3): a card's comments button is "2 comments", a proposal's
+votes "1 vote for" and "Vote neutral" (the icon read as a name said
+"comment 2", "thumb_up 1" and, for a neutral vote, "remove"). **A choice that stays chosen says so as a state, not only as a
 colour**: a button that selects one option among several carries
 `aria-pressed` (the Welcome phase's moods, Discuss's *Move On*, the ROTI
 scores of both session types, the health check's survey scores, the invite
@@ -751,7 +760,9 @@ on an old team are expected, and nothing is migrated. **Every person is drawn
 by `components/common/Avatar.tsx`**, which takes its classes as `colorClasses`
 (what `avatarColorClasses` or `DEPARTED_AVATAR_CLASSES` returned) and has no
 `className`: margins, rings and visibility belong to a wrapper at the call
-site.
+site. One row is not a person in the session yet, and is not drawn by it: an
+invitee still expected, in the participants panel, is a dashed circle holding
+initials, with no colour and no picture (see *Avatars*).
 A departed participant's avatar is neutral, never faded, and
 nothing adds opacity, `grayscale` or a second text colour beside the call —
 `__tests__/avatarColorSource.test.ts` walks the AST of `App.tsx` and every
@@ -1462,7 +1473,10 @@ change to it lands in both.**
   `services/sessionRevocation.ts`, a module with no imports, so the suites that
   mock `dataService` keep working. **The Dashboard does the same**: App keeps it
   mounted under `components/dashboard/DashboardRevokedBanner.tsx` (an alert with
-  "Log in again") instead of signing out at once, because a feedback being
+  "Log in again", drawn as the session's own band: `BANNER_CLASS`,
+  `BANNER_ALERT_CLASS`, `BANNER_ICON_CLASS` and `BANNER_ACTION_CLASS` of
+  `SessionConnectionStatus.tsx`, which the stalled banner takes too) instead of
+  signing out at once, because a feedback being
   written there — its screenshots, every comment draft — lives only on the
   screen, and the login screen replacing it took the draft before the form could
   say "copy your text" (`__tests__/appSessionRevokedDashboard.test.tsx`). Only a
@@ -3205,6 +3219,14 @@ Rules:
   nothing. The file is the source: to add or change a picture, edit its shapes
   there, with its id in `utils/avatars.js` and its name in both `avatars`
   dictionaries (`__tests__/avatarArt.test.tsx` checks the three agree).
+- **A picture is drawn for a person who is in the session.** Two rows of the
+  participants panel show none, on purpose, and both say why in words: a
+  participant marked as having left is neutral initials (the "Left the
+  session" chip), and an invitee still expected is a dashed circle holding
+  initials (the "Invited" chip), drawn by the panel itself and not by `Avatar`.
+  The picture arrives with the person, in their own tone, with the arrival's
+  effect; an invitee who chose one is not shown it greyed out while they are
+  away. `__tests__/avatarScreensWiring.test.tsx` holds it for the invitee.
 - **The picture is decoration; the person's name is the name.** An `Avatar`
   without a `label` is hidden from assistive technology (a name is written
   beside it); with one it is an image named by the person, never by the
