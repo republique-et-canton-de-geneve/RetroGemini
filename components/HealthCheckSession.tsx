@@ -1751,6 +1751,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           onInvite={() => setShowInvite(true)}
           onToggleLeft={handleToggleParticipantLeft}
           getMemberDisplay={getMemberDisplay}
+          isLive={isLive}
+          motionScope={session.phase}
         />
       </div>
     </div>

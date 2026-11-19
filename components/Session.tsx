@@ -4695,6 +4695,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             onInvite={() => setShowInvite(true)}
             onToggleLeft={handleToggleParticipantLeft}
             getMemberDisplay={getMemberDisplay}
+            isLive={isLive}
           />
         </div>
         {/* Ticket Comments Modal */}
