@@ -158,7 +158,7 @@ const AnnouncementModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={onMarkAsRead}
-            className={`${showLaterButton ? 'flex-1' : 'w-full'} bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-lg btn-brand-glow motion-safe:active:scale-[0.97] transition`}
+            className={`${showLaterButton ? 'flex-1' : 'w-full'} bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-4 rounded-lg btn-brand-glow enabled:active:bg-indigo-800 transition`}
           >
             {t('shared.announcement.gotIt')}
           </button>

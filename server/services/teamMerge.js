@@ -852,11 +852,12 @@ const rosterIdSet = (team) =>
  * member ids: the main team's as they are, the second's through its user-id
  * map. For a member the merge unified, the main team's entry wins — a clear
  * included, which is a choice — and the second's is used when the main team
- * has none (PLAN.md D17). An entry of the second team for an id on neither of
+ * has none. An entry of the second team for an id on neither of
  * its roster lists is carried only when that id is not one of the main
- * team's members: the id map knows only roster members, so such an entry
- * would otherwise land on someone else. Entries that are not `{ id, at }`
- * under a plausible member id are not carried.
+ * team's members, and the same holds the other way round for an off-roster
+ * entry of the main team: the id map knows only roster members, so such an
+ * entry would otherwise land on someone else. Entries that are not
+ * `{ id, at }` under a plausible member id are not carried.
  *
  * @returns {Record<string, { id: string | null, at: number }> | null}
  */
@@ -864,10 +865,17 @@ const mergedMemberAvatars = (primary, secondary, secondaryUserIds) => {
   const entries = new Map();
   const readable = (team) => (isPlainObject(team.memberAvatars) ? Object.entries(team.memberAvatars) : [])
     .filter(([memberId, entry]) => isValidRaterId(memberId) && isMemberAvatarEntry(entry));
-  for (const [memberId, entry] of readable(primary)) entries.set(memberId, { id: entry.id, at: entry.at });
   const primaryRoster = rosterIdSet(primary);
   const secondaryRoster = rosterIdSet(secondary);
+  for (const [memberId, entry] of readable(primary)) {
+    // An entry kept for an id the main team's roster no longer holds, which
+    // is a member of the second team: in the merged team that id is theirs.
+    if (!primaryRoster.has(memberId) && secondaryRoster.has(memberId)) continue;
+    entries.set(memberId, { id: entry.id, at: entry.at });
+  }
   for (const [memberId, entry] of readable(secondary)) {
+    // And the mirror: an off-roster entry of the second team under the id of
+    // a member of the main team.
     if (!secondaryRoster.has(memberId) && primaryRoster.has(memberId)) continue;
     const mergedId = secondaryUserIds.get(memberId) ?? memberId;
     if (!entries.has(mergedId)) entries.set(mergedId, { id: entry.id, at: entry.at });

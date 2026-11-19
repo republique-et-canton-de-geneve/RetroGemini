@@ -52,7 +52,7 @@ const ShowAuthorsDialog: React.FC<Props> = ({ disabled = false, onKeepAnonymous,
           className={`flex-1 py-2.5 rounded-lg font-semibold transition ${
             disabled
               ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
-              : 'bg-indigo-600 text-white hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97]'
+              : 'bg-indigo-600 text-white hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800'
           }`}
         >
           {t('session.openBoard.showAuthors')}

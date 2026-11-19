@@ -4,7 +4,7 @@ import { translateErrorMessage } from '../i18n/errorMessages';
 import { createTranslator } from '../i18n/translate';
 
 /**
- * `dataService.setMemberAvatar` (PLAN.md section 18.1): one awaited write
+ * `dataService.setMemberAvatar` (AGENTS.md, *Avatars*): one awaited write
  * through the avatar route, then the cached team's map replaced by the one
  * the server answered. It never posts the roster, and never writes onto a
  * cached member row: those rows are replaced wholesale by roster posts, and a
@@ -114,6 +114,48 @@ describe('dataService.setMemberAvatar', () => {
     expect(after.members.every(member => !('avatar' in member))).toBe(true);
   });
 
+  // The write is awaited, so the screen can go while it runs. Its answer is
+  // the team's it was asked for, and is put on no other cache.
+  describe('an answer that arrives late', () => {
+    /** Holds every answer of the avatar route until released. */
+    const holdAvatarAnswers = () => {
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const answer = global.fetch as unknown as (url: string, options?: { body?: string }) => Promise<unknown>;
+      global.fetch = vi.fn(async (url: string, options?: { body?: string }) => {
+        if (/\/member\/avatar$/.test(url.toString())) await gate;
+        return answer(url, options);
+      }) as unknown as typeof fetch;
+      return () => release();
+    };
+
+    it('is kept off the cache after a sign-out, and still answers its caller', async () => {
+      const team = await createTeam();
+      const release = holdAvatarAnswers();
+
+      const pending = dataService.setMemberAvatar('admin-1', 'fox');
+      dataService.logout();
+      release();
+
+      await expect(pending).resolves.toEqual({ 'admin-1': { id: 'fox', at: 1234 } });
+      expect(dataService.getTeam(team.id)).toBeFalsy();
+    });
+
+    it("is kept off another team's cache when that team logged in meanwhile", async () => {
+      await createTeam();
+      const release = holdAvatarAnswers();
+
+      const pending = dataService.setMemberAvatar('admin-1', 'fox');
+      const other = await dataService.createTeam('Beta', 'secret-password', 'fac@example.com');
+      release();
+      await pending;
+
+      const cached = dataService.getTeam(other.id)!;
+      expect(cached.name).toBe('Beta');
+      expect(cached.memberAvatars).toBeUndefined();
+    });
+  });
+
   it('never posts the roster', async () => {
     await createTeam();
     await dataService.setMemberAvatar('admin-1', 'fox');
@@ -148,6 +190,45 @@ describe('dataService.setMemberAvatar', () => {
 
     expect(avatarCalls()).toHaveLength(1);
     expect(dataService.getTeam(team.id)!.memberAvatars).toBeUndefined();
+  });
+
+  // The rollout retry is for a pod that does not serve the route yet (an HTML
+  // 404). These come from a pod that does, and no pod will answer otherwise:
+  // the team is gone, the credential is refused, or the limiter said to wait,
+  // and each retry is one more request against it. The person is watching
+  // "Saving…": retried, the refusal took seven seconds to be said.
+  it.each([
+    [401, 'team_not_found'],
+    [401, 'invalid_token'],
+    [401, 'invalid_password'],
+    [429, 'too_many_requests'],
+  ])('says at once that a %i %s cannot be saved, without sending it again', async (status, code) => {
+    const team = await createTeam();
+    respond = (url) => /\/member\/avatar$/.test(url) ? { ok: false, status, body: { error: code } } : null;
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const saving = dataService.setMemberAvatar('admin-1', 'owl');
+    const outcome = expect(saving).rejects.toThrow('The avatar could not be saved.');
+    await vi.advanceTimersByTimeAsync(20_000);
+    await outcome;
+
+    expect(avatarCalls()).toHaveLength(1);
+    expect(dataService.getTeam(team.id)!.memberAvatars).toBeUndefined();
+  });
+
+  // A failure of the server itself may pass: it is sent again, as before.
+  it('still sends a 500 again: the server may answer the next time', async () => {
+    await createTeam();
+    let attempts = 0;
+    respond = (url) => /\/member\/avatar$/.test(url) && attempts++ < 1 ? { ok: false, status: 500, body: { error: 'failed_to_update' } } : null;
+    vi.useFakeTimers();
+
+    const saving = dataService.setMemberAvatar('admin-1', 'owl');
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(saving).resolves.toEqual({ 'admin-1': { id: 'owl', at: 1234 } });
+    expect(avatarCalls()).toHaveLength(2);
   });
 
   it('throws once a server that never serves the route has been retried for the rollout window', async () => {

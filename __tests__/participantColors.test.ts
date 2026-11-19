@@ -201,11 +201,18 @@ describe('participant avatars', () => {
 
   // The dots are a person's only mark beside their name in some places (the
   // contribution line, the vote tooltip): WCAG 1.4.11, 3:1 on the surfaces
-  // they sit on — white, and the reader's own row (indigo-50).
+  // they sit on — white, and the reader's own row, which the participants
+  // panel paints `bg-indigo-100` (read from the panel below, so the surface
+  // measured here is the one drawn).
+  it('the reader\'s own row is the surface the dots are measured on', () => {
+    const panel = readFileSync(join(__dirname, '..', 'components', 'session', 'SessionParticipantsPanel.tsx'), 'utf8');
+    expect(panel).toMatch(/isCurrentUser \? 'bg-indigo-100' :/);
+  });
+
   it.each([...PARTICIPANT_PALETTE.map((color) => [color]), [undefined]])('%s: its dot is the ink, 3:1 on white and on the reader\'s row', (color) => {
     const dot = participantColorClass(color as string | undefined);
     expect(dot).toBe(`bg-person-${color ? hueOf(color as string) : 'neutral'}-ink`);
-    for (const surface of ['white', 'indigo-50']) {
+    for (const surface of ['white', 'indigo-100']) {
       expect(tokenContrast(bgToken(dot), surface), `${dot} on ${surface}`).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
     }
   });

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import React, { useState } from 'react';
 import { readFileSync } from 'fs';
@@ -89,6 +89,35 @@ describe('ModalDialog — the entrance', () => {
     expect(veil.classList).not.toContain('fx-veil-in');
   });
 
+  // An animation that is interrupted never ends: the element hidden while it
+  // plays, the reader turning motion off between the script's check and the
+  // stylesheet's. The class then stayed for as long as the dialog was open,
+  // and an animation it names plays again the next time its element is shown.
+  it('takes each class off after its length even when no animation ever ends', () => {
+    vi.useFakeTimers();
+    const view = render(<ModalDialog label="Stuck" onClose={() => {}}><button type="button">One</button></ModalDialog>);
+    try {
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.classList.contains('fx-dialog-in')).toBe(true);
+      expect(veilOf(dialog).classList.contains('fx-veil-in')).toBe(true);
+      // Still there while the effect is playing.
+      act(() => { vi.advanceTimersByTime(150); });
+      expect(dialog.classList.contains('fx-dialog-in')).toBe(true);
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(dialog.classList.contains('fx-dialog-in')).toBe(false);
+      expect(veilOf(dialog).classList.contains('fx-veil-in')).toBe(false);
+    } finally {
+      // The dialog leaves on this clock, and the clock runs dry before the
+      // real one comes back. jsdom starts its own rendering interval with
+      // whatever `setInterval` is installed when the focus moves; left
+      // waiting on a clock that is gone, it never fires again, and no
+      // animation frame runs for the rest of the file.
+      view.unmount();
+      act(() => { vi.runOnlyPendingTimers(); });
+      vi.useRealTimers();
+    }
+  });
+
   it('does not replay on a re-render', () => {
     const { rerender } = render(
       <ModalDialog label="Test" panelClassName="p-4">
@@ -148,12 +177,61 @@ describe('ModalDialog — the entrance', () => {
   });
 });
 
+// The gallery's panel takes the fade (`entrance="fade"`): the veil's class on
+// the panel. It comes off like the rise does, at the panel's own animation
+// end and at the net when none comes.
+describe('ModalDialog — the fade a panel takes', () => {
+  beforeEach(() => prefersMotion('no-preference'));
+  afterEach(() => restoreMotionPreference());
+
+  const Faded: React.FC = () => (
+    <ModalDialog label="Faded" entrance="fade" onClose={() => {}}>
+      <button type="button">Inside</button>
+    </ModalDialog>
+  );
+
+  it('takes the fade off the panel when the panel’s own animation ends, not its veil’s nor a descendant’s', () => {
+    render(<Faded />);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.classList).toContain('fx-veil-in');
+    expect(dialog.classList).not.toContain('fx-dialog-in');
+
+    fireEvent.animationEnd(screen.getByRole('button', { name: 'Inside' }));
+    fireEvent.animationEnd(veilOf(dialog));
+    expect(dialog.classList).toContain('fx-veil-in');
+    // The veil's own class went with the veil's own animation.
+    expect(veilOf(dialog).classList).not.toContain('fx-veil-in');
+
+    fireEvent.animationEnd(dialog);
+    expect(dialog.classList).not.toContain('fx-veil-in');
+  });
+
+  it('takes the fade off the panel after its length when no animation ever ends', () => {
+    vi.useFakeTimers();
+    const view = render(<Faded />);
+    try {
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.classList).toContain('fx-veil-in');
+      act(() => { vi.advanceTimersByTime(150); });
+      expect(dialog.classList).toContain('fx-veil-in');
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(dialog.classList).not.toContain('fx-veil-in');
+      expect(veilOf(dialog).classList).not.toContain('fx-veil-in');
+    } finally {
+      // See the same lines above: the dialog leaves on this clock, and the clock runs dry.
+      view.unmount();
+      act(() => { vi.runOnlyPendingTimers(); });
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('the entrance effects in index.css', () => {
   const css = readFileSync(join(__dirname, '..', 'index.css'), 'utf8');
   const rule = (name: string) => new RegExp(`\\.${name}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
   const keyframes = (name: string) => new RegExp(`@keyframes ${name}\\s*\\{([\\s\\S]*?)\\n  \\}`).exec(css)?.[1] ?? '';
 
-  it('fill backwards only, so no transform remains after the animation (decision D24)', () => {
+  it('fill backwards only, so no transform remains after the animation', () => {
     for (const name of ['fx-dialog-in', 'fx-veil-in']) {
       const body = rule(name);
       expect(body, name).toMatch(/animation:/);

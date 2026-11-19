@@ -24,7 +24,7 @@ describe('columnHue', () => {
     expect(columnHue(column({ customColor: '#fff' }))).toBe('#ffffff');
   });
 
-  // Custom templates created by older releases hold classes only (decision D15).
+  // Custom templates created by older releases hold classes only (AGENTS.md, *A card's colour*).
   it.each(Object.entries(COLUMN_CLASS_HUES))('reads the %s hue from a column that holds classes only', (hue, hex) => {
     expect(columnHue(column({ color: `bg-${hue}-50`, border: `border-${hue}-400`, text: `text-${hue}-700` }))).toBe(hex);
     // Any of the three classes is enough, the background first.

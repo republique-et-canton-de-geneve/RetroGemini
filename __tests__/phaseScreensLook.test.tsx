@@ -390,7 +390,7 @@ describe('Discuss', () => {
   });
 
   // A custom template made by an older release stores classes and no hex
-  // (decision D15): the topic takes the hue those classes name, as the board's
+  // (AGENTS.md, *A card's colour*): the topic takes the hue those classes name, as the board's
   // card does (utils/columnHue.ts), and only a column with neither is white.
   it('tints a topic whose column stores classes only, and leaves one with no hue white', () => {
     const classOnly = column('col-1');

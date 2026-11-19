@@ -526,7 +526,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={onInvite}
-                className="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold text-sm hover:bg-indigo-700 btn-brand-glow transition motion-safe:active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                className="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold text-sm hover:bg-indigo-700 btn-brand-glow transition enabled:active:bg-indigo-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
               >
                 {t('phases.participants.invite')}
               </button>

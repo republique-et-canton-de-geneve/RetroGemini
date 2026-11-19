@@ -76,6 +76,23 @@ export const RECOVERY_EMAIL_NOT_SAVED = 'The recovery email could not be saved. 
 // Thrown by `setMemberAvatar` when the server did not store the choice.
 export const AVATAR_NOT_SAVED = 'The avatar could not be saved.';
 
+/**
+ * Answers of the avatar route that sending the pick again cannot change. They
+ * come from a pod that serves the route (a pod of the previous release answers
+ * an HTML 404, which is what the rollout retry is for): the value is refused,
+ * the team is gone, the credential is refused, or the limiter said to wait,
+ * and each retry is one more request against it. The person is watching
+ * "Saving…" meanwhile; retried, these took seven seconds to be said.
+ */
+const AVATAR_FINAL_REFUSALS: ReadonlySet<string> = new Set([
+  'invalid_avatar',
+  'invalid_member',
+  'team_not_found',
+  'invalid_token',
+  'invalid_password',
+  'too_many_requests',
+]);
+
 // When the cache last received the whole team from a login, a creation, a
 // restore or an invite join, or `null`. The Dashboard reuses that load once,
 // instead of fetching the same team again a moment later
@@ -2571,9 +2588,9 @@ export const dataService = {
    *
    * Awaited like the recovery address, so a screen says "saved" only once the
    * server has it. `sessionId` names the live session the choice was made in,
-   * which the server then stamps (PLAN.md section 18.1). It rides the
+   * which the server then stamps (AGENTS.md, *Avatars*). It rides the
    * rolling-update retry: a pod of the previous release answers an HTML 404,
-   * while `invalid_avatar` and `invalid_member` are the route's own and final.
+   * while the route's own refusals are final (`AVATAR_FINAL_REFUSALS`).
    * Not queued behind the session saves: it writes a key nothing else writes.
    *
    * The cached team's `memberAvatars` is then replaced by the answer, as a new
@@ -2596,7 +2613,7 @@ export const dataService = {
     const { data, error } = await postAcrossRolloutFor<{ memberAvatars?: unknown }>(
       `/api/team/${teamId}/member/avatar`,
       { memberId, avatar, ...(typeof sessionId === 'string' && sessionId ? { sessionId } : {}) },
-      (code) => code === 'invalid_avatar' || code === 'invalid_member'
+      (code) => AVATAR_FINAL_REFUSALS.has(code)
     );
     if (error || !data) {
       if (error) console.warn('[dataService] Failed to save avatar', error);

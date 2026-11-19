@@ -15,8 +15,13 @@
  * reader asked for less of it.
  */
 
-/** How long each effect of `index.css` lasts, delays and repeats included (ms). */
-const EFFECT_LENGTH_MS: Readonly<Record<string, number>> = {
+/**
+ * How long each effect of `index.css` lasts, delays and repeats included (ms).
+ * Exported for `__tests__/motionEffects.test.ts`, which reads the stylesheet
+ * and requires each entry to be the length declared there: an animation
+ * lengthened in the stylesheet alone would be cut off by the net below.
+ */
+export const EFFECT_LENGTH_MS: Readonly<Record<string, number>> = {
   'fx-card-in': 500,
   'fx-ring': 900,
   'fx-pop': 450,

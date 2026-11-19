@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup as cleanupView, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup as cleanupView, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import Session from '../components/Session';
@@ -313,6 +313,236 @@ describe('Session — the vote’s flight', () => {
     expect(document.querySelectorAll('.fx-layer .fx-token')).toHaveLength(1);
     land();
     expect(group.classList.contains('fx-ring')).toBe(true);
+  });
+
+  // A write made while the session reconnects is dropped, as every edit made
+  // offline is. The motion follows the write: a vote that was not taken back
+  // sends no token home and holds no mark. (It read "no session written" as
+  // "no vote of mine left", and flew the token of a vote still there.)
+  it('flies nothing for a vote taken back while the session reconnects: nothing was written', async () => {
+    allowMotion();
+    let setConnected: ((connected: boolean) => void) | null = null;
+    vi.mocked(syncService.onConnectionChange).mockImplementation((callback) => {
+      setConnected = callback as (connected: boolean) => void;
+      return () => {};
+    });
+    const fromServer = captureServerStates();
+    const voted = createSession({ groups: [{ id: 'g1', title: 'Working together', colId: 'col-1', votes: ['facilitator-1'], anchorTicketId: 't2' }] });
+    await renderSession(voted);
+    pastTheQuietSeconds();
+    const group = document.querySelector('[data-group-id="g1"]') as HTMLElement;
+    const minus = within(group).getByRole('button', { name: 'Remove a vote from this group' });
+    const writes = vi.mocked(syncService.updateSession).mock.calls.length;
+    expect(setConnected).not.toBeNull();
+
+    // The connection drops and the click lands before the screen is drawn
+    // again: the control is still the live one, the write is already refused.
+    const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    environment.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      setConnected!(false);
+    } finally {
+      environment.IS_REACT_ACT_ENVIRONMENT = true;
+    }
+    fireEvent.click(minus);
+    expect(vi.mocked(syncService.updateSession).mock.calls.length).toBe(writes);
+    expect(document.querySelector('.fx-layer')).toBeNull();
+
+    // Back online, the server's state still holds the vote, and nothing that
+    // click queued plays on it: no token, and the vote's marks are not held.
+    act(() => { setConnected!(true); });
+    act(() => { fromServer({ ...JSON.parse(JSON.stringify(voted)), _rev: 7, finishedUsers: ['p1'] }); });
+    expect(document.querySelector('.fx-layer')).toBeNull();
+    expect(within(document.querySelector('[data-group-id="g1"]') as HTMLElement).getByText('You gave it 1 vote')).toBeTruthy();
+    land();
+    expect(document.querySelector('.fx-layer')).toBeNull();
+  });
+
+  it('sends nothing flying, shakes nothing and holds nothing for a vote added while the session reconnects', async () => {
+    allowMotion();
+    let setConnected: ((connected: boolean) => void) | null = null;
+    vi.mocked(syncService.onConnectionChange).mockImplementation((callback) => {
+      setConnected = callback as (connected: boolean) => void;
+      return () => {};
+    });
+    const fromServer = captureServerStates();
+    // One vote left: a refusal for lack of votes would shake the budget.
+    const start = createSession({
+      tickets: [
+        { id: 't1', colId: 'col-1', text: 'Great teamwork', authorId: 'p1', groupId: null, votes: [] },
+        { id: 't4', colId: 'col-1', text: 'Spent', authorId: 'p1', groupId: null, votes: ['facilitator-1'] },
+      ],
+      groups: [],
+    }, { maxVotes: 2 });
+    await renderSession(start);
+    pastTheQuietSeconds();
+    const plus = within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' });
+    const writes = vi.mocked(syncService.updateSession).mock.calls.length;
+
+    // The connection drops and the click lands before the screen is drawn again.
+    const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    environment.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      setConnected!(false);
+    } finally {
+      environment.IS_REACT_ACT_ENVIRONMENT = true;
+    }
+    fireEvent.click(plus);
+    expect(vi.mocked(syncService.updateSession).mock.calls.length).toBe(writes);
+    expect(document.querySelector('.fx-layer')).toBeNull();
+    expect(document.querySelector('[data-vote-budget]')!.classList.contains('fx-nope')).toBe(false);
+    expect(within(card('t1')).getByText('You gave it 0 votes')).toBeTruthy();
+
+    // Back online, nothing that click queued plays on the server's state.
+    act(() => { setConnected!(true); });
+    act(() => { fromServer({ ...JSON.parse(JSON.stringify(start)), _rev: 7, finishedUsers: ['p1'] }); });
+    expect(document.querySelector('.fx-layer')).toBeNull();
+    expect(card('t1').classList.contains('fx-ring')).toBe(false);
+    land();
+    expect(document.querySelector('.fx-layer')).toBeNull();
+  });
+
+  // A flight that cannot be drawn (an end outside the window, a browser that
+  // cannot animate) arrives at once: nothing waits for a token that will
+  // never land. The vote's marks play where they stand and its hold is let
+  // go, so what the hook plays for that item later is not skipped for good.
+  describe('a token that cannot fly', () => {
+    /** Every box far below the window: no flight has a path. */
+    const offScreen = () =>
+      vi.mocked(Element.prototype.getBoundingClientRect).mockReturnValue({
+        left: 100, top: 5000, width: 10, height: 10, right: 110, bottom: 5010, x: 100, y: 5000, toJSON: () => ({}),
+      } as DOMRect);
+    /** The server's word that votes are now unlimited: the budget draws no token, and no vote flies. */
+    const withoutBudget = (fromServer: (state: RetroSession) => void, rev: number) => {
+      const current = lastWrite()!;
+      act(() => {
+        fromServer({ ...JSON.parse(JSON.stringify(current)), _rev: rev, settings: { ...current.settings, unlimitedVotes: true } });
+      });
+      expect(document.querySelector('[data-vote-tokens]')).toBeNull();
+      // The board is quiet for three seconds after the server's first state: past them.
+      vi.mocked(Date.now).mockReturnValue(Date.now() + 5_000);
+    };
+
+    it('plays a vote\'s marks at once, shows its dot, and holds nothing', async () => {
+      allowMotion();
+      const fromServer = captureServerStates();
+      await renderSession(createSession());
+      pastTheQuietSeconds();
+      offScreen();
+
+      await userEvent.click(within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' }));
+      expect(lastWrite()?.tickets.find((t) => t.id === 't1')?.votes).toEqual(['facilitator-1']);
+      expect(document.querySelector('.fx-layer')).toBeNull();
+      const dot = within(card('t1')).getByTestId('my-guided-votes').lastElementChild as HTMLElement;
+      expect(dot.style.visibility).toBe('');
+      expect(card('t1').classList.contains('fx-ring')).toBe(true);
+
+      // Nothing is held: a later vote on this card that does not fly is marked by the board itself.
+      card('t1').classList.remove('fx-ring');
+      withoutBudget(fromServer, 5);
+      await userEvent.click(within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' }));
+      expect(lastWrite()?.tickets.find((t) => t.id === 't1')?.votes).toEqual(['facilitator-1', 'facilitator-1']);
+      expect(card('t1').classList.contains('fx-ring')).toBe(true);
+    });
+
+    it('lets go of a vote taken back at once, with no token left on the page', async () => {
+      allowMotion();
+      const fromServer = captureServerStates();
+      await renderSession(createSession({ groups: [{ id: 'g1', title: 'Working together', colId: 'col-1', votes: ['facilitator-1'], anchorTicketId: 't2' }] }));
+      pastTheQuietSeconds();
+      offScreen();
+      const group = () => document.querySelector('[data-group-id="g1"]') as HTMLElement;
+
+      await userEvent.click(within(group()).getByRole('button', { name: 'Remove a vote from this group' }));
+      expect(lastWrite()?.groups[0].votes).toEqual([]);
+      expect(document.querySelector('.fx-layer')).toBeNull();
+      expect(animations).toHaveLength(0);
+
+      withoutBudget(fromServer, 5);
+      await userEvent.click(within(group()).getByRole('button', { name: 'Add a vote to this group' }));
+      expect(lastWrite()?.groups[0].votes).toEqual(['facilitator-1']);
+      // Held, the group would be skipped by the board's own marks.
+      expect(group().classList.contains('fx-ring')).toBe(true);
+    });
+  });
+
+  // The hold is counted: two quick votes on one card each keep it held until
+  // their own token has landed. Let go at the first landing, the card took the
+  // board's own marks for whatever its second token was still carrying.
+  describe('two tokens on one card', () => {
+    /** The server's word on the viewer's votes for the card, past the quiet seconds that follow its first state. */
+    const serverSays = (fromServer: (state: RetroSession) => void, rev: number, mine: number) => {
+      const current = lastWrite()!;
+      act(() => {
+        fromServer({
+          ...JSON.parse(JSON.stringify(current)),
+          _rev: rev,
+          tickets: current.tickets.map((t) => (t.id === 't1' ? { ...t, votes: Array.from({ length: mine }, () => 'facilitator-1') } : t)),
+        });
+      });
+      vi.mocked(Date.now).mockReturnValue(Date.now() + 5_000);
+    };
+    const landOne = () => act(() => { animations.shift()?.onfinish?.(); });
+    const ring = () => card('t1').classList.contains('fx-ring');
+    const clearRing = () => card('t1').classList.remove('fx-ring');
+
+    it('keeps the card held until the second of two quick votes has landed', async () => {
+      allowMotion();
+      const fromServer = captureServerStates();
+      await renderSession(createSession({}, { maxVotes: 6 }));
+      pastTheQuietSeconds();
+      const plus = within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' });
+      await userEvent.click(plus);
+      await userEvent.click(plus);
+      expect(animations).toHaveLength(2);
+
+      // The first token lands and plays its own marks; the second is still flying.
+      landOne();
+      expect(ring()).toBe(true);
+      clearRing();
+      // The server agrees with both votes, then says the viewer has a third
+      // (cast from their other browser): news the board would mark, if the
+      // card were not held for the token on its way.
+      serverSays(fromServer, 5, 2);
+      serverSays(fromServer, 6, 3);
+      expect(within(card('t1')).getByText('You gave it 3 votes')).toBeTruthy();
+      expect(ring()).toBe(false);
+
+      // The second lands: the card is let go, and the next news is marked.
+      landOne();
+      expect(ring()).toBe(true);
+      clearRing();
+      serverSays(fromServer, 7, 4);
+      expect(within(card('t1')).getByText('You gave it 4 votes')).toBeTruthy();
+      expect(ring()).toBe(true);
+    });
+
+    it('keeps the card held until the second of two votes taken back is home', async () => {
+      allowMotion();
+      const fromServer = captureServerStates();
+      await renderSession(createSession({
+        tickets: [{ id: 't1', colId: 'col-1', text: 'Great teamwork', authorId: 'p1', groupId: null, votes: ['facilitator-1', 'facilitator-1', 'facilitator-1'] }],
+        groups: [],
+      }, { maxVotes: 6 }));
+      pastTheQuietSeconds();
+      const minus = within(card('t1')).getByRole('button', { name: 'Remove a vote from this ticket' });
+      await userEvent.click(minus);
+      await userEvent.click(minus);
+      expect(animations).toHaveLength(2);
+
+      // One token is home (a vote taken back rings nothing), the other still flies.
+      landOne();
+      expect(ring()).toBe(false);
+      serverSays(fromServer, 5, 1);
+      serverSays(fromServer, 6, 2);
+      expect(within(card('t1')).getByText('You gave it 2 votes')).toBeTruthy();
+      expect(ring()).toBe(false);
+
+      landOne();
+      serverSays(fromServer, 7, 3);
+      expect(within(card('t1')).getByText('You gave it 3 votes')).toBeTruthy();
+      expect(ring()).toBe(true);
+    });
   });
 
   it('shakes the budget when a vote is refused for lack of votes, and sends nothing flying', async () => {

@@ -181,7 +181,7 @@ describe('planTeamRestore — a team that still exists', () => {
   });
 });
 
-// Each member's avatar (PLAN.md section 18.1): a choice is the person's, made
+// Each member's avatar (AGENTS.md, *Avatars*): a choice is the person's, made
 // since the backup or not, and rolling it back would put an older avatar on
 // everyone's screen with a date that loses to nothing. A team deleted since
 // the backup has no current map and comes back with the archive's.

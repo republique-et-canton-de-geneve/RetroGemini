@@ -41,7 +41,7 @@ const FIELD =
 const LABEL = 'block text-sm font-semibold text-slate-700 mb-1.5';
 const HINT = 'text-xs text-slate-500 mt-1.5';
 const PRIMARY =
-  'w-full inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 font-semibold text-white hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] transition';
+  'w-full inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 font-semibold text-white hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 transition';
 const SECONDARY =
   'rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-colors aria-disabled:opacity-60 aria-disabled:cursor-wait';
 // "Back", a quiet button at the top of a view.
@@ -671,7 +671,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                     {infoMessage && <Message tone="notice" preWrap>{infoMessage}</Message>}
                     <div className="flex justify-between items-center gap-3 mb-5">
                         <h2 ref={listHeadingRef} tabIndex={-1} className={`${TITLE} outline-hidden`}>{t('login.list.title')}</h2>
-                        <button onClick={() => { setView('CREATE'); setName(''); setPassword(''); setError(null); }} className="shrink-0 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] transition">
+                        <button onClick={() => { setView('CREATE'); setName(''); setPassword(''); setError(null); }} className="shrink-0 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 transition">
                             {t('login.list.newTeam')}
                         </button>
                     </div>

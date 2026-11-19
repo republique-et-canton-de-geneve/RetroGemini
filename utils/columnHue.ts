@@ -7,7 +7,7 @@ import type { Column } from '../types';
  * A column's colour is data. Columns written since custom colours exist carry
  * a hex in `customColor`; custom templates saved by older releases carry only
  * Tailwind classes (`bg-emerald-50`, `text-emerald-700`), and they would draw
- * white cards if only the hex were read (decision D15). Their hue is read here,
+ * white cards if only the hex were read (AGENTS.md, *A card's colour*). Their hue is read here,
  * at render time, through a fixed table; nothing is written back.
  */
 

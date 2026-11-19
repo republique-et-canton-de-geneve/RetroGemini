@@ -121,7 +121,7 @@ test.describe('template language', () => {
 test.describe('headers fit in both languages', () => {
   const WIDTHS = [320, 390, 768, 1024, 1280];
 
-  // The fonts are awaited first (decision D11): a header measured in the
+  // The fonts are awaited first (AGENTS.md, *Headers are measured*): a header measured in the
   // fallback font before Geist arrives says nothing about the one people see.
   const measure = (page: Page) =>
     page.evaluate(async () => {
@@ -214,7 +214,7 @@ test.describe('headers fit in both languages', () => {
           expect(m.invite, `invite in view, ${where}`).toBe(true);
           expect(m.timer, `timer play button in view, ${where}`).toBe(true);
           expect(m.backTappable, `back arrow is what a tap hits, ${where}`).toBe(true);
-          // A facilitator's header shows their avatar from 360px (decision D10;
+          // A facilitator's header shows their avatar from 360px (AGENTS.md, *Avatars*;
           // a participant's at every width), and wherever it is drawn it fits.
           // The health check's header follows the same rule.
           if (width >= 360) expect(m.avatar, `own avatar in view, ${where}`).toBe(true);
@@ -287,7 +287,7 @@ test.describe('headers fit in both languages', () => {
     await page.setViewportSize({ width: 1280, height: 900 });
   };
 
-  // The viewer's own avatar opens the avatar picker (decision D10): asserted in
+  // The viewer's own avatar opens the avatar picker (AGENTS.md, *Avatars*): asserted in
   // French, the longer language, where a phone has the least room.
   const assertPickerOpens = async (page: Page, where: string, widths: readonly number[]) => {
     for (const width of widths) {

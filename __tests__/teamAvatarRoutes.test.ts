@@ -23,7 +23,7 @@ vi.mock('../utils/avatars.js', async (importOriginal) => {
 });
 
 /**
- * One person's avatar, written by one narrow route (PLAN.md section 18.1).
+ * One person's avatar, written by one narrow route (AGENTS.md, *Avatars*).
  *
  * The choice lives under `memberAvatars`, a top-level key of the team record,
  * and not on the member row: `/members` replaces the rows wholesale with
@@ -433,6 +433,49 @@ describe('POST /api/team/:teamId/member/avatar', () => {
       await flush();
       expect(liveSessionPatch).not.toHaveBeenCalled();
     });
+
+    // The entry the patch would carry is decided inside the team's update. A
+    // write the store then refuses stored nothing, and stamps no session: a
+    // room shown a picture the team does not hold would lose it at the next
+    // state from anyone whose copy of the team is the stored one.
+    it('answers a write the store refused as a 500 with its code, and stamps no session', async () => {
+      const update = dataStore.atomicTeamUpdate;
+      dataStore.atomicTeamUpdate = async (id: string, updater: (team: Team) => Team | null) => {
+        updater(structuredClone(stored()));
+        return { success: false, error: 'max_retries_exceeded' };
+      };
+      try {
+        const res = await pick({ memberId: 'p1', avatar: 'fox', sessionId: 'retro-1' });
+        expect(res.status).toBe(500);
+        expect(await res.json()).toEqual({ error: 'max_retries_exceeded' });
+        await flush();
+        expect(liveSessionPatch).not.toHaveBeenCalled();
+        expect(stored().memberAvatars).toBeUndefined();
+      } finally {
+        dataStore.atomicTeamUpdate = update;
+      }
+    });
+
+    it("answers a store that throws as a 500 with the route's own code, never the error's words", async () => {
+      const update = dataStore.atomicTeamUpdate;
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      dataStore.atomicTeamUpdate = async () => {
+        throw new Error('connect ECONNREFUSED 10.0.0.7:5432');
+      };
+      try {
+        const res = await pick({ memberId: 'p1', avatar: 'fox', sessionId: 'retro-1' });
+        expect(res.status).toBe(500);
+        const body = await res.json();
+        expect(body).toEqual({ error: 'failed_to_update' });
+        await flush();
+        expect(liveSessionPatch).not.toHaveBeenCalled();
+        // The detail goes to the log, not to the caller.
+        expect(logged).toHaveBeenCalled();
+      } finally {
+        dataStore.atomicTeamUpdate = update;
+        logged.mockRestore();
+      }
+    });
   });
 });
 
@@ -460,6 +503,36 @@ describe('stampParticipantAvatar', () => {
     const newer = session([{ ...ada, avatar: 'owl', avatarAt: 9000 }]);
     expect(stampParticipantAvatar(newer, 'p1', { id: 'fox', at: 5000 })).toBeNull();
     expect(stampParticipantAvatar(newer, 'p1', { id: 'fox', at: 9000 })).toBeNull();
+  });
+
+  // A participant entry is data any client of the session writes, its
+  // avatar's time included. The route dates its stamps with this server's
+  // clock (and never before the choice they replace), so a stamp far ahead of
+  // both the clock and the choice being stamped is not one the route wrote.
+  // Left to outrank every real one, it kept each later pick of that person
+  // out of the session for as long as the session lived.
+  it("replaces a stamp dated far ahead of the server's clock, which no pick can have written", () => {
+    const now = 1_000_000_000;
+    const planted = session([{ ...ada, avatar: 'owl', avatarAt: now + 60 * 60_000 }]);
+    expect(stampParticipantAvatar(planted, 'p1', { id: 'fox', at: now }, now).participants[0]).toEqual({ ...ada, avatar: 'fox', avatarAt: now });
+    expect(stampParticipantAvatar(session([{ ...ada, avatar: 'owl', avatarAt: Number.MAX_SAFE_INTEGER }]), 'p1', { id: null, at: now }, now).participants[0])
+      .toEqual({ ...ada, avatar: null, avatarAt: now });
+  });
+
+  it('keeps a stamp a little ahead of this clock: another pod wrote it, for a newer pick', () => {
+    const now = 1_000_000_000;
+    const ahead = session([{ ...ada, avatar: 'owl', avatarAt: now + 60_000 }]);
+    expect(stampParticipantAvatar(ahead, 'p1', { id: 'fox', at: now }, now)).toBeNull();
+  });
+
+  // Choices dated ahead of the clock themselves (a record brought from a
+  // deployment whose clock ran ahead): two picks stamped out of order still
+  // end on the newer one.
+  it('still orders two stamps that are both ahead of the clock', () => {
+    const now = 1_000_000_000;
+    const far = now + 24 * 60 * 60_000;
+    const newer = session([{ ...ada, avatar: 'owl', avatarAt: far + 2 }]);
+    expect(stampParticipantAvatar(newer, 'p1', { id: 'fox', at: far + 1 }, now)).toBeNull();
   });
 
   it('reads a stamp that is not a finite number as older than any choice', () => {

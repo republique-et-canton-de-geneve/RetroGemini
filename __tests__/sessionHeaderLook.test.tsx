@@ -155,7 +155,7 @@ describe('the controls of the bar', () => {
 
 describe("the viewer's own avatar", () => {
   it('shows for a participant at every width', () => {
-    // Decision D10: the avatar picker opens from it, phones included.
+    // The avatar picker opens from it, phones included (AGENTS.md, *Avatars*).
     renderHeader(alice);
     const avatar = screen.getByRole('button', { name: 'AL, Alice Roux, choose my avatar' });
     expect(visibilityChain(avatar)).not.toContain('hidden');

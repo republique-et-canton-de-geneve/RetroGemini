@@ -222,7 +222,7 @@ const SessionHeader: React.FC<Props> = ({
         <span className="text-xs font-medium text-slate-500">{t('phases.header.user')}</span>
         <span className="max-w-32 truncate text-sm font-semibold text-slate-900" title={currentUser.name}>{currentUser.name}</span>
       </div>
-      {/* The viewer's own avatar opens the avatar picker (decision D10): at
+      {/* The viewer's own avatar opens the avatar picker (AGENTS.md, *Avatars*): at
           every width for a participant, from 360px for a facilitator, whose
           header also carries the invite button and play. */}
       <ViewerAvatarButton

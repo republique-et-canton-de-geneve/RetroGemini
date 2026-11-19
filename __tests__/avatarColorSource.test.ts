@@ -371,18 +371,24 @@ describe('what the guard catches, on fixtures', () => {
 
   // Every shape below exists in the components today. Each must stay legal,
   // or the guard would be switched off rather than kept.
-  it('accepts the colour functions, a style or key, a roster copy and a colour-map lookup', () => {
+  it('accepts the colour functions, a style or key and a roster copy', () => {
     const text = `
       const measured = avatarColorClasses(currentUser.color);
       const merged = { ...p, name: member.name, email: member.email, color: member.color };
       const seeded = { id, color: member?.color || PARTICIPANT_COLOR_POOL[0] };
       const kept = { id, color: member.color ?? PARTICIPANT_COLOR_POOL[0] };
-      const cardBgHex = TAILWIND_COLOR_MAP[author.color] || null;
       const Row = ({ layer, u }) => (
         <div key={layer.color} style={{ backgroundColor: layer.color }} className={avatarColorClasses(u.color)}>
           <Dots colorClass={participantColorClass(u.color)} />
         </div>
       );`;
     expect(rulesIn(text)).toEqual([]);
+  });
+
+  // Rule 4's map key. No component writes one since 45.0 (the board's map of
+  // card colours went with the tints), and the shape stays legal: a colour
+  // used to look a value up reaches no class by itself.
+  it('accepts a colour used as the key of a map', () => {
+    expect(rulesIn('const cardBgHex = TONES_BY_COLOUR[author.color] || null;')).toEqual([]);
   });
 });

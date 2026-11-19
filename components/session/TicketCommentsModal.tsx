@@ -241,7 +241,7 @@ const TicketCommentsModal: React.FC<Props> = ({
           <button
             onClick={handleSubmit}
             disabled={!canSend}
-            className={`w-9 h-9 shrink-0 flex items-center justify-center rounded-full transition ${canSend ? 'bg-indigo-600 text-white hover:bg-indigo-700 motion-safe:active:scale-[0.97]' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}`}
+            className={`w-9 h-9 shrink-0 flex items-center justify-center rounded-full transition ${canSend ? 'bg-indigo-600 text-white hover:bg-indigo-700 enabled:active:bg-indigo-800' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}`}
             title={t('session.comments.sendTitle')}
             data-testid="submit-comment-btn"
             aria-label={t('session.comments.sendAria')}

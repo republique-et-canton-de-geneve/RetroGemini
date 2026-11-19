@@ -4,7 +4,7 @@ import { isAcceptedAvatarId, isMemberAvatarEntry, memberAvatar } from '../../uti
 import { NO_OP_LIVE_SESSION_PATCH } from '../services/liveSessionRename.js';
 
 /**
- * One person's avatar (PLAN.md section 18.1).
+ * One person's avatar (AGENTS.md, *Avatars*).
  *
  * The choice is `memberAvatars[memberId] = { id, at }` on the team record — a
  * top-level key, not a field of the member row, because `/members` replaces
@@ -90,20 +90,32 @@ const nextMemberAvatars = (team, memberId, avatar, now, { max = MEMBER_AVATARS_M
 
 const toAnsweredMap = (team) => Object.fromEntries(validEntriesOf(team));
 
+// How far ahead of this pod's clock a stamp another pod wrote can be: the
+// difference between two pods' clocks, with room to spare.
+const STAMP_CLOCK_SLACK_MS = 5 * 60 * 1000;
+
 /**
  * The live session with `memberId`'s participant copy stamped with `entry`,
  * or `null` when there is nothing to change: no such participant (nobody is
  * added here), or a copy whose stamp is as new or newer. A new session and a
  * new entry object; the others are kept as they were. The team check is the
  * patch's own (`createLiveSessionPatch`).
+ *
+ * A participant entry is data: every client of the session writes it, its
+ * avatar's time included. This route dates its stamps with the server's clock
+ * (never before the choice they replace), so a stored stamp far ahead of both
+ * `now` and the choice being stamped is not one it wrote, and does not
+ * outrank it. Left to stand, such a stamp kept every later pick of that
+ * person out of the session for as long as the session lived.
  */
-const stampParticipantAvatar = (session, memberId, entry) => {
+const stampParticipantAvatar = (session, memberId, entry, now = Date.now()) => {
   if (!session || !Array.isArray(session.participants)) return null;
   const index = session.participants.findIndex((participant) => participant && participant.id === memberId);
   if (index === -1) return null;
   const participant = session.participants[index];
   const stampedAt = typeof participant.avatarAt === 'number' && Number.isFinite(participant.avatarAt) ? participant.avatarAt : 0;
-  if (stampedAt >= entry.at) return null;
+  const writtenHere = stampedAt <= Math.max(now, entry.at) + STAMP_CLOCK_SLACK_MS;
+  if (writtenHere && stampedAt >= entry.at) return null;
   const participants = [...session.participants];
   participants[index] = { ...participant, avatar: entry.id, avatarAt: entry.at };
   return { ...session, participants };

@@ -50,11 +50,33 @@ const mix = (a: Rgb, b: Rgb, shareOfA: number): string =>
 const HEX_COLOUR = /^#?[0-9a-f]{6}$/i;
 
 /**
- * The tones of a card for one stored colour, or `null` for a value that is not
- * a six-digit hex: the caller then draws the default white card.
+ * The answers already computed, by colour as it was asked. Every card asks at
+ * every draw, and an answer searches up to a hundred candidate inks: on a
+ * board of a thousand cards that was about 50 ms of each draw. A session
+ * shows a handful of colours (its columns, or the eight people), so the same
+ * few answers are handed out again; any hex can be picked, so the memory is
+ * bounded and emptied when it is full.
  */
-export function cardTones(colour: string | null | undefined): CardTones | null {
+const KNOWN_TONES = new Map<string, Readonly<CardTones>>();
+const KNOWN_TONES_MAX = 256;
+
+/**
+ * The tones of a card for one stored colour, or `null` for a value that is not
+ * a six-digit hex: the caller then draws the default white card. The answer is
+ * shared and frozen: read it, never edit it.
+ */
+export function cardTones(colour: string | null | undefined): Readonly<CardTones> | null {
   if (typeof colour !== 'string' || !HEX_COLOUR.test(colour)) return null;
+  const known = KNOWN_TONES.get(colour);
+  if (known) return known;
+  const tones = computeTones(colour);
+  if (!tones) return null;
+  if (KNOWN_TONES.size >= KNOWN_TONES_MAX) KNOWN_TONES.clear();
+  KNOWN_TONES.set(colour, tones);
+  return tones;
+}
+
+function computeTones(colour: string): Readonly<CardTones> | null {
   const hue = hexToRgb(colour);
   if (!hue) return null;
 
@@ -75,5 +97,5 @@ export function cardTones(colour: string | null | undefined): CardTones | null {
     }
   }
 
-  return { tint, tintStrong, line, ink };
+  return Object.freeze({ tint, tintStrong, line, ink });
 }

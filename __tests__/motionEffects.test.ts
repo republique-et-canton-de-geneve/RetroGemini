@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { motionAllowed, playEffect } from '../components/common/motion/effects';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { EFFECT_LENGTH_MS, motionAllowed, playEffect } from '../components/common/motion/effects';
 
 /**
  * `playEffect` puts an effect class of index.css on an element for one
@@ -137,5 +139,45 @@ describe('playEffect', () => {
     const detached = document.createElement('div');
     expect(playEffect(detached, 'fx-pop')).toBe(false);
     expect(detached.className).toBe('');
+  });
+});
+
+/**
+ * `playEffect` takes a class off at its animation's end, with a timeout as a
+ * net: the effect's length from the table plus a margin. The table is a copy
+ * of what `index.css` declares, so an animation lengthened in the stylesheet
+ * alone would be cut off by the net, with nothing reporting it. This reads the
+ * stylesheet and compares.
+ */
+describe('the lengths playEffect waits for', () => {
+  const css = readFileSync(join(__dirname, '..', 'index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const ms = (time: string) => (time.endsWith('ms') ? Number.parseFloat(time) : Number.parseFloat(time) * 1000);
+
+  /** Each `.fx-*` rule that declares an animation: its class, and the animation's whole length (ms), or Infinity. */
+  const declared = (): Array<{ effect: string; length: number }> =>
+    [...css.matchAll(/\.(fx-[a-z-]+)(?:::?[a-z-]+)?\s*\{([^}]*)\}/g)].flatMap(([, effect, body]) => {
+      const shorthand = /(?:^|;)\s*animation:\s*([^;]+);/.exec(body)?.[1];
+      if (!shorthand) return [];
+      const words = shorthand.trim().split(/\s+/);
+      const times = words.filter((word) => /^[\d.]+m?s$/.test(word)).map(ms);
+      const repeats = words.includes('infinite') ? Infinity : Number(words.find((word) => /^\d+$/.test(word)) ?? 1);
+      const [duration = 0, delay = 0] = times;
+      return [{ effect, length: duration * repeats + delay }];
+    });
+
+  it('reads every effect of the stylesheet', () => {
+    const effects = new Set(declared().map(({ effect }) => effect));
+    expect(effects.size).toBeGreaterThan(10);
+    for (const effect of ['fx-card-in', 'fx-ring', 'fx-person-in', 'fx-halo', 'fx-reveal', 'fx-dialog-in']) expect(effects).toContain(effect);
+    // A delay and a repeat are counted: two pulses of 0.9s after 0.3s.
+    expect(declared().find(({ effect }) => effect === 'fx-halo')?.length).toBe(2100);
+  });
+
+  it('are the lengths index.css declares, the longest animation of each effect', () => {
+    const longest = new Map<string, number>();
+    for (const { effect, length } of declared()) longest.set(effect, Math.max(longest.get(effect) ?? 0, length));
+    // An effect that never ends is a state React draws (the writing pencil), not one playEffect plays.
+    const finite = [...longest].filter(([, length]) => Number.isFinite(length));
+    expect(Object.fromEntries(finite)).toEqual({ ...EFFECT_LENGTH_MS });
   });
 });

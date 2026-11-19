@@ -45,6 +45,14 @@ export const RECONNECT_QUIET_MS = 3000;
 export const REVEAL_STEP_MS = 80;
 /** ...and the last one starts within this (ms). */
 export const REVEAL_CAP_MS = 600;
+/**
+ * At most this many cards are unblurred at once, of those in the window. The
+ * reveal is the one effect that grows with the board: a blur and a fade on
+ * every hidden card, hundreds on a board kept for weeks, most of them far
+ * below the screen. A card outside the window, or past this number, is simply
+ * shown, as it is to a reader who asked for less motion.
+ */
+export const MAX_REVEALED_AT_ONCE = 60;
 
 /** Ids of the cards this client created and the server has not confirmed: a set, or the session's map of them. */
 type PendingIds = ReadonlySet<string> | ReadonlyMap<string, unknown>;
@@ -105,6 +113,18 @@ const ringOptions = (item: Element) => {
     return colour && !TRANSPARENT.test(colour.trim()) ? { properties: { '--fx-ring': colour } } : {};
   } catch {
     return {};
+  }
+};
+
+/** Whether any of an element's box is inside the window. An element that cannot be measured counts as in. */
+const inWindow = (element: Element): boolean => {
+  try {
+    const box = element.getBoundingClientRect();
+    const width = window.innerWidth || document.documentElement.clientWidth;
+    const height = window.innerHeight || document.documentElement.clientHeight;
+    return box.bottom >= 0 && box.right >= 0 && box.top <= height && box.left <= width;
+  } catch {
+    return true;
   }
 };
 
@@ -181,6 +201,17 @@ export function playSessionMotion(
   const groups = indexBy(root, MOTION_HOOKS.group);
   const first = (index: Map<string, Element[]>, id: string) => index.get(id)?.[0] ?? null;
 
+  // Measured before any effect is put on: a class written first would have
+  // the browser lay the page out again for each box read after it.
+  const shown: Element[] = [];
+  for (const id of motion.revealedCards) {
+    if (shown.length >= MAX_REVEALED_AT_ONCE) break;
+    const card = first(cards, id);
+    if (!card || !inWindow(card)) continue;
+    const text = partOf(card, CARD_TEXT_SELECTOR);
+    if (text) shown.push(text);
+  }
+
   for (const id of [...motion.arrivedCards, ...motion.ownCards]) {
     const card = first(cards, id);
     if (!card) continue;
@@ -188,10 +219,6 @@ export function playSessionMotion(
     playEffect(card, 'fx-ring', ringOptions(card));
   }
 
-  const shown = motion.revealedCards
-    .map((id) => first(cards, id))
-    .map((card) => (card ? partOf(card, CARD_TEXT_SELECTOR) : null))
-    .filter((text): text is Element => !!text);
   staggerDelays(shown.length, REVEAL_STEP_MS, REVEAL_CAP_MS).forEach((delay, index) => {
     playEffect(shown[index], 'fx-reveal', { properties: { '--fx-delay': `${delay}ms` } });
   });

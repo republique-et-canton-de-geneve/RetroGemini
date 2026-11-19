@@ -249,7 +249,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                             // are colours a test can measure, not an opacity.
                             className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
                               canAccept
-                                ? 'bg-indigo-600 text-white hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97]'
+                                ? 'bg-indigo-600 text-white hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800'
                                 : 'bg-slate-200 text-slate-600 cursor-not-allowed'
                             }`}
                           >
@@ -342,7 +342,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                 onClick={handleAcceptAll}
                 // White on emerald-500 measured 2.54:1: the footer's main
                 // action takes the brand, like every primary button.
-                className="text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] px-3 py-1.5 rounded-lg transition"
+                className="text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 px-3 py-1.5 rounded-lg transition"
               >
                 {t('session.aiGroups.acceptAllRemaining')}
               </button>

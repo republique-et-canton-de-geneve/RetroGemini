@@ -209,7 +209,7 @@ describe('the header is the retrospective header', () => {
     renderSession(createSession(), alice);
     const avatar = document.querySelector('[data-viewer-avatar]') as HTMLElement;
     expect(avatar.className.split(/\s+/)).not.toContain('hidden');
-    // The picker's opener, named by the person (decision D10).
+    // The picker's opener, named by the person (AGENTS.md, *Avatars*).
     expect(avatar.tagName).toBe('BUTTON');
     expect(avatar.getAttribute('aria-label')).toBe('AL, Alice, choose my avatar');
   });

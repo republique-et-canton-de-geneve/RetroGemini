@@ -250,6 +250,24 @@ by one route, `POST /api/team/:teamId/member/avatar`.
   cannot know: a credential names a team, not a person. "Your own avatar" is a
   rule of the screens. The harm is bounded to a picture from the list below,
   shown beside a member's name, and the next choice replaces it.
+- **Inside a session, a participant can change the picture shown for another
+  participant there.** A live session's participant list is written by every
+  client of the session, like its cards, and each entry carries a copy of its
+  person's choice and of the time it was made. A client can therefore put any
+  picture of the list, with any time, on another person's entry in that
+  session, as it already can a name or a colour. The team's own record is out
+  of its reach (only the route writes it), nothing but a picture of the list
+  is ever drawn, and no other session or screen shows what was planted. A
+  later choice of the person replaces it: any choice, when the planted time
+  is not ahead of that choice; and for a time planted ahead of the clock, a
+  choice made in that session, where the route's stamp replaces a time more
+  than five minutes ahead of the server's clock (no choice wrote it). A time
+  planted less than five minutes ahead stands until it has passed: that is
+  how far two servers' clocks are allowed to differ. A choice made elsewhere
+  does not reach that session while a planted time is ahead of it. The browsers compare the two times and never judge one by
+  their own clock: a browser whose clock is wrong would otherwise write over
+  a newer choice made in the person's other browser, and the two would undo
+  each other without end.
 - **The id is checked against a closed list and refused, never coerced.** An
   avatar id is one of the application's own ids (`utils/avatars.js`), or `null`
   for none; anything else is answered `400 invalid_avatar`. The map is rebuilt
@@ -266,7 +284,9 @@ by one route, `POST /api/team/:teamId/member/avatar`.
 - **An anonymous session shows no chosen avatar.** One resolver decides what a
   session draws and answers nothing while the session is anonymous, because a
   picture beside a card would say who wrote it; a source test refuses any other
-  read of an avatar in the components.
+  read of an avatar in the components. This is what the screens show, like
+  the rest of an anonymous session: its data still carries each participant's
+  entry, avatar included, as it carries each card's author.
 - **Nothing of it is in a URL or a log.** The choice travels in the request
   body, and the route logs no member id, avatar id or choice: a failure logs
   the error alone. A choice is not a privileged action and writes no row to the

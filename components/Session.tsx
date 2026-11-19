@@ -137,7 +137,7 @@ import { avatarColorClasses, participantToneHex } from '../utils/participantColo
 import Avatar from './common/Avatar';
 import AvatarPicker from './common/AvatarPicker';
 import { useOwnAvatar } from './session/useOwnAvatar';
-import { sessionAvatarOf, viewerInitials } from './session/sessionAvatars';
+import { sessionAvatarOf, stampOwnAvatarEntry, viewerInitials } from './session/sessionAvatars';
 
 const generateLocalId = () => randomId();
 
@@ -1556,6 +1556,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       updaterBase = JSON.parse(JSON.stringify(newSession));
     }
     updater(newSession);
+    // The viewer's own entry carries their avatar from the write that adds
+    // them: sent in a write of its own right behind, it left from the same
+    // revision as this one, and the server refused one of the two.
+    stampOwnAvatarEntry(newSession, team, currentUser.id);
     claimOwnChanges(updaterBase, newSession);
     dataService.updateSession(team.id, newSession);
     dataService.persistParticipants(team.id, newSession.participants);
@@ -1574,6 +1578,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     updateSession,
     canWrite: isLive && !deniedReason,
     onTeamAvatars,
+    // The presence write below goes out once on entering, whatever the
+    // session holds, and carries the entry.
+    entersWithAWrite: () => !presenceBroadcasted.current,
   });
 
   // A vote of the viewer's, added or taken back by `write`, and the motion
@@ -1596,12 +1603,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           ? voteFlightStart()?.getBoundingClientRect() ?? null
           : voteTargetOf(document, itemId)?.count?.lastElementChild?.getBoundingClientRect() ?? null;
       const written = write();
+      // Nothing was written (the session reconnects, and edits made offline
+      // are dropped): the vote stands as it was, and nothing follows it. Read
+      // as "no vote of mine left", a vote taken back queued its token's
+      // flight home and held its marks, played at the next state.
+      if (!written) return;
       const after = mine(written);
       if (add ? after > before : after < before) {
           if (!flies) return;
           holdVote(itemId);
           afterDrawRef.current.push(() => flyVote(itemId, add, from));
-      } else if (add && written && voteBudget(written.settings) - (votesCastByVoter(written).get(currentUser.id) ?? 0) <= 0) {
+      } else if (add && voteBudget(written.settings) - (votesCastByVoter(written).get(currentUser.id) ?? 0) <= 0) {
           shakeVoteBudget();
       }
   };
@@ -3938,7 +3950,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                 else if(mode === 'GROUP') setPhase('VOTE');
                                 else if(mode === 'VOTE') setPhase('DISCUSS');
                             }} 
-                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] transition"
+                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 transition"
                        >
                            {tr('session.board.nextPhase')}
                        </button>

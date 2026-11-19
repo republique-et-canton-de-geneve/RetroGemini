@@ -2,7 +2,14 @@ import React from 'react';
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Group, RetroSession, Ticket } from '../types';
-import { MOTION_HOOKS, RECONNECT_QUIET_MS, playLandedVote, useSessionMotion } from '../components/session/useSessionMotion';
+import {
+  MAX_REVEALED_AT_ONCE,
+  MOTION_HOOKS,
+  RECONNECT_QUIET_MS,
+  REVEAL_CAP_MS,
+  playLandedVote,
+  useSessionMotion,
+} from '../components/session/useSessionMotion';
 
 /**
  * The hook compares the session it showed with the one it shows and puts the
@@ -87,6 +94,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  // A spy a test put on a prototype (the cards' boxes) never outlives it,
+  // whether its assertions passed or not.
+  vi.restoreAllMocks();
   window.matchMedia = originalMatchMedia;
 });
 
@@ -127,6 +137,42 @@ describe('useSessionMotion', () => {
     expect(delays).toEqual(['0ms', '80ms', '160ms']);
     // One's own card was never hidden from oneself.
     expect(card('mine').querySelector('.whitespace-pre-wrap')!.classList.contains('fx-reveal')).toBe(false);
+  });
+
+  // The reveal is the one effect that grows with the board: a blur and a fade
+  // on every hidden card at once. On a board kept for weeks that is hundreds
+  // of them, most far below the screen, each a filter the phone must paint.
+  // Only the cards in the window are unblurred; the others are simply shown.
+  it('unblurs only the hidden cards that are in the window', () => {
+    const tickets = [ticket('a'), ticket('below'), ticket('c'), ticket('above'), ticket('aside')];
+    const { show } = mount(session({ settings: { revealBrainstorm: false } as RetroSession['settings'], tickets }));
+    const box = (top: number, left = 20): DOMRect =>
+      ({ top, left, bottom: top + 80, right: left + 300, width: 300, height: 80, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+    const outside: Record<string, DOMRect> = {
+      below: box(window.innerHeight + 400),
+      above: box(-900),
+      aside: box(100, window.innerWidth + 50),
+    };
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return outside[this.getAttribute(MOTION_HOOKS.card) ?? ''] ?? box(100);
+    });
+    show(session({ settings: { revealBrainstorm: true } as RetroSession['settings'], tickets }));
+    const words = (id: string) => card(id).querySelector('.whitespace-pre-wrap') as HTMLElement;
+    expect(['a', 'c'].map((id) => words(id).classList.contains('fx-reveal'))).toEqual([true, true]);
+    // The stagger counts the cards that play, not the ones left still.
+    expect(['a', 'c'].map((id) => words(id).style.getPropertyValue('--fx-delay'))).toEqual(['0ms', '80ms']);
+    expect(['below', 'above', 'aside'].map((id) => words(id).classList.contains('fx-reveal'))).toEqual([false, false, false]);
+  });
+
+  it('unblurs a bounded number of cards however many a window holds, the last within the cap', () => {
+    expect(MAX_REVEALED_AT_ONCE).toBeGreaterThan(10);
+    const many = Array.from({ length: MAX_REVEALED_AT_ONCE + 15 }, (_, index) => ticket(`n${index}`));
+    const { show } = mount(session({ settings: { revealBrainstorm: false } as RetroSession['settings'], tickets: many }));
+    show(session({ settings: { revealBrainstorm: true } as RetroSession['settings'], tickets: many }));
+    const playing = many.filter((t) => card(t.id).querySelector('.whitespace-pre-wrap')!.classList.contains('fx-reveal')).map((t) => t.id);
+    expect(playing).toEqual(many.slice(0, MAX_REVEALED_AT_ONCE).map((t) => t.id));
+    const delays = playing.map((id) => Number.parseFloat((card(id).querySelector('.whitespace-pre-wrap') as HTMLElement).style.getPropertyValue('--fx-delay')));
+    expect(Math.max(...delays)).toBeLessThanOrEqual(REVEAL_CAP_MS);
   });
 
   it('pops a new reaction and bumps one that gained a person', () => {

@@ -381,6 +381,24 @@ describe('the top bar', () => {
     expect(effectivePair(icon).ratio).toBeGreaterThanOrEqual(ICON);
   });
 
+  // A participant has no Dashboard: the bar's brand takes a facilitator there
+  // and takes a participant nowhere. App hands the bar an unconditional
+  // `onHome`, so this guard is the only thing between a participant's click
+  // on the team's name and the facilitator's screens.
+  it('takes a facilitator to the Dashboard from the team name, and a participant nowhere', () => {
+    const onHome = vi.fn();
+    const view = header({ onHome });
+    fireEvent.click(screen.getByText('Alpha Team'));
+    expect(onHome).toHaveBeenCalledTimes(1);
+    view.unmount();
+
+    const stay = vi.fn();
+    header({ currentUser: { ...user, role: 'participant' }, onHome: stay });
+    fireEvent.click(screen.getByText('Alpha Team'));
+    fireEvent.click(screen.getByText('RetroGemini'));
+    expect(stay).not.toHaveBeenCalled();
+  });
+
   it('shows the viewer as a named avatar, and no Logout or badge when not asked', () => {
     header({ onLogout: undefined, unreadCount: null });
     // The avatar opens the picker; named by the person, the name beside it being hidden on a phone.

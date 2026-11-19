@@ -140,8 +140,10 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
     setSaving(true);
     setError(null);
     setSaved(false);
+    let stored = false;
     try {
       await onPickRef.current(choice);
+      stored = true;
       chosenRef.current = choice;
       setChosen(choice);
       setSaved(true);
@@ -154,9 +156,13 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
       chosenRef.current = storedRef.current;
       setChosen(storedRef.current);
     }
+    // A pick that waited is dropped only when it is what this write just
+    // stored (a double click). After a refusal nothing was stored, and the
+    // mark is back on this browser's copy of the choice: the pick is written
+    // whatever it is, the marked picture included.
     const next = waiting.current;
     waiting.current = null;
-    if (next && next.choice !== chosenRef.current) {
+    if (next && !(stored && next.choice === choice)) {
       void write(next.choice);
       return;
     }
@@ -170,7 +176,11 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
       waiting.current = { choice };
       return;
     }
-    if (choice === chosenRef.current) return;
+    // The picture already marked is written too: the mark is this browser's
+    // copy of the choice, and can be older than what the server holds (a pick
+    // made since in another browser). The server writes nothing when it
+    // already holds it. Only a pick that waited behind a write is dropped,
+    // when it is the choice that write just stored (see `write`).
     void write(choice);
   };
 
@@ -297,7 +307,7 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
         <button
           type="button"
           onClick={onClose}
-          className={`shrink-0 px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] ${FOCUS_RING}`}
+          className={`shrink-0 px-4 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 ${FOCUS_RING}`}
         >
           {t('avatars.picker.done')}
         </button>

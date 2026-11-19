@@ -124,15 +124,41 @@ describe('AvatarPicker', () => {
     expect(screen.getAllByRole('tab').map((tab) => tab.tabIndex)).toEqual([0, -1, -1, -1, -1, -1]);
   });
 
-  it('writes once per click, and nothing for the choice already held', async () => {
+  it('writes once per click', async () => {
     const { onPick } = renderPicker({ currentAvatarId: 'fox' });
-    fireEvent.click(screen.getByRole('button', { name: 'Fox' }));
-    expect(onPick).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
     expect(onPick).toHaveBeenCalledTimes(1);
     expect(onPick).toHaveBeenCalledWith('owl');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('true'));
     expect(screen.getByRole('button', { name: 'Fox' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  // The mark is this browser's copy of the choice, and can be older than the
+  // server's: picked since in another browser, from the dashboard, the choice
+  // reached no session this one is in. A click on the marked picture is the
+  // person's latest word, so it is written (the server writes nothing when it
+  // already holds it). Skipped as "already chosen", it left the other
+  // browser's pick in place for good.
+  it('writes a click on the picture already marked: the mark may be older than what the server holds', async () => {
+    const { onPick } = renderPicker({ currentAvatarId: 'fox' });
+    fireEvent.click(screen.getByRole('button', { name: 'Fox' }));
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(onPick).toHaveBeenCalledWith('fox');
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(en['avatars.picker.saved']));
+    expect(screen.getByRole('button', { name: 'Fox' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  // A double click is two clicks on one picture: the second waits for the
+  // first, and is the choice just stored by then.
+  it('writes a double click on one picture once', async () => {
+    const first = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    renderPicker({ onPick });
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    await act(async () => { first.resolve(); });
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(en['avatars.picker.saved']));
+    expect(onPick).toHaveBeenCalledTimes(1);
   });
 
   it('marks the grid busy while a write runs, and makes a second pick wait for it', async () => {
@@ -205,6 +231,77 @@ describe('AvatarPicker', () => {
     fireEvent.click(screen.getByRole('button', { name: /, My initials$/ }));
     expect(onPick).toHaveBeenCalledWith(null);
     await waitFor(() => expect(screen.getByRole('button', { name: /, My initials$/ }).getAttribute('aria-pressed')).toBe('true'));
+  });
+
+  // A pick made while a write runs waits for it. It is dropped only when it is
+  // the choice that write just stored (a double click); after a refusal
+  // nothing was stored, so the waiting pick is written whatever it is, the
+  // marked picture included: the mark went back to this browser's copy of the
+  // choice, which can be older than what the server holds.
+  it('writes the marked picture picked during a write that is then refused', async () => {
+    const first = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    renderPicker({ onPick, currentAvatarId: 'fox' });
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fox' }));
+    expect(onPick).toHaveBeenCalledTimes(1);
+    await act(async () => { first.reject(new Error(AVATAR_NOT_SAVED)); });
+    await waitFor(() => expect(onPick).toHaveBeenCalledTimes(2));
+    expect(onPick).toHaveBeenLastCalledWith('fox');
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(en['avatars.picker.saved']));
+    expect(screen.getByRole('button', { name: 'Fox' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('writes another picture picked during a write that is then refused', async () => {
+    const first = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    renderPicker({ onPick, currentAvatarId: 'fox' });
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cat' }));
+    await act(async () => { first.reject(new Error(AVATAR_NOT_SAVED)); });
+    await waitFor(() => expect(onPick).toHaveBeenCalledTimes(2));
+    expect(onPick).toHaveBeenLastCalledWith('cat');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cat' }).getAttribute('aria-pressed')).toBe('true'));
+  });
+
+  it('writes the marked picture picked during a write that lands: the person went back to it', async () => {
+    const first = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    renderPicker({ onPick, currentAvatarId: 'fox' });
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fox' }));
+    await act(async () => { first.resolve(); });
+    await waitFor(() => expect(onPick).toHaveBeenCalledTimes(2));
+    expect(onPick).toHaveBeenLastCalledWith('fox');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Fox' }).getAttribute('aria-pressed')).toBe('true'));
+    expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  // "My initials" is a choice like any picture: refused, the picture stored
+  // stays marked; picked while a write runs, it is written after it.
+  it('keeps the picture marked when a clear is refused, and says why', async () => {
+    const onPick = vi.fn(async () => { throw new Error(AVATAR_NOT_SAVED); });
+    renderPicker({ onPick, currentAvatarId: 'fox' });
+    fireEvent.click(screen.getByRole('button', { name: /My initials/ }));
+    expect((await screen.findByRole('alert')).textContent).toBe(en['errors.avatarNotSaved']);
+    expect(onPick).toHaveBeenCalledWith(null);
+    expect(screen.getByRole('button', { name: 'Fox' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: /My initials/ }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('writes a clear picked during a write once that write has settled', async () => {
+    const first = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    renderPicker({ onPick, currentAvatarId: 'fox' });
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    fireEvent.click(screen.getByRole('button', { name: /My initials/ }));
+    expect(onPick).toHaveBeenCalledTimes(1);
+    await act(async () => { first.resolve(); });
+    await waitFor(() => expect(onPick).toHaveBeenCalledTimes(2));
+    expect(onPick).toHaveBeenLastCalledWith(null);
+    await waitFor(() => expect(screen.getByRole('button', { name: /My initials/ }).getAttribute('aria-pressed')).toBe('true'));
+    expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('false');
   });
 
   it('follows a new current choice from its opener', () => {

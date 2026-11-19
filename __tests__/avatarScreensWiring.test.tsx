@@ -1,19 +1,22 @@
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Session from '../components/Session';
 import HealthCheckSession from '../components/HealthCheckSession';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
+import { SERVER_STAMP_WAIT_MS } from '../components/session/useOwnAvatar';
 import type { HealthCheckSession as HealthCheckSessionType, MemberAvatarChoice, RetroSession, Team, User } from '../types';
 
 /**
- * The avatars on the two session screens (PLAN 6 and 18.1), wired end to end
+ * The avatars on the two session screens (AGENTS.md, *Avatars*), wired end to end
  * in jsdom: every person drawn through `sessionAvatarOf` (a picture in a named
  * session, initials in an anonymous one or for an id this release does not
- * draw), the viewer's own entry written once on entering when the team holds a
- * newer choice, and the picker opened from the header's own avatar.
+ * draw), the viewer's own entry carrying the team's newer choice in the write
+ * that enters the session (one more write only where the screen sends none),
+ * left to the server after a pick made in the session, and the picker opened
+ * from the header's own avatar.
  */
 
 const handlers: { update: ((session: unknown) => void) | null } = { update: null };
@@ -234,21 +237,67 @@ describe.each<Kind>(['retro', 'health check'])('avatars on the %s screen', (kind
       expect(writes().filter((blob) => blob.participants?.some((p) => 'avatar' in p))).toEqual([]);
     });
 
-    it("writes one copy of the viewer's own entry with the team's newer choice, and nobody else's", () => {
+    // A retrospective always sends one write on entering (its presence), and
+    // that write carries the choice: a write of the avatar's own went out
+    // from the same revision, and the server refused one of the two. A health
+    // check sends none for a person it already lists, so the entry is its own
+    // write there.
+    it("carries the viewer's choice into the session with the team's newer choice, and nobody else's", () => {
       renderScreen(kind, team(undefined), sessionOf(kind));
       const baseline = writes().length;
       cleanup();
       vi.clearAllMocks();
 
       const { team: rendered } = renderScreen(kind, team(CHOICES), sessionOf(kind));
-      expect(writes().length).toBe(baseline + 1);
-      const sent = writes().find((blob) => blob.participants?.some((p) => p.id === 'me' && 'avatar' in p))!;
-      expect(sent.participants?.find((p) => p.id === 'me')).toMatchObject({ avatar: 'owl', avatarAt: 100 });
-      // Fran's entry is Fran's own client's to write.
-      expect(sent.participants?.find((p) => p.id === 'fran')).not.toHaveProperty('avatar');
+      expect(writes().length).toBe(kind === 'retro' ? baseline : baseline + 1);
+      expect(writes().length).toBeGreaterThan(0);
+      for (const sent of writes()) {
+        expect(sent.participants?.find((p) => p.id === 'me')).toMatchObject({ avatar: 'owl', avatarAt: 100 });
+        // Fran's entry is Fran's own client's to write.
+        expect(sent.participants?.find((p) => p.id === 'fran')).not.toHaveProperty('avatar');
+      }
       // A copy: the cached member rows never gain the field, and no roster post carries one.
       expect(rendered.members.every((member) => !('avatar' in member))).toBe(true);
       expect(me).not.toHaveProperty('avatar');
+    });
+
+    // Someone who is not in the session yet: the write that adds them carries
+    // their choice. It used to go out without it, and the avatar followed in
+    // a write of its own from the same revision: refused, healed, sent again.
+    it('adds a newcomer with their choice in the write that adds them, and sends no write more for it', () => {
+      renderScreen(kind, team(undefined), sessionOf(kind, { participants: [fran] }));
+      const baseline = writes().length;
+      expect(baseline).toBeGreaterThan(0);
+      cleanup();
+      vi.clearAllMocks();
+
+      renderScreen(kind, team(CHOICES), sessionOf(kind, { participants: [fran] }));
+      expect(writes().length).toBe(baseline);
+      for (const sent of writes()) {
+        expect(sent.participants?.find((p) => p.id === 'me')).toMatchObject({ avatar: 'owl', avatarAt: 100 });
+        expect(sent.participants?.find((p) => p.id === 'fran')).not.toHaveProperty('avatar');
+      }
+      expect(me).not.toHaveProperty('avatar');
+    });
+
+    // Someone the session lists and marked as having left, who comes back:
+    // the write that takes the mark off carries their choice. Sent first in a
+    // write of its own, the entry left from the same revision as that write,
+    // the server refused the second, and the mark stayed: nothing sends a
+    // lost "I am back" again.
+    it('takes the "has left" mark off and carries the choice in one write', () => {
+      const away = () => sessionOf(kind, { leftUsers: ['me'] });
+      renderScreen(kind, team(undefined), away());
+      const baseline = writes().length;
+      expect(baseline).toBe(1);
+      cleanup();
+      vi.clearAllMocks();
+
+      renderScreen(kind, team(CHOICES), away());
+      expect(writes()).toHaveLength(1);
+      const sent = writes()[0] as { participants?: User[]; leftUsers?: string[] };
+      expect(sent.leftUsers).toEqual([]);
+      expect(sent.participants?.find((p) => p.id === 'me')).toMatchObject({ avatar: 'owl', avatarAt: 100 });
     });
 
     it('writes nothing when the entry is already as new as the choice', () => {
@@ -271,6 +320,87 @@ describe.each<Kind>(['retro', 'health check'])('avatars on the %s screen', (kind
       expect(writes().length).toBe(after + 1);
       expect(writes().at(-1)!.participants?.find((p) => p.id === 'me')).toMatchObject({ avatar: 'cat', avatarAt: 200 });
       expect(pictures()).toContain('cat');
+    });
+  });
+
+  // The server stamps the entry of the session a pick was made in, right
+  // after it answers. Written by the client at once as well, the entry left
+  // from the revision that stamp was about to move, and the server refused
+  // one of the two on every pick.
+  describe('the own entry after a pick made in the session', () => {
+    // These run on a fake clock with a dialog open. The screen leaves on that
+    // clock and the clock runs dry before the real one comes back: jsdom
+    // starts its rendering interval with whatever `setInterval` is installed
+    // when the focus moves, and one left waiting on a clock that is gone
+    // never fires again (no animation frame for the rest of the file).
+    afterEach(() => {
+      cleanup();
+      if (vi.isFakeTimers()) act(() => { vi.runOnlyPendingTimers(); });
+      vi.useRealTimers();
+    });
+
+    const settle = async () => {
+      for (let turn = 0; turn < 10; turn += 1) await act(async () => { await Promise.resolve(); });
+    };
+
+    const pickCat = async () => {
+      vi.useFakeTimers();
+      const answered = { me: { id: 'cat', at: 300 } };
+      vi.mocked(dataService.setMemberAvatar).mockResolvedValue(answered);
+      const onTeamAvatars = vi.fn();
+      const local = sessionOf(kind);
+      const view = renderScreen(kind, team(undefined), local, me, { onTeamAvatars });
+      fireEvent.click(screen.getByRole('button', { name: /choose my avatar/ }));
+      const dialog = screen.getByRole('dialog', { name: 'Choose my avatar' });
+      fireEvent.click(within(dialog).getByRole('tab', { name: /animals/i }));
+      fireEvent.click(within(dialog).getByRole('button', { name: /^Cat$/ }));
+      await settle();
+      expect(onTeamAvatars).toHaveBeenCalledWith('team-1', answered);
+      vi.mocked(syncService.updateSession).mockClear();
+      // App's part: the answered map on a new team object.
+      const next = { ...view.team, memberAvatars: answered };
+      if (kind === 'retro') view.rerender(<Session team={next} sessionId="retro-1" currentUser={me} onExit={() => {}} onTeamAvatars={onTeamAvatars} />);
+      else view.rerender(<HealthCheckSession team={next} sessionId="hc-1" currentUser={me} onExit={() => {}} onTeamAvatars={onTeamAvatars} />);
+      return local;
+    };
+
+    it("shows the pick at once and writes nothing: the server's stamp is on its way", async () => {
+      const local = await pickCat();
+      expect(writes()).toEqual([]);
+      // The viewer already sees their choice, from the team's map.
+      expect(screen.getByRole('button', { name: /choose my avatar/ }).querySelector('[data-avatar-art="cat"]')).not.toBeNull();
+
+      // The stamp arrives: the entry agrees, and nothing was ever written for it.
+      act(() => {
+        handlers.update?.(JSON.parse(JSON.stringify({ ...local, participants: [{ ...me, avatar: 'cat', avatarAt: 300 }, fran], _rev: 2 })));
+      });
+      act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS * 2); });
+      expect(writes()).toEqual([]);
+    });
+
+    it('writes the entry itself when the stamp has not come', async () => {
+      await pickCat();
+      act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS - 1); });
+      expect(writes()).toEqual([]);
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(writes()).toHaveLength(1);
+      expect(writes()[0].participants?.find((p) => p.id === 'me')).toMatchObject({ avatar: 'cat', avatarAt: 300 });
+      act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS * 2); });
+      expect(writes()).toHaveLength(1);
+    });
+
+    it("waits through other people's writes, then writes the entry on the newest state", async () => {
+      const local = await pickCat();
+      // Another person's write lands, built on the entry without the pick: no stamp yet.
+      act(() => {
+        handlers.update?.(JSON.parse(JSON.stringify({ ...local, _rev: 2, finishedUsers: ['fran'] })));
+      });
+      expect(writes()).toEqual([]);
+      // The wait over, the entry goes out, built on that newer state.
+      act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS); });
+      expect(writes()).toHaveLength(1);
+      expect(writes()[0]).toMatchObject({ finishedUsers: ['fran'] });
+      expect(writes()[0].participants?.find((p) => p.id === 'me')).toMatchObject({ avatar: 'cat', avatarAt: 300 });
     });
   });
 

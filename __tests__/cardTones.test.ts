@@ -70,6 +70,32 @@ describe('cardTones', () => {
     },
   );
 
+  // The board asks for a card's tones at every draw of every card (a thousand
+  // cards on a board kept for weeks), and each answer searched up to a hundred
+  // candidate inks: about 50 ms of every draw of such a board. The answer for
+  // one colour is computed once and handed out again.
+  it('hands out one answer per colour, computed once, and nobody can edit it', () => {
+    const first = cardTones('#ca8a04');
+    expect(cardTones('#ca8a04')).toBe(first);
+    expect(cardTones('CA8A04')).toEqual(first);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(() => { (first as { tint: string }).tint = '#000000'; }).toThrow();
+    // A value that is not a colour is not kept either, and stays null.
+    expect(cardTones('not a colour')).toBeNull();
+    expect(cardTones('not a colour')).toBeNull();
+  });
+
+  // Any hex can be picked for a column: the memory of answers is bounded, and
+  // a colour that left it is simply computed again.
+  it('keeps a bounded number of answers, and answers the same for a colour it forgot', () => {
+    const first = cardTones('#123456');
+    const expected = { ...first };
+    for (let n = 0; n < 2000; n += 1) cardTones(`#${n.toString(16).padStart(6, '0')}`);
+    const again = cardTones('#123456');
+    expect(again).toEqual(expected);
+    expect(again).not.toBe(first);
+  });
+
   it('keeps the hue: a green column gives a green ink, not the neutral one', () => {
     const ink = hexToRgb(cardTones('#059669')!.ink)!;
     expect(ink.g).toBeGreaterThan(ink.r);

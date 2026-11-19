@@ -5,8 +5,11 @@
 //
 // The truth is the team's `memberAvatars` (`{ id, at }`, the server's time of
 // the choice); each session copy carries the person's entry `avatar` and
-// `avatarAt`, written by their own client only. The newer `at` wins, so a
-// browser holding an old copy of the team never puts an older choice back.
+// `avatarAt`, written by their own client and by the avatar route's stamp of
+// the session a pick was made in. The newer `at` wins, so a browser holding
+// an old copy of the team never puts an older choice back. (The participant
+// list is data every client of the session can write: what an entry says is
+// drawn only through `toAvatarId`, and never reaches the team's map.)
 // Values are copied as stored and passed through `toAvatarId` only to draw:
 // a tab that does not know an id a newer release stored must not erase it.
 
@@ -80,6 +83,55 @@ export const ownAvatarEntry = (session: MaybeSession, team: MaybeTeam, memberId:
   const entry = entryOf(session, memberId);
   if (!entry || entryTime(entry) >= choice.at) return null;
   return { ...entry, avatar: choice.id, avatarAt: choice.at };
+};
+
+/**
+ * Puts the viewer's own entry of `draft`, a state about to be written, on the
+ * team's newer choice, and answers whether it changed anything. Both session
+ * screens call it in their one write function, so the write that adds a person
+ * to a session already carries their avatar: sent in a write of its own right
+ * behind, the avatar left from the same revision as that write, and the server
+ * refused one of the two. A copy takes the entry's place, so an object the
+ * entry shares with the screen (the viewer's own user, a cached member row)
+ * never gains an avatar.
+ */
+export const stampOwnAvatarEntry = (draft: MaybeSession, team: MaybeTeam, memberId: string): boolean => {
+  const entry = ownAvatarEntry(draft, team, memberId);
+  const participants: unknown = draft?.participants;
+  if (!entry || !Array.isArray(participants)) return false;
+  const index = participants.findIndex(
+    (candidate: unknown) => !!candidate && typeof candidate === 'object' && (candidate as User).id === memberId
+  );
+  if (index < 0) return false;
+  // The draft is the caller's own copy, about to be sent: its list is written in place.
+  (participants as User[])[index] = entry;
+  return true;
+};
+
+/** When `memberId`'s choice in `memberAvatars` (a map the server answered) was made, or null without one. */
+export const avatarChoiceTime = (
+  memberAvatars: Team['memberAvatars'] | null | undefined,
+  memberId: string
+): number | null => memberAvatar({ memberAvatars: memberAvatars ?? undefined }, memberId)?.at ?? null;
+
+/** What `stampOwnAvatarEntry` would write for the viewer: the time of the choice their entry lacks, or null. */
+export const ownAvatarEntryTime = (session: MaybeSession, team: MaybeTeam, memberId: string): number | null => {
+  const entry = ownAvatarEntry(session, team, memberId);
+  return entry ? entryTime(entry) : null;
+};
+
+/**
+ * `entry` without an avatar of its own, for a participant entry that passes to
+ * another id (someone back under a new id, matched by name): an avatar is a
+ * member's choice, kept under their id, and the person who takes the entry
+ * over may be someone else of the same name.
+ */
+export const withoutAvatar = (entry: User): User => {
+  if (!Object.prototype.hasOwnProperty.call(entry, 'avatar') && !Object.prototype.hasOwnProperty.call(entry, 'avatarAt')) return entry;
+  const copy: User = { ...entry };
+  delete copy.avatar;
+  delete copy.avatarAt;
+  return copy;
 };
 
 /**

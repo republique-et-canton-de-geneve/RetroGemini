@@ -141,9 +141,13 @@ describe('diffSessionMotion', () => {
       expect(diffSessionMotion(prev, next, me).voteTotals).toEqual(['a', 'b', 'g1']);
     });
 
-    it('names who just finished', () => {
-      expect(diffSessionMotion(session({ finishedUsers: ['ana'] }), session({ finishedUsers: ['ana', 'bo'] }), me).finished).toEqual(['bo']);
-      expect(diffSessionMotion(session({ finishedUsers: ['ana'] }), session({ finishedUsers: [] }), me).finished).toEqual([]);
+    // Who finished is the participants panel's to show (usePanelMotion reads
+    // the rows' checks). Named here as an event, it was read by nothing, and
+    // made a state that only said "someone is done" news for the board.
+    it('reads a state that only says someone finished as no news for the board', () => {
+      expect(diffSessionMotion(session({ finishedUsers: ['ana'] }), session({ finishedUsers: ['ana', 'bo'] }), me)).toBe(NO_MOTION);
+      expect(diffSessionMotion(session({ finishedUsers: ['ana'] }), session({ finishedUsers: [] }), me)).toBe(NO_MOTION);
+      expect(Object.keys(NO_MOTION)).not.toContain('finished');
     });
   });
 

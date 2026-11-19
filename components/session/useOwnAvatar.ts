@@ -1,7 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MemberAvatarChoice, Team, User } from '../../types';
 import { dataService } from '../../services/dataService';
-import { ownAvatarChoice, ownAvatarEntry, sessionAvatarOf, type AvatarSessionView } from './sessionAvatars';
+import {
+  avatarChoiceTime,
+  ownAvatarChoice,
+  ownAvatarEntry,
+  ownAvatarEntryTime,
+  sessionAvatarOf,
+  stampOwnAvatarEntry,
+  type AvatarSessionView,
+} from './sessionAvatars';
+
+/**
+ * How long a pick made in a session leaves the viewer's own entry to the
+ * server (ms), which stamps it right after it answers the pick.
+ */
+export const SERVER_STAMP_WAIT_MS = 2000;
 
 /** What both session screens hand the hook: the parts of their state the avatar rule reads. */
 type AvatarSession = AvatarSessionView & { readonly id: string };
@@ -16,20 +30,34 @@ interface Options<S extends AvatarSession> {
   canWrite: boolean;
   /** Shows the map the server answered after a pick (App puts it on a new team object). */
   onTeamAvatars?: (teamId: string, memberAvatars: Record<string, MemberAvatarChoice>) => void;
+  /**
+   * True while the screen has yet to send the write it sends on entering
+   * whatever the session holds (the retrospective's presence write). That
+   * write carries the entry (the screen stamps every write), so the entry is
+   * not written on its own beside it.
+   */
+  entersWithAWrite?: () => boolean;
 }
 
 /**
- * The avatar half both session screens share (PLAN 18.1):
+ * The avatar half both session screens share (AGENTS.md, *Avatars*):
  *
  * - `avatarIdOf(memberId)`: what to draw for a person, `sessionAvatarOf`,
  *   which answers null in an anonymous session.
- * - The own entry: on entering a session, and whenever the team's choice or
- *   the entry changes while in it, the viewer's client writes a copy of its
- *   own entry carrying the team's newer choice, once, through the screen's
- *   normal write, and only when `ownAvatarEntry` says the entry is older. No
- *   own-change ledger slice: the newer `at` wins everywhere, so two browsers
- *   of one person write the same value and a lost race is written again by
- *   the next state that still shows the older entry.
+ * - The own entry: the viewer's entry carries the team's newer choice. Each
+ *   screen stamps it in its one write function (`stampOwnAvatarEntry`), so the
+ *   write that enters a session carries it; where no write is on its way (the
+ *   team's choice changed while in the session, a lost race healed back, a
+ *   health check entered by someone it already lists) this hook sends one,
+ *   through the screen's normal write, and only when `ownAvatarEntry` says the
+ *   entry is older. No own-change ledger slice: the newer `at` wins
+ *   everywhere, so two browsers of one person write the same value and a lost
+ *   race is written again by the next state that still shows the older entry.
+ *   A pick made here is left to the server, which stamps this session's entry
+ *   right after answering: written at once, the entry left from the revision
+ *   that stamp was about to move, and one of the two was refused on every
+ *   pick. It is written here only if the stamp has not come in
+ *   `SERVER_STAMP_WAIT_MS` (the server's is best effort).
  * - The picker: its open state, the choice it marks, and the pick, stored by
  *   `dataService.setMemberAvatar` with the session's id, so the server also
  *   stamps the live session's entry for the room.
@@ -44,6 +72,7 @@ export function useOwnAvatar<S extends AvatarSession>({
   updateSession,
   canWrite,
   onTeamAvatars,
+  entersWithAWrite,
 }: Options<S>) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const me = currentUser.id;
@@ -52,6 +81,17 @@ export function useOwnAvatar<S extends AvatarSession>({
   updateRef.current = updateSession;
   const teamRef = useRef(team);
   teamRef.current = team;
+  const entersWithAWriteRef = useRef(entersWithAWrite);
+  entersWithAWriteRef.current = entersWithAWrite;
+
+  // The choice the server was asked to stamp on this session, while its stamp
+  // is waited for. The wait ends with its timer, never by comparing clocks.
+  const serverStamp = useRef<{ at: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const [stampWaits, setStampWaits] = useState(0);
+  useEffect(() => () => {
+    if (serverStamp.current) clearTimeout(serverStamp.current.timer);
+    serverStamp.current = null;
+  }, []);
 
   // What the own entry is missing, as a key: the effect runs when it changes,
   // and the key goes back to null once the entry agrees, so a state that
@@ -60,6 +100,7 @@ export function useOwnAvatar<S extends AvatarSession>({
   const pendingKey = pending && session
     ? `${session.id}:${JSON.stringify(pending)}`
     : null;
+  const pendingAt = ownAvatarEntryTime(session, team, me);
   // StrictMode runs an effect twice with the same key: the second must not
   // write an empty session update behind the first.
   const writtenKey = useRef<string | null>(null);
@@ -76,22 +117,31 @@ export function useOwnAvatar<S extends AvatarSession>({
       return;
     }
     if (writtenKey.current === pendingKey) return;
+    // The write the screen sends on entering is still to come, and carries it.
+    if (entersWithAWriteRef.current?.()) return;
+    // The server stamps a pick made here: its stamp is waited for (see above).
+    if (serverStamp.current?.at === pendingAt) return;
     writtenKey.current = pendingKey;
     updateRef.current((draft) => {
-      const entry = ownAvatarEntry(draft, teamRef.current, me);
-      const participants = draft.participants as User[] | undefined;
-      if (!entry || !participants) return;
-      const index = participants.findIndex((participant) => participant?.id === me);
-      // A copy replaces the entry: the cached member row it may share with
-      // never gains an avatar field.
-      if (index >= 0) participants[index] = entry;
+      stampOwnAvatarEntry(draft, teamRef.current, me);
     });
-  }, [pendingKey, canWrite, me]);
+    // `stampWaits` is not read: it runs this again when the wait for the
+    // server's stamp ends.
+  }, [pendingKey, pendingAt, canWrite, me, stampWaits]);
 
   const sessionId = session?.id;
   const pick = useCallback(async (avatarId: string | null) => {
     const teamId = teamRef.current.id;
     const map = await dataService.setMemberAvatar(me, avatarId, sessionId);
+    const at = avatarChoiceTime(map, me);
+    if (sessionId && at !== null) {
+      if (serverStamp.current) clearTimeout(serverStamp.current.timer);
+      const timer = setTimeout(() => {
+        serverStamp.current = null;
+        setStampWaits((count) => count + 1);
+      }, SERVER_STAMP_WAIT_MS);
+      serverStamp.current = { at, timer };
+    }
     onTeamAvatars?.(teamId, map);
   }, [me, sessionId, onTeamAvatars]);
 

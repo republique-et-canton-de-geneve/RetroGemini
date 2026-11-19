@@ -286,7 +286,10 @@ another look. Eight rules:
   ligature name must never flash) with the previous cut as its second source.
   `e2e-prod/production-csp.spec.ts` loads the built app under the policy and
   checks that the text font and the icon font are loaded and that no request
-  left the origin.
+  left the origin. The stylesheet names its fonts by an absolute path
+  (`/fonts/…`), which the build carries under the public prefix of a
+  `PROXY_BASE_URL` mount: `e2e-prod/dual-url.spec.ts` asks for both families
+  by name at that mount, and that every font was fetched under the prefix.
 - **A token that the look needs and Tailwind lacks is added to `@theme`**
   (`--color-person-*`, `--ease-settle`), never written as an arbitrary value in
   a class: an arbitrary colour is invisible to the helper and to the next
@@ -333,7 +336,11 @@ modules decide it:
   facilitator can pick. `CARD_INK` (slate-900) is the colour of a card's words.
   `__tests__/cardTones.test.ts` measures hundreds of hues: the words at 7:1, the
   ink at 4.5:1. The three strengths (12, 22 and 36 percent of the hue on white)
-  are the one place to retune how strong the board looks.
+  are the one place to retune how strong the board looks. Every card asks at
+  every draw, and an answer searches up to a hundred candidate inks, so the
+  answer for a colour is computed once and handed out again, frozen (a
+  thousand cards cost about 50 ms of each draw before); the memory holds 256
+  colours and is emptied when full, since any hex can be picked.
 - **The hue's source**: the topic column (the origin column first) when the
   board is coloured by topic; `participantToneHex(author.color).pop` when it is
   coloured by author. No hue gives the white card.
@@ -353,7 +360,7 @@ card's filler keeps its shape.
 A guest who arrives, a card that lands, a vote that is cast, hidden cards that
 are shown, a dialog that opens: each has a short animation. All of it is
 **decoration**. The state an effect accompanies is already on screen in words
-or in a count, and a reader who asked for less motion gets none of it. Seven
+or in a count, and a reader who asked for less motion gets none of it. Eight
 rules:
 
 - **The effects are classes of `index.css`, all under
@@ -364,6 +371,11 @@ rules:
   delay. A transform's fill mode is `backwards`, never `forwards` or `both`: a
   transform that stays makes its element the containing block of every
   `position: fixed` descendant (`__tests__/lookTokens.test.ts` refuses it).
+  Two eases, each with a job: `--ease-settle` for what comes to rest in its
+  place (a card, a row, a dialog, a title), and `--ease-spring`, which
+  overshoots on purpose, only for something small that is not aimed at (a dot,
+  a count, a chosen avatar). The overshoot is the look's one flourish; it
+  never goes on a box people click.
 - **An effect follows something that happened, never an element being drawn.**
   A phase change remounts the whole board and a card remounts when it changes
   group or column, so an animation tied to a mount would replay each time.
@@ -376,7 +388,10 @@ rules:
   (`components/session/usePanelMotion.ts`, with `arrivedPeople`).
 - **A class is put on for one animation and taken off**
   (`components/common/motion/effects.ts` → `playEffect`: at the element's own
-  `animationend`, with a timeout as a net). On the board it is put on
+  `animationend`, with a timeout as a net; the lengths the net waits for,
+  `EFFECT_LENGTH_MS`, are a copy of the stylesheet's, and
+  `__tests__/motionEffects.test.ts` reads `index.css` and requires them
+  equal, so an animation lengthened in one place is not cut off by the other). On the board it is put on
   imperatively: it costs no render of a component of nearly 5,000 lines, a
   remounted element simply has no class, and the unit tests of the screens
   keep seeing the class strings React wrote. `motionAllowed()` reads the
@@ -391,7 +406,12 @@ rules:
   change of session, while the connection is down, in the three seconds after
   it comes back (a rolling update reconnects everybody), or for a burst: more
   than six cards or more than two people at once is a healed state or a
-  restore, not people working. **The first paint is a seed, never a "before".**
+  restore, not people working. The reveal is the one effect that grows with
+  the board (a blur and a fade on every hidden card), so it plays on the cards
+  in the window only, sixty at most (`MAX_REVEALED_AT_ONCE`); the others are
+  simply shown. Who finished is the participants panel's to show: it is not an
+  event of the board, which a state that only says "someone is done" does not
+  wake. **The first paint is a seed, never a "before".**
   A session screen is drawn first from the cached team record, which lags the
   session row, and the server's state or roster can land seconds later. So
   nothing is compared until the server's first state has been applied
@@ -412,6 +432,21 @@ rules:
   see. Nothing animates on the
   way out: a deleted card's place is taken at once, and a dialog gives focus
   back at once.
+- **A press answers with a colour, never with its box.** A control that
+  shrinks or shifts while it is pressed moves its own edge from under the
+  pointer: pressed on its outer pixel, the release lands beside it, the
+  browser sends the click to the ancestor both events share, and the control
+  does nothing. 45.0 was first written with `active:scale-[0.97]` on every
+  primary button, and a press held on the outer pixel of "New Team" clicked
+  the page behind it (measured in a browser, with motion on). A primary
+  button darkens instead (`enabled:active:bg-indigo-800`, rose-900 for a
+  destructive one; `enabled:` because a disabled button matches `:active`
+  too). `__tests__/lookTokens.test.ts` → *a press never moves the control
+  pressed* refuses an `active:` class that transforms, sizes or spaces an
+  element, in every component and recipe, and a `:active` rule of
+  `index.css` that does. `fx-press`, the answer a vote button gives, is not
+  a press state: it plays after the click it answers, once its write is
+  drawn.
 - **A vote's flight follows the write, it never decides it.** In the guided
   Vote phase, while the budget draws its tokens (ten votes or fewer, not
   unlimited), a vote that landed sends a token from the budget to the card's
@@ -419,9 +454,16 @@ rules:
   the dot pops where it lands and a ring closes on the card; a vote taken back
   flies home; a click refused for lack of votes shakes the budget
   (`shakeVoteBudget`). The session holds the vote's marks until the token lands
-  (`heldVotes`, `playLandedVote`), and a button answers its press once the vote
+  (`heldVotes`, `playLandedVote`; the hold is counted, so two quick votes on
+  one card each keep it held until their own token lands), and a button
+  answers its press once the vote
   is drawn: played during the click, the class was wiped by the one React
-  wrote in the same commit. Past ten votes, with unlimited votes and on the
+  wrote in the same commit. A write that wrote nothing is followed by nothing
+  (`castVote` stops on it): while the session reconnects an edit is dropped,
+  and a vote "taken back" then, read as gone, queued its token's flight home
+  for the next state. A token that cannot fly (an end outside the window, a
+  browser that cannot animate) arrives at once, so the marks play where they
+  stand and nothing stays held. Past ten votes, with unlimited votes and on the
   open board, the dot pops in place. The budget (`VoteBudget`) draws one filled
   token per vote left and one outline per vote the viewer really cast: a vote
   one vote per item leaves no item to place on (five votes, three items) is
@@ -455,7 +497,8 @@ exactly how the product reached **thirteen** overlays with **one**
 dialog its **entrance** (45.0): the veil fades in and the panel rises a few
 pixels, once, when the dialog mounts, and nothing plays on the way out (an exit
 would delay the return of focus and keep the focus trap alive). The effect
-classes come off at their own `animationend`, and their fill mode is
+classes come off at their own `animationend`, or after a second when none
+comes (an animation that is interrupted never ends), and their fill mode is
 `backwards`, so no transform remains: a transformed panel is the containing
 block of its `position: fixed` descendants. A dialog whose panel holds a fixed
 child while it opens passes `entrance="fade"` (opacity only), as the image
@@ -1567,12 +1610,18 @@ that test in hand.
 ### Current Self-Hosted Assets
 | Asset | Location | Purpose |
 |-------|----------|---------|
-| Material Symbols Rounded | `public/fonts/material-symbols-rounded.woff2` | Icon font for all UI icons (static cut, weight 400, Apache 2.0) |
+| Material Symbols Rounded | `public/fonts/material-symbols-rounded.woff2` | Icon font for all UI icons (static cut, weight 400, Apache 2.0). 375 kB, where the Outlined cut of 44.x was 253 kB: the whole cut on purpose, not a subset of the icons the screens name, because a column's stored icon is a name chosen from whatever list a past release offered, and a name outside a subset draws as its raw word |
 | Material Symbols Outlined | `public/fonts/material-symbols-outlined.woff2` | The icon font of 44.x, kept as the second `src` of the same `@font-face`: font files are not hashed, so during a rolling update a 45.x page can ask a 44.x pod for the Rounded file and get the SPA page instead. Remove it one release after 45.0 |
 | Geist | `public/fonts/geist-latin.woff2`, `geist-latin-ext.woff2` | The interface typeface (variable, weights 100 to 900; SIL OFL 1.1) |
 | Geist Mono | `public/fonts/geist-mono-latin.woff2`, `geist-mono-latin-ext.woff2` | Digits that change: the timer, counts (variable; SIL OFL 1.1) |
 | Typeface licence | `public/fonts/OFL-Geist.txt` | The licence asks that its text travels with the fonts; `__tests__/lookTokens.test.ts` checks it is there |
 | Timer alert sound | `public/assets/timer-alert.mp3` | Audio notification when a retrospective or health check timer ends |
+
+The login screen's background texture (`public/assets/cubes.png`) went with
+45.0, on purpose and with nothing kept for the rollout: a 44.x login page that
+asks a 45.x pod for it during the rolling update is answered the `/assets`
+text 404 and shows its plain background until it reloads. Unlike a missing
+icon font, nothing is unreadable without it.
 
 ### When Adding New Features
 1. **Check for external resource dependencies** — if a new library or feature loads something from the internet, find an offline alternative
@@ -2038,7 +2087,10 @@ the English file does not have. Both files ship in the image (`Dockerfile`,
    (`scripts/lint.mjs`, decision D6). It fails if the warning count rises *and*
    if it falls: when you remove warnings, lower `BUDGET` in that file in the
    same change, otherwise the freed slots are silently spent by the next
-   warning to appear. Errors always fail, budget or not.
+   warning to appear. Errors always fail, budget or not. Two directories of
+   local tooling are not linted (`eslint.config.js`): `.claude/worktrees/`
+   and `.gstack/`, gstack's working directory, where `/qa` and `/review`
+   write their probe scripts.
 2. **Run type check**: `npm run type-check`
 3. **Run tests with coverage**: `npm run test:coverage`
 4. **Run build**: `npm run build`
@@ -2149,6 +2201,16 @@ green state and address automated feedback:
 - **Add tests** for new functionality in `__tests__/` directory
 - **Test naming**: `*.test.ts` or `*.test.tsx`
 - **Framework**: Vitest + React Testing Library
+- **A test on a fake clock unmounts what it rendered, and runs the clock dry,
+  before the real clock comes back.** jsdom starts its own rendering interval
+  (it serves `requestAnimationFrame` and the focus it repairs when a focused
+  element goes) with whatever `setInterval` is installed at that moment. Left
+  waiting on a fake clock that is then removed, it never fires again and jsdom
+  never starts another: no animation frame runs for the rest of the file, and
+  the next test that waits for one (a dialog's first focus) times out, far
+  from its cause. So: `view.unmount()` (or `cleanup()`), then
+  `act(() => { vi.runOnlyPendingTimers(); })`, then `vi.useRealTimers()`, in
+  that order (`modalDialogEntrance.test.tsx`, `avatarScreensWiring.test.tsx`).
 
 ### Regression coverage (leave a durable guard, not a throwaway)
 
@@ -2489,7 +2551,7 @@ that take a team credential (`/api/send-invite`, `/api/wifi-config`,
 | `/api/team/:teamId/action` | POST | Persist a global action update. **Additive, not a replace** (`utils/actionImpact.js` → `mergeActionImpactState`): it folds the incoming action onto the stored one so `impactRatings`, `closedAt` and `impactDeferredBy` survive a caller that never read them. Without that, a facilitator renaming an action from a client loaded before anyone voted wipes the whole rating round. It also stamps `closedAt` when *it* is what closes the action, which is what keeps the field correct through a rolling update where an older pod closes an action without stamping — but it never invents one for an action already stored as closed without a stamp, because those are the pre-feature closures and dating them would drag the entire historical backlog into the next rating round. Its `jira` comes from the record only (`withRecordedJiraLink`: the stored copy's value, else another copy's, else none), so a caller can neither drop a link nor plant one |
 | `/api/team/:teamId/action/impact` | POST | Record one participant's impact vote on one closed action (`{ actionId, userId, vote }`; `vote: 1 \| 2 \| 3 \| 'abstain' \| null`, `null` clears the caller's own vote). **Deliberately narrow, for the same reason `/retrospective/:retroId/name` is**: `impactRatings` is the first per-user data on the team record and it has one writer per participant, so sending a whole action would make two people voting in the same second race, with the loser's vote vanishing silently. This writes exactly `impactRatings[userId]` inside `atomicTeamUpdate`, so concurrent voters never contend for the same key. Carries no revision, touches no other field, and takes no retro/health-check hint — it scans all three homes, because a hint would be a second way to locate an action that could disagree with the scan. Answers `404 action_not_found` (after the write, never from a preliminary read) and `400 invalid_vote` for anything off the scale, refused rather than coerced. **`{ actionId, reset: true }` drops the whole map for one action** — what a *later* retrospective does when it puts a postponed action back to the team, because "Rate later" promises the question is asked again and a vote left in place is pre-filled next time, so the early answerer is never re-asked. It lives on this route rather than a new one because `impactRatings` is owned here and nowhere else (the whole-action route deliberately cannot touch it), and a clear written elsewhere would be a second owner. The reset is performed at **re-presentation**, never at the deferral: that is what keeps the "Rate later" toggle lossless, so a mis-click stays undoable and the votes only go when the round that would have shown them really reopens. `reset` must be a literal `true`; anything else falls through to the ordinary vote path and its validation |
 | `/api/team/:teamId/members` | POST | Update the member roster. Member emails are **cleaned, never refused** by the shared email rule (`cleanRosterEmails`, the function the heal pass uses): a value that does not parse is stored as sent, and so is one whose cleaned form another member already holds — a roster write carries joins, and member emails are identities on the client. Answers `{ success: true }`: it used to return the whole team, which no client read, so every join paid for a second copy of the history |
-| `/api/team/:teamId/member/avatar` | POST | Set or clear one member's avatar `{ memberId, avatar: <id> \| null, sessionId? }` (`server/routes/teamAvatarRoutes.js`). Credential first (`401`); `400 invalid_member` unless `memberId` is a plausible member id (`isValidRaterId`); `400 invalid_avatar` unless `avatar` is `null` or an id the release accepts (`isAcceptedAvatarId` in `utils/avatars.js`: the offered ids, and those accepted one release ahead of being offered): refused, never coerced, because an id this pod does not know may be one a later release offers. Under the row lock it writes `memberAvatars[memberId] = { id, at }`, with `at` the server's clock in ms and never before the entry it replaces, and a clear stored as `{ id: null, at }` (so a clear too is newer than every copy of the choice it replaces). It rebuilds the map from its valid entries, so junk heals, and caps it at 500 entries (ids on neither roster list go first, then the oldest; never the one just written). An unchanged choice writes nothing. Answers `{ success: true, memberAvatars }` after the write. With a `sessionId`, after the answer and best-effort, it stamps that live session's participant entry with `avatar` and `avatarAt` through `liveSessionPatch`: only the team's own session, only a participant it already holds, only when the stored stamp is older. `/update` ignores `memberAvatars`. The client calls it through `dataService.setMemberAvatar`, which retries an older pod's HTML 404 across a rollout and never posts the roster |
+| `/api/team/:teamId/member/avatar` | POST | Set or clear one member's avatar `{ memberId, avatar: <id> \| null, sessionId? }` (`server/routes/teamAvatarRoutes.js`). Credential first (`401`); `400 invalid_member` unless `memberId` is a plausible member id (`isValidRaterId`); `400 invalid_avatar` unless `avatar` is `null` or an id the release accepts (`isAcceptedAvatarId` in `utils/avatars.js`: the offered ids, and those accepted one release ahead of being offered): refused, never coerced, because an id this pod does not know may be one a later release offers. Under the row lock it writes `memberAvatars[memberId] = { id, at }`, with `at` the server's clock in ms and never before the entry it replaces, and a clear stored as `{ id: null, at }` (so a clear too is newer than every copy of the choice it replaces). It rebuilds the map from its valid entries, so junk heals, and caps it at 500 entries (ids on neither roster list go first, then the oldest; never the one just written). An unchanged choice writes nothing. Answers `{ success: true, memberAvatars }` after the write. With a `sessionId`, after the answer and best-effort, it stamps that live session's participant entry with `avatar` and `avatarAt` through `liveSessionPatch`: only the team's own session, only a participant it already holds, only when the stored stamp is older (or dated far ahead of the server's clock: a participant entry is data, and no pick wrote such a stamp). `/update` ignores `memberAvatars`. The client calls it through `dataService.setMemberAvatar`, which retries an older pod's HTML 404 across a rollout, takes the route's own refusals as final (a value refused, the team gone, the credential refused, the limiter's 429: sent again, they took seven seconds to be said to someone watching "Saving…") and never posts the roster |
 | `/api/team/:teamId/invite-credential` | POST | Derive the team's current invite credential for embedding in invite links (revoked by password rotation) |
 | `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links). **Revokes every session token of the team** (decision D3b): the same transaction gives the team a new session epoch, and the answer is `{ success, sessionToken }`, a token under the new epoch for the caller, so the facilitator who changed it keeps working (a 41.0 client ignores it and keeps authenticating by the new password it holds). After the answer, best-effort, the team's live sockets are cut on this pod and the others (`sessionRevocation.js`). Recorded as `team.password-change` with `detail.sessionsRevoked: true` |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned; its Jira token, `team-secret:{teamId}`, is deleted before the record). The Dashboard waits for the answer: a failure keeps the team signed in and says so, and `team_not_found` (already deleted — a lost answer, another tab, the super admin) counts as done |
@@ -2691,7 +2753,9 @@ member row, because `/members` replaces the rows wholesale with whatever roster
 a client cached: a stale tab would lose a value kept there. It is sent to
 clients as stored and read through `memberAvatar` / `memberAvatarId`
 (`utils/avatars.js`), as data: any holder of a team credential can post
-anything. A merge re-keys it through the member-id map (`mergedMemberAvatars`:
+anything. A merge re-keys it through the member-id map (an entry one team
+kept for an id that is off its roster and on the other team's is not carried
+onto that other member; `mergedMemberAvatars`:
 for a member the merge unifies, the primary's entry wins, a clear included, and
 the secondary's is used when the primary has none); a single-team restore keeps
 the current map (`KEPT_FROM_CURRENT`); a whole-store restore puts the archive's
@@ -3177,15 +3241,54 @@ Rules:
   is why this feature needs **no own-change ledger slice**.
 - **A session shows its own copy.** A participant entry of a session carries
   `avatar` and `avatarAt`. The route stamps the entry of the session the pick
-  came from (the room sees it at once); and on entering a session, or when the
-  team's map changes while in it, each client writes a **copy of its own
-  entry** with the team's choice when that choice is newer
-  (`ownAvatarEntry`), through the screen's normal `updateSession`. Nobody
-  writes another person's entry, and a team member row never gains an `avatar`
-  field. When drawing, `sessionAvatarOf` takes the entry only when its
-  `avatarAt` is at least the team choice's `at` (an entry with no time counts
-  as 0), otherwise the team's: a pick made on the dashboard stamps no session,
-  and the session's copy must not outlive it.
+  came from (the room sees it at once); and each client keeps a **copy of its
+  own entry** on the team's choice when that choice is newer
+  (`ownAvatarEntry`). Nobody writes another person's entry, and a team member
+  row never gains an `avatar` field. When drawing, `sessionAvatarOf` takes the
+  entry only when its `avatarAt` is at least the team choice's `at` (an entry
+  with no time counts as 0), otherwise the team's: a pick made on the
+  dashboard stamps no session, and the session's copy must not outlive it.
+- **The own entry rides the writes the screen already sends.** Both screens
+  stamp it in their one write function (`stampOwnAvatarEntry`, after the
+  updater), so the write that adds a person to a session carries their
+  avatar. Sent in a write of its own right behind, the avatar left from the
+  same revision as that write: the server refused one of the two, healed, and
+  the avatar went out again (four writes to enter a retrospective, two of them
+  refused). `useOwnAvatar` writes the entry itself only where no write is on
+  its way: the team's choice changed while in the session, a lost race healed
+  the entry back, a health check entered by someone it already lists. It
+  leaves the entry to the write a screen sends on entering
+  (`entersWithAWrite`): a retrospective's presence write, which goes out once
+  whatever the session holds, and a health check's when there is one to come
+  (the viewer is not listed yet, or comes back marked as having left; the
+  hook's own write, sent just before from the same revision, had the server
+  refuse the write that takes the mark off, which nothing sends again). **A pick
+  made in a session is left to the server**, whose stamp follows its answer:
+  written by the client at once as well, the entry raced that stamp on every
+  pick. The hook waits `SERVER_STAMP_WAIT_MS` (2 s) for the stamp and writes
+  the entry only if it has not come (the server's is best effort); the wait
+  ends with its timer, never by comparing clocks.
+- **A participant entry is data, its avatar's time included.** Every client
+  of a session writes the participant list, so a client can put any picture
+  of the offered set, and any time, on anyone's entry there, as it can a name
+  or a colour. Nothing but an offered picture is ever drawn (`toAvatarId`),
+  and the team's map is out of its reach. A later pick of the person
+  replaces what was planted when it is newer than the planted time. The
+  route's stamp also replaces a stamp dated far ahead of the server's clock
+  (more than five minutes past both the clock and the choice being stamped:
+  no pick wrote it; a time planted less than that ahead stands until it has
+  passed), so a pick made **in that session** reaches it;
+  left to outrank every real stamp, one planted time kept each later pick out
+  for as long as the session lived. A pick made elsewhere does not reach a
+  session whose entry carries a time planted ahead of it, on purpose: **the
+  clients compare the two times and never judge one by their own clock.** A
+  browser whose clock is wrong would read a newer pick, stamped by the server
+  for the person's other browser, as "ahead of the clock", write its older
+  choice over it, and the two browsers would undo each other without end
+  (the loop the own-change ledger exists to prevent). A
+  row that passes to another id (someone back under a new id, matched by
+  name in `mergeRosterIntoParticipants`) leaves its avatar behind
+  (`withoutAvatar`): the picture is the choice of the member whose id it was.
 - **Values are copied as stored and checked only to draw.** `toAvatarId` is
   applied where a picture is drawn (`Avatar`, `sessionAvatarOf`,
   `memberAvatarId`), never where a value is copied: a tab or pod that does not
@@ -3201,7 +3304,10 @@ Rules:
   decides, `sessionAvatarOf(session, team, memberId)`, and it answers `null`
   while the session is anonymous, wherever the session stores that (both
   session types keep it under `settings.isAnonymous`): a picture beside a card
-  would say who wrote it. `__tests__/avatarSource.test.ts` walks the AST of
+  would say who wrote it. (A rule of what is drawn, like anonymity itself:
+  the session's data carries each entry's avatar there too, as it carries
+  each card's author, and the entry is written in an anonymous session so
+  that the picture is there when the session names its authors again.) `__tests__/avatarSource.test.ts` walks the AST of
   `App.tsx` and `components/` and refuses a read of `.avatar`, `.avatarAt` or
   `.memberAvatars` anywhere but in `sessionAvatars.ts` or inside a call to
   `sessionAvatarOf`, `ownAvatarEntry`, `memberAvatar` or `memberAvatarId`, so a
@@ -3239,10 +3345,16 @@ Rules:
   width for a participant, from 360px for a facilitator, whose header also
   carries invite and play) and the dashboard's top bar (every width), measured
   by the header-fit spec. The picker writes one choice at a time, keeps the
-  latest pick made during a write, shows a choice only once it is stored, and
-  keeps its error on screen when the save fails. `App` puts the answered map
-  on a **new** team object, only for the team still open, so nothing survives a
-  sign-out.
+  latest pick made during a write (dropped only when it is the choice that
+  write just stored, a double click; written whatever it is after a refusal),
+  shows a choice only once it is stored, and keeps its error on screen when
+  the save fails. A click on the picture
+  already marked is written too: the mark is this browser's copy of the
+  choice and can be older than the server's (a pick made since in another
+  browser, from the dashboard), and the server writes nothing when it already
+  holds it. `App` puts the answered map on a **new** team object, only for the
+  team still open (`__tests__/appAvatar.test.tsx`: not after a sign-out, not
+  on another team opened meanwhile), so nothing survives a sign-out.
 
 Residuals, stated on purpose:
 
@@ -3265,13 +3377,38 @@ Residuals, stated on purpose:
   rollout or after a rollback; nothing else an older pod does touches the key.
 - **In an anonymous session the comments dialog still names each comment's
   author**, as it did before avatars; only the pictures are hidden there.
+- **A pick made in a session is one write of that session**: the route's
+  stamp moves its revision, as a vote does, so a participant's write that
+  crosses it loses its race and is healed like any other. The route's limiter
+  is the team writes' (300 a minute per address, which a whole office
+  shares): lower, it would refuse a team choosing its pictures together.
+- **A pick answered while a Dashboard refresh is on its way** can be drawn
+  over by that refresh's answer, read before the pick, until the next
+  refresh (the general rule of a write made after a refresh started, see
+  *Key Design Principles*); the server holds the pick, and the next refresh
+  shows it.
+- **After a merge, a unified member's old sessions can show the other
+  picture.** The merged team keeps the main team's choice for a member the
+  merge unified, and the sessions that came from the second team carry that
+  person's entry with the second team's choice and its time: where that time
+  is the newer, those sessions draw the second team's picture and every
+  other screen the main team's, until the person picks again.
+- **A whole-store restore rolls the team's map back, not what open tabs
+  hold.** The newer `at` wins everywhere, so a tab that was open across the
+  restore keeps drawing, and stamping into the sessions it enters, the choice
+  it knew, until it reloads; the record holds the archive's choice, and the
+  next pick is newer than both.
 
-The guards: `__tests__/avatars.test.ts`, `teamAvatarRoutes.test.ts`,
-`dataServiceAvatar.test.ts`, the avatar cases of `teamMerge.test.ts`,
-`teamRestore.test.ts` and `archiveContract.test.ts`, `avatarArt.test.tsx`,
-`i18nAvatars.test.ts`, `avatarComponent.test.tsx`, `avatarPicker.test.tsx`,
-`sessionAvatars.test.ts`, `avatarScreensWiring.test.tsx` (both session types:
-named, anonymous, the own-entry write), `avatarSource.test.ts`,
+The guards: `__tests__/avatars.test.ts`, `teamAvatarRoutes.test.ts` (the
+route, its two failure answers, the stamp and a stamp dated ahead of the
+clock), `dataServiceAvatar.test.ts` (an answer that arrives after a sign-out
+or another team's login included), `appAvatar.test.tsx`, the avatar cases of
+`teamMerge.test.ts`, `teamRestore.test.ts` and `archiveContract.test.ts`,
+`avatarArt.test.tsx`, `i18nAvatars.test.ts`, `avatarComponent.test.tsx`,
+`avatarPicker.test.tsx`, `sessionAvatars.test.ts`, `useOwnAvatar.test.tsx`,
+`avatarScreensWiring.test.tsx` (both session types: named, anonymous, the
+entry carried by the entering write, the wait after a pick made in the
+session), the avatar cases of `sessionRoster.test.ts`, `avatarSource.test.ts`,
 `avatarColorSource.test.ts`, and `e2e/avatars.spec.ts` (two browsers: a pick
 reaching the other's panel and card, a reload, a clear, a refused save, an
 anonymous retrospective, and the picker in the axe audit).

@@ -196,7 +196,7 @@ const SessionTimer: React.FC<Props> = ({ settings, phase, fallbackSeconds, isFac
               disabled={!isLive || (!timer.running && !timer.canStart)}
               // A round button in the brand colour: the one main action of the
               // chip. Disabled, it goes grey rather than translucent.
-              className="grid place-items-center w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 motion-safe:active:scale-[0.92] transition disabled:bg-slate-400 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+              className="grid place-items-center w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 enabled:active:bg-indigo-800 transition disabled:bg-slate-400 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
               aria-label={timer.running ? t('phases.timer.pause') : t('phases.timer.start')}
             >
               <span className="material-symbols-outlined text-lg! sm:text-xl! leading-none" aria-hidden="true">

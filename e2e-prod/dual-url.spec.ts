@@ -8,9 +8,11 @@ const proxied = 'http://127.0.0.1:34101/retrogemini';
 for (const base of [native, proxied]) {
   test(`assets, API, fonts and deep reload at ${base}`, async ({ page }) => {
     const errors: string[] = [];
+    const fontPaths: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     page.on('response', (res) => {
       if (['script', 'stylesheet', 'font'].includes(res.request().resourceType()) && res.status() >= 400) errors.push(res.url());
+      if (res.request().resourceType() === 'font') fontPaths.push(new URL(res.url()).pathname);
     });
     const violations = watchForViolations(page);
     await page.goto(base + '/');
@@ -29,10 +31,19 @@ for (const base of [native, proxied]) {
     await expect(page.locator('#root')).not.toBeEmpty();
     const styles = await page.evaluate(async () => {
       await document.fonts.ready;
-      return { sheets: document.styleSheets.length, fonts: Array.from(document.fonts).some((font) => font.status === 'loaded') };
+      return {
+        sheets: document.styleSheets.length,
+        fonts: Array.from(document.fonts).filter((font) => font.status === 'loaded').map((font) => font.family.replace(/["']/g, '')),
+      };
     });
     expect(styles.sheets).toBeGreaterThan(0);
-    expect(styles.fonts).toBe(true);
+    // Each family by name, as on the root mount (production-csp.spec.ts): the
+    // stylesheet names its fonts by an absolute path, which the build must
+    // carry under the public prefix. "Some font loaded" was true with one.
+    expect(styles.fonts, 'the icon font did not load at this mount').toContain('Material Symbols Rounded');
+    expect(styles.fonts, 'the text font did not load at this mount').toContain('Geist');
+    expect(fontPaths.length).toBeGreaterThan(0);
+    for (const path of fontPaths) expect(path).toMatch(base === proxied ? /^\/retrogemini\/fonts\// : /^\/fonts\//);
     expect(errors).toEqual([]);
     expect(await violations()).toEqual([]);
   });

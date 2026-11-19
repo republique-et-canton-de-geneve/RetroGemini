@@ -50,8 +50,6 @@ export interface SessionMotion {
   columns: string[];
   /** Cards and groups whose vote total changed. */
   voteTotals: string[];
-  /** People who just finished. */
-  finished: string[];
 }
 
 export const NO_MOTION: SessionMotion = Object.freeze({
@@ -61,7 +59,6 @@ export const NO_MOTION: SessionMotion = Object.freeze({
   reactions: [],
   columns: [],
   voteTotals: [],
-  finished: [],
 }) as SessionMotion;
 
 const listOf = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
@@ -133,13 +130,13 @@ export function diffSessionMotion(
     (colId) => (countsBefore.get(colId) ?? 0) !== (countsNow.get(colId) ?? 0),
   );
 
-  const finishedBefore = new Set(listOf<string>(prev.finishedUsers));
-  const finished = listOf<string>(next.finishedUsers).filter((userId) => !finishedBefore.has(userId));
-
-  if (!arrivedCards.length && !ownCards.length && !revealedCards.length && !reactions.length && !columns.length && !voteTotals.length && !finished.length) {
+  // Who finished is the participants panel's to show (usePanelMotion): read
+  // here as an event, it made a state that only said "someone is done" look
+  // like news for the board, which then searched the page for nothing.
+  if (!arrivedCards.length && !ownCards.length && !revealedCards.length && !reactions.length && !columns.length && !voteTotals.length) {
     return NO_MOTION;
   }
-  return { arrivedCards, ownCards, revealedCards, reactions, columns, voteTotals, finished };
+  return { arrivedCards, ownCards, revealedCards, reactions, columns, voteTotals };
 }
 
 /**

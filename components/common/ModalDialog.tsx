@@ -96,9 +96,19 @@ const PANEL_ENTRANCE_CLASS: Record<DialogEntrance, string> = {
 };
 
 /**
+ * Past this, an entrance class is taken off even if its animation never ended
+ * (ms): the longest entrance lasts 280 ms. An animation that is interrupted
+ * sends no `animationend` — its element hidden meanwhile, motion turned off
+ * between this script's check and the stylesheet's — and the class it left
+ * would play again the next time the element is shown.
+ */
+const ENTRANCE_NET_MS = 1000;
+
+/**
  * Whether an element still carries its entrance class. It comes off when that
  * element's own animation ends, never on an animation of a
- * descendant, whose events bubble up to it.
+ * descendant, whose events bubble up to it, and after `ENTRANCE_NET_MS` at
+ * the latest.
  */
 const useEntrance = (ref: React.RefObject<HTMLElement | null>) => {
   const [entering, setEntering] = useState(motionAllowed);
@@ -112,7 +122,11 @@ const useEntrance = (ref: React.RefObject<HTMLElement | null>) => {
       if (e.target === element) setEntering(false);
     };
     element.addEventListener('animationend', settle);
-    return () => element.removeEventListener('animationend', settle);
+    const net = setTimeout(() => setEntering(false), ENTRANCE_NET_MS);
+    return () => {
+      element.removeEventListener('animationend', settle);
+      clearTimeout(net);
+    };
   }, [ref]);
   return entering;
 };

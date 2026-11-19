@@ -12,7 +12,7 @@
 
 /** The main action of a tab or a dialog: one per screen area. */
 export const PRIMARY_BUTTON =
-  'inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] transition disabled:bg-slate-200 disabled:text-slate-600 disabled:shadow-none disabled:cursor-not-allowed';
+  'inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 transition disabled:bg-slate-200 disabled:text-slate-600 disabled:shadow-none disabled:cursor-not-allowed';
 
 /** A second action beside the primary one. */
 export const SECONDARY_BUTTON =
@@ -24,7 +24,7 @@ export const DANGER_SECONDARY_BUTTON =
 
 /** A destructive action that is the point of its dialog (delete, archive). */
 export const DANGER_BUTTON =
-  'inline-flex items-center justify-center gap-2 rounded-lg bg-rose-700 text-white font-semibold hover:bg-rose-800 motion-safe:active:scale-[0.97] transition disabled:bg-slate-200 disabled:text-slate-600 disabled:cursor-not-allowed';
+  'inline-flex items-center justify-center gap-2 rounded-lg bg-rose-700 text-white font-semibold hover:bg-rose-800 enabled:active:bg-rose-900 transition disabled:bg-slate-200 disabled:text-slate-600 disabled:cursor-not-allowed';
 
 /** A quiet text button (Back, Cancel beside a primary). */
 export const GHOST_BUTTON =

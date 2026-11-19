@@ -46,7 +46,7 @@ import { avatarColorClasses } from '../utils/participantColors';
 import AvatarPicker from './common/AvatarPicker';
 import ViewerAvatarButton from './session/ViewerAvatarButton';
 import { useOwnAvatar } from './session/useOwnAvatar';
-import { sessionAvatarOf, viewerInitials } from './session/sessionAvatars';
+import { sessionAvatarOf, stampOwnAvatarEntry, viewerInitials } from './session/sessionAvatars';
 
 interface Props {
   team: Team;
@@ -321,6 +321,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       }
 
       updater(newSession);
+      // The viewer's own entry carries their avatar from the write that adds
+      // them (see the same call in Session.tsx).
+      stampOwnAvatarEntry(newSession, team, currentUser.id);
       // Declare the own-data slices this write changed before it goes out —
       // see the same call in Session.tsx.
       registerOwnHealthCheckChanges(ownChangesRef.current, baseSession, newSession, currentUser.id);
@@ -332,6 +335,15 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     });
   };
 
+  // Whether entering this session sends a write (the effect further down): the
+  // viewer is not listed yet, or comes back marked as having left.
+  const entersWriting = (entered: HealthCheckSessionType) =>
+    !entered.participants?.length
+    || !entered.participants.some(p => p.id === currentUser.id)
+    || !!entered.leftUsers?.includes(currentUser.id);
+  // The session that effect has already run for.
+  const enteredSessionRef = useRef<string | null>(null);
+
   // The avatars as in a retrospective (useOwnAvatar): who is drawn with which,
   // the own entry kept as new as the team's choice, and the picker.
   const ownAvatar = useOwnAvatar({
@@ -341,6 +353,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     updateSession,
     canWrite: isLive && !deniedReason,
     onTeamAvatars,
+    // The entering write carries the entry, when there is one to come. Sent
+    // in a write of its own just before, the entry left from the same
+    // revision as that write, and the server refused the second: the one
+    // that takes the "has left" mark off, which nothing sends again.
+    entersWithAWrite: () => !!session && enteredSessionRef.current !== session.id && entersWriting(session),
   });
 
   // The status follows the phase, as in a retrospective: opening Close ends the
@@ -510,9 +527,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // re-opening the session while marked as "left" brings them back.
   useEffect(() => {
     if (!session) return;
-    const hasCurrentUser = session.participants?.some(p => p.id === currentUser.id);
-    const markedLeft = session.leftUsers?.includes(currentUser.id);
-    if (!hasCurrentUser || !session.participants?.length || markedLeft) {
+    enteredSessionRef.current = session.id;
+    if (entersWriting(session)) {
       updateSession(s => {
         if (!s.participants) s.participants = [];
         if (!s.participants.some(p => p.id === currentUser.id)) {
@@ -985,7 +1001,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           <span className="max-w-32 truncate text-sm font-semibold text-slate-900" title={currentUser.name}>{currentUser.name}</span>
         </div>
         {/* The viewer's own avatar opens the avatar picker, by the retro
-            header's rule (decision D10): at every width for a participant,
+            header's rule (AGENTS.md, *Avatars*): at every width for a participant,
             from 360px for a facilitator, whose header also carries the
             invite button and play. */}
         <ViewerAvatarButton
@@ -1029,7 +1045,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           {isFacilitator && (
             <button
               onClick={() => setPhase('DISCUSS')}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] transition"
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 transition"
             >
               {t('healthCheck.survey.next')}
             </button>
@@ -1167,7 +1183,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           {isFacilitator && (
             <button
               onClick={() => setPhase('REVIEW')}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] transition"
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 transition"
             >
               {t('healthCheck.discuss.next')}
             </button>
@@ -1545,7 +1561,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           {isFacilitator && (
             <button
               onClick={() => setPhase('CLOSE')}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97] transition"
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 transition"
             >
               {t('healthCheck.review.next')}
             </button>

@@ -17,7 +17,7 @@ interface Props {
 
 /**
  * The viewer's own avatar, as the button that opens the avatar picker
- * (decision D10), in both session headers and the dashboard's top bar. The
+ * (AGENTS.md, *Avatars*), in both session headers and the dashboard's top bar. The
  * avatar inside is decoration: the button is named "<name>, choose my
  * avatar", led by the initials while they are what it shows, since a name
  * must hold the words a voice-control user can see (WCAG 2.5.3).

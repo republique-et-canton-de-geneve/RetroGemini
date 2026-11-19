@@ -3844,7 +3844,7 @@ describe('Open board — every hold and every drop', () => {
     expect(effectivePair(within(cardElement('Too many meetings')).getByRole('button', { name: 'Add reaction' })).ratio).toBeGreaterThanOrEqual(3);
   });
 
-  // Custom templates saved by older releases hold classes only (decision D15):
+  // Custom templates saved by older releases hold classes only (AGENTS.md, *A card's colour*):
   // their cards are tinted by the hue the classes name, not left white.
   it('tints the cards of a column that holds Tailwind classes only', async () => {
     renderBoard(createBoard({ columns: [{ ...hueless('todo', 'To Discuss'), color: 'bg-rose-50', text: 'text-rose-700' }, column('doing', 'Discussing')] }));

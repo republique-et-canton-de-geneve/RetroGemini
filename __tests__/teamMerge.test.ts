@@ -376,7 +376,7 @@ describe('planTeamMerge — the session parents of sessionParent mode', () => {
   });
 });
 
-// Each member's avatar (PLAN.md section 18.1) is keyed by member id, and the
+// Each member's avatar (AGENTS.md, *Avatars*) is keyed by member id, and the
 // merge rewrites the secondary's ids. Carried as an unknown key, the
 // primary's map would win whole and every choice of the second team would be
 // reported as a conflict and lost; a reminted member would wear another
@@ -436,6 +436,25 @@ describe('planTeamMerge — each member\'s avatar', () => {
       'a-old': choice('owl', 3),
       'b-gone': choice('star', 5)
     });
+  });
+
+  // The mirror: an entry the main team kept for an id its roster no longer
+  // holds (the row was dropped by a stale roster post), and that id is a
+  // member of the second team. In the merged team the id is that member's:
+  // the main team's leftover is not their choice.
+  it('never lands an off-roster entry of the main team on a member of the second', () => {
+    const primary = primaryTeam() as Record<string, any>;
+    primary.memberAvatars = { 'b-luc': choice('owl', 3), 'a-jean': choice('fox', 10) };
+    const secondary = secondaryTeam() as Record<string, any>;
+    secondary.memberAvatars = { 'b-luc': choice('dice', 20) };
+    expect(merge({ primary, secondary }).team.memberAvatars).toEqual({
+      'a-jean': choice('fox', 10),
+      'b-luc': choice('dice', 20)
+    });
+
+    // Without a choice of their own, that member wears none.
+    const unchosen = secondaryTeam() as Record<string, any>;
+    expect(merge({ primary, secondary: unchosen }).team.memberAvatars).toEqual({ 'a-jean': choice('fox', 10) });
   });
 
   it('stores no map when neither team has a choice', () => {

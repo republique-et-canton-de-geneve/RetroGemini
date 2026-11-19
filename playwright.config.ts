@@ -64,7 +64,7 @@ export default defineConfig({
     },
     {
       // The product as most people see it, animations on, for the specs an
-      // animation can break (decision D3 of the Clarté plan).
+      // animation can break (AGENTS.md, *Test runs emulate reduced motion*).
       name: 'motion',
       testMatch: MOTION_SPECS,
       use: {

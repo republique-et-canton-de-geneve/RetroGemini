@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, readdirSync, statSync } from 'fs';
+import { join, relative } from 'path';
 import { parsedColor, themeBlocks, tokenContrast } from './helpers/tailwindTheme';
 
 /**
@@ -165,5 +165,84 @@ describe('one source for a colour', () => {
     const before = CSS.slice(0, start);
     expect(before).not.toMatch(/\.fx-(?!layer|token)[a-z-]+\s*(?:::?[a-z]+)?\s*\{/);
     expect(before).not.toMatch(/@keyframes fx-/);
+  });
+});
+
+/**
+ * A control that shrinks, grows or shifts while it is pressed moves its own
+ * edge from under the pointer. Pressed on its outer pixel, the release lands
+ * beside it, the browser sends the click to the ancestor both events share,
+ * and the control does nothing: 45.0 was first written with
+ * `active:scale-[0.97]` on every primary button, and a held press on the
+ * outer pixel of "New Team" clicked the page behind it. A press answers with a
+ * colour, never with its box.
+ */
+describe('a press never moves the control pressed', () => {
+  const ROOT = join(__dirname, '..');
+  const walk = (dir: string, out: string[] = []): string[] => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path, out);
+      else if (/\.tsx?$/.test(name)) out.push(path);
+    }
+    return out;
+  };
+
+  /** A class's variants and its utility: `motion-safe:active:scale-[0.97]` is two variants and `scale-[0.97]`. */
+  const parts = (token: string): string[] => {
+    const out: string[] = [];
+    let depth = 0;
+    let current = '';
+    for (const char of token) {
+      if (char === '[') depth += 1;
+      if (char === ']') depth = Math.max(0, depth - 1);
+      if (char === ':' && depth === 0) {
+        out.push(current);
+        current = '';
+      } else current += char;
+    }
+    out.push(current);
+    return out;
+  };
+
+  /** Utilities that change where an element's edge is: a transform, a size, a spacing, an edge's width, the size of its words. */
+  const movesBox = (utility: string): boolean =>
+    /^-?(?:scale|translate|rotate|skew)(?:-|$)/.test(utility) ||
+    /^-?(?:[whpm]|[pm][xytrblse]|size|min-[wh]|max-[wh]|inset(?:-[xy])?|top|right|bottom|left|gap(?:-[xy])?)-/.test(utility) ||
+    /^border(?:-[xytrblse])?(?:-(?:\d|\[\d)|$)/.test(utility) ||
+    /^(?:text-(?:xs|sm|base|lg|\d?xl|\[\d)|leading-|tracking-|font-(?:thin|extralight|light|normal|medium|semibold|bold|extrabold|black)$)/.test(utility);
+
+  const pressMoves = (text: string): string[] =>
+    (text.match(/[^\s"'`]+/g) ?? []).filter((token) => {
+      const split = parts(token);
+      const utility = split[split.length - 1].replace(/!$/, '').replace(/^!/, '');
+      return split.slice(0, -1).includes('active') && movesBox(utility);
+    });
+
+  /** Rules of a stylesheet that change a box while `:active` holds. */
+  const pressRules = (css: string): string[] =>
+    [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]*:active[^{}]*)\{([^{}]*)\}/g)]
+      .filter((match) => /(?:^|[;\s])(?:transform|scale|translate|rotate|width|height|padding|margin|inset|top|right|bottom|left|font-size|font-weight|border-width)\s*:/.test(match[2]))
+      .map((match) => match[1].trim());
+
+  it('no class of the components moves a box on a press', () => {
+    const files = [...walk(join(ROOT, 'components')), join(ROOT, 'App.tsx')];
+    expect(files.length).toBeGreaterThan(100);
+    const found = files.flatMap((file) => pressMoves(readFileSync(file, 'utf8')).map((token) => `${relative(ROOT, file)}: ${token}`));
+    expect(found).toEqual([]);
+  });
+
+  it('no rule of index.css moves a box on a press', () => {
+    expect(pressRules(CSS)).toEqual([]);
+  });
+
+  it('reads a press that moves a box, whatever stands before it, and leaves a press that changes a colour', () => {
+    expect(pressMoves('rounded-lg motion-safe:active:scale-[0.97] transition')).toEqual(['motion-safe:active:scale-[0.97]']);
+    expect(pressMoves("'active:translate-y-px sm:active:-translate-y-0.5 active:scale-95'")).toHaveLength(3);
+    expect(pressMoves('active:px-5 active:border-2 active:text-sm active:font-bold active:h-9 active:[&>span]:scale-90')).toHaveLength(6);
+    expect(pressMoves('active:bg-indigo-800 active:text-slate-900 active:border-indigo-700 active:shadow-none active:opacity-90 active:ring-2')).toEqual([]);
+    // Without the press, the same utilities are the element's ordinary box.
+    expect(pressMoves('scale-95 hover:scale-105 px-5 border-2 group-active:scale-95')).toEqual([]);
+    expect(pressRules('.a:active { transform: scale(0.97); } .b:active { background: var(--color-indigo-800); } .c { transform: none; }')).toEqual(['.a:active']);
   });
 });

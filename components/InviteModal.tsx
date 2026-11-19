@@ -274,7 +274,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         className={`w-full px-4 py-2.5 rounded-lg font-semibold text-sm transition ${
           !emailsToInvite.length || status === 'sending'
             ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
-            : 'bg-indigo-600 text-white hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97]'
+            : 'bg-indigo-600 text-white hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800'
         }`}
         disabled={!emailsToInvite.length || status === 'sending'}
       >

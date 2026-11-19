@@ -1,10 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { ownAvatarChoice, ownAvatarEntry, sessionAvatarOf } from '../components/session/sessionAvatars';
+import {
+  avatarChoiceTime,
+  ownAvatarChoice,
+  ownAvatarEntry,
+  ownAvatarEntryTime,
+  sessionAvatarOf,
+  stampOwnAvatarEntry,
+  withoutAvatar,
+} from '../components/session/sessionAvatars';
 import type { Team, User } from '../types';
 
 /**
  * The one rule that decides which avatar a session shows, and what the
- * viewer's own client writes on entering one (PLAN 18.1): the newer `at` wins,
+ * viewer's own client writes on entering one (AGENTS.md, *Avatars*): the newer `at` wins,
  * values are copied as stored, `toAvatarId` is applied only to draw, and an
  * anonymous session shows no picture at all (it would say who wrote a card).
  */
@@ -184,5 +192,86 @@ describe('ownAvatarChoice', () => {
 
   it("is the viewer's own and stays readable in an anonymous session", () => {
     expect(ownAvatarChoice(sessionWith([person('ada')], true), team, 'ada')).toBe('fox');
+  });
+});
+
+describe('stampOwnAvatarEntry', () => {
+  const team = teamWith({ ada: { id: 'fox', at: 100 }, bob: { id: 'owl', at: 200 } });
+
+  it("puts the viewer's own entry of a draft on the team's newer choice, and says so", () => {
+    const ada = person('ada');
+    const bob = person('bob');
+    const draft = { participants: [ada, bob] };
+    expect(stampOwnAvatarEntry(draft, team, 'ada')).toBe(true);
+    expect(draft.participants[0]).toEqual({ ...person('ada'), avatar: 'fox', avatarAt: 100 });
+    // A copy took the entry's place: the object the draft shared is untouched.
+    expect(draft.participants[0]).not.toBe(ada);
+    expect(ada).not.toHaveProperty('avatar');
+    // Nobody else's entry is the viewer's to write.
+    expect(draft.participants[1]).toBe(bob);
+  });
+
+  it('changes nothing when the entry is as new, when there is no entry, and when there is no choice', () => {
+    const current = { participants: [person('ada', { avatar: 'fox', avatarAt: 100 })] };
+    const before = deepCopy(current);
+    expect(stampOwnAvatarEntry(current, team, 'ada')).toBe(false);
+    expect(current).toEqual(before);
+
+    const absent = { participants: [person('bob')] };
+    expect(stampOwnAvatarEntry(absent, team, 'ada')).toBe(false);
+    expect(absent.participants).toHaveLength(1);
+
+    const unchosen = { participants: [person('zoe')] };
+    expect(stampOwnAvatarEntry(unchosen, team, 'zoe')).toBe(false);
+    expect(unchosen.participants[0]).not.toHaveProperty('avatar');
+  });
+
+  it('survives a draft that is missing or malformed', () => {
+    expect(stampOwnAvatarEntry(null, team, 'ada')).toBe(false);
+    expect(stampOwnAvatarEntry({}, team, 'ada')).toBe(false);
+    expect(stampOwnAvatarEntry({ participants: 'nobody' as unknown as User[] }, team, 'ada')).toBe(false);
+    const holed = { participants: [null as unknown as User, person('ada')] };
+    expect(stampOwnAvatarEntry(holed, team, 'ada')).toBe(true);
+    expect(holed.participants[1]).toMatchObject({ avatar: 'fox', avatarAt: 100 });
+  });
+});
+
+describe('the time of a choice', () => {
+  it("reads when a member's choice was made from a map the server answered", () => {
+    expect(avatarChoiceTime({ ada: { id: 'fox', at: 100 } }, 'ada')).toBe(100);
+    expect(avatarChoiceTime({ ada: { id: null, at: 250 } }, 'ada')).toBe(250);
+    expect(avatarChoiceTime({ ada: { id: 'fox', at: 100 } }, 'bob')).toBeNull();
+    expect(avatarChoiceTime(undefined, 'ada')).toBeNull();
+    expect(avatarChoiceTime(null, 'ada')).toBeNull();
+    expect(avatarChoiceTime({ ada: 'fox' } as unknown as Team['memberAvatars'], 'ada')).toBeNull();
+  });
+
+  it("says which choice the viewer's entry lacks, or null when it lacks none", () => {
+    const team = teamWith({ ada: { id: 'fox', at: 100 } });
+    expect(ownAvatarEntryTime(sessionWith([person('ada')]), team, 'ada')).toBe(100);
+    expect(ownAvatarEntryTime(sessionWith([person('ada', { avatar: 'cat', avatarAt: 40 })]), team, 'ada')).toBe(100);
+    expect(ownAvatarEntryTime(sessionWith([person('ada', { avatar: 'fox', avatarAt: 100 })]), team, 'ada')).toBeNull();
+    expect(ownAvatarEntryTime(sessionWith([person('bob')]), team, 'ada')).toBeNull();
+    expect(ownAvatarEntryTime(null, team, 'ada')).toBeNull();
+  });
+});
+
+describe('withoutAvatar', () => {
+  it('gives a copy without the avatar and its time, and leaves the entry it was given alone', () => {
+    const entry = person('ada', { avatar: 'fox', avatarAt: 100, email: 'ada@example.org' });
+    const bare = withoutAvatar(entry);
+    expect(bare).toEqual(person('ada', { email: 'ada@example.org' }));
+    expect(bare).not.toHaveProperty('avatar');
+    expect(bare).not.toHaveProperty('avatarAt');
+    expect(entry).toMatchObject({ avatar: 'fox', avatarAt: 100 });
+  });
+
+  it('drops a cleared choice too: a null is a choice', () => {
+    expect(withoutAvatar(person('ada', { avatar: null, avatarAt: 100 }))).toEqual(person('ada'));
+  });
+
+  it('hands back the very entry when it holds no avatar', () => {
+    const entry = person('ada');
+    expect(withoutAvatar(entry)).toBe(entry);
   });
 });
