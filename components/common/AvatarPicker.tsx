@@ -250,7 +250,9 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
             type="button"
             aria-pressed={drawn === null}
             aria-disabled={disabled || undefined}
-            aria-label={t('avatars.picker.initials')}
+            // The initials it shows lead its name: a name must hold the words
+            // a voice-control user can see (WCAG 2.5.3).
+            aria-label={t('avatars.picker.initialsTile', { initials })}
             onClick={() => pick(null)}
             className={tileClass(drawn === null)}
           >

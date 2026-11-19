@@ -82,7 +82,8 @@ interface Props {
   onInvite: () => void;
   /** Facilitator marks a participant as having left (or as returned). */
   onToggleLeft?: (userId: string) => void;
-  getMemberDisplay: (member: User) => { displayName: string; initials: string };
+  // `avatarId`: the picture to draw (`sessionAvatarOf`), absent or null for initials.
+  getMemberDisplay: (member: User) => { displayName: string; initials: string; avatarId?: string | null };
 }
 
 // Chosen by comparison, never looked up in an object: an unchecked value
@@ -385,7 +386,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
           {/* No horizontal scroll: an arriving row slides in from 18px to the right. */}
           <div className="grow overflow-y-auto overflow-x-hidden p-2">
             {orderedParticipants.map((member) => {
-              const { displayName, initials } = getMemberDisplay(member);
+              const { displayName, initials, avatarId } = getMemberDisplay(member);
               const hasLeft = leftSet.has(member.id);
               const isCurrentUser = member.id === currentUser.id;
               const isOnline = connectedUsers.has(member.id);
@@ -404,13 +405,14 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                   className={`relative isolate flex items-center gap-3 px-2.5 py-2 rounded-xl mb-0.5 group/row ${isCurrentUser ? 'bg-indigo-100' : 'hover:bg-slate-50'} ${arriving ? 'fx-person-in' : ''}`}
                   style={arriving ? ({ '--av-bg': participantToneHex(member.color).bg } as React.CSSProperties) : undefined}
                 >
-                  {/* A departed participant's avatar turns neutral grey; the
-                      "Left the session" chip says why. Nothing here is faded:
+                  {/* A departed participant's avatar turns neutral grey, as
+                      initials, never their picture; the "Left the session"
+                      chip says why. Nothing here is faded:
                       fading the row, then the avatar, each put text below
                       4.5:1 (utils/participantColors.ts). */}
                   <div className="relative shrink-0">
                     <span className={`block rounded-full ${arriving ? 'fx-pop' : ''}`}>
-                      <Avatar colorClasses={hasLeft ? DEPARTED_AVATAR_CLASSES : avatarColorClasses(member.color)} initials={initials} size={36} />
+                      <Avatar colorClasses={hasLeft ? DEPARTED_AVATAR_CLASSES : avatarColorClasses(member.color)} initials={initials} size={36} avatarId={hasLeft ? null : avatarId} />
                     </span>
                     {/* Ringed in the row's own surface, so it reads as a dot on the avatar's edge. */}
                     {isOnline && !hasLeft && (

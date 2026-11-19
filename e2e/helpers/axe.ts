@@ -106,6 +106,8 @@ export const BASELINE: Record<string, number> = {
   // e2e/admin-team-merge.spec.ts: the merge and delete dialogs, scoped.
   'admin-team-merge-dialog': 0,
   'admin-team-delete-dialog': 0,
+  // e2e/avatars.spec.ts: the avatar picker over a session, scoped (45.0).
+  'avatar-picker': 0,
 };
 
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];

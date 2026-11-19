@@ -2,7 +2,7 @@ import { appFetch } from '../services/publicPath';
 
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
-import { Team, User, RetroSession, Ticket, ActionItem, ActionImpactVote, Group, ParticipantActivity, JiraLink } from '../types';
+import { Team, User, RetroSession, Ticket, ActionItem, ActionImpactVote, Group, ParticipantActivity, JiraLink, MemberAvatarChoice } from '../types';
 import { dataService } from '../services/dataService';
 import { noteRevokedResponse } from '../services/sessionRevocation';
 import { syncService } from '../services/syncService';
@@ -135,6 +135,9 @@ import SyncStalledBanner from './session/SyncStalledBanner';
 import { jiraLinkFields, sameJiraLink, withJiraLinkFrom } from './jira/jiraLinkMerge';
 import { avatarColorClasses, participantToneHex } from '../utils/participantColors';
 import Avatar from './common/Avatar';
+import AvatarPicker from './common/AvatarPicker';
+import { useOwnAvatar } from './session/useOwnAvatar';
+import { sessionAvatarOf, viewerInitials } from './session/sessionAvatars';
 
 const generateLocalId = () => randomId();
 
@@ -165,6 +168,8 @@ interface Props {
   // expired or belongs to another team, so the only way out is the login
   // screen (audit H12). Falls back to `onExit` when the host does not wire it.
   onSessionExpired?: () => void;
+  // Shows the avatar map the server answered after the viewer's pick.
+  onTeamAvatars?: (teamId: string, memberAvatars: Record<string, MemberAvatarChoice>) => void;
 }
 
 // The guided phases the header walks. An open board (utils/openBoard.ts) is
@@ -205,7 +210,7 @@ const applyMaxVotes = (s: RetroSession, newVal: number) => {
   if (!s.settings.unlimitedVotes) capVotes(s, s.settings.maxVotes);
 };
 
-const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
+const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired, onTeamAvatars }) => {
   // Named `tr`, not `t`: `t` is the ticket variable throughout this file.
   const { t: tr } = useTranslation();
   const [session, setSession] = useState<RetroSession | undefined>(() => {
@@ -852,7 +857,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     const anonymous = getAnonymizedLabel(member.id);
     const displayName = anonymous || member.name;
     const initials = displayName.substring(0, 2).toUpperCase();
-    return { displayName, initials };
+    // None in an anonymous session: the resolver says so.
+    const avatarId = sessionAvatarOf(session, team, member.id);
+    return { displayName, initials, avatarId };
   };
 
   const getParticipants = () => {
@@ -1548,6 +1555,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     syncService.updateSession(newSession);
     return newSession;
   };
+
+  // Who is drawn with which avatar (none in an anonymous session), the own
+  // entry kept as new as the team's choice, and the picker.
+  const ownAvatar = useOwnAvatar({
+    session: session ?? null,
+    team,
+    currentUser,
+    updateSession,
+    canWrite: isLive && !deniedReason,
+    onTeamAvatars,
+  });
 
   // A vote of the viewer's, added or taken back by `write`, and the motion
   // that follows it. The write goes first and alone decides (mayAddVote judges
@@ -3281,7 +3299,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 <div className="absolute top-2 right-2">
                     {/* Named: it is the card's only sign of who wrote it. */}
                     <div className="flex rounded-full ring-2 ring-white">
-                        <Avatar colorClasses={avatarColorClasses(author.color)} initials={author.name.substring(0,2).toUpperCase()} size={28} label={author.name} />
+                        <Avatar colorClasses={avatarColorClasses(author.color)} initials={author.name.substring(0,2).toUpperCase()} size={28} label={author.name} avatarId={ownAvatar.avatarIdOf(author.id)} />
                     </div>
                 </div>
             )}
@@ -4590,6 +4608,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           onToggleRetroTips={() => setIsRetroTipsOpen((open) => !open)}
           isLive={isLive}
           joinDeniedReason={deniedReason}
+          viewerAvatarId={ownAvatar.avatarIdOf(currentUser.id)}
+          onOpenAvatarPicker={ownAvatar.openPicker}
         />
         <SessionConnectionBanner
           isLive={isLive}
@@ -4835,9 +4855,20 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     cardBgHex={modalBgHex}
                     cardTextColor={modalTextColor}
                     isAnonymous={session.settings.isAnonymous}
+                    avatarIdOf={ownAvatar.avatarIdOf}
                 />
             );
         })()}
+        <AvatarPicker
+            open={ownAvatar.pickerOpen}
+            onClose={ownAvatar.closePicker}
+            colorClasses={avatarColorClasses(currentUser.color)}
+            initials={viewerInitials(currentUser)}
+            name={currentUser.name}
+            currentAvatarId={ownAvatar.currentChoice}
+            onPick={ownAvatar.pick}
+            disabled={!isLive || !!deniedReason}
+        />
     </div>
   );
 };

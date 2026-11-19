@@ -1,6 +1,6 @@
 import { appFetch, appPath, localPath } from './services/publicPath';
 import React, { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
-import { Team, User, AppVersion, VersionAnnouncement } from './types';
+import { Team, User, AppVersion, VersionAnnouncement, MemberAvatarChoice } from './types';
 import { dataService, OPEN_SESSION_STORAGE_KEY } from './services/dataService';
 import TeamLogin, { InviteData } from './components/TeamLogin';
 import Dashboard from './components/Dashboard';
@@ -12,6 +12,7 @@ import AppHeader from './components/AppHeader';
 import DashboardRevokedBanner from './components/dashboard/DashboardRevokedBanner';
 import { useTranslation } from './i18n/I18nContext';
 import { isSessionInProgress } from './utils/sessionStatus';
+import { memberAvatar, memberAvatarId } from './utils/avatars.js';
 import { isSessionRevoked, newerToken, onSessionRevokedChange, onSessionTokenChanged } from './services/sessionRevocation';
 import type { Notice } from './i18n/notice';
 
@@ -475,6 +476,14 @@ const App: React.FC = () => {
     setCurrentTeam((open) => (open?.id === copy.id ? copy : open));
   }, []);
 
+  // The avatar map the server answered after a pick, on a new team object so
+  // every screen holding the team draws it (the header, the Members tab, a
+  // session). Only onto the team still open: an answer arriving after a
+  // sign-out opens nothing.
+  const showTeamAvatars = useCallback((teamId: string, memberAvatars: Record<string, MemberAvatarChoice>) => {
+    setCurrentTeam((open) => (open?.id === teamId ? { ...open, memberAvatars } : open));
+  }, []);
+
   // Decision D3b: the team's password was changed and this client's token is
   // revoked. A session and the Dashboard say so themselves, with "Log in
   // again" — useSessionRevoked in a session, DashboardRevokedBanner here — so
@@ -720,6 +729,13 @@ const App: React.FC = () => {
             unreadCount={hasUnreadAnnouncements ? unreadAnnouncements.reduce((acc, a) => acc + a.items.length, 0) : null}
             onOpenAnnouncements={handleOpenAnnouncements}
             onLogout={isSession ? undefined : handleLogout}
+            avatarId={memberAvatarId(currentTeam, currentUser.id)}
+            avatarChoice={memberAvatar(currentTeam, currentUser.id)?.id ?? null}
+            onPickAvatar={async (avatarId) => {
+                const teamId = currentTeam.id;
+                showTeamAvatars(teamId, await dataService.setMemberAvatar(currentUser.id, avatarId));
+            }}
+            avatarPickerDisabled={sessionRevoked}
         />
     );
   };
@@ -745,6 +761,7 @@ const App: React.FC = () => {
             <Session
                 team={currentTeam}
                 currentUser={currentUser}
+                onTeamAvatars={showTeamAvatars}
                 sessionId={activeSessionId}
                 // A refused socket join means the team credential is gone or
                 // expired (audit H12): send the user back to the login screen
@@ -768,6 +785,7 @@ const App: React.FC = () => {
             <HealthCheckSession
                 team={currentTeam}
                 currentUser={currentUser}
+                onTeamAvatars={showTeamAvatars}
                 sessionId={activeHealthCheckId}
                 // See the retrospective session above (audit H12).
                 onSessionExpired={handleSessionExpired}

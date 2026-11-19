@@ -46,6 +46,7 @@ import { effectiveSessionStatus } from '../utils/sessionStatus';
 import { isOpenBoard } from '../utils/openBoard';
 import { avatarColorClasses } from '../utils/participantColors';
 import Avatar from './common/Avatar';
+import { memberAvatarId } from '../utils/avatars.js';
 import { HEALTH_RATING_BADGE } from '../utils/healthRatingColors';
 import { columnIconName } from './iconPickerIcons';
 import {
@@ -1659,7 +1660,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
         <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
           {team.members.map((member) => (
             <div key={member.id} className={`${CARD} p-4 flex flex-wrap items-center gap-3`}>
-              <Avatar colorClasses={avatarColorClasses(member.color)} initials={member.name.substring(0, 2)} size={40} />
+              <Avatar colorClasses={avatarColorClasses(member.color)} initials={member.name.substring(0, 2)} size={40} avatarId={memberAvatarId(team, member.id)} />
               {/* At least 8rem for the name: the removal question goes to its own line rather than squeeze it. */}
               <div className="flex flex-col flex-1 min-w-[8rem]">
                 {editingMemberId === member.id ? (

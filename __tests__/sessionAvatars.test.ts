@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ownAvatarEntry, sessionAvatarOf } from '../components/session/sessionAvatars';
+import { ownAvatarChoice, ownAvatarEntry, sessionAvatarOf } from '../components/session/sessionAvatars';
 import type { Team, User } from '../types';
 
 /**
@@ -26,6 +26,20 @@ describe('sessionAvatarOf', () => {
     expect(sessionAvatarOf(session, team, 'ada')).toBeNull();
     expect(sessionAvatarOf(session, team, 'bob')).toBeNull();
     expect(sessionAvatarOf(session, team, 'nobody')).toBeNull();
+  });
+
+  // Both stored session types keep the flag in `settings` (RetroSettings,
+  // HealthCheckSettings): a resolver reading only a top-level flag would draw
+  // every picture of a real anonymous session.
+  it('draws nothing in an anonymous session as the screens store it, under settings', () => {
+    const named = [person('ada', { avatar: 'cat', avatarAt: 300 }), person('bob')];
+    const retro = { id: 'r1', participants: named, settings: { isAnonymous: true } };
+    const healthCheck = { id: 'hc1', templateId: 'x', participants: named, settings: { isAnonymous: true, revealRoti: false } };
+    expect(sessionAvatarOf(retro, team, 'ada')).toBeNull();
+    expect(sessionAvatarOf(retro, team, 'bob')).toBeNull();
+    expect(sessionAvatarOf(healthCheck, team, 'ada')).toBeNull();
+    expect(sessionAvatarOf({ ...retro, settings: { isAnonymous: false } }, team, 'ada')).toBe('cat');
+    expect(sessionAvatarOf({ ...retro, settings: { isAnonymous: false } }, team, 'bob')).toBe('owl');
   });
 
   it("takes the entry's avatar when the entry states one, before the team's", () => {
@@ -136,5 +150,25 @@ describe('ownAvatarEntry', () => {
     const session = sessionWith([person('ada')], true);
     expect(ownAvatarEntry(session, team, 'ada')).toMatchObject({ avatar: 'fox', avatarAt: 100 });
     expect(sessionAvatarOf({ ...session, participants: [ownAvatarEntry(session, team, 'ada')!] }, team, 'ada')).toBeNull();
+  });
+});
+
+describe('ownAvatarChoice', () => {
+  const team = teamWith({ ada: { id: 'fox', at: 100 } });
+
+  it("marks the team's choice when the entry is not newer", () => {
+    expect(ownAvatarChoice(sessionWith([person('ada', { avatar: 'cat', avatarAt: 100 })]), team, 'ada')).toBe('fox');
+    expect(ownAvatarChoice(sessionWith([person('ada')]), team, 'ada')).toBe('fox');
+    expect(ownAvatarChoice(null, team, 'ada')).toBe('fox');
+    expect(ownAvatarChoice(null, teamWith({}), 'ada')).toBeNull();
+  });
+
+  it('marks a newer entry, a cleared one included (a pick from another browser reached the session first)', () => {
+    expect(ownAvatarChoice(sessionWith([person('ada', { avatar: 'cat', avatarAt: 150 })]), team, 'ada')).toBe('cat');
+    expect(ownAvatarChoice(sessionWith([person('ada', { avatar: null, avatarAt: 150 })]), team, 'ada')).toBeNull();
+  });
+
+  it("is the viewer's own and stays readable in an anonymous session", () => {
+    expect(ownAvatarChoice(sessionWith([person('ada')], true), team, 'ada')).toBe('fox');
   });
 });

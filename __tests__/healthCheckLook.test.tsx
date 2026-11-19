@@ -194,7 +194,9 @@ describe('the header is the retrospective header', () => {
     renderSession(createSession(), alice);
     const avatar = document.querySelector('[data-viewer-avatar]') as HTMLElement;
     expect(avatar.className.split(/\s+/)).not.toContain('hidden');
-    expect(within(avatar).getByRole('img', { name: 'Alice' })).toBeTruthy();
+    // The picker's opener, named by the person (decision D10).
+    expect(avatar.tagName).toBe('BUTTON');
+    expect(avatar.getAttribute('aria-label')).toBe('AL, Alice, choose my avatar');
   });
 
   it('reads every phase label and hides the icons from assistive technology', () => {

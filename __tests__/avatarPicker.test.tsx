@@ -74,7 +74,8 @@ describe('AvatarPicker', () => {
         expect(button.getAttribute('aria-pressed')).toBe('false');
         seen.add(name);
       }
-      expect(within(panel).getByRole('button', { name: messages['avatars.picker.initials'] })).toBeTruthy();
+      // Led by the initials it shows (WCAG 2.5.3: the visible text is part of the name).
+      expect(within(panel).getByRole('button', { name: `LM, ${messages['avatars.picker.initials']}` })).toBeTruthy();
     }
     expect(seen.size).toBe(120);
     expect(within(dialog).getByRole('button', { name: messages['avatars.picker.done'] })).toBeTruthy();
@@ -86,7 +87,7 @@ describe('AvatarPicker', () => {
     const selected = screen.getByRole('tab', { selected: true });
     expect(selected.textContent).toBe(en['avatars.family.shapes']);
     expect(screen.getByRole('button', { name: 'Hourglass' }).getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('button', { name: 'My initials' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('button', { name: /, My initials$/ }).getAttribute('aria-pressed')).toBe('false');
     // The person's name and the picture's, beside the big avatar.
     expect(screen.getByText('Léa Martin')).toBeTruthy();
     expect(screen.getAllByText('Hourglass').length).toBeGreaterThan(0);
@@ -96,7 +97,7 @@ describe('AvatarPicker', () => {
     for (const currentAvatarId of [null, 'space-whale']) {
       const { unmount } = renderPicker({ currentAvatarId });
       expect(screen.getByRole('tab', { selected: true }).textContent).toBe(en['avatars.family.animals']);
-      expect(screen.getByRole('button', { name: 'My initials' }).getAttribute('aria-pressed')).toBe('true');
+      expect(screen.getByRole('button', { name: /, My initials$/ }).getAttribute('aria-pressed')).toBe('true');
       unmount();
     }
   });
@@ -188,9 +189,9 @@ describe('AvatarPicker', () => {
 
   it('writes null for "My initials"', async () => {
     const { onPick } = renderPicker({ currentAvatarId: 'fox' });
-    fireEvent.click(screen.getByRole('button', { name: 'My initials' }));
+    fireEvent.click(screen.getByRole('button', { name: /, My initials$/ }));
     expect(onPick).toHaveBeenCalledWith(null);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'My initials' }).getAttribute('aria-pressed')).toBe('true'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /, My initials$/ }).getAttribute('aria-pressed')).toBe('true'));
   });
 
   it('follows a new current choice from its opener', () => {
@@ -250,7 +251,7 @@ describe('AvatarPicker', () => {
       screen.getByRole('status'),
       ...screen.getAllByRole('tab'),
       screen.getByRole('button', { name: 'Done' }),
-      within(screen.getByRole('button', { name: 'My initials' })).getByText('LM'),
+      within(screen.getByRole('button', { name: /, My initials$/ })).getByText('LM'),
     ];
     for (const element of texts) {
       const pair = effectivePair(element);

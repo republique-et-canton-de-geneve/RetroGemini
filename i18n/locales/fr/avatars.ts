@@ -4,9 +4,12 @@ import type en from '../en/avatars';
 const avatars: Record<keyof typeof en, string> = {
   // The picker
   'avatars.picker.title': 'Choisir mon avatar',
+  'avatars.picker.open': '{name}, choisir mon avatar',
+  'avatars.picker.openWithInitials': '{initials}, {name}, choisir mon avatar',
   'avatars.picker.hint': 'Les participants de vos sessions le voient à côté de vos cartes et dans la liste des participants, sauf dans une session anonyme.',
   'avatars.picker.families': 'Familles d’avatars',
   'avatars.picker.initials': 'Mes initiales',
+  'avatars.picker.initialsTile': '{initials}, Mes initiales',
   'avatars.picker.done': 'Terminé',
   'avatars.picker.saving': 'Enregistrement…',
   'avatars.picker.saved': 'Avatar enregistré.',

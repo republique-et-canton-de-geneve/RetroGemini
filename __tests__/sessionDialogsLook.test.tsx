@@ -114,6 +114,17 @@ describe('ticket comments dialog', () => {
     expectFrame(screen.getByRole('dialog'));
   });
 
+  it("draws each person's picture the session resolves, and initials without one", () => {
+    const { unmount } = renderModal();
+    expect(document.querySelectorAll('[data-avatar-art]').length).toBe(0);
+    unmount();
+    // What Session passes: sessionAvatarOf, which already answers null in an anonymous session.
+    renderModal({ avatarIdOf: (id) => (id === lime.id ? 'fox' : id === amber.id ? 'owl' : null) });
+    const drawn = [...document.querySelectorAll('[data-avatar-art]')].map((element) => element.getAttribute('data-avatar-art'));
+    expect(drawn).toContain('fox');
+    expect(drawn).toContain('owl');
+  });
+
   it('the send button states both its looks in colours, never an opacity', () => {
     renderModal();
     const send = screen.getByRole('button', { name: 'Send comment' });

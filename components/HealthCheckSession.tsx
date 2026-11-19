@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Team, User, HealthCheckSession as HealthCheckSessionType, HealthCheckDimension, ActionItem, JiraLink } from '../types';
+import { Team, User, HealthCheckSession as HealthCheckSessionType, HealthCheckDimension, ActionItem, JiraLink, MemberAvatarChoice } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import { randomId } from '../utils/randomId';
@@ -43,7 +43,10 @@ import JiraParentLine from './jira/JiraParentLine';
 import { withJiraLinkFrom } from './jira/jiraLinkMerge';
 import { useJiraStatus } from './jira/useJiraStatus';
 import { avatarColorClasses } from '../utils/participantColors';
-import Avatar from './common/Avatar';
+import AvatarPicker from './common/AvatarPicker';
+import ViewerAvatarButton from './session/ViewerAvatarButton';
+import { useOwnAvatar } from './session/useOwnAvatar';
+import { sessionAvatarOf, viewerInitials } from './session/sessionAvatars';
 
 interface Props {
   team: Team;
@@ -55,6 +58,8 @@ interface Props {
   // expired or belongs to another team, so the only way out is the login
   // screen (audit H12). Falls back to `onExit` when the host does not wire it.
   onSessionExpired?: () => void;
+  // Shows the avatar map the server answered after the viewer's pick.
+  onTeamAvatars?: (teamId: string, memberAvatars: Record<string, MemberAvatarChoice>) => void;
 }
 
 const PHASES = ['SURVEY', 'DISCUSS', 'REVIEW', 'CLOSE'] as const;
@@ -138,7 +143,7 @@ const isHealthCheckSession = (session: unknown): session is HealthCheckSessionTy
   return !!candidate.templateId && Array.isArray(candidate.dimensions);
 };
 
-const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
+const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired, onTeamAvatars }) => {
   const { t, tp, locale } = useTranslation();
   // The next press of a double click, or the next tap of a double tap, presses
   // nothing on another control than the first: the retrospective's guard, the
@@ -278,7 +283,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     const anonymous = getAnonymizedLabel(member.id);
     const displayName = anonymous || member.name;
     const initials = displayName.substring(0, 2).toUpperCase();
-    return { displayName, initials };
+    // None in an anonymous session: the resolver says so.
+    const avatarId = sessionAvatarOf(session, team, member.id);
+    return { displayName, initials, avatarId };
   };
 
   // Update session helper
@@ -321,6 +328,17 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       return newSession;
     });
   };
+
+  // The avatars as in a retrospective (useOwnAvatar): who is drawn with which,
+  // the own entry kept as new as the team's choice, and the picker.
+  const ownAvatar = useOwnAvatar({
+    session: session ?? null,
+    team,
+    currentUser,
+    updateSession,
+    canWrite: isLive && !deniedReason,
+    onTeamAvatars,
+  });
 
   // The status follows the phase, as in a retrospective: opening Close ends the
   // health check with the facilitator's own phase write, rather than waiting
@@ -962,12 +980,16 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           <span className="text-xs font-medium text-slate-500">{t('healthCheck.header.user')}</span>
           <span className="max-w-32 truncate text-sm font-semibold text-slate-900" title={currentUser.name}>{currentUser.name}</span>
         </div>
-        {/* The viewer's own avatar, by the retro header's rule (decision D10):
-            at every width for a participant, from 360px for a facilitator,
-            whose header also carries the invite button and play. */}
-        <div data-viewer-avatar className={`${isFacilitator ? 'hidden min-[360px]:flex' : 'flex'} shrink-0 rounded-full`}>
-          <Avatar colorClasses={avatarColorClasses(currentUser.color)} initials={currentUser.name.substring(0, 2).toUpperCase()} size={32} label={currentUser.name} />
-        </div>
+        {/* The viewer's own avatar opens the avatar picker, by the retro
+            header's rule (decision D10): at every width for a participant,
+            from 360px for a facilitator, whose header also carries the
+            invite button and play. */}
+        <ViewerAvatarButton
+          user={currentUser}
+          avatarId={ownAvatar.avatarIdOf(currentUser.id)}
+          onClick={ownAvatar.openPicker}
+          visibilityClass={isFacilitator ? 'hidden min-[360px]:flex' : 'flex'}
+        />
       </div>
     </header>
   );
@@ -1816,6 +1838,16 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           motionScope={session.phase}
         />
       </div>
+      <AvatarPicker
+        open={ownAvatar.pickerOpen}
+        onClose={ownAvatar.closePicker}
+        colorClasses={avatarColorClasses(currentUser.color)}
+        initials={viewerInitials(currentUser)}
+        name={currentUser.name}
+        currentAvatarId={ownAvatar.currentChoice}
+        onPick={ownAvatar.pick}
+        disabled={!isLive || !!deniedReason}
+      />
     </div>
   );
 };

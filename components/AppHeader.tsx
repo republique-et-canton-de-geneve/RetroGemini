@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { User } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import LanguageSwitcher from './common/LanguageSwitcher';
-import Avatar from './common/Avatar';
+import AvatarPicker from './common/AvatarPicker';
+import ViewerAvatarButton from './session/ViewerAvatarButton';
+import { viewerInitials } from './session/sessionAvatars';
 import { avatarColorClasses } from '../utils/participantColors';
 
 interface Props {
@@ -17,7 +19,18 @@ interface Props {
   onOpenAnnouncements: () => void;
   /** Absent where the screen offers its own way out. */
   onLogout?: () => void;
+  /** The viewer's picture, `memberAvatarId(team, currentUser.id)`, or null for initials. */
+  avatarId?: string | null;
+  /** The stored choice the picker marks. */
+  avatarChoice?: string | null;
+  /** Stores a choice from the picker; rejects when it was not stored. */
+  onPickAvatar?: (avatarId: string | null) => Promise<unknown>;
+  /** True while a choice cannot be stored (the credential was revoked). */
+  avatarPickerDisabled?: boolean;
 }
+
+// Where no screen stores a choice (a test of the bar alone): nothing is stored.
+const NOT_STORED = () => Promise.reject(new Error('The avatar could not be saved.'));
 
 /**
  * The dashboard's top bar. `e2e/i18n.spec.ts` → *headers fit in both
@@ -35,9 +48,14 @@ const AppHeader: React.FC<Props> = ({
   unreadCount,
   onOpenAnnouncements,
   onLogout,
+  avatarId = null,
+  avatarChoice = null,
+  onPickAvatar = NOT_STORED,
+  avatarPickerDisabled = false,
 }) => {
   const { t } = useTranslation();
   const isParticipant = currentUser.role === 'participant';
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between gap-3 px-4 md:px-6 shrink-0 z-50">
@@ -88,10 +106,9 @@ const AppHeader: React.FC<Props> = ({
             <span className="text-xs font-medium text-slate-500">{t('app.user')}</span>
             <span className="text-sm font-semibold text-slate-900">{currentUser.name}</span>
           </div>
-          {/* Named: on a phone the name beside it is hidden. */}
-          <div className="flex shrink-0 rounded-full ring-2 ring-white shadow-sm">
-            <Avatar colorClasses={avatarColorClasses(currentUser.color)} initials={currentUser.name.substring(0, 2).toUpperCase()} size={32} label={currentUser.name} />
-          </div>
+          {/* Opens the avatar picker; named by the person, since on a phone
+              the name beside it is hidden. */}
+          <ViewerAvatarButton user={currentUser} avatarId={avatarId} onClick={() => setPickerOpen(true)} />
         </div>
         {onLogout && (
           <button
@@ -105,6 +122,16 @@ const AppHeader: React.FC<Props> = ({
           </button>
         )}
       </div>
+      <AvatarPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        colorClasses={avatarColorClasses(currentUser.color)}
+        initials={viewerInitials(currentUser)}
+        name={currentUser.name}
+        currentAvatarId={avatarChoice}
+        onPick={onPickAvatar}
+        disabled={avatarPickerDisabled}
+      />
     </header>
   );
 };

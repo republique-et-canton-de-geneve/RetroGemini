@@ -206,6 +206,8 @@ test.describe('headers fit in both languages', () => {
         expect(m.switcher, `language switcher in view, ${where}`).toBe(true);
         if (screen === 'dashboard') {
           expect(m.logout, `logout in view, ${where}`).toBe(true);
+          // The dashboard's top bar draws the viewer's avatar at every width.
+          expect(m.avatar, `own avatar in view, ${where}`).toBe(true);
         } else {
           expect(m.invite, `invite in view, ${where}`).toBe(true);
           expect(m.timer, `timer play button in view, ${where}`).toBe(true);
@@ -282,6 +284,64 @@ test.describe('headers fit in both languages', () => {
     }
     await page.setViewportSize({ width: 1280, height: 900 });
   };
+
+  // The viewer's own avatar opens the avatar picker (decision D10): asserted in
+  // French, the longer language, where a phone has the least room.
+  const assertPickerOpens = async (page: Page, where: string, widths: readonly number[]) => {
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.getByTestId('language-option-fr').click();
+      await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
+      const opener = page.locator('header [data-viewer-avatar]');
+      await expect(opener, `own avatar shown, ${where} at ${width}px`).toBeVisible();
+      expect((await measure(page)).avatar, `own avatar in view, ${where} at ${width}px`).toBe(true);
+      await expect(opener).toHaveAccessibleName(/, choisir mon avatar$/);
+      await opener.click();
+      const picker = page.getByRole('dialog', { name: 'Choisir mon avatar' });
+      await expect(picker, `picker opens, ${where} at ${width}px`).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(picker).toHaveCount(0);
+      await expect(opener).toBeFocused();
+    }
+    await page.getByTestId('language-option-en').click();
+    await page.setViewportSize({ width: 1280, height: 900 });
+  };
+
+  test('the viewer\'s avatar opens the picker on a phone, for a participant too', async ({ page, browser }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    const teamName = `E2E-I18n-Avatar-${Date.now()}`;
+    await createTeam(page, teamName);
+    await assertPickerOpens(page, 'dashboard', [320, 390]);
+
+    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    await page.getByTestId('retro-template-start_stop_continue').click();
+    await expect(page.getByTestId('icebreaker-question-input')).toBeVisible({ timeout: 10_000 });
+    // A facilitator's header shows the avatar from 360px.
+    await assertPickerOpens(page, 'retro, facilitator', [390]);
+
+    await page.locator('button[title="Invite / Join"]').click();
+    await page.getByRole('button', { name: 'CODE & LINK' }).click();
+    const link = page.locator('code').first();
+    await expect(link).toContainText('?join=', { timeout: 10_000 });
+    const inviteUrl = (await link.textContent()) ?? '';
+    await page.getByRole('button', { name: 'Done' }).click();
+
+    const guestContext = await browser.newContext({ viewport: { width: 320, height: 844 } });
+    try {
+      const guest = await guestContext.newPage();
+      await guest.goto(inviteUrl);
+      await guest.waitForLoadState('networkidle');
+      const notInList = guest.getByRole('button', { name: "I'm not in the list" });
+      if (await notInList.isVisible({ timeout: 5_000 }).catch(() => false)) await notInList.click();
+      await guest.getByPlaceholder('e.g. John Doe').fill('Guest Avatar');
+      await guest.getByRole('button', { name: 'Join Retrospective' }).click();
+      await expect(guest.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 15_000 });
+      await assertPickerOpens(guest, 'retro, participant', [320, 390]);
+    } finally {
+      await guestContext.close();
+    }
+  });
 
   test('dashboard and session headers keep every control on screen', async ({ page }) => {
     // Icons keep their own font: only the inherited text font is replaced.

@@ -1,6 +1,7 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import TeamLogin from '../components/TeamLogin';
 import AnnouncementModal from '../components/AnnouncementModal';
 import AppHeader from '../components/AppHeader';
@@ -250,6 +251,21 @@ describe('the join screen of an invite link', () => {
     expectText(initials);
   });
 
+  it("draws a member's chosen picture, and the initials for an id this release does not draw", async () => {
+    mocks.importTeam.mockResolvedValue({ ...team, memberAvatars: { u2: { id: 'fox', at: 1 } } });
+    const { unmount } = render(<TeamLogin onLogin={vi.fn()} onJoin={vi.fn()} inviteData={invite} />);
+    let picker = await screen.findByRole('group', { name: 'Select Your Name' });
+    expect(within(picker).getByText('Bob').closest('button')!.querySelector('[data-avatar-art="fox"]')).not.toBeNull();
+    unmount();
+
+    mocks.importTeam.mockResolvedValue({ ...team, memberAvatars: { u2: { id: 'from-a-later-release', at: 1 } } });
+    render(<TeamLogin onLogin={vi.fn()} onJoin={vi.fn()} inviteData={invite} />);
+    picker = await screen.findByRole('group', { name: 'Select Your Name' });
+    const bob = within(picker).getByText('Bob').closest('button')!;
+    expect(bob.querySelector('[data-avatar-art]')).toBeNull();
+    expect(within(bob).getByText('BO')).toBeTruthy();
+  });
+
   it('reads the "could not be reached" message and its retry', async () => {
     mocks.importTeam.mockRejectedValueOnce(new Error('The server could not be reached. Check your connection, then try again.'));
     render(<TeamLogin onLogin={vi.fn()} onJoin={vi.fn()} inviteData={invite} />);
@@ -367,9 +383,30 @@ describe('the top bar', () => {
 
   it('shows the viewer as a named avatar, and no Logout or badge when not asked', () => {
     header({ onLogout: undefined, unreadCount: null });
-    expect(screen.getByRole('img', { name: 'Claire Dubois' })).toBeInTheDocument();
+    // The avatar opens the picker; named by the person, the name beside it being hidden on a phone.
+    expect(screen.getByRole('button', { name: 'CL, Claire Dubois, choose my avatar' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Logout Team' })).toBeNull();
     expect(screen.getByRole('button', { name: "What's New" })).toBeInTheDocument();
+  });
+
+  it('opens the avatar picker from the viewer\'s avatar, by keyboard too, and stores a pick', async () => {
+    const onPickAvatar = vi.fn(() => Promise.resolve());
+    header({ avatarId: 'owl', avatarChoice: 'owl', onPickAvatar });
+    const opener = screen.getByRole('button', { name: 'Claire Dubois, choose my avatar' });
+    expect(opener.querySelector('[data-avatar-art="owl"]')).not.toBeNull();
+    opener.focus();
+    await userEvent.setup().keyboard('{Enter}');
+    const dialog = screen.getByRole('dialog', { name: 'Choose my avatar' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Fox' }));
+    expect(onPickAvatar).toHaveBeenCalledWith('fox');
+  });
+
+  it('keeps the picker from storing while the session is revoked', () => {
+    const onPickAvatar = vi.fn(() => Promise.resolve());
+    header({ onPickAvatar, avatarPickerDisabled: true });
+    fireEvent.click(screen.getByRole('button', { name: /choose my avatar/ }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Fox' }));
+    expect(onPickAvatar).not.toHaveBeenCalled();
   });
 
   it('shows no "What\'s New" to a participant', () => {

@@ -33,7 +33,8 @@ interface Props {
   onInvite: () => void;
   /** Facilitator marks a participant as having left the retro (or as returned) */
   onToggleLeft?: (userId: string) => void;
-  getMemberDisplay: (member: User) => { displayName: string; initials: string };
+  // `avatarId`: the picture to draw (`sessionAvatarOf`), absent or null for initials.
+  getMemberDisplay: (member: User) => { displayName: string; initials: string; avatarId?: string | null };
   /** The viewer's own connection: the panel animates nothing while it is down, nor just after (SessionParticipantsPanel). */
   isLive?: boolean;
 }

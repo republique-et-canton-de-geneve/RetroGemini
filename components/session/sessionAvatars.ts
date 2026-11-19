@@ -16,8 +16,14 @@ import { memberAvatar, memberAvatarId, toAvatarId } from '../../utils/avatars.js
 /** What the rule reads of a session: the same fields on a retrospective and a health check. */
 export interface AvatarSessionView {
   readonly isAnonymous?: boolean;
+  /** Where both stored session types keep the flag. */
+  readonly settings?: { readonly isAnonymous?: boolean } | null;
   readonly participants?: readonly User[];
 }
+
+/** Anonymous by either spelling: the stored sessions say it under `settings`. */
+const isAnonymousSession = (session: MaybeSession): boolean =>
+  !!session && (session.isAnonymous === true || session.settings?.isAnonymous === true);
 
 type MaybeSession = AvatarSessionView | null | undefined;
 type MaybeTeam = Pick<Team, 'memberAvatars'> | null | undefined;
@@ -39,7 +45,7 @@ const entryOf = (session: MaybeSession, memberId: string): User | null => {
  * choice; without one, the team's. Outside a session, read `memberAvatarId`.
  */
 export const sessionAvatarOf = (session: MaybeSession, team: MaybeTeam, memberId: string): string | null => {
-  if (session?.isAnonymous) return null;
+  if (isAnonymousSession(session)) return null;
   const entry = entryOf(session, memberId);
   if (entry && Object.prototype.hasOwnProperty.call(entry, 'avatar')) return toAvatarId(entry.avatar);
   return memberAvatarId(team, memberId);
@@ -66,3 +72,22 @@ export const ownAvatarEntry = (session: MaybeSession, team: MaybeTeam, memberId:
   if (!entry || entryTime(entry) >= choice.at) return null;
   return { ...entry, avatar: choice.id, avatarAt: choice.at };
 };
+
+/**
+ * The viewer's own choice as it is stored (an id, or null for initials), for
+ * the picker to mark: the newer of the team's map and the viewer's own entry
+ * in `session`, which a pick made in another browser reaches first (the
+ * server stamps the entry of the session it was made in). Not hidden in an
+ * anonymous session: it is the viewer's own, shown to the viewer only.
+ */
+export const ownAvatarChoice = (session: MaybeSession, team: MaybeTeam, memberId: string): string | null => {
+  const choice = memberAvatar(team, memberId);
+  const entry = entryOf(session, memberId);
+  if (entry && Object.prototype.hasOwnProperty.call(entry, 'avatar') && entryTime(entry) > (choice?.at ?? 0)) {
+    return typeof entry.avatar === 'string' ? entry.avatar : null;
+  }
+  return choice?.id ?? null;
+};
+
+/** The initials every screen draws for the viewer's own avatar. */
+export const viewerInitials = (user: Pick<User, 'name'>): string => user.name.substring(0, 2).toUpperCase();

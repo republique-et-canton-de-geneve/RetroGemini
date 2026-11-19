@@ -286,6 +286,11 @@ describe('the Dashboard’s screens, measured', () => {
     measured(screen.getByRole('button', { name: 'Remove member' }), EDGE);
   });
 
+  it('draws each member with the picture they chose, outside any session', () => {
+    renderDashboard(buildTeam({ memberAvatars: { 'mem-1': { id: 'bee', at: 1 }, 'fac-1': { id: 'not-an-avatar', at: 1 } } }), 'MEMBERS');
+    expect([...document.querySelectorAll('[data-avatar-art]')].map((element) => element.getAttribute('data-avatar-art'))).toEqual(['bee']);
+  });
+
   it('reads the settings’ descriptions, the empty template lists and a refused rename', async () => {
     renderDashboard(buildTeam(), 'SETTINGS');
     measured(screen.getByText('No custom retrospective templates yet.'));

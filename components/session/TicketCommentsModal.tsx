@@ -18,7 +18,11 @@ interface Props {
   cardBgHex: string | null;
   cardTextColor: string;
   isAnonymous: boolean;
+  /** The picture to draw for a person (`sessionAvatarOf`: none in an anonymous session). */
+  avatarIdOf?: (memberId: string) => string | null;
 }
+
+const NO_AVATAR = () => null;
 
 const TicketCommentsModal: React.FC<Props> = ({
   ticket,
@@ -32,6 +36,7 @@ const TicketCommentsModal: React.FC<Props> = ({
   cardBgHex,
   cardTextColor,
   isAnonymous,
+  avatarIdOf = NO_AVATAR,
 }) => {
   const { t, locale } = useTranslation();
   const [commentText, setCommentText] = useState('');
@@ -115,7 +120,7 @@ const TicketCommentsModal: React.FC<Props> = ({
             // about 2.9:1, and a faded look is what a measurement cannot see.
             <div className="mt-2 flex items-center gap-2 text-xs font-medium">
               <span className="flex shrink-0">
-                <Avatar colorClasses={avatarColorClasses(author.color)} initials={author.name.substring(0, 2).toUpperCase()} size={24} />
+                <Avatar colorClasses={avatarColorClasses(author.color)} initials={author.name.substring(0, 2).toUpperCase()} size={24} avatarId={avatarIdOf(author.id)} />
               </span>
               <span className={cardBgHex ? cardTextColor : 'text-slate-600'}>{author.name}</span>
             </div>
@@ -138,7 +143,7 @@ const TicketCommentsModal: React.FC<Props> = ({
             return (
               <div key={comment.id} className="flex items-start gap-3 group" data-testid="ticket-comment">
                 <span className="flex shrink-0">
-                  <Avatar colorClasses={avatarColorClasses(commentAuthor?.color)} initials={(commentAuthor?.name || comment.authorName).substring(0, 2).toUpperCase()} size={28} />
+                  <Avatar colorClasses={avatarColorClasses(commentAuthor?.color)} initials={(commentAuthor?.name || comment.authorName).substring(0, 2).toUpperCase()} size={28} avatarId={commentAuthor ? avatarIdOf(commentAuthor.id) : null} />
                 </span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2">
@@ -218,7 +223,7 @@ const TicketCommentsModal: React.FC<Props> = ({
 
         {/* Comment input */}
         <div className="border-t border-slate-200 px-4 py-3 flex items-center gap-2 bg-slate-50">
-          <Avatar colorClasses={avatarColorClasses(currentUser.color)} initials={currentUser.name.substring(0, 2).toUpperCase()} size={28} />
+          <Avatar colorClasses={avatarColorClasses(currentUser.color)} initials={currentUser.name.substring(0, 2).toUpperCase()} size={28} avatarId={avatarIdOf(currentUser.id)} />
           <input
             ref={inputRef}
             type="text"

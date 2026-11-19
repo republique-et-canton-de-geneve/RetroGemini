@@ -16,6 +16,7 @@ import { noticeText, type Notice } from '../i18n/notice';
 import LanguageSwitcher from './common/LanguageSwitcher';
 import { avatarColorClasses } from '../utils/participantColors';
 import Avatar from './common/Avatar';
+import { memberAvatarId } from '../utils/avatars.js';
 import { Star } from './common/StarRating';
 
 /**
@@ -1050,7 +1051,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                                 }`}
                                             >
                                                 <span className="flex shrink-0">
-                                                    <Avatar colorClasses={avatarColorClasses(member.color)} initials={member.name.substring(0, 2).toUpperCase()} size={40} />
+                                                    <Avatar colorClasses={avatarColorClasses(member.color)} initials={member.name.substring(0, 2).toUpperCase()} size={40} avatarId={memberAvatarId(selectedTeam, member.id)} />
                                                 </span>
                                                 <div className="text-left grow min-w-0">
                                                     <div className="font-semibold text-slate-900 truncate">{member.name}</div>

@@ -7,8 +7,7 @@ import { SessionSyncChip } from './SessionConnectionStatus';
 import SessionTimer from './SessionTimer';
 import { getRetroPhaseDefaultTimerSeconds } from './retroTips';
 import { DEFAULT_TIMER_SECONDS } from '../../utils/sessionTimer';
-import { avatarColorClasses } from '../../utils/participantColors';
-import Avatar from '../common/Avatar';
+import ViewerAvatarButton from './ViewerAvatarButton';
 import { isOpenBoard } from '../../utils/openBoard';
 
 interface Props {
@@ -30,6 +29,10 @@ interface Props {
   // Non-null once the server refused the socket join (audit H12): the chip then
   // says "signed out" rather than "reconnecting", which would never resolve.
   joinDeniedReason?: string | null;
+  /** The viewer's picture in this session (`sessionAvatarOf`), or null for initials. */
+  viewerAvatarId?: string | null;
+  /** Opens the avatar picker from the viewer's own avatar. */
+  onOpenAvatarPicker?: () => void;
 }
 
 const SessionHeader: React.FC<Props> = ({
@@ -47,7 +50,9 @@ const SessionHeader: React.FC<Props> = ({
   isRetroTipsOpen,
   onToggleRetroTips,
   isLive = true,
-  joinDeniedReason = null
+  joinDeniedReason = null,
+  viewerAvatarId = null,
+  onOpenAvatarPicker = () => {}
 }) => {
   const { t, language } = useTranslation();
   // When the bar is narrower than its phases it scrolls, and nothing would
@@ -217,12 +222,15 @@ const SessionHeader: React.FC<Props> = ({
         <span className="text-xs font-medium text-slate-500">{t('phases.header.user')}</span>
         <span className="max-w-32 truncate text-sm font-semibold text-slate-900" title={currentUser.name}>{currentUser.name}</span>
       </div>
-      {/* The viewer's own avatar, where the avatar picker will open (decision
-          D10): at every width for a participant, from 360px for a facilitator,
-          whose header also carries the invite button and play. */}
-      <div data-viewer-avatar className={`${isFacilitator ? 'hidden min-[360px]:flex' : 'flex'} shrink-0 rounded-full`}>
-        <Avatar colorClasses={avatarColorClasses(currentUser.color)} initials={currentUser.name.substring(0, 2).toUpperCase()} size={32} label={currentUser.name} />
-      </div>
+      {/* The viewer's own avatar opens the avatar picker (decision D10): at
+          every width for a participant, from 360px for a facilitator, whose
+          header also carries the invite button and play. */}
+      <ViewerAvatarButton
+        user={currentUser}
+        avatarId={viewerAvatarId}
+        onClick={onOpenAvatarPicker}
+        visibilityClass={isFacilitator ? 'hidden min-[360px]:flex' : 'flex'}
+      />
     </div>
   </header>
   );

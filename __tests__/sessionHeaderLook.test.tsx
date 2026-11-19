@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import SessionHeader from '../components/session/SessionHeader';
 import { RetroSession, User } from '../types';
 import { effectivePair } from './helpers/tailwindTheme';
@@ -157,13 +157,13 @@ describe("the viewer's own avatar", () => {
   it('shows for a participant at every width', () => {
     // Decision D10: the avatar picker opens from it, phones included.
     renderHeader(alice);
-    const avatar = screen.getByRole('img', { name: 'Alice Roux' });
+    const avatar = screen.getByRole('button', { name: 'AL, Alice Roux, choose my avatar' });
     expect(visibilityChain(avatar)).not.toContain('hidden');
   });
 
   it('shows for a facilitator from 360px, whose header also carries invite and play', () => {
     renderHeader(facilitator);
-    const avatar = screen.getByRole('img', { name: 'Fran Martin' });
+    const avatar = screen.getByRole('button', { name: /^FR, Fran Martin, choose my avatar$/ });
     const chain = visibilityChain(avatar);
     expect(chain).toContain('hidden');
     expect(chain.some((token) => token.startsWith('min-[360px]:'))).toBe(true);
@@ -171,8 +171,26 @@ describe("the viewer's own avatar", () => {
     expect(chain.filter((token) => /^\w+:hidden$/.test(token) || /^min-\[\d+px\]:hidden$/.test(token))).toEqual([]);
   });
 
-  it('is still a picture, not a control, until the picker lands', () => {
-    renderHeader(alice);
-    expect(screen.getByRole('img', { name: 'Alice Roux' }).closest('button')).toBeNull();
+  it('is the control that opens the picker, by keyboard too, with a visible focus and a 24px target', () => {
+    const onOpenAvatarPicker = vi.fn();
+    renderHeader(alice, { onOpenAvatarPicker });
+    const button = screen.getByRole('button', { name: /choose my avatar/ });
+    expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(button.hasAttribute('data-viewer-avatar')).toBe(true);
+    // A native button: Enter and Space click it.
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    fireEvent.click(button);
+    expect(onOpenAvatarPicker).toHaveBeenCalledTimes(1);
+    expect(tokens(button).some((token) => token.startsWith('focus-visible:outline'))).toBe(true);
+    // The avatar inside is decoration, 32px: the button is named, the picture is not.
+    expect(within(button).queryByRole('img')).toBeNull();
+    expect(button.querySelector('.w-8.h-8')).not.toBeNull();
+  });
+
+  it('draws the picture the viewer chose, and is then named without initials', () => {
+    renderHeader(alice, { viewerAvatarId: 'fox' });
+    const button = screen.getByRole('button', { name: 'Alice Roux, choose my avatar' });
+    expect(button.querySelector('[data-avatar-art="fox"]')).not.toBeNull();
   });
 });

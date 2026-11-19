@@ -5,9 +5,14 @@
 const avatars = {
   // The picker
   'avatars.picker.title': 'Choose my avatar',
+  // The button that opens the picker, on the viewer's own avatar. While it
+  // shows the initials they come first: they are its visible text (WCAG 2.5.3).
+  'avatars.picker.open': '{name}, choose my avatar',
+  'avatars.picker.openWithInitials': '{initials}, {name}, choose my avatar',
   'avatars.picker.hint': 'People in your sessions see it beside your cards and in the participants list, except in an anonymous session.',
   'avatars.picker.families': 'Avatar families',
   'avatars.picker.initials': 'My initials',
+  'avatars.picker.initialsTile': '{initials}, My initials',
   'avatars.picker.done': 'Done',
   'avatars.picker.saving': 'Saving…',
   'avatars.picker.saved': 'Avatar saved.',
