@@ -4,6 +4,7 @@ import { dataService } from '../../services/dataService';
 import { parseEmailInput } from '../../utils/emailAddress.js';
 import { useTranslation } from '../../i18n/I18nContext';
 import { Notice, noticeFromError, noticeText } from '../../i18n/notice';
+import { ERROR_TEXT, FIELD_BOX, SETTING_ICON, SETTING_TITLE, SUCCESS_TEXT } from './dashboardLook';
 
 interface Props {
   team: Team;
@@ -83,11 +84,11 @@ const RecoveryEmailSetting: React.FC<Props> = ({ team, onRefresh }) => {
 
   return (
     <div className="mb-4">
-      <h3 className="font-bold text-slate-700 mb-2 flex items-center">
-        <span className="material-symbols-outlined mr-2 text-slate-500" aria-hidden="true">email</span>
+      <h3 className={SETTING_TITLE}>
+        <span className={SETTING_ICON} aria-hidden="true">email</span>
         <label htmlFor={inputId}>{t('dashboard.settings.recoveryEmail')}</label>
       </h3>
-      <p id={descriptionId} className="text-sm text-slate-500 mb-3">
+      <p id={descriptionId} className="text-sm text-slate-600 mb-3">
         {t('dashboard.settings.recoveryEmailDescription')}
       </p>
       <div className="flex gap-3">
@@ -118,25 +119,25 @@ const RecoveryEmailSetting: React.FC<Props> = ({ team, onRefresh }) => {
               void commit();
             }
           }}
-          className="flex-1 border border-slate-300 rounded-lg p-2 text-sm"
+          className={`${FIELD_BOX} flex-1 min-w-0 text-sm aria-invalid:border-rose-700 aria-invalid:focus:ring-rose-700/15`}
           placeholder={t('dashboard.settings.recoveryEmailPlaceholder')}
         />
       </div>
       {error && (
-        <p id={errorId} role="alert" className="text-xs text-red-600 mt-2 flex items-center">
-          <span className="material-symbols-outlined text-xs mr-1" aria-hidden="true">error</span>
+        <p id={errorId} role="alert" className={`${ERROR_TEXT} mt-2`}>
+          <span className="material-symbols-outlined text-sm! leading-none mr-1" aria-hidden="true">error</span>
           {noticeText(error, t)}
         </p>
       )}
       {saved && (
-        <p role="status" className="text-xs text-green-700 mt-2 flex items-center">
-          <span className="material-symbols-outlined text-xs mr-1" aria-hidden="true">check_circle</span>
+        <p role="status" className={`${SUCCESS_TEXT} mt-2`}>
+          <span className="material-symbols-outlined text-sm! leading-none mr-1" aria-hidden="true">check_circle</span>
           {noticeText(saved, t)}
         </p>
       )}
       {!stored && (
-        <p className="text-xs text-amber-700 mt-2 flex items-center">
-          <span className="material-symbols-outlined text-xs mr-1" aria-hidden="true">warning</span>
+        <p className="text-xs font-medium text-amber-800 mt-2 flex items-center">
+          <span className="material-symbols-outlined text-sm! leading-none mr-1" aria-hidden="true">warning</span>
           {t('dashboard.settings.noRecoveryEmail')}
         </p>
       )}

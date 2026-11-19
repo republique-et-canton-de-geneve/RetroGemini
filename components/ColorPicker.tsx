@@ -42,42 +42,46 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({ initialColor = '#6366F
   };
 
   return (
-    <div className="absolute z-50 bg-white rounded-lg shadow-2xl border border-gray-200 p-4 w-64">
+    // The picker's own chrome follows the look (slate and the brand); the
+    // seventeen colours above are data offered to the facilitator and stay
+    // as they are.
+    <div className="absolute z-50 bg-white rounded-xl shadow-xl border border-slate-200 p-4 w-64">
       <div className="flex justify-between items-center mb-3">
-        <span className="font-medium text-gray-700">{t('shared.colorPicker.title')}</span>
+        <span className="font-semibold text-slate-900">{t('shared.colorPicker.title')}</span>
         {onClose && (
           <button
             onClick={onClose}
             aria-label={t('shared.colorPicker.close')}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+            className="inline-flex items-center justify-center w-8 h-8 -mr-1.5 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
           >
-            <span className="material-symbols-outlined text-xl">close</span>
+            <span className="material-symbols-outlined text-xl" aria-hidden="true">close</span>
           </button>
         )}
       </div>
 
       {/* Preview */}
-      <div className="mb-4 flex items-center gap-3 pb-3 border-b border-gray-200">
+      <div className="mb-4 flex items-center gap-3 pb-3 border-b border-slate-200">
         <div
-          className="w-12 h-12 rounded-lg border-2 border-gray-300 shadow-xs"
+          className="w-11 h-11 rounded-lg border border-slate-400 shadow-xs"
           style={{ backgroundColor: selectedColor }}
         />
         <div className="flex-1">
-          <div className="text-xs text-gray-500 mb-1">{t('shared.colorPicker.selected')}</div>
-          <div className="text-sm font-mono font-bold text-gray-700">{selectedColor.toUpperCase()}</div>
+          <div className="text-xs text-slate-600 mb-0.5">{t('shared.colorPicker.selected')}</div>
+          <div className="text-sm font-mono font-semibold text-slate-900">{selectedColor.toUpperCase()}</div>
         </div>
       </div>
 
-      {/* Color Palette Grid */}
-      <div className="grid grid-cols-6 gap-2">
+      {/* Color Palette Grid. The chosen swatch carries a brand ring with a
+          white gap, so it reads on every colour of the palette. */}
+      <div className="grid grid-cols-6 gap-1.5">
         {COLORS.map((color) => (
           <button
             key={color}
             onClick={() => handleColorSelect(color)}
-            className={`w-10 h-10 rounded-md transition-all hover:scale-110 border-2 ${
+            className={`w-8 h-8 rounded-lg transition-shadow ${
               selectedColor === color
-                ? 'border-gray-800 ring-2 ring-gray-300'
-                : 'border-gray-200 hover:border-gray-400'
+                ? 'ring-2 ring-indigo-600 ring-offset-2 ring-offset-white'
+                : 'hover:ring-2 hover:ring-slate-400 hover:ring-offset-2 hover:ring-offset-white'
             }`}
             style={{ backgroundColor: color }}
             title={color}

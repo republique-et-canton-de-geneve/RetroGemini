@@ -23,14 +23,17 @@ const TABS: { id: DashboardTab; labelKey: MessageKey; icon: string }[] = [
 const DashboardTabs: React.FC<Props> = ({ activeTab, onChange }) => {
   const { t } = useTranslation();
   return (
-    <div className="flex border-b border-slate-200 mb-6 overflow-x-auto">
+    // The current tab is drawn by `.dash-tab.active` in index.css (the brand
+    // colour and its underline); the others are slate-600, which reads on the
+    // page's grey where slate-500 does not.
+    <div className="flex gap-1 border-b border-slate-200 mb-6 overflow-x-auto">
       {TABS.map((tab) => (
         <button
           key={tab.id}
           onClick={() => onChange(tab.id)}
-          className={`dash-tab px-6 py-3 font-bold text-sm flex items-center transition whitespace-nowrap ${activeTab === tab.id ? 'active' : 'text-slate-500 hover:text-retro-primary'}`}
+          className={`dash-tab -mb-px px-4 py-3 font-semibold text-sm flex items-center gap-2 rounded-t-lg transition whitespace-nowrap ${activeTab === tab.id ? 'active' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
         >
-          <span className="material-symbols-outlined mr-2">{tab.icon}</span>
+          <span className="material-symbols-outlined text-xl! leading-none" aria-hidden="true">{tab.icon}</span>
           {t(tab.labelKey)}
         </button>
       ))}

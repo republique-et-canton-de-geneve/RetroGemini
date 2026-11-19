@@ -15,6 +15,22 @@ import {
 } from '../utils/feedbackImages';
 import { newFeedbackSubmissionId, type FeedbackSubmitResult } from '../services/feedbackSubmission';
 import { noteRevokedResponse } from '../services/sessionRevocation';
+import {
+  CARD,
+  CHIP,
+  EMPTY_STATE,
+  ERROR_NOTICE,
+  FIELD,
+  FIELD_BOX,
+  FIELD_LABEL,
+  FILTER_PILL,
+  FILTER_PILL_OFF,
+  FILTER_PILL_ON,
+  PRIMARY_BUTTON,
+  SECONDARY_BUTTON,
+  feedbackStatusChip,
+  feedbackTypeChip
+} from './dashboard/dashboardLook';
 
 // How a submission ended, as the board needs to know it: a feedback the server
 // did not store must keep its draft on screen.
@@ -448,29 +464,21 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
       year: 'numeric'
     });
 
-  const getStatusBadge = (status: TeamFeedbackType['status']) => {
-    const colors = {
-      pending: 'bg-yellow-100 text-yellow-800',
-      in_progress: 'bg-blue-100 text-blue-800',
-      resolved: 'bg-green-100 text-green-800',
-      rejected: 'bg-red-100 text-red-800'
-    };
-    return (
-      <span className={`px-2 py-1 text-xs rounded-full ${colors[status]}`}>
-        {t(STATUS_LABEL_KEYS[status])}
-      </span>
-    );
-  };
+  const getStatusBadge = (status: TeamFeedbackType['status']) => (
+    <span className={`${CHIP} ${feedbackStatusChip(status)}`}>
+      {t(STATUS_LABEL_KEYS[status])}
+    </span>
+  );
 
   const getTypeBadge = (feedbackType: 'bug' | 'feature') => {
     return feedbackType === 'bug' ? (
-      <span className="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">
-        <span className="material-symbols-outlined text-xs align-middle mr-1">bug_report</span>
+      <span className={`${CHIP} ${feedbackTypeChip('bug')}`}>
+        <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">bug_report</span>
         {t('feedback.type.bug')}
       </span>
     ) : (
-      <span className="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
-        <span className="material-symbols-outlined text-xs align-middle mr-1">new_releases</span>
+      <span className={`${CHIP} ${feedbackTypeChip('feature')}`}>
+        <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">new_releases</span>
         {t('feedback.type.featureBadge')}
       </span>
     );
@@ -503,37 +511,38 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
   const featuresCount = allFeedbacks.filter(f => f.type === 'feature').length;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">{t('feedback.header.title')}</h2>
-          <p className="text-sm text-slate-500 mt-1">
+    <div className="py-2 sm:p-2 max-w-6xl mx-auto">
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
+        <div className="min-w-0">
+          <h2 className="text-xl font-bold tracking-tight text-slate-900">{t('feedback.header.title')}</h2>
+          {/* slate-600: on the page's grey. */}
+          <p className="text-sm text-slate-600 mt-1">
             {t('feedback.header.subtitle')}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
           <button
             onClick={() => loadAllFeedbacks()}
-            className="px-3 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition flex items-center gap-1"
+            className={`${SECONDARY_BUTTON} w-10 h-10`}
             title={t('feedback.header.refreshTitle')}
             aria-label={t('feedback.header.refreshLabel')}
           >
-            <span className="material-symbols-outlined text-sm">refresh</span>
+            <span className="material-symbols-outlined text-xl" aria-hidden="true">refresh</span>
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
             disabled={submitting}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            className={`${PRIMARY_BUTTON} px-4 py-2 text-sm`}
           >
-            <span className="material-symbols-outlined text-sm">add</span>
+            <span className="material-symbols-outlined text-xl" aria-hidden="true">add</span>
             {t('feedback.header.newFeedback')}
           </button>
         </div>
       </div>
 
       {showForm && (
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h3 className="text-lg font-semibold mb-4">{t('feedback.form.heading')}</h3>
+        <div className={`${CARD} p-5 sm:p-6 mb-6`}>
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">{t('feedback.form.heading')}</h3>
           {/* While a send is on its way the draft is locked, as it was sent:
               edits made meanwhile were erased by the "sent" answer, and a
               Cancel did not withdraw a feedback that was then posted. The
@@ -553,9 +562,9 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                   other. Tab order is the only thing the attribute changes, and
                   `e2e/feedback-radio-keyboard.spec.ts` proves it — jsdom
                   implements neither behaviour. */}
-              <span id="feedback-type-label" className="block text-sm font-medium text-slate-700 mb-2">{t('feedback.form.typeLabel')}</span>
-              <div role="radiogroup" aria-labelledby="feedback-type-label" className="flex gap-4">
-                <label className="flex items-center cursor-pointer">
+              <span id="feedback-type-label" className={`${FIELD_LABEL} mb-2`}>{t('feedback.form.typeLabel')}</span>
+              <div role="radiogroup" aria-labelledby="feedback-type-label" className="flex flex-wrap gap-x-6 gap-y-2 text-slate-900">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="feedback-type"
@@ -563,12 +572,12 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                     checked={type === 'bug'}
                     onChange={(e) => setType(e.target.value as 'bug' | 'feature')}
                     disabled={submitting}
-                    className="mr-2"
+                    className="w-4 h-4 accent-indigo-600"
                   />
-                  <span className="material-symbols-outlined text-red-600 mr-1">bug_report</span>
+                  <span className="material-symbols-outlined text-rose-700" aria-hidden="true">bug_report</span>
                   {t('feedback.type.bug')}
                 </label>
-                <label className="flex items-center cursor-pointer">
+                <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="feedback-type"
@@ -576,36 +585,36 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                     checked={type === 'feature'}
                     onChange={(e) => setType(e.target.value as 'bug' | 'feature')}
                     disabled={submitting}
-                    className="mr-2"
+                    className="w-4 h-4 accent-indigo-600"
                   />
-                  <span className="material-symbols-outlined text-purple-600 mr-1">new_releases</span>
+                  <span className="material-symbols-outlined text-violet-700" aria-hidden="true">new_releases</span>
                   {t('feedback.type.featureRequest')}
                 </label>
               </div>
             </div>
 
             <div className="mb-4">
-              <label htmlFor="feedback-title" className="block text-sm font-medium text-slate-700 mb-2">{t('feedback.form.titleLabel')}</label>
+              <label htmlFor="feedback-title" className={`${FIELD_LABEL} mb-1.5`}>{t('feedback.form.titleLabel')}</label>
               <input
                 id="feedback-title"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 readOnly={submitting}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent read-only:bg-slate-50"
+                className={FIELD}
                 placeholder={t('feedback.form.titlePlaceholder')}
                 maxLength={100}
               />
             </div>
 
             <div className="mb-4">
-              <label htmlFor="feedback-description" className="block text-sm font-medium text-slate-700 mb-2">{t('feedback.form.descriptionLabel')}</label>
+              <label htmlFor="feedback-description" className={`${FIELD_LABEL} mb-1.5`}>{t('feedback.form.descriptionLabel')}</label>
               <textarea
                 id="feedback-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 readOnly={submitting}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent read-only:bg-slate-50"
+                className={FIELD}
                 placeholder={t('feedback.form.descriptionPlaceholder')}
                 rows={5}
                 maxLength={2000}
@@ -613,9 +622,11 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
             </div>
 
             <div className="mb-4">
-              <label htmlFor="feedback-images" className="block text-sm font-medium text-slate-700 mb-2">
+              <label htmlFor="feedback-images" className={`${FIELD_LABEL} mb-1.5`}>
                 {t('feedback.form.imagesLabel')}
               </label>
+              {/* The button inside the file field is the browser's; `file:`
+                  draws it as the look's secondary button. */}
               <input
                 id="feedback-images"
                 type="file"
@@ -624,15 +635,15 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 onChange={handleImageUpload}
                 disabled={uploading || submitting || images.length >= MAX_IMAGES}
                 aria-describedby={imageNotices.length > 0 ? IMAGE_NOTICES_ID : undefined}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg"
+                className={`${FIELD_BOX} w-full text-sm disabled:bg-slate-100 disabled:text-slate-600 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-slate-50 file:px-3 file:py-1 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-slate-100`}
               />
-              {uploading && <p className="text-sm text-slate-500 mt-2">{t('feedback.form.uploading')}</p>}
+              {uploading && <p className="text-sm text-slate-600 mt-2">{t('feedback.form.uploading')}</p>}
 
               {images.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-3">
+                <div className="flex flex-wrap gap-3 mt-3">
                   {images.map((img, idx) => (
                     <div key={idx} className="relative">
-                      <img src={img} alt={t('feedback.form.uploadAlt', { number: idx + 1 })} className="w-20 h-20 object-cover rounded-sm" />
+                      <img src={img} alt={t('feedback.form.uploadAlt', { number: idx + 1 })} className="w-20 h-20 object-cover rounded-lg border border-slate-200" />
                       {/* A bare "×" was announced as "times", not as which
                           image it removes. */}
                       <button
@@ -640,7 +651,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                         onClick={() => handleRemoveImage(idx)}
                         disabled={submitting}
                         aria-label={t('feedback.form.removeImage', { number: idx + 1 })}
-                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="absolute -top-2 -right-2 bg-white border border-slate-400 text-slate-700 shadow-sm rounded-full w-6 h-6 flex items-center justify-center hover:bg-rose-50 hover:border-rose-700 hover:text-rose-700 transition disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                       >
                         <span aria-hidden="true">×</span>
                       </button>
@@ -651,7 +662,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
             </div>
 
             {(imageNotices.length > 0 || submitNotice) && (
-              <div role="alert" className="mb-4 text-sm text-red-700">
+              <div role="alert" className={`${ERROR_NOTICE} mb-4`}>
                 {imageNotices.length === 1 && <p id={IMAGE_NOTICES_ID}>{noticeText(imageNotices[0], t)}</p>}
                 {imageNotices.length > 1 && (
                   <ul id={IMAGE_NOTICES_ID} className="list-disc pl-5 space-y-1">
@@ -668,7 +679,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
               <button
                 type="submit"
                 disabled={submitting || uploading}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                className={`${PRIMARY_BUTTON} px-4 py-2`}
               >
                 {submitting ? t('feedback.form.sending') : t('feedback.form.submit')}
               </button>
@@ -676,7 +687,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                 type="button"
                 onClick={discardDraft}
                 disabled={submitting}
-                className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                className={`${SECONDARY_BUTTON} px-4 py-2`}
               >
                 {t('common.cancel')}
               </button>
@@ -691,57 +702,43 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setFilter('all')}
-            className={`px-4 py-2 rounded-lg font-medium text-sm ${
-              filter === 'all'
-                ? 'bg-indigo-600 text-white'
-                : 'bg-white text-slate-600 hover:bg-slate-50'
-            }`}
+            className={`${FILTER_PILL} ${filter === 'all' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
           >
             {t('feedback.filter.all', { count: allFeedbacks.length })}
           </button>
           <button
             onClick={() => setFilter('mine')}
-            className={`px-4 py-2 rounded-lg font-medium text-sm ${
-              filter === 'mine'
-                ? 'bg-indigo-600 text-white'
-                : 'bg-white text-slate-600 hover:bg-slate-50'
-            }`}
+            className={`${FILTER_PILL} ${filter === 'mine' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
           >
             {t('feedback.filter.myTeam', { count: myFeedbacksCount })}
           </button>
           <button
             onClick={() => setFilter('bug')}
-            className={`px-4 py-2 rounded-lg font-medium text-sm ${
-              filter === 'bug'
-                ? 'bg-indigo-600 text-white'
-                : 'bg-white text-slate-600 hover:bg-slate-50'
-            }`}
+            className={`${FILTER_PILL} ${filter === 'bug' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
           >
             {t('feedback.filter.bugs', { count: bugsCount })}
           </button>
           <button
             onClick={() => setFilter('feature')}
-            className={`px-4 py-2 rounded-lg font-medium text-sm ${
-              filter === 'feature'
-                ? 'bg-indigo-600 text-white'
-                : 'bg-white text-slate-600 hover:bg-slate-50'
-            }`}
+            className={`${FILTER_PILL} ${filter === 'feature' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
           >
             {t('feedback.filter.features', { count: featuresCount })}
           </button>
         </div>
 
-        {/* Status Filters */}
-        <div className="flex gap-2 flex-wrap items-center">
-          <span className="text-sm text-slate-500">{t('feedback.filter.statusLabel')}</span>
+        {/* Status Filters: smaller than the type filters above, and neutral,
+            so the two rows read as a main and a secondary choice. */}
+        <div className="flex gap-1.5 flex-wrap items-center">
+          {/* slate-600: on the page's grey. */}
+          <span className="text-sm text-slate-600 mr-1">{t('feedback.filter.statusLabel')}</span>
           {(['all', 'pending', 'in_progress', 'resolved', 'rejected'] as StatusFilter[]).map((status) => (
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
-              className={`px-3 py-1 rounded-lg font-medium text-xs ${
+              className={`px-3 py-1 rounded-full font-semibold text-xs border transition ${
                 statusFilter === status
-                  ? 'bg-slate-700 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'bg-slate-800 border-slate-800 text-white'
+                  : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:text-slate-900'
               }`}
             >
               {status === 'all' ? t('feedback.filter.statusAll') : t(STATUS_LABEL_KEYS[status])}
@@ -751,36 +748,36 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
       </div>
 
       {loading ? (
-        <div className="bg-slate-50 rounded-lg p-8 text-center text-slate-500">
-          <span className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600 mr-2"></span>
+        <div className={EMPTY_STATE}>
+          <span className="inline-block motion-safe:animate-spin rounded-full h-5 w-5 border-2 border-slate-200 border-t-indigo-600 mr-2 align-middle" aria-hidden="true"></span>
           {t('feedback.list.loading')}
         </div>
       ) : (
         <div className="space-y-4">
           {filteredFeedbacks.length === 0 ? (
-            <div className="bg-slate-50 rounded-lg p-8 text-center text-slate-500">
+            <div className={EMPTY_STATE}>
               {t('feedback.list.empty')}
             </div>
           ) : (
             filteredFeedbacks.map((feedback) => (
-              <div key={feedback.id} data-feedback-id={feedback.id} className={`bg-white rounded-lg shadow-md p-6 ${
-                feedback.teamId === teamId ? 'border-l-4 border-l-indigo-500' : ''
+              <div key={feedback.id} data-feedback-id={feedback.id} className={`${CARD} p-5 sm:p-6 ${
+                feedback.teamId === teamId ? 'border-l-4 border-l-indigo-600' : ''
               }`}>
-                <div className="flex justify-between items-start mb-3">
+                <div className="flex flex-wrap justify-between items-start gap-x-4 gap-y-2 mb-3">
                   <div className="flex items-center gap-2 flex-wrap">
                     {getTypeBadge(feedback.type)}
                     {getStatusBadge(feedback.status)}
                     {feedback.teamId === teamId && (
-                      <span className="px-2 py-1 text-xs rounded-full bg-indigo-100 text-indigo-800">
+                      <span className={`${CHIP} bg-indigo-50 text-indigo-700`}>
                         {t('feedback.card.myTeam')}
                       </span>
                     )}
                   </div>
-                  <span className="text-sm text-slate-500">{formatDate(feedback.submittedAt)}</span>
+                  <span className="text-sm text-slate-600 tabular-nums">{formatDate(feedback.submittedAt)}</span>
                 </div>
 
-                <h3 className="text-lg font-semibold text-slate-800 mb-2">{feedback.title}</h3>
-                <p className="text-slate-600 mb-3 whitespace-pre-wrap">{feedback.description}</p>
+                <h3 className="text-lg font-semibold text-slate-900 mb-1.5">{feedback.title}</h3>
+                <p className="text-slate-700 mb-3 whitespace-pre-wrap">{feedback.description}</p>
 
                 {feedback.images && feedback.images.length > 0 && (
                   <ImageGallery
@@ -789,75 +786,78 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                   />
                 )}
 
-                <div className="text-sm text-slate-500 mb-3">
-                  <span className="material-symbols-outlined text-sm align-middle mr-1">groups</span>
-                  {tRich('feedback.card.meta', {
-                    team: <span className="font-semibold">{feedback.teamName}</span>,
-                    name: feedback.submittedByName,
-                    date: formatDay(feedback.submittedAt)
-                  })}
+                <div className="text-sm text-slate-600 mb-3 flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-lg! leading-none text-slate-500" aria-hidden="true">groups</span>
+                  <span>
+                    {tRich('feedback.card.meta', {
+                      team: <span className="font-semibold text-slate-900">{feedback.teamName}</span>,
+                      name: feedback.submittedByName,
+                      date: formatDay(feedback.submittedAt)
+                    })}
+                  </span>
                 </div>
 
                 {/* Comments Section */}
-                <div className="mt-4 pt-4 border-t border-slate-200">
+                <div className="mt-4 pt-3 border-t border-slate-200">
                   <button
                     onClick={() => setExpandedFeedback(expandedFeedback === feedback.id ? null : feedback.id)}
-                    className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-800"
+                    className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition"
                   >
-                    <span className="material-symbols-outlined text-sm">
+                    <span className="material-symbols-outlined text-xl! leading-none" aria-hidden="true">
                       {expandedFeedback === feedback.id ? 'expand_less' : 'expand_more'}
                     </span>
-                    <span className="material-symbols-outlined text-sm">chat</span>
+                    <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">chat</span>
                     {t('feedback.comments.toggle', { count: feedback.comments?.length || 0 })}
                   </button>
 
                   {expandedFeedback === feedback.id && (
-                    <div className="mt-3 space-y-3">
+                    <div className="mt-3 space-y-2">
                       {/* Existing comments */}
                       {feedback.comments && feedback.comments.length > 0 ? (
                         feedback.comments.map((comment) => (
-                          <div key={comment.id} className={`rounded-sm p-3 ${comment.isAdmin ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'}`}>
-                            <div className="flex justify-between items-start">
+                          <div key={comment.id} className={`rounded-lg px-3 py-2.5 border ${comment.isAdmin ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+                            <div className="flex justify-between items-start gap-2">
                               <div className="text-sm">
                                 {comment.isAdmin && (
-                                  <span className="material-symbols-outlined text-xs align-middle mr-1 text-amber-600">admin_panel_settings</span>
+                                  <span className="material-symbols-outlined text-sm! leading-none align-middle mr-1 text-amber-700" aria-hidden="true">admin_panel_settings</span>
                                 )}
-                                <span className={`font-medium ${comment.isAdmin ? 'text-amber-800' : 'text-slate-800'}`}>{commentAuthorName(comment, t)}</span>
+                                <span className={`font-semibold ${comment.isAdmin ? 'text-amber-900' : 'text-slate-900'}`}>{commentAuthorName(comment, t)}</span>
+                                {/* slate-600: these lines sit on a grey or amber tint. */}
                                 {!comment.isAdmin && (
                                   <>
-                                    <span className="text-slate-500"> · </span>
-                                    <span className="text-slate-500">{comment.teamName}</span>
+                                    <span className="text-slate-600"> · </span>
+                                    <span className="text-slate-600">{comment.teamName}</span>
                                   </>
                                 )}
-                                <span className="text-slate-500"> · </span>
-                                <span className="text-slate-500">{formatDate(comment.createdAt)}</span>
+                                <span className={comment.isAdmin ? 'text-amber-800' : 'text-slate-600'}> · </span>
+                                <span className={comment.isAdmin ? 'text-amber-800' : 'text-slate-600'}>{formatDate(comment.createdAt)}</span>
                               </div>
                               {comment.teamId === teamId && !comment.isAdmin && (
                                 <button
                                   onClick={() => handleDeleteComment(feedback.teamId, feedback.id, comment.id)}
-                                  className="text-red-500 hover:text-red-700"
+                                  className="inline-flex items-center justify-center w-8 h-8 shrink-0 -mr-1.5 -mt-1 rounded-lg text-slate-600 hover:bg-rose-50 hover:text-rose-700 transition"
                                   title={t('feedback.comments.delete')}
                                   aria-label={t('feedback.comments.delete')}
                                 >
-                                  <span className="material-symbols-outlined text-sm">delete</span>
+                                  <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">delete</span>
                                 </button>
                               )}
                             </div>
-                            <p className={`text-sm mt-1 ${comment.isAdmin ? 'text-amber-700' : 'text-slate-700'}`}>{comment.content}</p>
+                            <p className={`text-sm mt-1 ${comment.isAdmin ? 'text-amber-900' : 'text-slate-800'}`}>{comment.content}</p>
                           </div>
                         ))
                       ) : (
-                        <p className="text-sm text-slate-500 italic">{t('feedback.comments.empty')}</p>
+                        <p className="text-sm text-slate-600 italic">{t('feedback.comments.empty')}</p>
                       )}
 
                       {/* Add comment form */}
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 pt-1">
                         <input
                           type="text"
                           value={commentDrafts[feedback.id] ?? ''}
                           onChange={(e) => setCommentDraft(feedback.id, e.target.value)}
                           placeholder={t('feedback.comments.placeholder')}
-                          className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          className={`${FIELD_BOX} flex-1 min-w-0 text-sm`}
                           maxLength={1000}
                           onKeyPress={(e) => {
                             if (e.key === 'Enter' && !e.shiftKey) {
@@ -869,7 +869,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                         <button
                           onClick={() => handleAddComment(feedback.teamId, feedback.id)}
                           disabled={submittingComment || !(commentDrafts[feedback.id] ?? '').trim()}
-                          className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                          className={`${PRIMARY_BUTTON} px-4 py-2 text-sm`}
                         >
                           {submittingComment ? '...' : t('feedback.comments.send')}
                         </button>
@@ -883,9 +883,9 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
                   <div className="mt-3 pt-3 border-t border-slate-200">
                     <button
                       onClick={() => handleDeleteFeedback(feedback.id)}
-                      className="text-sm text-red-600 hover:text-red-700 font-medium flex items-center gap-1"
+                      className="-ml-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 transition"
                     >
-                      <span className="material-symbols-outlined text-sm">delete</span>
+                      <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">delete</span>
                       {t('feedback.card.delete')}
                     </button>
                   </div>
