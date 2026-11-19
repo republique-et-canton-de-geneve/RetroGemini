@@ -185,6 +185,25 @@ describe.each<Kind>(['retro', 'health check'])('avatars on the %s screen', (kind
     if (kind === 'retro') expect(screen.getByRole('img', { name: 'Fran' }).getAttribute('data-avatar-art')).toBe('fox');
   });
 
+  // A picture is drawn for a person who is in the session. An invitee still
+  // expected is a placeholder (a dashed circle holding initials, the "Invited"
+  // chip): the picture they chose arrives with them, it is not shown greyed
+  // out while they are away. A decision, held here so that it stays one.
+  it('draws an invitee still expected as initials, never as the picture they chose', () => {
+    const tom: User = { id: 'tom', name: 'Tom', color: 'bg-amber-500', role: 'participant' };
+    const withInvitee = team({ ...CHOICES, tom: { id: 'cat', at: 100 } }, { members: [{ ...me }, { ...fran }, { ...tom }] });
+    renderScreen(kind, withInvitee, sessionOf(kind, { invitedUsers: [{ id: 'tom', name: 'Tom' }] }), fran);
+
+    const invited = screen.getAllByTestId('invited-row');
+    expect(invited).toHaveLength(1);
+    expect(invited[0].textContent).toContain('Tom');
+    expect(invited[0].textContent).toContain('TO');
+    expect(invited[0].querySelector('[data-avatar-art]')).toBeNull();
+    expect(pictures()).not.toContain('cat');
+    // The people who are here keep theirs.
+    expect(pictures()).toEqual(expect.arrayContaining(['owl', 'fox']));
+  });
+
   it('draws no picture anywhere in an anonymous session, whatever the team chose', () => {
     renderScreen(kind, team(CHOICES), anonymousOf(kind), fran);
     expect(screen.getAllByTestId('participant-row').length).toBeGreaterThan(1);

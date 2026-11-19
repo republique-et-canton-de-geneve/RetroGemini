@@ -186,12 +186,21 @@ test.describe('the board’s motion', () => {
 
       await facilitator.reload();
       await expect(facilitator.getByRole('heading', { level: 2, name: 'Brainstorm' })).toBeVisible({ timeout: 15_000 });
+      // The page is drawn first from the cached team, and the quiet seconds open
+      // when the server's own state lands, not at that first paint. The teammate
+      // shown as connected is the sign that it did (the roster follows the
+      // join's state): the waits below count from there, so that a slow join
+      // cannot put the teammate's card inside the quiet seconds.
+      await expect(
+        facilitator.getByTestId('participant-row').filter({ hasText: PARTICIPANT_NAME }).locator('[data-presence-dot]'),
+      ).toBeVisible({ timeout: 15_000 });
       await facilitator.waitForTimeout(1_500);
       expect((await effectsSince(facilitator, 0)).map((e) => e.cls)).toEqual([]);
       await expectNothingLeft(facilitator);
 
       // ---- (b) A teammate's card rises in with a ring, once, and its box stays put ----
-      await facilitator.waitForTimeout(2_000);
+      // Four seconds in all since the roster: the three quiet ones, and a margin.
+      await facilitator.waitForTimeout(2_500);
       const beforeCard = await now(facilitator);
       await addIdea(participant, 0, 'Pairing made the release calm');
       const arrived = facilitator.locator('[data-ticket-id]').last();
