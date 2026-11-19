@@ -321,6 +321,73 @@ keeps: **an anonymous session is never coloured by author**, **a card hidden
 from its reader takes its topic's tint only, never its author's**, and a hidden
 card's filler keeps its shape.
 
+### Motion
+
+A guest who arrives, a card that lands, a vote that is cast, hidden cards that
+are shown, a dialog that opens: each has a short animation. All of it is
+**decoration**. The state an effect accompanies is already on screen in words
+or in a count, and a reader who asked for less motion gets none of it. Seven
+rules:
+
+- **The effects are classes of `index.css`, all under
+  `@media (prefers-reduced-motion: no-preference)`** (`fx-card-in`, `fx-ring`,
+  `fx-pop`, `fx-bump`, `fx-press`, `fx-nope`, `fx-title-in`, `fx-person-in`,
+  `fx-halo`, `fx-write`, `fx-reveal`, `fx-dialog-in`, `fx-veil-in`, `fx-swap`).
+  Reduced motion is therefore "no animation" by construction, with no leftover
+  delay. A transform's fill mode is `backwards`, never `forwards` or `both`: a
+  transform that stays makes its element the containing block of every
+  `position: fixed` descendant (`__tests__/lookTokens.test.ts` refuses it).
+- **An effect follows something that happened, never an element being drawn.**
+  A phase change remounts the whole board and a card remounts when it changes
+  group or column, so an animation tied to a mount would replay each time.
+  `utils/sessionMotion.ts` → `diffSessionMotion` (pure) turns two states of a
+  session into events, and `components/session/useSessionMotion.ts` plays them
+  in a layout effect on the elements concerned, found by the data attributes of
+  its `MOTION_HOOKS` table (`data-ticket-id`, `data-group-id`,
+  `data-column-count`, `data-reaction`, `data-vote-count`, and the card text's
+  `.whitespace-pre-wrap`). The participants panel does the same for people
+  (`components/session/usePanelMotion.ts`, with `arrivedPeople`).
+- **A class is put on for one animation and taken off**
+  (`components/common/motion/effects.ts` → `playEffect`: at the element's own
+  `animationend`, with a timeout as a net). On the board it is put on
+  imperatively: it costs no render of a 4,700-line component, a remounted
+  element simply has no class, and the unit tests of the screens keep seeing
+  the class strings React wrote. `motionAllowed()` reads the reader's setting
+  live; without `matchMedia` (jsdom) the board plays nothing.
+- **Quiet by default.** Nothing plays on first paint, on a phase change or a
+  change of session, while the connection is down, in the three seconds after
+  it comes back (a rolling update reconnects everybody), or for a burst: more
+  than six cards or more than two people at once is a healed state or a
+  restore, not people working.
+- **An effect never changes a box that a test measures or a click aims at.**
+  Rings and washes are drawn on pseudo-elements; a participant's row may
+  animate only opacity, a pseudo-element and `translateX`, never its height or
+  `y`; a card's hover is a deeper shadow, never a lift. Nothing animates on the
+  way out: a deleted card's place is taken at once, and a dialog gives focus
+  back at once.
+- **A vote's flight follows the write, it never decides it.** In the guided
+  Vote phase, while the budget draws its tokens (ten votes or fewer, not
+  unlimited), a vote that landed sends a token from the budget to the card's
+  dots (`components/common/motion/flight.ts` → `fly`, the Web Animations API),
+  the dot pops where it lands and a ring closes on the card; a vote taken back
+  flies home; a click refused for lack of votes shakes the budget
+  (`shakeVoteBudget`). The session holds the vote's marks until the token lands
+  (`heldVotes`, `playLandedVote`), and a button answers its press once the vote
+  is drawn: played during the click, the class was wiped by the one React
+  wrote in the same commit. Past ten votes, with unlimited votes and on the
+  open board, the dot pops in place. **In the guided Vote phase, and on a board
+  whose counts are hidden, only the viewer's own votes are marked**: a ring
+  must never tell where a teammate's vote went.
+- **A new effect is a class in `index.css` with its numbers, a trigger read
+  from two states, and a test.** `__tests__/sessionMotion.test.ts`,
+  `motionEffects.test.ts`, `motionFlight.test.ts`, `useSessionMotion.test.tsx`,
+  `sessionVoteMotion.test.tsx`, `panelMotion.test.tsx` and
+  `modalDialogEntrance.test.tsx` hold the rules in jsdom (which has neither
+  `matchMedia` nor `Element.animate`: each suite stubs them and also runs
+  bare), and `e2e/session-motion.spec.ts`, in the `motion` project, proves in a
+  browser that each effect plays once, leaves no class and no layer behind,
+  moves no box, and that reduced motion plays nothing.
+
 ## Accessibility (audit H42)
 
 WCAG 2.1 AA is a conformance obligation for a Geneva public-sector deployment
