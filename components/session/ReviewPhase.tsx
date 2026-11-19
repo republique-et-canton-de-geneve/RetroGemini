@@ -128,7 +128,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
 
   return (
     <div
-      className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 transition ${action.done ? 'bg-green-50/50' : ''}`}
+      className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 transition ${action.done ? 'bg-emerald-50/60' : ''}`}
     >
       <div className="flex items-center grow mr-4">
         <button
@@ -141,10 +141,12 @@ const ActionRow: React.FC<ActionRowProps> = ({
             }, action);
             setRefreshTick((tick) => tick + 1);
           }}
-          className={`mr-3 transition ${action.done ? 'text-emerald-600 scale-110' : 'text-slate-500 hover:text-emerald-600'} ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+          // A participant cannot tick it, but still reads its state: the
+          // circle keeps its measured colour rather than fading.
+          className={`mr-3 rounded-full transition disabled:cursor-not-allowed ${action.done ? 'text-emerald-600' : 'text-slate-500 enabled:hover:text-emerald-600'}`}
           aria-label={action.done ? t('phases.actions.markNotDone') : t('phases.actions.markDone')}
         >
-          <span className="material-symbols-outlined text-2xl">
+          <span className="material-symbols-outlined text-2xl" aria-hidden="true">
             {action.done ? 'check_circle' : 'radio_button_unchecked'}
           </span>
         </button>
@@ -175,7 +177,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
                 el.style.height = `${el.scrollHeight}px`;
               }
             }}
-            className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium resize-none overflow-hidden ${action.done ? 'line-through text-slate-500' : 'text-slate-700'} ${!canEdit ? 'cursor-not-allowed' : ''}`}
+            className={`w-full bg-transparent border border-transparent rounded-lg px-2 py-1 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 outline-hidden transition font-medium resize-none overflow-hidden ${action.done ? 'line-through text-slate-600' : 'text-slate-800'} ${canEdit ? 'hover:border-slate-300' : 'cursor-not-allowed'}`}
           />
           {contextText && <span className="text-xs text-indigo-600 italic mt-0.5 px-2">{contextText}</span>}
           {/* Hidden while the control renders nothing (no Jira, a closed
@@ -204,7 +206,7 @@ const ActionRow: React.FC<ActionRowProps> = ({
         value={action.assigneeId || ''}
         disabled={!canEdit}
         onChange={(event) => commitAssigneeChange(event.target.value || null)}
-        className={`text-xs border border-slate-200 rounded-sm p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''}`}
+        className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white text-slate-900 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600"
       >
         <option value="">{t('phases.shared.unassigned')}</option>
         {assignableMembers.map((member) => (
@@ -216,16 +218,16 @@ const ActionRow: React.FC<ActionRowProps> = ({
       {isFacilitator && !isGlobal && (
         <div className="ml-3">
           {!confirmingDelete ? (
-            <button onClick={() => setConfirmingDelete(true)} className="text-slate-500 hover:text-red-600" aria-label={t('phases.review.deleteAction')}>
-              <span className="material-symbols-outlined">delete</span>
+            <button onClick={() => setConfirmingDelete(true)} className="text-slate-500 hover:text-rose-700 rounded-md transition" aria-label={t('phases.review.deleteAction')}>
+              <span className="material-symbols-outlined" aria-hidden="true">delete</span>
             </button>
           ) : (
-            <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-3 py-1 shadow-xs">
-              <span className="text-slate-500">{t('phases.review.confirmDelete')}</span>
-              <button className="text-rose-700 font-bold" onClick={handleDelete}>
+            <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-lg px-3 py-1 shadow-xs">
+              <span className="text-slate-600">{t('phases.review.confirmDelete')}</span>
+              <button className="text-rose-700 font-semibold rounded-sm hover:underline" onClick={handleDelete}>
                 {t('common.yes')}
               </button>
-              <button className="text-slate-500" onClick={() => setConfirmingDelete(false)}>
+              <button className="text-slate-600 rounded-sm hover:underline" onClick={() => setConfirmingDelete(false)}>
                 {t('common.no')}
               </button>
             </div>
@@ -445,12 +447,12 @@ const ReviewPhase: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
-      <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0 shadow-xs z-30">
-        <h2 className="font-bold text-slate-700 text-lg">{t('phases.review.title')}</h2>
+      <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shrink-0 shadow-xs z-30">
+        <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{t('phases.review.title')}</h2>
         {isFacilitator && (
           <button
             onClick={() => setPhase('CLOSE')}
-            className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-indigo-700 btn-brand-glow transition"
           >
             {t('phases.review.next')}
           </button>
@@ -460,18 +462,18 @@ const ReviewPhase: React.FC<Props> = ({
         <JiraDiscoveryNote status={jiraStatus} isFacilitator={isFacilitator} userId={currentUser.id} />
         <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-5">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-bold text-slate-500 uppercase">{t('phases.review.summaryTitle')}</h3>
+            <h3 className="text-sm font-semibold tracking-wide text-slate-600 uppercase">{t('phases.review.summaryTitle')}</h3>
             {isFacilitator && aiEnabled && session.tickets?.some(t => t.text?.trim()) && (
               <button
                 onClick={handleGenerateSummary}
                 disabled={aiGenerating}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                   aiGenerating
-                    ? 'bg-slate-100 text-slate-500 cursor-not-allowed'
+                    ? 'bg-slate-100 text-slate-600 border border-slate-200 cursor-not-allowed'
                     : 'bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200'
                 }`}
               >
-                <span className={`material-symbols-outlined text-sm ${aiGenerating ? 'animate-spin' : ''}`}>
+                <span className={`material-symbols-outlined text-sm ${aiGenerating ? 'animate-spin' : ''}`} aria-hidden="true">
                   {aiGenerating ? 'progress_activity' : 'smart_toy'}
                 </span>
                 {aiGenerating ? t('phases.review.generating') : t('phases.review.generate')}
@@ -489,7 +491,7 @@ const ReviewPhase: React.FC<Props> = ({
               }}
               placeholder={t('phases.review.summaryPlaceholder')}
               rows={5}
-              className="w-full border border-slate-300 rounded-lg p-3 text-sm outline-hidden focus:border-retro-primary bg-white text-slate-900 resize-y"
+              className="w-full border border-slate-300 rounded-lg p-3 text-sm outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 bg-white text-slate-900 placeholder:text-slate-500 resize-y"
             />
           ) : (
             <div className="text-sm text-slate-700 whitespace-pre-wrap min-h-[90px] p-3 rounded-lg bg-slate-50 border border-slate-200">
@@ -500,7 +502,7 @@ const ReviewPhase: React.FC<Props> = ({
 
         <div>
           <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-            <h3 className="text-sm font-bold text-slate-500 uppercase">{t('phases.review.newActions')}</h3>
+            <h3 className="text-sm font-semibold tracking-wide text-slate-600 uppercase">{t('phases.review.newActions')}</h3>
             {/* Its own reason line when the team cannot create yet (finding U-1). */}
             <JiraBatchButton
               actions={newActionsForJira}
@@ -529,15 +531,15 @@ const ReviewPhase: React.FC<Props> = ({
           </div>
           <div className="space-y-4">
             {newActions.length === 0 ? (
-              <div className="p-8 text-center text-slate-500 bg-white rounded-xl border border-slate-200">
+              <div className="p-8 text-center text-slate-600 bg-white rounded-xl border border-slate-200">
                 {t('phases.review.noNewActions')}
               </div>
             ) : (
               Object.entries(groupedNewActions).map(([key, data]) => (
                 <div key={key} className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
-                  <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex flex-col justify-start">
-                    <div className="flex items-center text-sm font-bold text-slate-600">
-                      <span className="material-symbols-outlined text-lg mr-2 text-indigo-500">
+                  <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex flex-col justify-start">
+                    <div className="flex items-center text-sm font-semibold text-slate-800">
+                      <span className="material-symbols-outlined text-lg mr-2 text-indigo-600" aria-hidden="true">
                         {data.isGroup ? 'layers' : 'topic'}
                       </span>
                       {data.title}
@@ -547,7 +549,7 @@ const ReviewPhase: React.FC<Props> = ({
                         {data.tickets.map((ticket) => {
                           const originColumn = getTicketOriginColumn(ticket, session.columns);
                           return (
-                            <div key={ticket.id} className="text-xs text-slate-500 font-normal flex items-center gap-2 min-w-0">
+                            <div key={ticket.id} className="text-xs text-slate-600 font-normal flex items-center gap-2 min-w-0">
                               <span className="truncate">• {ticket.text}</span>
                               {originColumn && <TicketOriginBadge column={originColumn} className="shrink-0" />}
                             </div>
@@ -564,10 +566,10 @@ const ReviewPhase: React.FC<Props> = ({
         </div>
 
         <div>
-          <h3 className="text-sm font-bold text-slate-500 uppercase mb-4">{t('phases.review.previousActions')}</h3>
+          <h3 className="text-sm font-semibold tracking-wide text-slate-600 uppercase mb-4">{t('phases.review.previousActions')}</h3>
           <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden max-h-96 overflow-y-auto">
             {uniquePrevActions.length === 0 ? (
-              <div className="p-8 text-center text-slate-500">{t('phases.review.noHistory')}</div>
+              <div className="p-8 text-center text-slate-600">{t('phases.review.noHistory')}</div>
             ) : (
               uniquePrevActions.map((action) => <ActionRow key={action.id} action={action} jiraLink={jiraLinks.get(action.id)} isGlobal {...actionRowProps} />)
             )}

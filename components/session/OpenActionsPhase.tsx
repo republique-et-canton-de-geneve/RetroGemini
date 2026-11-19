@@ -89,12 +89,12 @@ const OpenActionsPhase: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
-      <div className="bg-white border-b px-6 py-3 flex justify-between items-center shrink-0">
-        <h2 className="font-bold text-slate-700 text-lg">{t('phases.openActions.title')}</h2>
+      <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shrink-0">
+        <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{t('phases.openActions.title')}</h2>
         {isFacilitator && (
           <button
             onClick={() => setPhase('BRAINSTORM')}
-            className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-indigo-700 btn-brand-glow transition"
           >
             {t('phases.shared.nextPhase')}
           </button>
@@ -102,7 +102,7 @@ const OpenActionsPhase: React.FC<Props> = ({
       </div>
       <div className="p-8 max-w-4xl mx-auto w-full">
         {ratingEnabled && (session.closedActionsSnapshot?.length ?? 0) > 0 && (
-          <h3 className="font-bold text-slate-700 mb-3">{t('phases.openActions.listTitle')}</h3>
+          <h3 className="font-semibold text-slate-900 mb-3">{t('phases.openActions.listTitle')}</h3>
         )}
         <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
           {uniqueActions.length === 0 ? (
@@ -129,7 +129,7 @@ const OpenActionsPhase: React.FC<Props> = ({
                 <div
                   key={action.id}
                   data-testid="open-action-row"
-                  className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 ${action.done ? 'bg-green-50/50' : ''}`}
+                  className={`p-4 border-b border-slate-100 last:border-0 flex items-center justify-between group hover:bg-slate-50 ${action.done ? 'bg-emerald-50/60' : ''}`}
                 >
                   <div className="flex items-center grow mr-4">
                     <button
@@ -143,16 +143,18 @@ const OpenActionsPhase: React.FC<Props> = ({
                         }, action);
                         setRefreshTick((tick) => tick + 1);
                       }}
-                      className={`mr-3 transition ${action.done ? 'text-emerald-600 scale-110' : 'text-slate-500 hover:text-emerald-600'} ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      // A participant cannot tick it, but still reads its state:
+                      // the circle keeps its measured colour rather than fading.
+                      className={`mr-3 rounded-full transition disabled:cursor-not-allowed ${action.done ? 'text-emerald-600' : 'text-slate-500 enabled:hover:text-emerald-600'}`}
                       aria-label={action.done ? t('phases.actions.markNotDone') : t('phases.actions.markDone')}
                     >
-                      <span className="material-symbols-outlined text-2xl">
+                      <span className="material-symbols-outlined text-2xl" aria-hidden="true">
                         {action.done ? 'check_circle' : 'radio_button_unchecked'}
                       </span>
                     </button>
                     <div className="flex flex-col">
                       <span
-                        className={`font-medium transition-all ${action.done ? 'text-emerald-800 line-through decoration-emerald-300' : 'text-slate-700'}`}
+                        className={`font-medium ${action.done ? 'text-emerald-800 line-through decoration-emerald-300' : 'text-slate-800'}`}
                       >
                         {action.text}
                       </span>
@@ -168,7 +170,7 @@ const OpenActionsPhase: React.FC<Props> = ({
                       <button
                         onClick={() => onRateNow(action)}
                         data-testid="rate-now"
-                        className="text-xs font-semibold text-slate-500 hover:text-retro-primary border border-slate-200 hover:border-retro-primary rounded-lg px-2 py-1 transition"
+                        className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 rounded-lg px-2.5 py-1 transition"
                         title={t('phases.openActions.rateNowTitle')}
                       >
                         {t('phases.openActions.rateNow')}
@@ -186,7 +188,7 @@ const OpenActionsPhase: React.FC<Props> = ({
                         }, action);
                         setRefreshTick((tick) => tick + 1);
                       }}
-                      className={`text-xs border border-slate-200 rounded-sm p-1 bg-white text-slate-900 ${!isFacilitator ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white text-slate-900 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600"
                     >
                       <option value="">{t('phases.shared.unassigned')}</option>
                       {assignableMembers.map((member) => (

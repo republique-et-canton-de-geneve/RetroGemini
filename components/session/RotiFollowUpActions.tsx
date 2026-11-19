@@ -51,7 +51,7 @@ const RotiFollowUpActions: React.FC<Props> = ({
   return (
     <div className="mt-8 text-left">
       <div className="mb-3">
-        <h4 className="text-lg font-bold text-white">{t('phases.rotiFollowUp.title')}</h4>
+        <h4 className="text-lg font-semibold text-white">{t('phases.rotiFollowUp.title')}</h4>
       </div>
 
       {rotiProposals.length > 0 && (
@@ -85,10 +85,10 @@ const RotiFollowUpActions: React.FC<Props> = ({
           {rotiAcceptedActions.map((action) => (
             <div
               key={action.id}
-              className="flex items-center justify-between bg-emerald-500/10 border border-emerald-400/40 rounded-sm p-3"
+              className="flex items-center justify-between gap-3 bg-emerald-500/10 border border-emerald-400/40 rounded-lg p-3"
             >
               <div className="text-sm text-emerald-100">
-                <span className="material-symbols-outlined text-sm align-middle mr-1">check_circle</span>
+                <span className="material-symbols-outlined text-sm align-middle mr-1" aria-hidden="true">check_circle</span>
                 {action.text}
               </div>
               {isFacilitator ? (
@@ -96,7 +96,7 @@ const RotiFollowUpActions: React.FC<Props> = ({
                   aria-label={t('phases.rotiFollowUp.assignee', { text: action.text })}
                   value={action.assigneeId || ''}
                   onChange={(event) => onAssignAction(action.id, event.target.value || null)}
-                  className="text-xs border border-slate-500 rounded-sm p-1.5 bg-slate-900 text-slate-100 outline-hidden"
+                  className="text-xs border border-slate-500 rounded-lg px-2 py-1.5 bg-slate-900 text-slate-100 outline-hidden focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/25"
                 >
                   <option value="">{t('phases.shared.unassigned')}</option>
                   {assignableMembers.map((member) => (
@@ -121,10 +121,12 @@ const RotiFollowUpActions: React.FC<Props> = ({
         </div>
       )}
 
-      <div className="flex">
+      <div className="flex gap-2">
         <input
           type="text"
-          className="grow border border-slate-600 rounded-l p-2 text-sm outline-hidden focus:border-retro-primary bg-slate-900 text-white"
+          // The placeholder is slate-400, which reads on this field's
+          // slate-900 (not on the card's slate-800 around it).
+          className="grow min-w-0 border border-slate-600 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/25 bg-slate-900 text-white placeholder:text-slate-400"
           placeholder={t('phases.rotiFollowUp.placeholder')}
           value={proposalText}
           onChange={(event) => onProposalTextChange(event.target.value)}
@@ -132,18 +134,18 @@ const RotiFollowUpActions: React.FC<Props> = ({
         />
         <button
           onClick={() => onAddProposal(ROTI_FOLLOW_UP_LINK_ID, proposalText)}
-          className="bg-slate-700 text-white px-3 font-bold text-sm hover:bg-slate-600 border-l border-slate-600"
+          className="bg-indigo-600 text-white px-4 rounded-lg font-semibold text-sm hover:bg-indigo-700 transition shrink-0"
         >
           {t('phases.shared.propose')}
         </button>
         {isFacilitator && (
           <button
             onClick={() => onDirectAddAction(ROTI_FOLLOW_UP_LINK_ID, proposalText)}
-            className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover"
+            className="bg-slate-700 text-white px-2.5 rounded-lg border border-slate-600 hover:bg-slate-600 transition shrink-0 flex items-center"
             title={t('phases.shared.directAccept')}
             aria-label={t('phases.shared.directAccept')}
           >
-            <span className="material-symbols-outlined text-sm">check</span>
+            <span className="material-symbols-outlined text-sm" aria-hidden="true">check</span>
           </button>
         )}
       </div>

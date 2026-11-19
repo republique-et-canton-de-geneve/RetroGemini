@@ -16,7 +16,9 @@ const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: n
   const neutralEnd = upEnd + neutralPct * 100;
 
   return {
-    background: `linear-gradient(to right, rgba(16, 185, 129, ${0.12 + upPct * 0.2}) 0%, rgba(16, 185, 129, ${0.12 + upPct * 0.2}) ${upEnd}%, rgba(148, 163, 184, ${0.1 + neutralPct * 0.15}) ${upEnd}%, rgba(148, 163, 184, ${0.1 + neutralPct * 0.15}) ${neutralEnd}%, rgba(239, 68, 68, ${0.1 + downPct * 0.18}) ${neutralEnd}%, rgba(239, 68, 68, ${0.1 + downPct * 0.18}) 100%)`
+    // Soft bands (the 45.0 look keeps colour for content, and calm): every
+    // text of the row sits on a pale wash of green, grey or red.
+    background: `linear-gradient(to right, rgba(16, 185, 129, ${0.08 + upPct * 0.14}) 0%, rgba(16, 185, 129, ${0.08 + upPct * 0.14}) ${upEnd}%, rgba(148, 163, 184, ${0.08 + neutralPct * 0.12}) ${upEnd}%, rgba(148, 163, 184, ${0.08 + neutralPct * 0.12}) ${neutralEnd}%, rgba(239, 68, 68, ${0.07 + downPct * 0.13}) ${neutralEnd}%, rgba(239, 68, 68, ${0.07 + downPct * 0.13}) 100%)`
   };
 };
 
@@ -83,23 +85,23 @@ const VoteStatusTooltip: React.FC<{
   const hasFacilitator = participants.some((participant) => participant.role === 'facilitator');
   const pendingBadgeClass = surface === 'dark'
     ? 'text-slate-200 bg-slate-900 border border-slate-700'
-    : 'text-slate-500 bg-slate-100';
+    : 'text-slate-700 bg-slate-100 border border-slate-200';
   const completeBadgeClass = surface === 'dark'
     ? 'text-emerald-300 bg-emerald-900/40 border border-emerald-600/60'
-    : 'text-emerald-700 bg-emerald-100 border border-emerald-300';
-  const totalBadgeClass = `flex items-center text-[11px] font-bold px-2 py-1 rounded-sm cursor-help whitespace-nowrap ${allVoted ? completeBadgeClass : pendingBadgeClass}`;
+    : 'text-emerald-800 bg-emerald-50 border border-emerald-300';
+  const totalBadgeClass = `flex items-center text-xs font-semibold tabular-nums px-2.5 py-1 rounded-full cursor-help whitespace-nowrap ${allVoted ? completeBadgeClass : pendingBadgeClass}`;
 
   return (
     <div className="relative" ref={wrapperRef} onMouseEnter={showTooltip} onMouseLeave={scheduleHide}>
       <div className={totalBadgeClass} data-testid="proposal-vote-progress" data-vote-progress={allVoted ? 'complete' : 'pending'}>
-        <span className="material-symbols-outlined text-sm mr-1">{allVoted ? 'task_alt' : 'group'}</span>
+        <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">{allVoted ? 'task_alt' : 'group'}</span>
         {expectedVoters.length > 0
           ? t('phases.proposal.votedRatio', { voted: votedExpectedCount, total: expectedVoters.length })
           : tp('phases.proposal.votedCount', votedParticipants.length)}
       </div>
       {visible && (
         <div
-          className="fixed w-60 bg-white border border-slate-200 rounded-lg shadow-lg z-50"
+          className="fixed w-60 bg-white border border-slate-200 rounded-xl shadow-lg z-50"
           style={{ top: pos?.top, bottom: pos?.bottom, right: pos?.right ?? 8 }}
           onMouseEnter={cancelHide}
           onMouseLeave={scheduleHide}
@@ -115,8 +117,8 @@ const VoteStatusTooltip: React.FC<{
             {/* "Not voted" comes first: the names that still need chasing are the
                 actionable ones, so they sit at the top and need no scrolling. */}
             <div className="mb-2">
-              <div className="font-bold text-amber-600 mb-1 flex items-center">
-                <span className="material-symbols-outlined text-sm mr-1">pending</span>
+              <div className="font-semibold text-amber-800 mb-1 flex items-center">
+                <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">pending</span>
                 {t('phases.proposal.notVoted', { count: notVotedParticipants.length })}
               </div>
               {notVotedParticipants.length > 0 ? (
@@ -133,8 +135,8 @@ const VoteStatusTooltip: React.FC<{
               )}
             </div>
             <div>
-              <div className="font-bold text-emerald-700 mb-1 flex items-center">
-                <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
+              <div className="font-semibold text-emerald-700 mb-1 flex items-center">
+                <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">check_circle</span>
                 {t('phases.proposal.voted', { count: votedParticipants.length })}
               </div>
               {votedParticipants.length > 0 ? (
@@ -155,14 +157,14 @@ const VoteStatusTooltip: React.FC<{
                             <span className="material-symbols-outlined text-emerald-700 text-base">thumb_up</span>
                           )}
                           {proposalVotes[participant.id] === 'down' && (
-                            <span className="material-symbols-outlined text-red-500 text-base">thumb_down</span>
+                            <span className="material-symbols-outlined text-rose-600 text-base">thumb_down</span>
                           )}
                           {proposalVotes[participant.id] === 'neutral' && (
                             <span className="material-symbols-outlined text-slate-500 text-base">remove</span>
                           )}
                         </span>
                       ) : (
-                        <span className="ml-auto material-symbols-outlined text-emerald-500 text-base shrink-0">how_to_reg</span>
+                        <span className="ml-auto material-symbols-outlined text-emerald-600 text-base shrink-0">how_to_reg</span>
                       )}
                     </li>
                   ))}
@@ -243,41 +245,51 @@ const ProposalActionRow: React.FC<Props> = ({
     ? 'ring-2 ring-amber-500/70 border-amber-500/60'
     : 'ring-2 ring-amber-400 border-amber-300';
   const containerClass = isDark
-    ? `p-3 rounded-sm border mb-2 text-slate-100 ${hasVoted ? 'border-slate-600/80' : pendingRingClass}`
-    : `p-3 rounded-sm border mb-2 ${hasVoted ? 'border-slate-200' : pendingRingClass}`;
+    ? `p-3 rounded-lg border mb-2 text-slate-100 ${hasVoted ? 'border-slate-600/80' : pendingRingClass}`
+    : `p-3 rounded-lg border mb-2 bg-white ${hasVoted ? 'border-slate-200' : pendingRingClass}`;
   const inputClass = isDark
-    ? 'grow border border-slate-600 rounded-sm p-2 text-sm outline-hidden focus:border-retro-primary bg-slate-900 text-slate-50'
-    : 'grow border border-slate-300 rounded-sm p-2 text-sm outline-hidden focus:border-retro-primary bg-white text-slate-900';
+    ? 'grow min-w-0 border border-slate-600 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/25 bg-slate-900 text-slate-50'
+    : 'grow min-w-0 border border-slate-300 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 bg-white text-slate-900';
+  const saveClass = isDark
+    ? 'bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-indigo-700 transition'
+    : 'bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-indigo-700 btn-brand-glow transition';
   const cancelClass = isDark
-    ? 'bg-slate-700 text-slate-100 px-3 py-2 rounded-sm text-xs font-bold hover:bg-slate-600'
-    : 'bg-slate-300 text-slate-700 px-3 py-2 rounded-sm text-xs font-bold hover:bg-slate-400';
+    ? 'bg-slate-700 text-slate-100 px-3 py-2 rounded-lg text-xs font-semibold hover:bg-slate-600 transition'
+    : 'bg-white text-slate-700 border border-slate-200 px-3 py-2 rounded-lg text-xs font-semibold hover:border-slate-300 hover:bg-slate-50 transition';
   const proposalTextClass = isDark
     ? `text-slate-50 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-300' : ''}`
-    : `text-slate-700 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-600' : ''}`;
+    : `text-slate-800 text-sm font-medium ${isFacilitator ? 'cursor-pointer hover:text-indigo-700' : ''}`;
+  // slate-500 read 2.6:1 on the dark card: the icon is the control, so it
+  // takes the dark screens' muted ink.
   const deleteButtonClass = isDark
-    ? 'text-slate-500 hover:text-rose-400 transition'
-    : 'text-slate-500 hover:text-red-600 transition';
+    ? 'text-slate-300 hover:text-rose-300 rounded-md transition'
+    : 'text-slate-500 hover:text-rose-700 rounded-md transition';
+  // `bg-slate-100 rounded-lg` stays on the light box: the e2e flows find the
+  // vote buttons inside it.
   const voteBoxClass = isDark
     ? 'flex bg-slate-900/80 border border-slate-700 rounded-lg p-1 space-x-1'
     : 'flex bg-slate-100 rounded-lg p-1 space-x-1';
   const upVoteClass = myVote === 'up'
-    ? (isDark ? 'bg-emerald-900/70 text-emerald-300 shadow-xs' : 'bg-emerald-100 text-emerald-700 shadow-xs')
-    : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-500');
+    ? (isDark ? 'bg-emerald-900/70 text-emerald-300 shadow-xs' : 'bg-emerald-100 text-emerald-800 shadow-xs')
+    : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-600');
   const neutralVoteClass = myVote === 'neutral'
-    ? (isDark ? 'bg-slate-700 text-slate-100 shadow-xs' : 'bg-slate-300 text-slate-800 shadow-xs')
-    : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-500');
+    ? (isDark ? 'bg-slate-700 text-slate-100 shadow-xs' : 'bg-white text-slate-900 shadow-xs')
+    : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-600');
   const downVoteClass = myVote === 'down'
-    ? (isDark ? 'bg-rose-900/70 text-rose-300 shadow-xs' : 'bg-red-100 text-red-700 shadow-xs')
-    : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-500');
+    ? (isDark ? 'bg-rose-900/70 text-rose-300 shadow-xs' : 'bg-rose-100 text-rose-800 shadow-xs')
+    : (isDark ? 'hover:bg-slate-800 text-slate-200' : 'hover:bg-white text-slate-600');
   const pendingBadgeClass = isDark
     ? 'bg-amber-900/40 text-amber-300 border border-amber-500/60'
-    : 'bg-amber-100 text-amber-700 border border-amber-300';
+    : 'bg-amber-50 text-amber-800 border border-amber-300';
   const votedBadgeClass = isDark
     ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-600/60'
-    : 'bg-emerald-100 text-emerald-700 border border-emerald-300';
+    : 'bg-emerald-50 text-emerald-800 border border-emerald-300';
   const rejectButtonClass = isDark
-    ? 'border border-rose-500/60 text-rose-300 px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-rose-900/40 transition'
-    : 'border border-rose-300 text-rose-700 px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-rose-50 transition';
+    ? 'border border-rose-500/60 text-rose-300 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-rose-900/40 transition'
+    : 'bg-white border border-rose-200 text-rose-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-rose-50 hover:border-rose-300 transition';
+  const acceptButtonClass = isDark
+    ? 'bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-indigo-700 transition'
+    : 'bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-indigo-700 btn-brand-glow transition';
 
   return (
     <div className={containerClass} style={rowStyle} data-proposal-row={proposal.id}>
@@ -301,16 +313,16 @@ const ProposalActionRow: React.FC<Props> = ({
           <button
             onClick={onSaveEdit}
             aria-label={t('phases.proposal.save')}
-            className="bg-emerald-500 text-white px-3 py-2 rounded-sm text-xs font-bold hover:bg-emerald-600"
+            className={saveClass}
           >
-            <span className="material-symbols-outlined text-sm">check</span>
+            <span className="material-symbols-outlined text-sm" aria-hidden="true">check</span>
           </button>
           <button
             onClick={onCancelEdit}
             aria-label={t('phases.proposal.cancelEdit')}
             className={cancelClass}
           >
-            <span className="material-symbols-outlined text-sm">close</span>
+            <span className="material-symbols-outlined text-sm" aria-hidden="true">close</span>
           </button>
         </div>
       ) : (
@@ -336,7 +348,7 @@ const ProposalActionRow: React.FC<Props> = ({
                 title={t('phases.proposal.delete')}
                 aria-label={t('phases.proposal.delete')}
               >
-                <span className="material-symbols-outlined text-sm">delete</span>
+                <span className="material-symbols-outlined text-sm" aria-hidden="true">delete</span>
               </button>
             )}
           </div>
@@ -345,41 +357,44 @@ const ProposalActionRow: React.FC<Props> = ({
               {hasVoted ? (
                 <span
                   data-vote-status="voted"
-                  className={`flex items-center text-[11px] font-bold px-2 py-1 rounded-sm whitespace-nowrap ${votedBadgeClass}`}
+                  className={`flex items-center text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${votedBadgeClass}`}
                 >
-                  <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
+                  <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">check_circle</span>
                   {t('phases.proposal.votedBadge')}
                 </span>
               ) : (
                 <span
                   data-vote-status="pending"
-                  className={`flex items-center text-[11px] font-bold px-2 py-1 rounded-sm whitespace-nowrap animate-pulse ${pendingBadgeClass}`}
+                  // Static: the amber ring around the row and these words carry
+                  // the reminder. A pulse at rest took the words through half
+                  // their opacity, below the contrast floor.
+                  className={`flex items-center text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${pendingBadgeClass}`}
                 >
-                  <span className="material-symbols-outlined text-sm mr-1">how_to_vote</span>
+                  <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">how_to_vote</span>
                   {t('phases.proposal.voteNeeded')}
                 </span>
               )}
               <div className={voteBoxClass}>
                 <button
                   onClick={() => onVote('up')}
-                  className={`px-2 py-1 rounded-sm flex items-center transition ${upVoteClass}`}
+                  className={`px-2 py-1 rounded-md flex items-center transition ${upVoteClass}`}
                 >
                   <span className="material-symbols-outlined text-sm mr-1">thumb_up</span>
-                  <span className="text-xs font-bold">{upVotes > 0 ? upVotes : ''}</span>
+                  <span className="text-xs font-semibold tabular-nums">{upVotes > 0 ? upVotes : ''}</span>
                 </button>
                 <button
                   onClick={() => onVote('neutral')}
-                  className={`px-2 py-1 rounded-sm flex items-center transition ${neutralVoteClass}`}
+                  className={`px-2 py-1 rounded-md flex items-center transition ${neutralVoteClass}`}
                 >
                   <span className="material-symbols-outlined text-sm mr-1">remove</span>
-                  <span className="text-xs font-bold">{neutralVotes > 0 ? neutralVotes : ''}</span>
+                  <span className="text-xs font-semibold tabular-nums">{neutralVotes > 0 ? neutralVotes : ''}</span>
                 </button>
                 <button
                   onClick={() => onVote('down')}
-                  className={`px-2 py-1 rounded-sm flex items-center transition ${downVoteClass}`}
+                  className={`px-2 py-1 rounded-md flex items-center transition ${downVoteClass}`}
                 >
                   <span className="material-symbols-outlined text-sm mr-1">thumb_down</span>
-                  <span className="text-xs font-bold">{downVotes > 0 ? downVotes : ''}</span>
+                  <span className="text-xs font-semibold tabular-nums">{downVotes > 0 ? downVotes : ''}</span>
                 </button>
               </div>
               <VoteStatusTooltip
@@ -403,7 +418,7 @@ const ProposalActionRow: React.FC<Props> = ({
                 )}
                 <button
                   onClick={onAccept}
-                  className="bg-retro-primary text-white px-3 py-1.5 rounded-sm text-xs font-bold hover:bg-retro-primaryHover shadow-xs"
+                  className={acceptButtonClass}
                 >
                   {t('phases.proposal.accept')}
                 </button>

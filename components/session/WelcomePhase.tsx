@@ -32,11 +32,11 @@ const WelcomePhase: React.FC<Props> = ({
   const maxVal = Math.max(...histogram, 1);
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-8 overflow-y-auto">
-      <h2 className="text-2xl font-bold text-slate-800 mb-2">{t('phases.welcome.title')}</h2>
-      <p className="text-slate-500 mb-8">{t('phases.welcome.question')}</p>
+    <div className="flex flex-col items-center justify-center h-full p-8 overflow-y-auto bg-slate-50">
+      <h2 className="text-2xl font-semibold tracking-tight text-slate-900 mb-2">{t('phases.welcome.title')}</h2>
+      <p className="text-slate-600 mb-8">{t('phases.welcome.question')}</p>
 
-      <div className="flex gap-4 mb-12">
+      <div className="flex gap-2 sm:gap-4 mb-12">
         {[1, 2, 3, 4, 5].map((score) => (
           <button
             key={score}
@@ -45,7 +45,16 @@ const WelcomePhase: React.FC<Props> = ({
                 draft.happiness[currentUser.id] = score;
               })
             }
-            className={`text-6xl transition transform hover:scale-110 ${myVote === score ? 'opacity-100 scale-110 grayscale-0' : 'opacity-40 grayscale hover:grayscale-0'}`}
+            // The choice shows as a tile in the brand's tint with a brand edge,
+            // the others as white tiles: never a faded or grey emoji, which no
+            // contrast can be measured on. `text-6xl` stays: the e2e flow finds
+            // the five choices by it. Smaller on a phone, where five did not fit.
+            aria-pressed={myVote === score}
+            className={`text-6xl max-sm:text-4xl leading-none p-2 sm:p-3 rounded-2xl border transition ${
+              myVote === score
+                ? 'bg-indigo-100 border-indigo-600 ring-4 ring-indigo-600/15'
+                : 'bg-white border-slate-200 hover:border-slate-400 hover:shadow-md'
+            }`}
           >
             {['⛈️', '🌧️', '☁️', '🌤️', '☀️'][score - 1]}
           </button>
@@ -54,7 +63,7 @@ const WelcomePhase: React.FC<Props> = ({
 
       {!session.settings.revealHappiness ? (
         <div className="mb-8 text-center">
-          <div className="text-lg font-bold text-slate-600 mb-2">
+          <div className="text-lg font-semibold tabular-nums text-slate-700 mb-3">
             {t('phases.welcome.votedCount', { voted: voterCount, total: participantsCount })}
           </div>
           {isFacilitator && (
@@ -64,23 +73,24 @@ const WelcomePhase: React.FC<Props> = ({
                   draft.settings.revealHappiness = true;
                 })
               }
-              className="bg-indigo-600 text-white px-6 py-2 rounded-full font-bold shadow-sm hover:bg-indigo-700"
+              className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-indigo-700 btn-brand-glow transition"
             >
               {t('phases.shared.revealResults')}
             </button>
           )}
         </div>
       ) : (
-        <div className="w-full max-w-lg bg-white p-6 rounded-xl shadow-lg border border-slate-200">
+        <div className="w-full max-w-lg bg-white p-6 rounded-2xl shadow-xs border border-slate-200">
           <div className="flex items-end justify-between h-48 space-x-4">
             {histogram.map((count, index) => (
               <div key={index} className="flex flex-col items-center flex-1 h-full justify-end">
                 {count > 0 && (
                   <div
-                    className="w-full bg-indigo-500 rounded-t-lg relative group bar-anim"
+                    className="w-full bg-indigo-600 rounded-t-lg relative group bar-anim"
                     style={{ height: `${(count / maxVal) * 100}%` }}
                   >
-                    <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 font-bold text-indigo-700">
+                    {/* Above the bar, on the card's white: the bar is no surface for text. */}
+                    <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 font-mono font-semibold text-indigo-700 bg-white">
                       {count}
                     </div>
                   </div>
@@ -89,7 +99,7 @@ const WelcomePhase: React.FC<Props> = ({
               </div>
             ))}
           </div>
-          <div className="text-center mt-4 text-slate-500 font-bold">
+          <div className="text-center mt-4 text-slate-600 font-semibold tabular-nums">
             {t('phases.welcome.participantsVoted', { voted: voterCount, total: participantsCount })}
           </div>
         </div>
@@ -97,7 +107,7 @@ const WelcomePhase: React.FC<Props> = ({
       {isFacilitator && (
         <button
           onClick={onNext}
-          className="mt-12 bg-white text-slate-800 border border-slate-300 px-6 py-2 rounded-lg font-bold hover:bg-slate-50 shadow-xs"
+          className="mt-12 bg-white text-slate-700 border border-slate-200 px-6 py-2 rounded-lg font-semibold hover:border-slate-300 hover:bg-slate-50 transition"
         >
           {t('phases.shared.nextPhase')}
         </button>
