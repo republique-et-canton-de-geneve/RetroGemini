@@ -4,6 +4,7 @@ import { Ticket, TicketComment, User } from '../../types';
 import ModalDialog from '../common/ModalDialog';
 import { useTranslation } from '../../i18n/I18nContext';
 import { avatarColorClasses } from '../../utils/participantColors';
+import Avatar from '../common/Avatar';
 
 interface Props {
   ticket: Ticket;
@@ -109,9 +110,9 @@ const TicketCommentsModal: React.FC<Props> = ({
             // Not muted by opacity: 70% took the initials and the name to
             // about 2.9:1, and a faded look is what a measurement cannot see.
             <div className="mt-2 flex items-center text-xs">
-              <div className={`w-5 h-5 rounded-full ${avatarColorClasses(author.color)} flex items-center justify-center text-[9px] font-bold mr-1.5`}>
-                {author.name.substring(0, 2).toUpperCase()}
-              </div>
+              <span className="mr-1.5 flex shrink-0">
+                <Avatar colorClasses={avatarColorClasses(author.color)} initials={author.name.substring(0, 2).toUpperCase()} size={20} />
+              </span>
               <span className={cardBgHex ? cardTextColor : 'text-slate-600'}>{author.name}</span>
             </div>
           )}
@@ -132,9 +133,9 @@ const TicketCommentsModal: React.FC<Props> = ({
 
             return (
               <div key={comment.id} className="flex items-start space-x-2 group" data-testid="ticket-comment">
-                <div className={`w-7 h-7 rounded-full ${avatarColorClasses(commentAuthor?.color)} flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5`}>
-                  {(commentAuthor?.name || comment.authorName).substring(0, 2).toUpperCase()}
-                </div>
+                <span className="mt-0.5 flex shrink-0">
+                  <Avatar colorClasses={avatarColorClasses(commentAuthor?.color)} initials={(commentAuthor?.name || comment.authorName).substring(0, 2).toUpperCase()} size={28} />
+                </span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center space-x-2">
                     <span className="text-xs font-bold text-slate-700">
@@ -213,9 +214,7 @@ const TicketCommentsModal: React.FC<Props> = ({
 
         {/* Comment input */}
         <div className="border-t p-3 flex items-center space-x-2 bg-slate-50">
-          <div className={`w-7 h-7 rounded-full ${avatarColorClasses(currentUser.color)} flex items-center justify-center text-[9px] font-bold shrink-0`}>
-            {currentUser.name.substring(0, 2).toUpperCase()}
-          </div>
+          <Avatar colorClasses={avatarColorClasses(currentUser.color)} initials={currentUser.name.substring(0, 2).toUpperCase()} size={28} />
           <input
             ref={inputRef}
             type="text"

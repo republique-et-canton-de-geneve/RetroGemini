@@ -8,6 +8,7 @@ import SessionTimer from './SessionTimer';
 import { getRetroPhaseDefaultTimerSeconds } from './retroTips';
 import { DEFAULT_TIMER_SECONDS } from '../../utils/sessionTimer';
 import { avatarColorClasses } from '../../utils/participantColors';
+import Avatar from '../common/Avatar';
 import { isOpenBoard } from '../../utils/openBoard';
 
 interface Props {
@@ -197,8 +198,8 @@ const SessionHeader: React.FC<Props> = ({
       </div>
       {/* The name and initials show from sm up; on a phone their width goes to
           the controls (the participants panel still names everyone). */}
-      <div className={`w-8 h-8 shrink-0 rounded-full ${avatarColorClasses(currentUser.color)} hidden sm:flex items-center justify-center text-xs font-bold shadow-md`}>
-        {currentUser.name.substring(0, 2).toUpperCase()}
+      <div className="hidden sm:flex shrink-0 rounded-full shadow-md">
+        <Avatar colorClasses={avatarColorClasses(currentUser.color)} initials={currentUser.name.substring(0, 2).toUpperCase()} size={32} label={currentUser.name} />
       </div>
     </div>
   </header>

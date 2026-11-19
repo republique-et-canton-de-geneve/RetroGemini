@@ -45,6 +45,7 @@ import {
 import { effectiveSessionStatus } from '../utils/sessionStatus';
 import { isOpenBoard } from '../utils/openBoard';
 import { avatarColorClasses } from '../utils/participantColors';
+import Avatar from './common/Avatar';
 import { HEALTH_RATING_BADGE } from '../utils/healthRatingColors';
 
 interface Props {
@@ -1614,9 +1615,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
         <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
           {team.members.map((member) => (
             <div key={member.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-full ${avatarColorClasses(member.color)} flex items-center justify-center font-bold uppercase`}>
-                {member.name.substring(0, 2)}
-              </div>
+              <Avatar colorClasses={avatarColorClasses(member.color)} initials={member.name.substring(0, 2)} size={40} />
               <div className="flex flex-col flex-1">
                 {editingMemberId === member.id ? (
                   <div className="space-y-2">

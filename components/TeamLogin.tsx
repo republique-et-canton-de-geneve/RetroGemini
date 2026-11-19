@@ -15,6 +15,7 @@ import type { MessageKey, TranslationParams } from '../i18n/translate';
 import { noticeText, type Notice } from '../i18n/notice';
 import LanguageSwitcher from './common/LanguageSwitcher';
 import { avatarColorClasses } from '../utils/participantColors';
+import Avatar from './common/Avatar';
 
 /**
  * A banner message, kept as *what* to say rather than the sentence itself, so
@@ -989,9 +990,9 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                                         : 'bg-slate-50 border-2 border-transparent hover:bg-slate-100'
                                                 }`}
                                             >
-                                                <div className={`w-10 h-10 rounded-full ${avatarColorClasses(member.color)} flex items-center justify-center font-bold text-sm mr-3 shrink-0`}>
-                                                    {member.name.substring(0, 2).toUpperCase()}
-                                                </div>
+                                                <span className="mr-3 flex shrink-0">
+                                                    <Avatar colorClasses={avatarColorClasses(member.color)} initials={member.name.substring(0, 2).toUpperCase()} size={40} />
+                                                </span>
                                                 <div className="text-left grow">
                                                     <div className="font-bold text-slate-800">{member.name}</div>
                                                     <div className="text-xs text-slate-600 capitalize">{roleLabel(member.role)}</div>

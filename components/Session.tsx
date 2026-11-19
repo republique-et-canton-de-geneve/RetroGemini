@@ -126,6 +126,7 @@ import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStall
 import SyncStalledBanner from './session/SyncStalledBanner';
 import { jiraLinkFields, sameJiraLink, withJiraLinkFrom } from './jira/jiraLinkMerge';
 import { avatarColorClasses } from '../utils/participantColors';
+import Avatar from './common/Avatar';
 
 const generateLocalId = () => randomId();
 
@@ -3185,8 +3186,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
             {showsAuthor && (
                 <div className="absolute top-2 right-2">
-                    <div className={`w-6 h-6 rounded-full ${avatarColorClasses(author.color)} flex items-center justify-center text-[10px] font-bold shadow-xs ring-1 ring-white`}>
-                        {author.name.substring(0,2).toUpperCase()}
+                    {/* Named: it is the card's only sign of who wrote it. */}
+                    <div className="flex rounded-full shadow-xs ring-1 ring-white">
+                        <Avatar colorClasses={avatarColorClasses(author.color)} initials={author.name.substring(0,2).toUpperCase()} size={24} label={author.name} />
                     </div>
                 </div>
             )}

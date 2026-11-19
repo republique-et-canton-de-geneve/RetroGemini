@@ -43,6 +43,7 @@ import JiraParentLine from './jira/JiraParentLine';
 import { withJiraLinkFrom } from './jira/jiraLinkMerge';
 import { useJiraStatus } from './jira/useJiraStatus';
 import { avatarColorClasses } from '../utils/participantColors';
+import Avatar from './common/Avatar';
 
 interface Props {
   team: Team;
@@ -936,8 +937,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           <span className="text-[10px] font-bold text-slate-500 uppercase">{t('healthCheck.header.user')}</span>
           <span className="max-w-32 truncate text-sm font-bold text-slate-700" title={currentUser.name}>{currentUser.name}</span>
         </div>
-        <div className={`w-8 h-8 shrink-0 rounded-full ${avatarColorClasses(currentUser.color)} hidden sm:flex items-center justify-center text-xs font-bold shadow-md`}>
-          {currentUser.name.substring(0, 2).toUpperCase()}
+        {/* Named: the name beside it waits for 2xl. */}
+        <div className="hidden sm:flex shrink-0 rounded-full shadow-md">
+          <Avatar colorClasses={avatarColorClasses(currentUser.color)} initials={currentUser.name.substring(0, 2).toUpperCase()} size={32} label={currentUser.name} />
         </div>
       </div>
     </header>

@@ -7,7 +7,9 @@ import type { ParticipantActivity, RetroSession, Ticket, User } from '../types';
 import { effectivePair, tokenContrast } from './helpers/tailwindTheme';
 
 /**
- * The avatars as the screens render them, measured against Tailwind's theme.
+ * The avatars as the screens render them, measured against the tokens the
+ * build paints (Tailwind's theme, then index.css: since 45.0 a person's tone,
+ * ink initials on a pastel body of the same hue).
  *
  * Avatars are found by their initials, never by a class, so these tests ran
  * unchanged before the fix and failed for the reason they exist: white
@@ -107,6 +109,9 @@ describe('participants panel avatars', () => {
     renderPanel(makeSession(), palette);
     const pair = effectivePair(avatarOf(member as User));
     expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(FLOOR);
+    // Its own tone, or the neutral one for a colour the palette does not know.
+    const hue = /^bg-(indigo|emerald|amber|rose|cyan|fuchsia|lime|pink)-500$/.exec((member as User).color)?.[1] ?? 'neutral';
+    expect(pair).toMatchObject({ fg: `person-${hue}-ink`, bg: `person-${hue}` });
   });
 
   it('draws a departed participant readable, not faded', () => {
@@ -114,6 +119,7 @@ describe('participants panel avatars', () => {
     renderPanel(makeSession({ leftUsers: [lime.id] }), palette);
     const avatar = avatarOf(lime);
     expect(avatar.className).not.toMatch(/\bopacity-\d+|\bgrayscale\b/);
+    expect(effectivePair(avatar)).toMatchObject({ fg: 'person-neutral-ink', bg: 'person-neutral' });
     expect(effectivePair(avatar).ratio).toBeGreaterThanOrEqual(FLOOR);
   });
 

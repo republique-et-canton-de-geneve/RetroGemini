@@ -79,6 +79,9 @@ const rendersNonIconContent = (node: ts.Node): boolean => {
   if (ts.isJsxText(node)) return node.text.trim().length > 0;
   if (ts.isJsxElement(node)) return node.children.some(rendersNonIconContent);
   if (ts.isJsxFragment(node)) return node.children.some(rendersNonIconContent);
+  // An <Avatar> without a label is decoration (aria-hidden): its initials are
+  // not a name, so a button whose only child it is has none.
+  if (ts.isJsxSelfClosingElement(node) && tagNameOf(node) === 'Avatar') return !!attributeOf(node, 'label');
   // A component or a void element (<Badge />, <img />) renders something.
   if (ts.isJsxSelfClosingElement(node)) return true;
   if (ts.isJsxExpression(node)) return !!node.expression && expressionRendersNonIcon(node.expression);
@@ -121,12 +124,13 @@ const expressionRendersNonIcon = (expr: ts.Expression): boolean => {
  *    accessible-name algorithm actually reaches — the same rule that condemns
  *    the family above is what rescues this one.
  */
-const findUnnamedButtons = (): IconButton[] => {
-  const files = ['App.tsx', ...tsxFilesUnder(join(REPO_ROOT, 'components'))].sort();
-
+const findUnnamedButtons = (
+  sources: ReadonlyArray<{ file: string; source: string }> = ['App.tsx', ...tsxFilesUnder(join(REPO_ROOT, 'components'))]
+    .sort()
+    .map(file => ({ file, source: readFileSync(join(REPO_ROOT, file), 'utf8') })),
+): IconButton[] => {
   const found: IconButton[] = [];
-  for (const file of files) {
-    const source = readFileSync(join(REPO_ROOT, file), 'utf8');
+  for (const { file, source } of sources) {
     if (!source.includes('<button')) continue;
     const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
@@ -192,6 +196,22 @@ describe('H52 — icon-only buttons must not be named by their ligature', () => 
     };
     visit(sourceFile);
     expect(buttons).toBeGreaterThan(50);
+  });
+});
+
+describe('H52 — the guard, on fixtures', () => {
+  const reasonsIn = (source: string) => findUnnamedButtons([{ file: 'components/Fixture.tsx', source }]).map(o => o.reason);
+
+  // A decorative avatar is aria-hidden, so its initials are no name: a button
+  // holding only that is announced as "button".
+  it('reports a button whose only child is an <Avatar> without a label', () => {
+    expect(reasonsIn('const A = () => <button onClick={() => open()}><Avatar colorClasses={c} initials="AB" size={32} /></button>;')).toEqual(['nameless']);
+  });
+
+  it('accepts it once the button is named, or the avatar is', () => {
+    expect(reasonsIn('const A = () => <button aria-label="AB, choose my avatar"><Avatar colorClasses={c} initials="AB" size={32} /></button>;')).toEqual([]);
+    expect(reasonsIn('const A = () => <button><Avatar colorClasses={c} initials="AB" size={32} label="Ada" /></button>;')).toEqual([]);
+    expect(reasonsIn('const A = () => <button><Avatar colorClasses={c} initials="AB" size={32} /> Ada</button>;')).toEqual([]);
   });
 });
 

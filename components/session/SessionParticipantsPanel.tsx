@@ -4,6 +4,7 @@ import { MessageKey, Translator } from '../../i18n/translate';
 import { ParticipantActivity, SessionInvitee, User } from '../../types';
 import { pendingInvitees as selectPendingInvitees } from './sessionInvitees';
 import { avatarColorClasses, DEPARTED_AVATAR_CLASSES, participantColorClass } from '../../utils/participantColors';
+import Avatar from '../common/Avatar';
 import { joinNames, splitTypingNames, typingMembers } from '../../utils/typingNow';
 
 /**
@@ -358,9 +359,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                       fading the row, then the avatar, each put text below
                       4.5:1 (utils/participantColors.ts). */}
                   <div className="relative mr-3 shrink-0">
-                    <div className={`w-8 h-8 rounded-full ${hasLeft ? DEPARTED_AVATAR_CLASSES : avatarColorClasses(member.color)} flex items-center justify-center text-xs font-bold`}>
-                      {initials}
-                    </div>
+                    <Avatar colorClasses={hasLeft ? DEPARTED_AVATAR_CLASSES : avatarColorClasses(member.color)} initials={initials} size={32} />
                     {isOnline && !hasLeft && (
                       <div
                         className="absolute -top-0.5 -left-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white"

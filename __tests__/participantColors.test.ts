@@ -3,11 +3,12 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   PARTICIPANT_PALETTE,
-  UNKNOWN_PARTICIPANT_COLOR,
+  NEUTRAL_AVATAR_CLASSES,
   DEPARTED_AVATAR_CLASSES,
   avatarColorClasses,
   isParticipantColor,
   participantColorClass,
+  participantToneHex,
 } from '../utils/participantColors';
 import { HEALTH_RATING_BADGE } from '../utils/healthRatingColors';
 import {
@@ -156,49 +157,86 @@ describe('the measuring helper', () => {
   });
 });
 
-/** Rule A1: white when white clears the floor, otherwise the better of the two. */
-const ruleA1 = (bgToken: string): 'text-white' | 'text-black' => {
-  if (tokenContrast('white', bgToken) >= FLOOR) return 'text-white';
-  return tokenContrast('black', bgToken) > tokenContrast('white', bgToken) ? 'text-black' : 'text-white';
-};
-
 const bgToken = (className: string) => {
   const token = classColor(className, 'bg');
   if (!token) throw new Error(`no background in "${className}"`);
   return token;
 };
 
+/** The hue a stored palette class names: `bg-lime-500` → `lime`. */
+const hueOf = (color: string) => color.replace(/^bg-/, '').replace(/-500$/, '');
+
+const NON_TEXT_FLOOR = 3;
+
+/**
+ * Since 45.0 a person is drawn in a tone of their own hue: a pastel body and
+ * initials in the dark ink of the same hue (`person-*` tokens of index.css),
+ * where until then the stored Tailwind class was painted as is with black or
+ * white initials. The stored value does not change; what it is drawn in does.
+ */
 describe('participant avatars', () => {
   it.each(PARTICIPANT_PALETTE.map((color) => [color]))('%s: the initials clear 4.5:1', (color) => {
     expect(pairContrast(avatarColorClasses(color))).toBeGreaterThanOrEqual(FLOOR);
   });
 
-  it.each(PARTICIPANT_PALETTE.map((color) => [color]))('%s: the initials colour follows the rule', (color) => {
-    expect(classColor(avatarColorClasses(color), 'text')).toBe(ruleA1(bgToken(color)).replace(/^text-/, ''));
+  it.each(PARTICIPANT_PALETTE.map((color) => [color]))('%s: drawn in its own hue, ink on body, with the tone for a picture', (color) => {
+    const hue = hueOf(color);
+    expect(avatarColorClasses(color)).toBe(`tone-${hue} bg-person-${hue} text-person-${hue}-ink`);
+    expect(bgToken(avatarColorClasses(color))).toBe(`person-${hue}`);
+    expect(classColor(avatarColorClasses(color), 'text')).toBe(`person-${hue}-ink`);
   });
 
-  it('keeps white on the facilitator\'s indigo, the one colour where white passes', () => {
-    expect(avatarColorClasses('bg-indigo-500')).toBe('bg-indigo-500 text-white');
-  });
-
-  it.each([[undefined], [null], [''], ['bg-sky-500'], ['fixed inset-0 z-50'], ['bg-lime-500 text-white']])(
+  it.each([[undefined], [null], [''], ['bg-sky-500'], ['fixed inset-0 z-50'], ['bg-lime-500 text-white'], ['__proto__']])(
     'renders %j as the neutral fallback, and nothing else',
     (value) => {
       const classes = avatarColorClasses(value as string | null | undefined);
-      expect(classes).toBe(`${UNKNOWN_PARTICIPANT_COLOR} text-white`);
+      expect(classes).toBe(NEUTRAL_AVATAR_CLASSES);
+      expect(classes).toBe('tone-neutral bg-person-neutral text-person-neutral-ink');
       expect(pairContrast(classes)).toBeGreaterThanOrEqual(FLOOR);
-      expect(participantColorClass(value as string | null | undefined)).toBe(UNKNOWN_PARTICIPANT_COLOR);
+      expect(participantColorClass(value as string | null | undefined)).toBe('bg-person-neutral-ink');
+      expect(participantToneHex(value as string | null | undefined)).toEqual(participantToneHex(undefined));
       expect(isParticipantColor(value)).toBe(false);
     },
   );
 
-  it('passes a palette colour through to the non-text dots unchanged', () => {
-    for (const color of PARTICIPANT_PALETTE) expect(participantColorClass(color)).toBe(color);
+  // The dots are a person's only mark beside their name in some places (the
+  // contribution line, the vote tooltip): WCAG 1.4.11, 3:1 on the surfaces
+  // they sit on — white, and the reader's own row (indigo-50).
+  it.each([...PARTICIPANT_PALETTE.map((color) => [color]), [undefined]])('%s: its dot is the ink, 3:1 on white and on the reader\'s row', (color) => {
+    const dot = participantColorClass(color as string | undefined);
+    expect(dot).toBe(`bg-person-${color ? hueOf(color as string) : 'neutral'}-ink`);
+    for (const surface of ['white', 'indigo-50']) {
+      expect(tokenContrast(bgToken(dot), surface), `${dot} on ${surface}`).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+    }
   });
 
-  it('draws a departed participant in a neutral pair that clears 4.5:1', () => {
+  it('draws a departed participant in the neutral tone, never faded', () => {
+    expect(DEPARTED_AVATAR_CLASSES).toBe(NEUTRAL_AVATAR_CLASSES);
     expect(pairContrast(DEPARTED_AVATAR_CLASSES)).toBeGreaterThanOrEqual(FLOOR);
     expect(DEPARTED_AVATAR_CLASSES).not.toMatch(/opacity|grayscale/);
+  });
+
+  // The board paints a colour-by-author card from these: they must be the
+  // tokens the avatars are painted in, not a copy that drifts from them.
+  it('hands out as hex exactly the tone tokens index.css defines', () => {
+    for (const hue of [...PARTICIPANT_PALETTE.map(hueOf), 'neutral']) {
+      const tone = hue === 'neutral' ? participantToneHex('not a colour') : participantToneHex(`bg-${hue}-500`);
+      expect(tone.bg, `person-${hue}`).toBe(themeValue(`person-${hue}`));
+      expect(tone.ink, `person-${hue}-ink`).toBe(themeValue(`person-${hue}-ink`));
+      expect(tone.pop, `person-${hue}-pop`).toBe(themeValue(`person-${hue}-pop`));
+    }
+  });
+
+  it('every tone class a person can be given exists in index.css, with its three variables', () => {
+    const css = readFileSync(join(REPO_ROOT, 'index.css'), 'utf8');
+    for (const hue of [...PARTICIPANT_PALETTE.map(hueOf), 'neutral']) {
+      const rule = new RegExp(`\\.tone-${hue}\\s*\\{([^}]*)\\}`).exec(css);
+      expect(rule, `.tone-${hue}`).not.toBeNull();
+      for (const part of ['bg', 'ink', 'pop']) {
+        const token = part === 'bg' ? `person-${hue}` : `person-${hue}-${part}`;
+        expect(rule?.[1], `.tone-${hue} --av-${part}`).toContain(`--av-${part}: var(--color-${token})`);
+      }
+    }
   });
 
   it('is the palette the server hands the facilitator', () => {
