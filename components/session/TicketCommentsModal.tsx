@@ -60,6 +60,7 @@ const TicketCommentsModal: React.FC<Props> = ({
     setEditingText('');
   };
 
+  const canSend = !!commentText.trim();
   const comments = ticket.comments || [];
   const author = participants.find(m => m.id === ticket.authorId);
 
@@ -84,34 +85,37 @@ const TicketCommentsModal: React.FC<Props> = ({
       label={t('session.comments.dialogLabel', { text: ticket.text })}
       onClose={onClose}
       overlayTestId="ticket-comments-modal"
-      overlayClassName="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-      panelClassName="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden"
+      overlayClassName="fixed inset-0 bg-slate-900/45 z-50 flex items-center justify-center p-4"
+      panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden"
     >
       <>
-        {/* Ticket content header */}
+        {/* The card the comments are about, in its own colours: the board
+            passes its background and the class of its words, whatever the
+            card looks like (a light tint today), so nothing here assumes a
+            saturated or a light background. */}
         <div
-          className={`p-4 border-b ${!cardBgHex ? 'bg-slate-50' : ''}`}
+          className={`px-5 pt-4 pb-3 border-b border-slate-200 ${!cardBgHex ? 'bg-slate-50' : ''}`}
           style={cardBgHex ? { backgroundColor: cardBgHex } : undefined}
         >
-          <div className="flex items-start justify-between">
-            <div className={`text-sm whitespace-pre-wrap wrap-break-word flex-1 ${cardBgHex ? cardTextColor : 'text-slate-900'}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className={`text-sm leading-relaxed font-medium whitespace-pre-wrap wrap-break-word flex-1 min-w-0 pt-1 ${cardBgHex ? cardTextColor : 'text-slate-900'}`}>
               {ticket.text}
             </div>
             <button
               onClick={onClose}
-              className={`ml-3 p-1 rounded-full hover:bg-black/10 transition shrink-0 ${cardBgHex ? cardTextColor : 'text-slate-500'}`}
+              className={`-mr-1.5 w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-900/5 transition shrink-0 ${cardBgHex ? cardTextColor : 'text-slate-600'}`}
               title={t('session.comments.closeTitle')}
               aria-label={t('session.comments.closeAria')}
             >
-              <span className="material-symbols-outlined text-lg">close</span>
+              <span className="material-symbols-outlined" aria-hidden="true">close</span>
             </button>
           </div>
           {!isAnonymous && author && (
             // Not muted by opacity: 70% took the initials and the name to
             // about 2.9:1, and a faded look is what a measurement cannot see.
-            <div className="mt-2 flex items-center text-xs">
-              <span className="mr-1.5 flex shrink-0">
-                <Avatar colorClasses={avatarColorClasses(author.color)} initials={author.name.substring(0, 2).toUpperCase()} size={20} />
+            <div className="mt-2 flex items-center gap-2 text-xs font-medium">
+              <span className="flex shrink-0">
+                <Avatar colorClasses={avatarColorClasses(author.color)} initials={author.name.substring(0, 2).toUpperCase()} size={24} />
               </span>
               <span className={cardBgHex ? cardTextColor : 'text-slate-600'}>{author.name}</span>
             </div>
@@ -119,7 +123,7 @@ const TicketCommentsModal: React.FC<Props> = ({
         </div>
 
         {/* Comments list */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {comments.length === 0 && (
             <div className="text-center text-slate-500 text-sm py-6">
               {t('session.comments.empty')}
@@ -132,19 +136,19 @@ const TicketCommentsModal: React.FC<Props> = ({
             const isEditing = editingCommentId === comment.id;
 
             return (
-              <div key={comment.id} className="flex items-start space-x-2 group" data-testid="ticket-comment">
-                <span className="mt-0.5 flex shrink-0">
+              <div key={comment.id} className="flex items-start gap-3 group" data-testid="ticket-comment">
+                <span className="flex shrink-0">
                   <Avatar colorClasses={avatarColorClasses(commentAuthor?.color)} initials={(commentAuthor?.name || comment.authorName).substring(0, 2).toUpperCase()} size={28} />
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-xs font-bold text-slate-700">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-sm font-semibold text-slate-900">
                       {commentAuthor?.name || comment.authorName}
                     </span>
-                    <span className="text-[10px] text-slate-500">{formatTime(comment.createdAt)}</span>
+                    <span className="text-xs text-slate-500 tabular-nums">{formatTime(comment.createdAt)}</span>
                   </div>
                   {isEditing ? (
-                    <div className="mt-1 flex items-center space-x-1">
+                    <div className="mt-1 flex items-center gap-1">
                       <input
                         // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click
                         autoFocus
@@ -154,28 +158,28 @@ const TicketCommentsModal: React.FC<Props> = ({
                           if (e.key === 'Enter') handleEditSubmit(comment.id);
                           if (e.key === 'Escape') { setEditingCommentId(null); setEditingText(''); }
                         }}
-                        className="flex-1 text-sm border border-indigo-300 rounded-sm px-2 py-1 outline-hidden focus:ring-1 focus:ring-indigo-400"
+                        className="flex-1 min-w-0 text-sm bg-white text-slate-900 border border-slate-400 rounded-lg px-2.5 py-1.5 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
                         data-testid="edit-comment-input"
                       />
                       <button
                         onClick={() => handleEditSubmit(comment.id)}
-                        className="text-indigo-600 hover:text-indigo-800 p-1"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-indigo-600 hover:bg-indigo-50"
                         title={t('session.comments.saveTitle')}
                         aria-label={t('session.comments.saveAria')}
                       >
-                        <span className="material-symbols-outlined text-sm">check</span>
+                        <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">check</span>
                       </button>
                       <button
                         onClick={() => { setEditingCommentId(null); setEditingText(''); }}
-                        className="text-slate-500 hover:text-slate-600 p-1"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"
                         title={t('session.comments.cancelTitle')}
                         aria-label={t('session.comments.cancelAria')}
                       >
-                        <span className="material-symbols-outlined text-sm">close</span>
+                        <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">close</span>
                       </button>
                     </div>
                   ) : (
-                    <div className="text-sm text-slate-700 mt-0.5 wrap-break-word" data-testid="comment-text">
+                    <div className="text-sm leading-relaxed text-slate-700 mt-0.5 wrap-break-word" data-testid="comment-text">
                       {comment.text}
                     </div>
                   )}
@@ -186,24 +190,24 @@ const TicketCommentsModal: React.FC<Props> = ({
                     could see (pass 15 of 42.1). Shown there, they take a
                     colour that can be seen on white. */}
                 {canModify && !isEditing && (
-                  <div className="flex items-center space-x-0.5 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition shrink-0">
+                  <div className="flex items-center gap-0.5 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition shrink-0">
                     <button
                       onClick={() => { setEditingCommentId(comment.id); setEditingText(comment.text); }}
-                      className="text-slate-500 hover:text-indigo-600 p-0.5"
+                      className="w-7 h-7 flex items-center justify-center rounded-md text-slate-500 hover:text-indigo-700 hover:bg-slate-100"
                       title={t('session.comments.edit')}
                       data-testid="edit-comment-btn"
                       aria-label={t('session.comments.edit')}
                     >
-                      <span className="material-symbols-outlined text-sm">edit</span>
+                      <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">edit</span>
                     </button>
                     <button
                       onClick={() => onDeleteComment(ticket.id, comment.id)}
-                      className="text-slate-500 hover:text-red-600 p-0.5"
+                      className="w-7 h-7 flex items-center justify-center rounded-md text-slate-500 hover:text-rose-700 hover:bg-rose-50"
                       title={t('session.comments.delete')}
                       data-testid="delete-comment-btn"
                       aria-label={t('session.comments.delete')}
                     >
-                      <span className="material-symbols-outlined text-sm">delete</span>
+                      <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">delete</span>
                     </button>
                   </div>
                 )}
@@ -213,7 +217,7 @@ const TicketCommentsModal: React.FC<Props> = ({
         </div>
 
         {/* Comment input */}
-        <div className="border-t p-3 flex items-center space-x-2 bg-slate-50">
+        <div className="border-t border-slate-200 px-4 py-3 flex items-center gap-2 bg-slate-50">
           <Avatar colorClasses={avatarColorClasses(currentUser.color)} initials={currentUser.name.substring(0, 2).toUpperCase()} size={28} />
           <input
             ref={inputRef}
@@ -222,18 +226,22 @@ const TicketCommentsModal: React.FC<Props> = ({
             onChange={e => setCommentText(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
             placeholder={t('session.comments.placeholder')}
-            className="flex-1 text-sm border border-slate-200 rounded-full px-4 py-2 outline-hidden focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+            className="flex-1 min-w-0 text-sm bg-white text-slate-900 placeholder:text-slate-500 border border-slate-400 rounded-lg px-3 py-2 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
             data-testid="add-comment-input"
           />
+          {/* Its two states are stated as colours, never as an opacity: a
+              faded icon is a pair no measurement can name (it read about
+              1.3:1). The classes are chosen here rather than by `disabled:`
+              variants, so a test measures the look each state paints. */}
           <button
             onClick={handleSubmit}
-            disabled={!commentText.trim()}
-            className="text-indigo-600 hover:text-indigo-800 disabled:opacity-30 p-1 transition"
+            disabled={!canSend}
+            className={`w-9 h-9 shrink-0 flex items-center justify-center rounded-full transition ${canSend ? 'bg-indigo-600 text-white hover:bg-indigo-700 motion-safe:active:scale-[0.97]' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}`}
             title={t('session.comments.sendTitle')}
             data-testid="submit-comment-btn"
             aria-label={t('session.comments.sendAria')}
           >
-            <span className="material-symbols-outlined text-xl">send</span>
+            <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">send</span>
           </button>
         </div>
       </>

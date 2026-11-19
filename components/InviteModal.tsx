@@ -202,19 +202,19 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
           <p className="text-xs text-slate-500">{t('invite.email.description')}</p>
         </div>
         {status !== 'idle' && (
-          <span className={`text-xs font-bold ${status === 'sent' ? 'text-emerald-700' : status === 'sending' ? 'text-slate-500' : 'text-amber-600'}`}>
+          <span className={`text-xs font-semibold ${status === 'sent' ? 'text-emerald-700' : status === 'sending' ? 'text-slate-500' : 'text-amber-700'}`}>
             {statusMessage}
           </span>
         )}
       </div>
 
       {membersWithEmail.length > 0 && (
-        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-600">{t('invite.email.teamMembers')}</span>
+            <span className="text-xs font-semibold text-slate-600">{t('invite.email.teamMembers')}</span>
             <button
               type="button"
-              className="text-[11px] font-bold text-indigo-600 hover:underline"
+              className="text-xs font-semibold text-indigo-700 hover:underline"
               onClick={() => setSelectedMemberIds(prev => prev.length === membersWithEmail.length ? [] : membersWithEmail.map(m => m.id))}
             >
               {selectedMemberIds.length === membersWithEmail.length ? t('invite.email.unselectAll') : t('invite.email.selectAll')}
@@ -224,18 +224,26 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
             {membersWithEmail.map(member => {
               const selected = selectedMemberIds.includes(member.id);
               return (
+                // A toggle: `aria-pressed` says what only the drawn box
+                // showed, and the box replaces a switch glyph that was the
+                // only sign of the state (and read out as "toggle_on").
                 <button
                   key={member.id}
                   type="button"
+                  aria-pressed={selected}
                   onClick={() => setSelectedMemberIds(prev => prev.includes(member.id) ? prev.filter(id => id !== member.id) : [...prev, member.id])}
-                  className={`flex items-center justify-between px-3 py-2 rounded-lg border text-left transition ${selected ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                  className={`flex items-center justify-between gap-3 px-3 py-2 rounded-lg border text-left transition ${selected ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
                 >
-                  <div>
-                    <div className="text-sm font-bold text-slate-700">{member.name}</div>
-                    <div className="text-[11px] text-slate-500">{member.email}</div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-800 truncate">{member.name}</div>
+                    <div className="text-xs text-slate-600 truncate">{member.email}</div>
                   </div>
-                  <span className={`material-symbols-outlined text-lg ${selected ? 'text-indigo-600' : 'text-slate-300'}`}>
-                    {selected ? 'toggle_on' : 'toggle_off'}
+                  <span
+                    data-testid="invite-member-check"
+                    className={`w-5 h-5 shrink-0 flex items-center justify-center rounded-md border ${selected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-400 text-white'}`}
+                    aria-hidden="true"
+                  >
+                    {selected && <span className="material-symbols-outlined text-base! leading-none">check</span>}
                   </span>
                 </button>
               );
@@ -245,7 +253,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       )}
 
       <textarea
-        className="w-full border border-slate-200 rounded-lg p-3 text-sm bg-white text-slate-900 h-28"
+        className="w-full border border-slate-400 rounded-lg p-3 text-sm bg-white text-slate-900 placeholder:text-slate-500 h-28 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
         placeholder={t('invite.email.placeholder')}
         value={emailsInput}
         onChange={(e) => setEmailsInput(e.target.value)}
@@ -254,31 +262,37 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       {manualInvites.length > 0 && (
         <div className="flex flex-wrap gap-2 text-xs text-slate-600">
           {manualInvites.map(({ email }) => (
-            <span key={email} className="px-2 py-1 bg-slate-100 border border-slate-200 rounded-full">{email}</span>
+            <span key={email} className="px-2.5 py-0.5 bg-slate-100 text-slate-700 font-medium rounded-full">{email}</span>
           ))}
         </div>
       )}
 
       <button
         type="submit"
-        className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg font-bold text-sm hover:bg-indigo-700 disabled:opacity-50"
+        // Off when there is no one to invite or a send is on its way: said by
+        // its colours rather than an opacity, so the state can be measured.
+        className={`w-full px-4 py-2.5 rounded-lg font-semibold text-sm transition ${
+          !emailsToInvite.length || status === 'sending'
+            ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
+            : 'bg-indigo-600 text-white hover:bg-indigo-700 btn-brand-glow motion-safe:active:scale-[0.97]'
+        }`}
         disabled={!emailsToInvite.length || status === 'sending'}
       >
         {status === 'sending' ? t('invite.email.sending') : t('invite.email.send')}
       </button>
 
       {generatedLinks.length > 0 && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-700 space-y-2">
-          <div className="font-bold">{t('invite.email.linksReady')}</div>
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-800 space-y-2">
+          <div className="font-semibold">{t('invite.email.linksReady')}</div>
           <div className="space-y-1 max-h-32 overflow-auto pr-1">
             {generatedLinks.map(({ email, link }) => (
               <div key={email} className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-emerald-800 min-w-[120px] truncate">{email}</span>
-                <code className="text-[11px] truncate flex-1">{link}</code>
+                <code className="text-xs font-mono truncate flex-1">{link}</code>
                 <button
                   type="button"
                   onClick={() => navigator.clipboard.writeText(link)}
-                  className="text-emerald-700 font-bold text-[10px] hover:underline"
+                  className="text-emerald-800 font-semibold text-xs hover:underline"
                 >
                   {t('invite.copy')}
                 </button>
@@ -298,17 +312,21 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       </div>
 
       <div className="flex justify-center">
-        <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-inner">
+        <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs">
           {qrDataUrl ? <img src={qrDataUrl} alt={t('invite.link.qrAlt')} className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 animate-pulse rounded" />}
         </div>
       </div>
 
-      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex items-center justify-between">
-        <code className="text-xs text-slate-600 truncate mr-2">{link ?? t('invite.link.generating')}</code>
+      <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+        <code className="text-xs font-mono text-slate-600 truncate">{link ?? t('invite.link.generating')}</code>
         <button
           onClick={() => link && navigator.clipboard.writeText(link)}
           disabled={!link}
-          className="text-retro-primary font-bold text-xs hover:underline disabled:opacity-50"
+          className={`shrink-0 font-semibold text-xs px-3 py-1.5 rounded-lg border transition ${
+            link
+              ? 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+              : 'bg-slate-100 text-slate-600 border-slate-200 cursor-not-allowed'
+          }`}
         >
           {t('invite.copy')}
         </button>
@@ -326,27 +344,27 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       </div>
 
       <div className="flex justify-center">
-        <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-inner">
+        <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs">
           {wifiQrDataUrl ? <img src={wifiQrDataUrl} alt={t('invite.wifi.qrAlt')} className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 animate-pulse rounded" />}
         </div>
       </div>
 
-      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-500">{t('invite.wifi.network')}</span>
-          <span className="text-sm font-bold text-slate-700">{wifiConfig?.ssid}</span>
+      <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1.5">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-slate-600">{t('invite.wifi.network')}</span>
+          <span className="text-sm font-semibold text-slate-800">{wifiConfig?.ssid}</span>
         </div>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-500">{t('invite.wifi.password')}</span>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-mono text-slate-700">{showWifiPassword ? wifiConfig?.password : '••••••••'}</span>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-slate-600">{t('invite.wifi.password')}</span>
+          <div className="flex items-center gap-1">
+            <span className="text-sm font-mono text-slate-800">{showWifiPassword ? wifiConfig?.password : '••••••••'}</span>
             <button
               type="button"
               onClick={() => setShowWifiPassword(prev => !prev)}
-              className="text-slate-500 hover:text-slate-600"
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-200 hover:text-slate-900 transition"
               aria-label={showWifiPassword ? t('invite.wifi.hidePassword') : t('invite.wifi.showPassword')}
             >
-              <span className="material-symbols-outlined text-lg">{showWifiPassword ? 'visibility_off' : 'visibility'}</span>
+              <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">{showWifiPassword ? 'visibility_off' : 'visibility'}</span>
             </button>
           </div>
         </div>
@@ -366,26 +384,32 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     <ModalDialog
       labelledBy="invite-modal-title"
       onClose={onClose}
-      overlayClassName="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-100 backdrop-blur-xs p-4 overflow-y-auto"
-      panelClassName="bg-white rounded-2xl shadow-2xl p-6 max-w-xl w-full relative max-h-[calc(100vh-2rem)] flex flex-col"
+      // No blur behind it: the veil alone sets it apart, and a blurred veil is
+      // the costly effect that drew doubled content in software compositing.
+      overlayClassName="fixed inset-0 bg-slate-900/45 flex items-start sm:items-center justify-center z-100 p-4 overflow-y-auto"
+      panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 max-w-xl w-full relative max-h-[calc(100vh-2rem)] flex flex-col"
     >
       <>
         <button
           onClick={onClose}
           aria-label={t('common.close')}
-          className="absolute top-4 right-4 text-slate-500 hover:text-slate-600"
+          className="absolute top-4 right-4 w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
         >
-          <span className="material-symbols-outlined">close</span>
+          <span className="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
 
-        <h3 id="invite-modal-title" className="text-xl font-bold text-slate-800 mb-1 text-center pr-8">{t('invite.title', { teamName: team.name })}</h3>
+        <h3 id="invite-modal-title" className="text-xl font-semibold tracking-tight text-slate-900 mb-1 text-center px-10">{t('invite.title', { teamName: team.name })}</h3>
         <p className="text-slate-500 text-sm text-center mb-4">{t('invite.subtitle')}</p>
 
-        <div className="flex border-b border-slate-200 mb-6">
+        {/* Segmented pills. The chosen one is told by its tint, its weight
+            and `aria-pressed`, never by colour alone. */}
+        <div className="flex gap-1 p-1 mb-5 rounded-xl bg-slate-100">
           {tabs.map(tab => (
             <button
               key={tab.key}
-              className={`flex-1 py-2 text-sm font-bold ${activeTab === tab.key ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500'}`}
+              data-testid="invite-tab"
+              aria-pressed={activeTab === tab.key}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-sm transition ${activeTab === tab.key ? 'bg-white text-indigo-700 font-semibold shadow-xs' : 'text-slate-600 font-medium hover:text-slate-900'}`}
               onClick={() => setActiveTab(tab.key)}
             >
               {tab.label}
@@ -400,18 +424,18 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         </div>
 
         {onLogout && (
-          <div className="mt-6 pt-4 border-t border-slate-100 text-center">
+          <div className="mt-6 pt-4 border-t border-slate-200 text-center">
             <p className="text-xs text-slate-500 mb-2">{t('invite.testAnotherUser')}</p>
             <button
               onClick={onLogout}
-              className="text-indigo-600 text-sm font-bold hover:underline"
+              className="text-indigo-700 text-sm font-semibold hover:underline"
             >
               {t('invite.logoutAndCreate')}
             </button>
           </div>
         )}
 
-        <button onClick={onClose} className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold mt-4 shrink-0">{t('invite.done')}</button>
+        <button onClick={onClose} className="w-full bg-white text-slate-700 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 py-2.5 rounded-lg font-semibold mt-4 shrink-0 transition">{t('invite.done')}</button>
       </>
     </ModalDialog>
   );

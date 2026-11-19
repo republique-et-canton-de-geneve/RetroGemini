@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { isTopDialog, pushDialog } from './modalDialogStack';
 import { useReturnFocus } from './useReturnFocus';
 
@@ -63,20 +63,78 @@ export interface ModalDialogProps {
   panelClassName?: string;
   /** `data-testid` for the backdrop, for call sites whose tests select on it. */
   overlayTestId?: string;
+  /**
+   * How the panel enters. `rise` (the default) lifts it a few pixels while it
+   * fades in; `fade` only fades it, for a panel holding a `position: fixed`
+   * child: a transformed panel is the containing block of its fixed
+   * descendants, so the child would ride with the panel instead of staying in
+   * the screen's corner while the animation runs.
+   */
+  entrance?: DialogEntrance;
   children: React.ReactNode;
 }
+
+export type DialogEntrance = 'rise' | 'fade';
+
+/** The veil and the panel of the product's dialogs, for a call site with nothing of its own to add. */
+export const DIALOG_OVERLAY_CLASS = 'fixed inset-0 bg-slate-900/45 flex items-center justify-center z-50 p-4';
+export const DIALOG_PANEL_CLASS = 'bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full';
+
+/**
+ * The entrance effects (`index.css`, under `prefers-reduced-motion:
+ * no-preference`). They fill backwards only, so nothing of the transform
+ * remains once they have run.
+ */
+export const VEIL_ENTRANCE_CLASS = 'fx-veil-in';
+const PANEL_ENTRANCE_CLASS: Record<DialogEntrance, string> = {
+  rise: 'fx-dialog-in',
+  // The veil's own fade: opacity only, no transform.
+  fade: 'fx-veil-in'
+};
+
+/**
+ * Whether an element still carries its entrance class. It comes off when that
+ * element's own animation ends, never on an animation of a
+ * descendant, whose events bubble up to it.
+ */
+const useEntrance = (ref: React.RefObject<HTMLElement | null>) => {
+  const [entering, setEntering] = useState(true);
+  // A native listener rather than React's `onAnimationEnd`: React picks the
+  // event's name once, from what the environment supports, and a mismatch
+  // there would leave the class on for good with nothing reporting it.
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const settle = (e: Event) => {
+      if (e.target === element) setEntering(false);
+    };
+    element.addEventListener('animationend', settle);
+    return () => element.removeEventListener('animationend', settle);
+  }, [ref]);
+  return entering;
+};
+
+const withClass = (base: string, extra: string, on: boolean) => (on ? `${base} ${extra}` : base);
 
 const ModalDialog: React.FC<ModalDialogProps> = ({
   label,
   labelledBy,
   onClose,
   closeOnBackdropClick = true,
-  overlayClassName = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4',
-  panelClassName = 'bg-white rounded-2xl shadow-2xl max-w-lg w-full',
+  overlayClassName = DIALOG_OVERLAY_CLASS,
+  panelClassName = DIALOG_PANEL_CLASS,
   overlayTestId,
+  entrance = 'rise',
   children
 }) => {
+  // The entrance runs once, when the dialog mounts: a re-render, or another
+  // dialog opening over this one, does not replay it. Nothing animates on the
+  // way out — call sites unmount the dialog, and an exit would have to keep a
+  // closed dialog's focus trap alive and give focus back late.
+  const veilRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const veilEntering = useEntrance(veilRef);
+  const panelEntering = useEntrance(panelRef);
   const idRef = useRef<symbol>(Symbol('modal-dialog'));
   // Read through a ref so the effect below can register **once**. Call sites
   // pass inline arrows, so `onClose` has a new identity every render; making
@@ -171,7 +229,8 @@ const ModalDialog: React.FC<ModalDialogProps> = ({
 
   return (
     <div
-      className={overlayClassName}
+      ref={veilRef}
+      className={withClass(overlayClassName, VEIL_ENTRANCE_CLASS, veilEntering)}
       data-testid={overlayTestId}
       onClick={(e) => {
         if (!onClose || !closeOnBackdropClick) return;
@@ -186,7 +245,7 @@ const ModalDialog: React.FC<ModalDialogProps> = ({
         aria-label={labelledBy ? undefined : label}
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        className={panelClassName}
+        className={withClass(panelClassName, PANEL_ENTRANCE_CLASS[entrance], panelEntering)}
       >
         {children}
       </div>
