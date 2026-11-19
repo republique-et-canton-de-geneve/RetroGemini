@@ -8,6 +8,7 @@ import {
   nextMemberAvatars,
   stampParticipantAvatar
 } from '../server/routes/teamAvatarRoutes.js';
+import { memberAvatar } from '../utils/avatars.js';
 import { createTeamAuthStateDouble } from './helpers/teamAuthStateDouble';
 
 // The release that adds a picture first only accepts its id (utils/avatars.js
@@ -540,6 +541,16 @@ describe('stampParticipantAvatar', () => {
     expect(stampParticipantAvatar(odd, 'p1', { id: 'fox', at: 5 }).participants[0].avatarAt).toBe(5);
   });
 
+  // A number too large to add one to (1e300) is not a date: read as one, it
+  // equalled every later choice's date and no stamp ever replaced it.
+  it('reads a stamp too large to be a date as older than any choice', () => {
+    const now = 1_000_000_000;
+    for (const avatarAt of [1e300, 2 ** 53, Number.POSITIVE_INFINITY, 12.5]) {
+      const odd = session([{ ...ada, avatar: 'owl', avatarAt }]);
+      expect(stampParticipantAvatar(odd, 'p1', { id: 'fox', at: now }, now).participants[0]).toEqual({ ...ada, avatar: 'fox', avatarAt: now });
+    }
+  });
+
   it('adds nobody: a session that does not hold the participant is left alone', () => {
     expect(stampParticipantAvatar(session([ada]), 'p9', { id: 'fox', at: 5 })).toBeNull();
     expect(stampParticipantAvatar(session(undefined), 'p1', { id: 'fox', at: 5 })).toBeNull();
@@ -548,6 +559,36 @@ describe('stampParticipantAvatar', () => {
 });
 
 describe('nextMemberAvatars', () => {
+  // The map can hold what this route never wrote: the update route of a pod
+  // from before 45.0 spreads unknown keys, and an archive is a file. A date
+  // nothing can be dated after (1e300 + 1 is 1e300) made every later pick
+  // carry that same date, and the sessions stamped with it kept the older
+  // picture for good.
+  it('drops a stored entry whose date is no date, and dates the pick by the clock', () => {
+    const now = 1_795_000_000_000;
+    const team = { memberAvatars: { p1: { id: 'owl', at: 1e300 }, p2: { id: 'cat', at: 2 ** 53 }, p3: { id: 'bee', at: 7 } } };
+    expect(nextMemberAvatars(team, 'p1', 'fox', now)).toEqual({ p3: { id: 'bee', at: 7 }, p1: { id: 'fox', at: now } });
+    // The junk entry is no choice: choosing "none" over it changes nothing.
+    expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'owl', at: 1e300 } } }, 'p1', null, now)).toBeNull();
+  });
+
+  it('dates a pick by the clock when the stored date is the largest one, which has no next', () => {
+    const now = 1_795_000_000_000;
+    const next = nextMemberAvatars({ memberAvatars: { p1: { id: 'owl', at: Number.MAX_SAFE_INTEGER } } }, 'p1', 'fox', now)!;
+    expect(next).toEqual({ p1: { id: 'fox', at: now } });
+    // What it wrote reads back as a choice, and a stamp carrying the old date
+    // is far ahead of this one: the pick reaches the session it was made in.
+    expect(memberAvatar({ memberAvatars: next }, 'p1')).toEqual({ id: 'fox', at: now });
+    const stamped = { participants: [{ id: 'p1', name: 'Ada', avatar: 'owl', avatarAt: Number.MAX_SAFE_INTEGER }] };
+    expect(stampParticipantAvatar(stamped, 'p1', next.p1, now).participants[0]).toMatchObject({ avatar: 'fox', avatarAt: now });
+  });
+
+  it('still dates a pick after a stored date ahead of the clock, when there is a next one', () => {
+    const now = 1_795_000_000_000;
+    const ahead = now + 10 * 365 * 24 * 60 * 60_000;
+    expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'owl', at: ahead } } }, 'p1', 'fox', now)).toEqual({ p1: { id: 'fox', at: ahead + 1 } });
+  });
+
   it('answers null when nothing changes', () => {
     expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'fox', at: 1 } } }, 'p1', 'fox', 10)).toBeNull();
     expect(nextMemberAvatars({}, 'p1', null, 10)).toBeNull();

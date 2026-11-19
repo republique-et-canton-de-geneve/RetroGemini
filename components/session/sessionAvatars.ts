@@ -14,7 +14,7 @@
 // a tab that does not know an id a newer release stored must not erase it.
 
 import type { Team, User } from '../../types';
-import { memberAvatar, memberAvatarId, toAvatarId } from '../../utils/avatars.js';
+import { isAvatarTime, memberAvatar, memberAvatarId, toAvatarId } from '../../utils/avatars.js';
 
 /** What the rule reads of a session: the same fields on a retrospective and a health check. */
 export interface AvatarSessionView {
@@ -41,10 +41,14 @@ const entryOf = (session: MaybeSession, memberId: string): User | null => {
   return (entry as User | undefined) ?? null;
 };
 
-/** An entry's `avatarAt`, or 0 when it never stated one (or stored something that is not a time). */
+/**
+ * An entry's `avatarAt`, or 0 when it never stated one or stored something
+ * that is not a time (`isAvatarTime`: a number too large to add one to would
+ * outrank every choice the person makes afterwards).
+ */
 const entryTime = (entry: User): number => {
   const at: unknown = entry.avatarAt;
-  return typeof at === 'number' && Number.isFinite(at) ? at : 0;
+  return isAvatarTime(at) ? at : 0;
 };
 
 /**

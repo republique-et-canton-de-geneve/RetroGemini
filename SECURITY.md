@@ -272,7 +272,13 @@ by one route, `POST /api/team/:teamId/member/avatar`.
   avatar id is one of the application's own ids (`utils/avatars.js`), or `null`
   for none; anything else is answered `400 invalid_avatar`. The map is rebuilt
   from its valid entries on every write, so junk another path left heals, and
-  it is capped at 500 entries.
+  it is capped at 500 entries. A date is whole milliseconds that a number
+  counts exactly: a value nothing could be dated after (1e300) is not a date,
+  on the map or on a session's copy, so it cannot outrank every later choice.
+  During a rolling update, the update route of a server from before 45.0
+  accepts the whole map from any team credential (it keeps the keys it does
+  not know): the readers take it as data, the next choice through the route
+  rebuilds it, and the most it does is set a member's picture.
 - **A picture is drawn from data, never from markup or a URL.** Each picture is
   a list of shapes in a closed vocabulary (eight SVG element types, seven
   colour classes, a fixed list of attributes) compiled into the bundle, and the

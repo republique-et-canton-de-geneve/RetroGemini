@@ -6,6 +6,7 @@ import {
   AVATAR_IDS,
   isAcceptedAvatarId,
   isAvatarId,
+  isAvatarTime,
   memberAvatar,
   memberAvatarId,
   toAvatarId
@@ -174,6 +175,11 @@ describe('memberAvatar and memberAvatarId', () => {
     ['a date that is not a number', { id: 'fox', at: '1000' }],
     ['a date that is not finite', { id: 'fox', at: Number.POSITIVE_INFINITY }],
     ['a negative date', { id: 'fox', at: -1 }],
+    // No pick could ever be dated after these, so each would outrank every
+    // later choice for good: a number too large to add one to is not a date.
+    ['a date too large to count exactly', { id: 'fox', at: 1e300 }],
+    ['a date one past the largest exact one', { id: 'fox', at: 2 ** 53 }],
+    ['a date that is not whole milliseconds', { id: 'fox', at: 1000.5 }],
     ['an id that is not a string', { id: 7, at: 1000 }],
     ['an id of no plausible shape', { id: 'Fox Face', at: 1000 }],
     ['an id far too long', { id: 'a'.repeat(200), at: 1000 }],
@@ -182,6 +188,20 @@ describe('memberAvatar and memberAvatarId', () => {
     const t = team({ m1: entry });
     expect(memberAvatar(t, 'm1')).toBeNull();
     expect(memberAvatarId(t, 'm1')).toBeNull();
+  });
+
+  it('keep the largest date a number counts exactly: it is still a date', () => {
+    const t = team({ m1: { id: 'fox', at: Number.MAX_SAFE_INTEGER } });
+    expect(memberAvatar(t, 'm1')).toEqual({ id: 'fox', at: Number.MAX_SAFE_INTEGER });
+  });
+
+  it.each([
+    [0, true], [1, true], [1_795_000_000_000, true], [Number.MAX_SAFE_INTEGER, true],
+    [-1, false], [0.5, false], [2 ** 53, false], [1e300, false],
+    [Number.POSITIVE_INFINITY, false], [Number.NaN, false],
+    ['1000', false], [null, false], [undefined, false], [{}, false]
+  ])('isAvatarTime(%s) is %s', (value, expected) => {
+    expect(isAvatarTime(value)).toBe(expected);
   });
 
   it('answer null for a member id that is not a string', () => {

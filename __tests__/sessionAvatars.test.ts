@@ -159,6 +159,17 @@ describe('ownAvatarEntry', () => {
     expect(ownAvatarEntry(asText, team, 'ada')).toMatchObject({ avatar: 'fox', avatarAt: 100 });
   });
 
+  // A participant entry is data any client writes. A number too large to add
+  // one to is not a time: left to count, it outranked every choice the person
+  // would ever make, here and when drawing.
+  it('reads an avatarAt too large to be a time as 0', () => {
+    for (const avatarAt of [1e300, 2 ** 53, Number.POSITIVE_INFINITY, 99.5, -4]) {
+      const session = sessionWith([person('ada', { avatar: 'cat', avatarAt })]);
+      expect(sessionAvatarOf(session, team, 'ada')).toBe('fox');
+      expect(ownAvatarEntry(session, team, 'ada')).toMatchObject({ avatar: 'fox', avatarAt: 100 });
+    }
+  });
+
   it("never touches another person's entry, nor mutates its inputs", () => {
     const session = sessionWith([person('ada'), person('bob', { avatar: 'owl', avatarAt: 1 })]);
     const map = { ada: { id: 'fox', at: 100 }, bob: { id: 'cat', at: 900 } };

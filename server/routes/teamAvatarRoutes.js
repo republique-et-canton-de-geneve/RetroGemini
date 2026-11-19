@@ -1,6 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import { isValidRaterId } from '../../utils/actionImpact.js';
-import { isAcceptedAvatarId, isMemberAvatarEntry, memberAvatar } from '../../utils/avatars.js';
+import { isAcceptedAvatarId, isAvatarTime, isMemberAvatarEntry, memberAvatar } from '../../utils/avatars.js';
 import { NO_OP_LIVE_SESSION_PATCH } from '../services/liveSessionRename.js';
 
 /**
@@ -69,8 +69,11 @@ const nextMemberAvatars = (team, memberId, avatar, now, { max = MEMBER_AVATARS_M
   const entries = validEntriesOf(team);
   entries.delete(memberId);
   // Never dated before the choice it replaces, whatever this pod's clock says
-  // against the pod that wrote it.
-  const at = current ? Math.max(now, current.at + 1) : now;
+  // against the pod that wrote it. The largest date a number counts exactly
+  // has no next one: the pick is then dated by this clock alone, and the
+  // stamp below treats a copy of the old date as far ahead of it.
+  const after = current ? current.at + 1 : now;
+  const at = isAvatarTime(after) ? Math.max(now, after) : now;
   entries.set(memberId, { id: avatar, at });
 
   if (entries.size > max) {
@@ -113,7 +116,7 @@ const stampParticipantAvatar = (session, memberId, entry, now = Date.now()) => {
   const index = session.participants.findIndex((participant) => participant && participant.id === memberId);
   if (index === -1) return null;
   const participant = session.participants[index];
-  const stampedAt = typeof participant.avatarAt === 'number' && Number.isFinite(participant.avatarAt) ? participant.avatarAt : 0;
+  const stampedAt = isAvatarTime(participant.avatarAt) ? participant.avatarAt : 0;
   const writtenHere = stampedAt <= Math.max(now, entry.at) + STAMP_CLOCK_SLACK_MS;
   if (writtenHere && stampedAt >= entry.at) return null;
   const participants = [...session.participants];

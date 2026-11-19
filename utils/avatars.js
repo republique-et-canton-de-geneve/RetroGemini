@@ -97,9 +97,24 @@ export const isAcceptedAvatarId = (value) => typeof value === 'string' && ACCEPT
 export const toAvatarId = (value) => (isAvatarId(value) ? value : null);
 
 /**
+ * True when `value` is a date a choice can carry: whole milliseconds that a
+ * number counts exactly, not negative. The newer date wins everywhere, and
+ * the route dates a pick one millisecond after the choice it replaces at the
+ * least, so a number with no next one is not a date: nothing could be dated
+ * after a stored 1e300 (1e300 + 1 is 1e300), and it outranked every later
+ * choice for good. The map can hold what the route never wrote (the update
+ * route of a pod from before 45.0 spreads unknown keys, an archive is a
+ * file), and a participant entry is written by every client.
+ *
+ * @param {unknown} value
+ * @returns {value is number}
+ */
+export const isAvatarTime = (value) => Number.isSafeInteger(value) && value >= 0;
+
+/**
  * True when `value` is a stored choice: `{ id, at }` with `id` null or an id
- * of the stored shape, and `at` a finite date in milliseconds. Extra fields
- * are ignored, so a later release may add one.
+ * of the stored shape, and `at` a date (`isAvatarTime`). Extra fields are
+ * ignored, so a later release may add one.
  *
  * @param {unknown} value
  * @returns {boolean}
@@ -107,7 +122,7 @@ export const toAvatarId = (value) => (isAvatarId(value) ? value : null);
 export const isMemberAvatarEntry = (value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const { id, at } = value;
-  if (typeof at !== 'number' || !Number.isFinite(at) || at < 0) return false;
+  if (!isAvatarTime(at)) return false;
   if (id === null) return true;
   return typeof id === 'string' && id.length <= STORED_AVATAR_ID_MAX_LENGTH && STORED_AVATAR_ID.test(id);
 };
