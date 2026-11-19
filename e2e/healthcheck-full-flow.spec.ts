@@ -251,11 +251,11 @@ test.describe('Full Health Check Flow', () => {
 
     // Verify average scores are displayed for each dimension
     // For the first dimension "Autonomie": facilitator gave 4, participant gave 3, average = 3.5
-    const autonomieCard = facilitator.locator('.bg-white.border-2.rounded-xl').filter({ hasText: 'Autonomie' });
+    const autonomieCard = facilitator.locator('[data-dimension-id]').filter({ hasText: 'Autonomie' });
     await expect(autonomieCard.getByText('3.5')).toBeVisible({ timeout: 5_000 });
 
     // For "Challenge": facilitator gave 5, participant gave 4, average = 4.5
-    const challengeCard = facilitator.locator('.bg-white.border-2.rounded-xl').filter({ hasText: 'Challenge' });
+    const challengeCard = facilitator.locator('[data-dimension-id]').filter({ hasText: 'Challenge' });
     await expect(challengeCard.getByText('4.5')).toBeVisible({ timeout: 5_000 });
 
     // Click on "Autonomie" to expand and check distribution and comments
@@ -294,9 +294,6 @@ test.describe('Full Health Check Flow', () => {
     await ratingBar4.hover();
     await facilitator.waitForTimeout(300);
 
-    // The tooltip should show the facilitator's name (the team creator)
-    // Facilitator name is the first member who created the team
-    const facilitatorName = await facilitator.locator('.text-sm.font-bold.text-slate-700').first().textContent();
     const tooltip4 = ratingBar4.locator('.bg-slate-800.text-white');
     await expect(tooltip4).toBeVisible({ timeout: 3_000 });
 
@@ -331,7 +328,7 @@ test.describe('Full Health Check Flow', () => {
 
     // The participant has not commented on "Autonomie" yet, so they get the
     // "Add a comment" composer. They follow the facilitator's discussion focus.
-    const participantAutonomieCard = participant.locator('.bg-white.border-2.rounded-xl').filter({ hasText: 'Autonomie' });
+    const participantAutonomieCard = participant.locator('[data-dimension-id]').filter({ hasText: 'Autonomie' });
     const participantDiscussComment = participantAutonomieCard.locator('textarea[placeholder="Add a comment..."]');
     await expect(participantDiscussComment).toBeVisible({ timeout: 5_000 });
     await participantDiscussComment.fill('Agree, we need more delegation');
@@ -381,7 +378,7 @@ test.describe('Full Health Check Flow', () => {
     await waitForSync(500);
 
     // Click on "Lien avec l'organisation" dimension to expand it
-    const lienOrgCard = facilitator.locator('.bg-white.border-2.rounded-xl').filter({ hasText: "Lien avec l'organisation" });
+    const lienOrgCard = facilitator.locator('[data-dimension-id]').filter({ hasText: "Lien avec l'organisation" });
     await lienOrgCard.locator('.p-4').first().click();
     await waitForSync(500);
 

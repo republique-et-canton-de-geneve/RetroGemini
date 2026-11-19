@@ -212,9 +212,8 @@ test.describe('headers fit in both languages', () => {
           expect(m.backTappable, `back arrow is what a tap hits, ${where}`).toBe(true);
           // A facilitator's header shows their avatar from 360px (decision D10;
           // a participant's at every width), and wherever it is drawn it fits.
-          // The health check's header draws the same avatar once it takes the
-          // retro header's rule; until then it is held to "in view if shown".
-          if (screen !== 'health check' && width >= 360) expect(m.avatar, `own avatar in view, ${where}`).toBe(true);
+          // The health check's header follows the same rule.
+          if (width >= 360) expect(m.avatar, `own avatar in view, ${where}`).toBe(true);
           else if (m.avatar !== null) expect(m.avatar, `own avatar in view, ${where}`).toBe(true);
           if (state === 'chip shown') {
             if (width >= 400) expect(m.chip, `sync chip in view, ${where}`).toBe(true);
