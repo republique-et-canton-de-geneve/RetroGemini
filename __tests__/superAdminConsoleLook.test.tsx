@@ -133,9 +133,11 @@ const variantPair = (element: Element, variant: string): number => {
   return tokenContrast(pick('text'), pick('bg'));
 };
 
+// Every file of the console, its recipe module (`adminLook.ts`) included: a
+// gradient or a fade written there reaches every screen that names the recipe.
 const sources = (): Array<{ file: string; text: string }> => {
   const files = ['components/SuperAdmin.tsx', ...readdirSync(join(ROOT, 'components/admin'))
-    .filter((name) => name.endsWith('.tsx'))
+    .filter((name) => /\.tsx?$/.test(name))
     .map((name) => `components/admin/${name}`)];
   return files.map((file) => ({ file, text: readFileSync(join(ROOT, file), 'utf8') }));
 };
