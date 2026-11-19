@@ -569,10 +569,11 @@ prop, which a `className`-only guard never saw) — and on one anywhere else tha
 is not inside those two functions, a roster copy (`color: member.color`, with
 an optional `||`/`??` fallback) or a key into a colour map, because a class
 built in a local variable and interpolated later reads `.color` outside every
-attribute. The one map is `Session.tsx`'s `TAILWIND_COLOR_MAP`, kept on purpose
-for the colour-by-author card: it paints a hex `style`, an unknown key gives the
-default card, and `bestTextColorOn` picks the text on it. A `color` destructured
-out of a user escapes the guard; do not write one. The health-check score
+attribute. The colour-by-author card takes its author's tone through
+`participantToneHex(color).pop`, and `utils/cardTones.ts` gives the card its
+tint, its line and the ink of its controls, painted as a hex `style` (see *A
+card's colour* below). A `color` destructured out of a user escapes the guard;
+do not write one. The health-check score
 tooltip's digits follow the same measurement (`utils/healthRatingColors.ts`),
 and because a measured table proves nothing about the line that reads it,
 `__tests__/healthRatingTooltipContrast.test.tsx` renders the tooltip and
@@ -1556,6 +1557,21 @@ interface follows the browser and a runner with a French locale would otherwise
 turn every English selector red; `e2e/i18n.spec.ts` opts into `fr-CH`
 explicitly. Each translated area carries an `__tests__/i18n<Area>.test.tsx`
 rendering it under `<LanguageProvider initialLanguage="fr">`.
+
+**Test runs emulate reduced motion, and one project turns motion back on.**
+Every animation of the look is declared under `prefers-reduced-motion:
+no-preference`, and many specs measure a box or audit contrast right after an
+element appears, so all four Playwright configs pin `reducedMotion: 'reduce'`
+beside the locale. `playwright.config.ts` has a second project, `motion`, which
+runs the specs an animation can actually change (`retro-touch-card-controls`,
+`retro-full-flow`, `retro-wide-board`, `accessibility-audit`) with motion on,
+plus `session-motion.spec.ts`, which runs only there and proves the animations
+play once and leave nothing behind. `npm run test:e2e` runs both projects. A
+context a spec opens itself with `browser.newContext()` inherits neither
+setting: set it there. `audit()` in `e2e/helpers/axe.ts` waits for the page's
+finite animations to end (five seconds at most, then it fails naming the
+animation) before axe reads a colour, so an audit never samples a fade
+half-way; `e2e/axe-animations.spec.ts` holds that wait.
 
 ## Language & Code Conventions
 
