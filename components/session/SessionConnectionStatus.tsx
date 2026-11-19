@@ -38,6 +38,18 @@ const deniedCopy = (reason: string | null, t: Translator) => {
   return t('phases.sync.deniedExpired');
 };
 
+// Every chip is a pill on a tint of its own hue. The breakpoints are the
+// header's: below 400px every state steps aside, the label shows from md.
+const CHIP_CLASS = 'hidden min-[400px]:flex items-center gap-1.5 h-8 px-2 md:px-2.5 rounded-full';
+const CHIP_ICON_CLASS = 'material-symbols-outlined text-lg! leading-none';
+const CHIP_LABEL_CLASS = 'text-xs font-semibold hidden md:inline';
+
+// The bands under the header: a light tint, a line of its hue below it, and the
+// way out as a small white button rather than an underlined word.
+const BANNER_CLASS = 'border-b text-sm font-medium px-4 sm:px-6 py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5';
+export const BANNER_ACTION_CLASS =
+  'rounded-lg border border-rose-300 bg-white px-2.5 py-1 text-xs font-semibold text-rose-800 transition hover:bg-rose-100';
+
 interface ChipProps {
   isLive: boolean;
   joinDeniedReason: string | null;
@@ -67,11 +79,11 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
   if (joinDeniedReason !== null) {
     return (
       <div
-        className="hidden min-[400px]:flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
+        className={`${CHIP_CLASS} text-rose-700 bg-rose-50`}
         title={joinDeniedReason === JOIN_DENIED_REVOKED ? t('phases.sync.signedOutRevokedTitle') : t('phases.sync.signedOutTitle')}
       >
-        <span className="material-symbols-outlined text-lg md:mr-1">lock</span>
-        <span className="text-xs font-bold hidden md:inline">{t('phases.sync.signedOut')}</span>
+        <span className={CHIP_ICON_CLASS} aria-hidden="true">lock</span>
+        <span className={CHIP_LABEL_CLASS}>{t('phases.sync.signedOut')}</span>
       </div>
     );
   }
@@ -79,11 +91,12 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
   if (!isLive) {
     return (
       <div
-        className="hidden min-[400px]:flex items-center text-amber-700 bg-amber-50 px-2 py-1 rounded-sm"
+        className={`${CHIP_CLASS} text-amber-800 bg-amber-50`}
         title={t('phases.sync.reconnectingTitle')}
       >
-        <span className="material-symbols-outlined text-lg md:mr-1 animate-pulse">cloud_off</span>
-        <span className="text-xs font-bold hidden md:inline">{t('phases.sync.reconnecting')}</span>
+        {/* The pulse says "working on it", for readers who allow motion. */}
+        <span className={`${CHIP_ICON_CLASS} motion-safe:animate-pulse`} aria-hidden="true">cloud_off</span>
+        <span className={CHIP_LABEL_CLASS}>{t('phases.sync.reconnecting')}</span>
       </div>
     );
   }
@@ -93,22 +106,24 @@ export const SessionSyncChip: React.FC<ChipProps> = ({ isLive, joinDeniedReason 
   if (health === 'stalled') {
     return (
       <div
-        className="hidden min-[400px]:flex items-center text-rose-700 bg-rose-50 px-2 py-1 rounded-sm"
+        className={`${CHIP_CLASS} text-rose-700 bg-rose-50`}
         title={t('phases.sync.notSaved')}
       >
-        <span className="material-symbols-outlined text-lg md:mr-1" aria-hidden="true">sync_problem</span>
-        <span className="text-xs font-bold hidden md:inline">{t('phases.sync.notSaving')}</span>
+        <span className={CHIP_ICON_CLASS} aria-hidden="true">sync_problem</span>
+        <span className={CHIP_LABEL_CLASS}>{t('phases.sync.notSaving')}</span>
       </div>
     );
   }
 
   return (
     <div
-      className="hidden min-[400px]:flex items-center text-emerald-700 bg-emerald-50 px-2 py-1 rounded-sm"
+      className={`${CHIP_CLASS} text-emerald-800 bg-emerald-50`}
       title={t('phases.sync.liveTitle')}
     >
-      <span className="material-symbols-outlined text-lg md:mr-1 animate-pulse">wifi</span>
-      <span className="text-xs font-bold hidden md:inline">{t('phases.sync.live')}</span>
+      {/* Still: "live" is the state in which nothing is happening, and a
+          pulse that never stops would be the one thing moving at rest. */}
+      <span className={CHIP_ICON_CLASS} aria-hidden="true">wifi</span>
+      <span className={CHIP_LABEL_CLASS}>{t('phases.sync.live')}</span>
     </div>
   );
 };
@@ -134,14 +149,14 @@ export const SessionConnectionBanner: React.FC<BannerProps> = ({
     return (
       <div
         role="alert"
-        className="bg-rose-100 border-b border-rose-300 text-rose-900 text-sm px-6 py-2 flex flex-wrap items-center justify-center gap-2"
+        className={`${BANNER_CLASS} bg-rose-50 border-rose-200 text-rose-900`}
       >
-        <span className="material-symbols-outlined text-base">lock</span>
+        <span className="material-symbols-outlined text-lg! leading-none">lock</span>
         <span>{deniedCopy(joinDeniedReason, t)}</span>
         <button
           type="button"
           onClick={onReturnToLogin}
-          className="font-bold underline underline-offset-2 hover:text-rose-700"
+          className={BANNER_ACTION_CLASS}
         >
           {t('phases.sync.logInAgain')}
         </button>
@@ -153,9 +168,9 @@ export const SessionConnectionBanner: React.FC<BannerProps> = ({
     return (
       <div
         role="status"
-        className="bg-amber-100 border-b border-amber-300 text-amber-900 text-sm px-6 py-2 flex items-center justify-center gap-2"
+        className={`${BANNER_CLASS} bg-amber-50 border-amber-200 text-amber-900`}
       >
-        <span className="material-symbols-outlined text-base animate-pulse">cloud_off</span>
+        <span className="material-symbols-outlined text-lg! leading-none motion-safe:animate-pulse">cloud_off</span>
         <span>{t('phases.sync.reconnectingBanner')}</span>
       </div>
     );

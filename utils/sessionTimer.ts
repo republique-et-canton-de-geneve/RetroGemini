@@ -262,6 +262,24 @@ export const formatTimer = (seconds: number): string => {
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`;
 };
 
+/**
+ * How much of the run is left, from 1 (all of it) to 0, for the ring drawn
+ * around the time. A view of what every client already derives: nothing is
+ * stored for it. 0 when there is no run to measure against (a 0:00 timer), so
+ * a stroke offset never receives NaN.
+ */
+export const timerRingFraction = (remaining: number, initial: number): number => {
+  if (!Number.isFinite(remaining) || !Number.isFinite(initial) || initial <= 0) return 0;
+  return Math.min(1, Math.max(0, remaining / initial));
+};
+
+/** The last seconds of a run, which the display marks with more than a colour (WCAG 1.4.1). */
+export const TIMER_ENDING_SECONDS = 10;
+
+/** A running timer in its last seconds; at zero the alarm takes over with signs of its own. */
+export const isTimerEnding = (remaining: number, running: boolean): boolean =>
+  running && remaining > 0 && remaining <= TIMER_ENDING_SECONDS;
+
 /** The editor's two fields as seconds; seconds past 59 carry over (0:90 is 1:30). */
 export const parseTimerInput = (minutes: string, seconds: string): number => {
   const m = Number.parseInt(minutes, 10);

@@ -6,6 +6,7 @@ import LanguageProvider from '../i18n/LanguageProvider';
 import SessionTimer from '../components/session/SessionTimer';
 import { TimerUpdate } from '../components/session/useSessionTimer';
 import { MAX_TIMER_SECONDS, TimerSettings, createTimerSettings } from '../utils/sessionTimer';
+import { effectivePair } from './helpers/tailwindTheme';
 
 /**
  * The countdown both session headers render (`components/session/SessionTimer`),
@@ -768,5 +769,110 @@ describe('SessionTimer — contrast and motion', () => {
     expect(display()).toHaveClass('text-red-700');
     expect(isBouncing(display())).toBe(false);
     expect(display()).not.toHaveClass('text-red-500');
+  });
+});
+
+/**
+ * The timer's face (45.0): a chip holding a ring, the time and, for the
+ * facilitator, a round play button and the +30 s / +1 min pills. Every state's
+ * time is measured as painted, and the ring is checked as a picture of the
+ * same number the digits show.
+ */
+describe('SessionTimer — the face', () => {
+  const chipOf = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-timer-chip]')!;
+  const arcOf = (container: HTMLElement) => container.querySelector<SVGElement>('[data-timer-ring] [data-timer-ring-arc]');
+  const offsetOf = (container: HTMLElement) => Number(arcOf(container)?.style.strokeDashoffset);
+  const paused = (seconds: number, initial: number): TimerSettings => ({
+    timerRunning: false,
+    timerInitial: initial,
+    timerSeconds: seconds,
+    timerAcknowledged: false
+  });
+
+  it.each([
+    ['stopped', () => createTimerSettings(300)],
+    ['running', () => running(T0, 300)],
+    ['paused', () => paused(120, 300)],
+    ['in its last minute', () => running(T0, 30)],
+    ['in its last ten seconds', () => running(T0, 8)],
+    ['expired', () => expired(T0 - 1000, 300)]
+  ])('reads at 4.5:1 when %s, for the facilitator and for a participant', (_state, settings) => {
+    for (const isFacilitator of [true, false]) {
+      const { display } = renderTimer(settings(), { isFacilitator });
+      const pair = effectivePair(display());
+      expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(4.5);
+      cleanup();
+    }
+  });
+
+  it('draws the ring as a picture of the time left, and hides it from assistive technology', () => {
+    const { container } = renderTimer(running(T0, 300), { isFacilitator: true });
+    const ring = container.querySelector('[data-timer-ring]')!;
+    expect(ring).toHaveAttribute('aria-hidden', 'true');
+    expect(ring).toHaveAttribute('focusable', 'false');
+    // Full at the start, half way after half the run, as the digits say.
+    expect(offsetOf(container)).toBeCloseTo(0);
+    tick(150_000);
+    expect(screen.getByText('2:30')).toBeInTheDocument();
+    expect(offsetOf(container)).toBeCloseTo(50);
+  });
+
+  it('shows a paused run part-way and an expired one empty', () => {
+    const pausedTimer = renderTimer(paused(75, 300));
+    expect(offsetOf(pausedTimer.container)).toBeCloseTo(75);
+    cleanup();
+
+    // Nothing left: no arc at all (a round cap would still draw a dot).
+    const done = renderTimer(expired(T0 - 1000, 300));
+    expect(arcOf(done.container)).toBeNull();
+  });
+
+  it('is the first thing to give its width back when room is short', () => {
+    const { container } = renderTimer(running(T0, 300), { isFacilitator: true });
+    const ring = container.querySelector('[data-timer-ring]')!;
+    const classes = ring.getAttribute('class')?.split(/\s+/) ?? [];
+    // Hidden on phones; drawn again only from a breakpoint up (the header-fit
+    // e2e measures where).
+    expect(classes).toContain('hidden');
+    expect(classes.some((token) => /^sm:(?:[\w-]+:)?block$/.test(token))).toBe(true);
+    expect(classes.some((token) => /^(?:max-sm|sm:max-sm):/.test(token))).toBe(false);
+  });
+
+  it('marks the last ten seconds with a frame, not only a colour', () => {
+    // WCAG 1.4.1: red alone is not a sign for everyone. The chip gains an
+    // edge of its own (a ring outside its border) for those seconds only.
+    const frame = (chip: HTMLElement) => chip.className.split(/\s+/).filter((token) => /^ring-\d$/.test(token));
+    const { container } = renderTimer(running(T0, 30), { isFacilitator: true });
+    expect(chipOf(container)).not.toHaveAttribute('data-timer-ending');
+    expect(frame(chipOf(container))).toEqual([]);
+
+    tick(21_000);
+    expect(screen.getByText('0:09')).toBeInTheDocument();
+    expect(chipOf(container)).toHaveAttribute('data-timer-ending');
+    expect(frame(chipOf(container))).not.toEqual([]);
+
+    tick(10_000);
+    // Time is up: the alarm's own signs take over (the bounce, the button).
+    expect(chipOf(container)).not.toHaveAttribute('data-timer-ending');
+  });
+
+  it('gives the facilitator a round play button whose icon reads on the brand colour', () => {
+    renderTimer(createTimerSettings(300), { isFacilitator: true });
+    const startButton = screen.getByRole('button', { name: 'Start timer' });
+    const icon = startButton.querySelector('.material-symbols-outlined')!;
+    expect(icon).toHaveAttribute('aria-hidden', 'true');
+    expect(icon.textContent).toBe('play_arrow');
+    const pair = effectivePair(icon);
+    expect(pair).toMatchObject({ fg: 'white', bg: 'indigo-600' });
+    expect(pair.ratio).toBeGreaterThanOrEqual(4.5);
+    expect(startButton.className).toContain('rounded-full');
+  });
+
+  it('writes the +30s and +1m pills in a colour that reads on them', () => {
+    renderTimer(createTimerSettings(300), { isFacilitator: true });
+    for (const name of ['+30s', '+1m']) {
+      const pair = effectivePair(screen.getByRole('button', { name }));
+      expect(pair.ratio, `${name}: ${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });

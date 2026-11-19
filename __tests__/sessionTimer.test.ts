@@ -10,8 +10,10 @@ import {
   createTimerSettings,
   finishTimer,
   formatTimer,
+  TIMER_ENDING_SECONDS,
   getHealthCheckPhaseDefaultTimerSeconds,
   isAlarmPending,
+  isTimerEnding,
   parseTimerInput,
   pauseTimer,
   readTimer,
@@ -19,6 +21,7 @@ import {
   resetTimer,
   startTimer,
   timerEndsAt,
+  timerRingFraction,
   type TimerSettings,
   type TimerState
 } from '../utils/sessionTimer';
@@ -562,6 +565,55 @@ describe('formatTimer', () => {
     [Number.POSITIVE_INFINITY, '0:00']
   ])('formats %s as %s', (value, expected) => {
     expect(formatTimer(value)).toBe(expected);
+  });
+});
+
+// The ring around the time (SessionTimer) is a picture of the same number the
+// digits show: what is left of the run. It is computed at render, from the
+// state every client already derives, so nothing is written for it.
+describe('timerRingFraction', () => {
+  it.each([
+    [300, 300, 1],
+    [150, 300, 0.5],
+    [0, 300, 0],
+    [45, 60, 0.75]
+  ])('shows %s s left of a %s s run as %s of the ring', (remaining, initial, expected) => {
+    expect(timerRingFraction(remaining, initial)).toBe(expected);
+  });
+
+  it('shows an empty ring when there is no run to measure against', () => {
+    // A 0:00 timer (a phase with no timebox) has nothing to draw; a division
+    // by zero would give NaN, which a stroke offset cannot take.
+    expect(timerRingFraction(0, 0)).toBe(0);
+    expect(timerRingFraction(30, 0)).toBe(0);
+    expect(timerRingFraction(30, -5)).toBe(0);
+  });
+
+  it('stays between empty and full, whatever it is given', () => {
+    // A stopped timer can hold more than the run that preceded it only through
+    // a stored value no gesture writes; the ring still never overflows.
+    expect(timerRingFraction(400, 300)).toBe(1);
+    expect(timerRingFraction(-3, 300)).toBe(0);
+    expect(timerRingFraction(Number.NaN, 300)).toBe(0);
+    expect(timerRingFraction(30, Number.POSITIVE_INFINITY)).toBe(0);
+  });
+});
+
+// The last seconds are signalled by more than a colour (WCAG 1.4.1): the
+// helper says when, the component draws the sign.
+describe('isTimerEnding', () => {
+  it('holds for the last ten seconds of a running timer', () => {
+    expect(TIMER_ENDING_SECONDS).toBe(10);
+    expect(isTimerEnding(10, true)).toBe(true);
+    expect(isTimerEnding(1, true)).toBe(true);
+    expect(isTimerEnding(11, true)).toBe(false);
+  });
+
+  it('does not hold once the time is up, nor for a stopped timer', () => {
+    // At zero the alarm takes over with its own signs; a paused timer showing
+    // 0:08 is not running out.
+    expect(isTimerEnding(0, true)).toBe(false);
+    expect(isTimerEnding(8, false)).toBe(false);
   });
 });
 

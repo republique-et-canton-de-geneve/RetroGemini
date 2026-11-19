@@ -119,8 +119,11 @@ test.describe('template language', () => {
 test.describe('headers fit in both languages', () => {
   const WIDTHS = [320, 390, 768, 1024, 1280];
 
+  // The fonts are awaited first (decision D11): a header measured in the
+  // fallback font before Geist arrives says nothing about the one people see.
   const measure = (page: Page) =>
-    page.evaluate(() => {
+    page.evaluate(async () => {
+      await document.fonts.ready;
       const header = document.querySelector('header')!;
       const width = window.innerWidth;
       const inView = (el: Element | null | undefined) => {
@@ -145,8 +148,13 @@ test.describe('headers fit in both languages', () => {
         const b = bar!.getBoundingClientRect();
         activeInView = a.left >= b.left - 0.5 && a.right <= b.right + 0.5;
       }
+      // The viewer's own avatar (45.0), where the avatar picker opens: null
+      // where the header does not draw it at this width.
+      const avatar = header.querySelector('[data-viewer-avatar]');
+      const avatarShown = !!avatar && avatar.getBoundingClientRect().width > 0;
       return {
         overflow: header.scrollWidth - header.clientWidth,
+        avatar: avatarShown ? inView(avatar) : null,
         switcher: inView(header.querySelector('[data-testid="language-switcher"]')),
         logout: back ? null : inView(button('logout')),
         invite: back ? inView(button('qr_code_2')) : null,
@@ -202,6 +210,12 @@ test.describe('headers fit in both languages', () => {
           expect(m.invite, `invite in view, ${where}`).toBe(true);
           expect(m.timer, `timer play button in view, ${where}`).toBe(true);
           expect(m.backTappable, `back arrow is what a tap hits, ${where}`).toBe(true);
+          // A facilitator's header shows their avatar from 360px (decision D10;
+          // a participant's at every width), and wherever it is drawn it fits.
+          // The health check's header draws the same avatar once it takes the
+          // retro header's rule; until then it is held to "in view if shown".
+          if (screen !== 'health check' && width >= 360) expect(m.avatar, `own avatar in view, ${where}`).toBe(true);
+          else if (m.avatar !== null) expect(m.avatar, `own avatar in view, ${where}`).toBe(true);
           if (state === 'chip shown') {
             if (width >= 400) expect(m.chip, `sync chip in view, ${where}`).toBe(true);
             else expect(m.banner, `sync banner in view instead of the chip, ${where}`).toBe(true);
