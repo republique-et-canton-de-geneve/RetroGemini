@@ -317,7 +317,13 @@ another look. Nine rules:
   order (never `grid-flow-dense` nor `order-*`), in a flex chain capped at
   the viewport so the page never scrolls on top of the list, while every form,
   a phone and a short list keep the narrow card (`WIDE_COLUMN` and its
-  siblings; `e2e/login-team-picker.spec.ts` measures it).
+  siblings; `e2e/login-team-picker.spec.ts` measures it). A team's name takes
+  two lines, then an ellipsis, a long word broken, in every list and at every
+  width: one rule, `TEAM_NAME` (`line-clamp-2 wrap-break-word`), for a tile, a
+  phone's row and a short list's. Cut on one line, a phone showed "Équipe
+  Plateforme…" at 390px; the spec measures "Équipe Plateforme Numérique de
+  l'État" on two lines there, while the whole name, ending "de Genève", takes
+  three and is still cut after the second.
 - **A control's edge is slate-400, not slate-300** (3.41:1 on white against
   1.59:1). A text field's, a select's, a textarea's border and a switch's off
   track are often the only thing that shows where the control is (1.4.11); a
@@ -334,8 +340,31 @@ another look. Nine rules:
   bottom edge. Such a strip's items take no negative margin and draw their ring
   inside (`.dash-tab:focus-visible`, the phase bar's `outline-offset: -2px`).
   `e2e/no-stray-scrollbars.spec.ts` measures `scrollHeight` and `scrollWidth`
-  (Playwright's Chromium hides scrollbars): both strips, and on a phone the
-  Welcome moods and the Icebreaker's question field.
+  (Playwright's Chromium hides scrollbars): both strips; on a phone the
+  Welcome moods; and the Icebreaker at 320 × 568, 360 × 640, 375 × 667,
+  390 × 844 and 414 × 896, under the avatar band and without it, with both
+  default questions and the three longest French ones, as the facilitator's
+  field and as a participant's text: nothing scrolls inside the field,
+  nothing reaches past the question's box or the card, the card's top is
+  never cut off and its bottom is within reach, nothing scrolls sideways, and
+  the facilitator's "Random" stays where it was from one question to the next.
+  Below `sm` the Icebreaker's card drops its fixed 600px (`sm:h-[600px]`): it
+  is as tall as what it holds, the screen scrolls instead
+  (`max-sm:overflow-y-auto`), and the card is centred by `max-sm:my-auto`
+  under `max-sm:justify-start`, so a card taller than the screen keeps its top
+  (centred by `justify-center`, it lost it where no scroll reaches). The
+  facilitator's field is as tall as the tallest built-in question of the
+  retro's template language, or its own words (its placeholder while empty)
+  when they are taller: invisible, `aria-hidden` copies set in the field's own
+  box (`QUESTION_BOX`) share its grid cell, one `minmax(0, 1fr)` column that
+  no long word widens. It never scrolls inside itself, in every browser
+  (`field-sizing` is not in all of them), and "Random" never moves the buttons
+  from under the finger: sized to its own words, the field moved them by up to
+  about 58px. A participant's question takes the field's type size there and
+  breaks a word longer than its box. From `sm` up nothing changed.
+  `__tests__/icebreakerPhoneLayout.test.tsx` holds what jsdom can, since it
+  lays nothing out: the copies' texts, their language and `aria-hidden`, and
+  the phone-only classes.
 
 ### A card's colour
 
@@ -540,7 +569,12 @@ string literals only.
 > Its focusable-element check walks ancestors instead of reading `offsetParent`
 > or `getClientRects()`. Those need a layout engine, so under jsdom they report
 > every control as hidden and the trap silently does nothing — which is how a
-> focus trap ships broken with a green test suite.
+> focus trap ships broken with a green test suite. The walk and its selector
+> live in `components/common/focusable.ts` (`isVisible`, `FOCUSABLE_SELECTOR`),
+> shared by `ModalDialog.tsx` and `components/common/seenOnce.ts`, whose
+> one-time notes hand the keyboard only to a control that is drawn: no
+> `hidden` attribute, `display: none` or `visibility: hidden` on it or above
+> it.
 
 **Anything a pointer can do, the keyboard must be able to do.** The Group phase
 was pointer-only for the life of the product and **no automated tool in this
@@ -1961,18 +1995,48 @@ user cannot see it, so it does not belong in the user-facing "What's New".
   The release workflow publishes that version when `VERSION` changes on `main`,
   including internal and documentation changes, so catalogue metadata must
   describe the version the merge will publish.
-- **A release builds its image, and its SBOM, from its own tag.**
-  `github-release.yml` creates the GitHub release, its tag on the commit the run
-  started from, then dispatches `docker-deploy.yml` on that tag with the
-  version and `latest`, and generates the SBOM from a checkout of the same tag.
-  Run by hand from a branch (Actions → *Publish GitHub Release* → the branch),
-  it therefore releases that branch whole; with `--ref main`, as it was until
-  45.2, it published main's code under the branch's version. A merge whose
-  release already exists rebuilds the same commit from its tag, as a new build
-  (the base image and its Alpine packages may be newer), and the version tag
-  and `latest` move to it: deploy a tested image by its digest.
-  `__tests__/deploymentManifestParity.test.ts` → *the release builds its image
-  from its own tag*.
+- **A release builds its image, and its SBOM, from its own tag, and only from
+  a tag that holds the run's content.** `github-release.yml` creates the
+  GitHub release, its tag on the commit the run started from (when a tag named
+  `VERSION` exists already, as deleting a release leaves it, GitHub ignores
+  `--target` and attaches the release to that tag), then checks the tag: it
+  fetches it, follows an annotated tag to its commit and compares the tag's
+  tree with the tree of the commit the run started from. Trees, not commits:
+  a branch released by hand and then squash-merged or rebased (another commit,
+  the same tree) passes, and its image is built from the tag. Only then does
+  it dispatch `docker-deploy.yml` on that tag with the version, and it
+  generates the SBOM from a checkout of the same tag. Run by hand from a
+  branch (Actions → *Publish GitHub Release* → the branch), it therefore
+  releases that branch whole; with `--ref main`, as it was until 45.2, it
+  published main's code under the branch's version. When the trees differ the
+  run stops before any image is published, on a push to `main` and on a
+  manual dispatch alike (a release this run attached to a stale tag stays,
+  and its error says so): it lists the files that differ, and its error names
+  the tag's commit and the run's, then the way out: bump `VERSION` so this
+  content gets its own release, or, when the tag is stale and nothing was
+  published from it, delete the release with its tag
+  (`gh release delete <version> --cleanup-tag --yes`) and run the workflow
+  again. A draft release named `VERSION` is refused before anything is
+  created, with its own error: a draft has no tag, so there is nothing to
+  build; publish it or delete it, then run the workflow again. **So a branch
+  released by hand, then fixed
+  without a bump or merged into a `main` that took other commits since (a
+  Dependabot fix), fails its merge's run until `VERSION` is bumped**: the
+  rule below that a deployed branch bumps `Y` again, enforced at release time.
+  A branch whose merge should republish it is released from the tree it will
+  be merged with (rebased onto the latest `main`). A merge whose release
+  already exists, and whose tag holds its tree, is rebuilt from that tag as a
+  new build (the base image and its Alpine packages may be newer), and the
+  version tag moves to it: deploy a tested image by its digest. `latest`,
+  which `render.yaml` and the README pull, moves only to the newest release:
+  a step lists the releases that are not drafts, counts `VERSION` in, keeps
+  the `X.Y` names, sorts them with `sort -V` (45.10 above 45.9) and passes
+  `push_latest=false`, with a notice, when a higher one exists, so a re-run of
+  an older release's run, or a release of an older line, never moves it. The
+  steps from the release to the dispatch run under `set -euo pipefail`.
+  `docker-deploy.yml` dispatched by hand still defaults `push_latest` to
+  `true`. `__tests__/deploymentManifestParity.test.ts` → *the release builds
+  its image from its own tag*.
 - The Docker deploy action reads `VERSION`, so every deployable change needs a
   bump (user-visible → `X`, internal → `Y`).
 - ⚠️ **Those two rules meet as soon as a version has been deployed, and the
@@ -2160,7 +2224,12 @@ the English file does not have. Both files ship in the image (`Dockerfile`,
    seven Jira screens, at 0 since they joined (2026-10-20);
    `e2e/retro-open-board.spec.ts` the open board and, scoped, its settings
    dialog; `e2e/avatars.spec.ts` the avatar picker over a session, scoped
-   (45.0); and
+   (45.0), and the one-time avatar band, scoped, in two states: a guest's on
+   a French phone in a retrospective (`avatar-hint`) and the facilitator's on
+   the dashboard (`avatar-hint-dashboard`, 45.3);
+   `e2e/login-team-picker.spec.ts` the login screen's team list as tiles, in
+   French, the whole page (`login-team-grid`, 45.3: the main flows' `login`
+   reads whatever list the server holds, which may be short); and
    `e2e/admin-team-merge.spec.ts` / `e2e/admin-team-restore.spec.ts` the merge,
    delete and one-team-restore dialogs and the backup import card, scoped, so
    any new serious or critical rule on those screens fails the pull request.
@@ -3414,12 +3483,20 @@ Rules:
   a still dot on the opener (`ViewerAvatarButton`'s `marked`, on a button that
   is `relative` in every state, so marking it moves nothing) while it shows.
   It is a note named by its title, met in reading order: not a live region,
-  it never takes the focus and nothing about it animates. From `sm` it shows
-  three of the pictures (fox, rocket, moon) in the viewer's tone, hidden from
-  assistive technology; drawn by `Avatar`, they carry `data-avatar-art`, so a
-  page-wide count of pictures sees them while the band shows. On a phone its
-  sentence is read, not shown. Its rule is `useAvatarDiscoveryHint`, called by
-  the screen that draws the opener:
+  it never takes the focus and nothing about it animates. From `lg` (1024px)
+  it shows three of the pictures (fox, rocket, moon) in the viewer's tone,
+  hidden from assistive technology, and its sentence, beside its buttons;
+  drawn by `Avatar`, the pictures carry `data-avatar-art`, so a page-wide
+  count of pictures sees them while the band shows (they stay in the page
+  below `lg`, not drawn). Below `lg` the band keeps its title and its two
+  buttons, and its sentence is read, not shown (`sr-only lg:not-sr-only`, the
+  pictures `hidden lg:flex`): one row of 43px from `sm`, and on a phone its
+  buttons under its title where they do not fit beside it (69px at 320 and
+  390px). From `sm` the pictures, the sentence and the buttons used to share
+  a row that cannot wrap, which left the sentence about 250px, four or five
+  lines: 117px of band at 640px in French, and a landscape phone (667 × 375)
+  kept 194px of session under the header and the band, 268px now. Its rule
+  is `useAvatarDiscoveryHint`, called by the screen that draws the opener:
   - **Decided with the screen**: shown when, at the first render, the viewer
     has no stored choice (`hasOwnAvatarChoice` in a session, through
     `useOwnAvatar`'s `hasChoice`; `memberAvatar(team, id) !== null` on the
@@ -3431,9 +3508,14 @@ Rules:
     band without an opener (a facilitator's, in a session, from 360px).
   - **Once gone, gone for the mount**: a choice arriving, the session turning
     anonymous, a blocked credential, the picker opening or "Got it" take it
-    away, and nothing brings it back while the screen lasts, so it never moves
-    the board while people work. Another member in the same mount is decided
-    afresh.
+    away, and nothing brings it back while the screen lasts. Its going moves
+    what is under it up once, by its height, and three of those can come
+    while people work, from outside this screen: a choice made in the
+    person's other browser, the session made anonymous, a password changed
+    or a join refused. The latch is what keeps that to once: the band never
+    comes back to push the board down again, not when the session names its
+    authors again, nor when another tab's new token clears a revocation.
+    Another member in the same mount is decided afresh.
   - **Remembered per member and browser** in `localStorage`
     (`retro-avatar-hint-seen`, the one-time notes' shared seen list,
     `components/common/seenOnce.ts`: the fifty most recent, a storage that
@@ -3441,16 +3523,22 @@ Rules:
     anywhere. A choice needs no write: it is the server's, and stops the hint
     in every browser.
   - "Choose my avatar" focuses the opener first, then opens the picker, so
-    the picker gives the focus back to the opener once the band has gone;
-    "Got it" moves the keyboard to what follows the band only when the
-    keyboard pressed it, which the click says (`nextFocusAfterDismiss`: a
-    key's click carries no `detail`). Where the browser left the focus says
+    the picker gives the focus back to the opener once the band has gone.
+    "Got it" moves the keyboard on only when the keyboard pressed it, which
+    the click says (`nextFocusAfterDismiss`: a key's click carries no
+    `detail`): to the next control drawn after the band (`nextFocusableAfter`
+    passes over one that is not drawn, through `isVisible`), else back to the
+    opener, which is drawn wherever the band is. A participant's Icebreaker
+    below `lg` has no drawn control after the band, since the participants
+    panel and its collapse toggle are `hidden lg:flex`: handed to that toggle,
+    the keyboard fell to the page as the band went. After a pointer the focus
+    stays where the browser put it. Where the browser left the focus says
     nothing: Chrome and Firefox focus the button they press, and moved on
     after a tap the focus landed in the next field, where a phone opened its
     keyboard (the facilitator's Icebreaker question). The login screen's star
-    hands the focus on by the same test. Both are named by their words (`exact: true` in
-    e2e: "Choose my avatar" is part of every opener's name, and "Got it" of
-    What's New's "Got it!").
+    hands the focus on by the same test. Both are named by their words
+    (`exact: true` in e2e: "Choose my avatar" is part of every opener's name,
+    and "Got it" of What's New's "Got it!").
 
 Residuals, stated on purpose:
 
@@ -3507,8 +3595,10 @@ Residuals, stated on purpose:
   is blocked shows it on every load, until a choice; a second tab of the same
   browser keeps it until it reloads. A participant of a team that only runs
   anonymous sessions never sees it, where no picture would show anyway. It
-  pushes the screen down while it shows (about 70px on a phone), which is
-  why it is decided with the screen and never comes back during one.
+  pushes the screen down while it shows (69px at 320 and 390px, 43px from
+  `sm` to `lg`, 57 to 77px from `lg`), and its going moves the screen up
+  once, which is why it is decided with the screen and never comes back
+  during one.
 
 The guards: `__tests__/avatars.test.ts`, `teamAvatarRoutes.test.ts` (the
 route, its two failure answers, the stamp and a stamp dated ahead of the
@@ -3524,16 +3614,34 @@ session), the avatar cases of `sessionRoster.test.ts`, `avatarSource.test.ts`,
 reaching the other's panel and card, a reload, a clear, a refused save, an
 anonymous retrospective, and the picker in the axe audit). The hint's:
 `avatarDiscoveryHint.test.tsx` (the rule and the band: English and French,
-who sees it, the literal key, the latch, focus, the visibility class,
-contrast), `seenOnce.test.ts` (the shared seen list), `hasOwnAvatarChoice`
-and `isAnonymousSession` in `sessionAvatars.test.ts`, `hasChoice` in
-`useOwnAvatar.test.tsx`, the hint cases of `avatarScreensWiring.test.tsx`
-(both session types) and `appAvatar.test.tsx` (the dashboard),
-`sessionHeaderLook.test.tsx` and `healthCheckLook.test.tsx` (the same opener
-and dot in both headers), `i18nAvatars.test.ts`, the hint block of
-`e2e/avatars.spec.ts` (a French phone's guest and the dashboard, audited as
-`avatar-hint` and `avatar-hint-dashboard`; an anonymous retrospective shows
-none) and `e2e/i18n.spec.ts`'s header fit (the band in view, no overflow).
+who sees it, the literal key, the latch, focus, where a key's "Got it" hands
+the keyboard past an undrawn control to the next drawn one, else to the
+opener, and a pointer's moves nothing, the pictures and the sentence from
+`lg` and never from `sm`, the visibility class, contrast), `seenOnce.test.ts`
+(the shared seen list, and the next drawn control: one under
+`display: none`, with or under `hidden`, or under `visibility: hidden` is
+passed over), `hasOwnAvatarChoice` and `isAnonymousSession` in
+`sessionAvatars.test.ts`,
+`hasChoice` in `useOwnAvatar.test.tsx`, the hint cases of
+`avatarScreensWiring.test.tsx` (both session types: who sees it, the
+opener's width, the picker opened from the header and from the band, the
+session turning anonymous, "Got it" remembered across a new mount of the
+screen, a choice stamped on the viewer's own entry from their other browser
+taking the band and the dot away in the render that draws it, read at every
+commit through a React `Profiler`, and a refused join, still gone once the
+connection comes back) and `appAvatar.test.tsx` (the dashboard, with the
+picker opened from the top bar's avatar and a revoked session, still gone
+once the revocation is cleared: the case that holds the latch on a real
+screen), `sessionHeaderLook.test.tsx` and `healthCheckLook.test.tsx` (the
+same opener and dot in both headers), `i18nAvatars.test.ts`, the hint block
+of `e2e/avatars.spec.ts` (a French phone's guest and the dashboard, audited
+as `avatar-hint` and `avatar-hint-dashboard`; an anonymous retrospective
+shows none), its band test (on the dashboard in English and French, at 390,
+640, 667, 768 and 1023px no picture and no visible sentence and, from 640px,
+one row no taller than its title's line or its buttons with its frame; at
+1024 and 1280px the pictures, and the sentence on two lines at most beside
+the buttons) and `e2e/i18n.spec.ts`'s header fit (the band in view, no
+overflow).
 
 ## Jira
 
@@ -3804,10 +3912,14 @@ Rules:
   renders nothing until the status says Jira is on: a deployment without Jira
   must never advertise it. That list is the one-time notes' shared seen list
   (`components/common/seenOnce.ts`, the avatar hint's too: the fifty most
-  recent people, and where the keyboard goes when a note is dismissed),
-  pinned by `__tests__/seenOnce.test.ts`. Its last sentence follows the reader's role and the
-  token's state. The Settings card follows the same rule (nothing where Jira is
-  off, unless a token is still stored, which it then offers to remove).
+  recent people, and where the keyboard goes when a key dismisses a note,
+  the next control drawn after it, nowhere after a pointer), pinned by
+  `__tests__/seenOnce.test.ts`. The Jira note has no place of its own to fall
+  back on, as the avatar hint has its opener: with no drawn control after
+  it, a key's dismissal leaves the keyboard to the page. Its last sentence
+  follows the reader's role and the token's state. The Settings card follows
+  the same rule (nothing where Jira is off, unless a token is still stored,
+  which it then offers to remove).
 - **The client sends again only what proves nothing ran.**
   `jiraService.createIssues` retries a `404` whose body is not JSON — an older
   pod during a rollout — with the rollout backoff (about 7 s), and nothing

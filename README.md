@@ -46,7 +46,7 @@ The named Docker volume keeps your test data across container restarts. For a pr
 
 ### One-click temporary demo
 
-The **Deploy to Render** button above creates a free personal evaluation instance from the latest published Docker image.
+The **Deploy to Render** button above creates a free personal evaluation instance from the Docker image of the newest release (the `latest` tag).
 
 Render's free web services sleep after 15 minutes without traffic and use an ephemeral filesystem. The demo's SQLite data is therefore cleared whenever the service sleeps, restarts, or redeploys. Use this path to explore the product, not for a real team deployment.
 

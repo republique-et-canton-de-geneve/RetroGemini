@@ -45,11 +45,13 @@ interface Props {
  * nothing else told people, and not everybody reads What's New. A note named
  * by its title, met in reading order right after the header: not a live
  * region (it is there with the screen, nothing is announced), it never takes
- * the focus and it does not move. From `sm` it shows three of the pictures in
- * the viewer's own tone and its sentence; on a phone the sentence is read but
+ * the focus and nothing about it animates. From `lg` it shows three of the
+ * pictures in the viewer's own tone and its sentence beside its buttons;
+ * below `lg` it keeps its title and its buttons, and the sentence is read but
  * not shown. "Choose my avatar" opens the picker from the opener, which it
- * focuses first so the picker gives the focus back there; "Got it" puts the
- * keyboard on what follows the band when it was the keyboard that pressed it.
+ * focuses first so the picker gives the focus back there. "Got it" pressed by
+ * a key puts the keyboard on the next drawn control after the band, else back
+ * on the opener; pressed by a pointer, it moves the focus nowhere.
  */
 const AvatarDiscoveryHint: React.FC<Props> = ({ user, hint, visibilityClass = 'flex' }) => {
   const { t } = useTranslation();
