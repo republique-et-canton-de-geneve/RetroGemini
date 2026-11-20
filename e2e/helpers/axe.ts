@@ -111,6 +111,10 @@ export const BASELINE: Record<string, number> = {
   'admin-team-delete-dialog': 0,
   // e2e/avatars.spec.ts: the avatar picker over a session, scoped (45.0).
   'avatar-picker': 0,
+  // The one-time avatar hint under the header, scoped: a guest's in a
+  // retrospective (a French phone) and the facilitator's on the dashboard.
+  'avatar-hint': 0,
+  'avatar-hint-dashboard': 0,
 };
 
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];

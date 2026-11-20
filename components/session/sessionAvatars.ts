@@ -24,8 +24,12 @@ export interface AvatarSessionView {
   readonly participants?: readonly User[];
 }
 
-/** Anonymous by either spelling: the stored sessions say it under `settings`. */
-const isAnonymousSession = (session: MaybeSession): boolean =>
+/**
+ * Anonymous by either spelling: the stored sessions say it under `settings`.
+ * The one rule for "this session draws no picture", which the one-time avatar
+ * hint reads too: it would promise a picture nobody sees there.
+ */
+export const isAnonymousSession = (session: MaybeSession): boolean =>
   !!session && (session.isAnonymous === true || session.settings?.isAnonymous === true);
 
 type MaybeSession = AvatarSessionView | null | undefined;
@@ -152,6 +156,20 @@ export const ownAvatarChoice = (session: MaybeSession, team: MaybeTeam, memberId
     return typeof entry.avatar === 'string' ? entry.avatar : null;
   }
   return choice?.id ?? null;
+};
+
+/**
+ * Whether the viewer has ever used the picker: a choice in the team's map, a
+ * cleared one ("my initials") included, or their own entry in `session`
+ * stating an avatar with a time (a pick made in this session from another
+ * browser, which the server stamps there first). What the one-time avatar
+ * hint asks, so that it reads no avatar field itself. Not hidden in an
+ * anonymous session: it is the viewer's own.
+ */
+export const hasOwnAvatarChoice = (session: MaybeSession, team: MaybeTeam, memberId: string): boolean => {
+  if (memberAvatar(team, memberId)) return true;
+  const entry = entryOf(session, memberId);
+  return !!entry && Object.prototype.hasOwnProperty.call(entry, 'avatar') && entryTime(entry) > 0;
 };
 
 /** The initials every screen draws for the viewer's own avatar. */

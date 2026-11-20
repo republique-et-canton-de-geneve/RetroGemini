@@ -17,6 +17,13 @@ const avatars = {
   'avatars.picker.saving': 'Saving…',
   'avatars.picker.saved': 'Avatar saved.',
   'avatars.picker.unavailable': 'Your avatar cannot be saved right now.',
+  // The one-time hint under the header that the avatar can be changed
+  // (components/common/AvatarDiscoveryHint.tsx). {count} is the number of
+  // pictures the picker offers.
+  'avatars.hint.title': 'New: choose your avatar',
+  'avatars.hint.body': 'Swap your initials for one of {count} drawings. You can change it at any time from your initials, at the top right.',
+  'avatars.hint.choose': 'Choose my avatar',
+  'avatars.hint.dismiss': 'Got it',
   // Animals
   'avatars.family.animals': 'Animals',
   'avatars.familyPitch.animals': 'Twenty animals pared down to their most telling outline, from a winking fox to a koala halfway through its nap.',

@@ -193,4 +193,32 @@ describe("the viewer's own avatar", () => {
     const button = screen.getByRole('button', { name: 'Alice Roux, choose my avatar' });
     expect(button.querySelector('[data-avatar-art="fox"]')).not.toBeNull();
   });
+
+  // While the one-time avatar hint shows under the header (AGENTS.md,
+  // *Avatars*), the opener carries a dot: a sign on the control itself.
+  it('carries a still dot while the avatar hint shows, its name, class and box unchanged', () => {
+    renderHeader(alice, { viewerAvatarMarked: true });
+    const marked = screen.getByRole('button', { name: 'AL, Alice Roux, choose my avatar' });
+    const dot = marked.querySelector('[data-avatar-hint-dot]') as HTMLElement;
+    expect(dot).not.toBeNull();
+    expect(dot).toHaveAttribute('aria-hidden', 'true');
+    // Drawn over the corner, out of the flow: the button keeps its size.
+    expect(tokens(dot)).toEqual(expect.arrayContaining(['absolute', 'bg-indigo-600', 'ring-white']));
+    expect(tokens(dot).filter((token) => token.startsWith('fx-') || token.startsWith('animate-'))).toEqual([]);
+    expect(tokens(marked)).toContain('relative');
+    expect(within(marked).queryByRole('img')).toBeNull();
+    const markedClass = marked.className;
+    cleanup();
+
+    renderHeader(alice);
+    const plain = screen.getByRole('button', { name: 'AL, Alice Roux, choose my avatar' });
+    expect(plain.querySelector('[data-avatar-hint-dot]')).toBeNull();
+    expect(plain.className).toBe(markedClass);
+  });
+
+  it("hands its button to the screen, which focuses it before opening the picker from the hint", () => {
+    const viewerAvatarRef = React.createRef<HTMLButtonElement>();
+    renderHeader(alice, { viewerAvatarRef });
+    expect(viewerAvatarRef.current).toBe(screen.getByRole('button', { name: /choose my avatar/ }));
+  });
 });

@@ -731,6 +731,8 @@ const App: React.FC = () => {
             onLogout={isSession ? undefined : handleLogout}
             avatarId={memberAvatarId(currentTeam, currentUser.id)}
             avatarChoice={memberAvatar(currentTeam, currentUser.id)?.id ?? null}
+            // A cleared choice is a choice: the one-time avatar hint shows only to someone who never used the picker.
+            hasAvatarChoice={memberAvatar(currentTeam, currentUser.id) !== null}
             onPickAvatar={async (avatarId) => {
                 const teamId = currentTeam.id;
                 showTeamAvatars(teamId, await dataService.setMemberAvatar(currentUser.id, avatarId));

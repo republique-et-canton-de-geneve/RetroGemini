@@ -46,7 +46,9 @@ import { avatarColorClasses } from '../utils/participantColors';
 import AvatarPicker from './common/AvatarPicker';
 import ViewerAvatarButton from './session/ViewerAvatarButton';
 import { useOwnAvatar } from './session/useOwnAvatar';
-import { sessionAvatarOf, stampOwnAvatarEntry, viewerInitials } from './session/sessionAvatars';
+import { isAnonymousSession, sessionAvatarOf, stampOwnAvatarEntry, viewerInitials } from './session/sessionAvatars';
+import AvatarDiscoveryHint from './common/AvatarDiscoveryHint';
+import { useAvatarDiscoveryHint } from './common/useAvatarDiscoveryHint';
 
 interface Props {
   team: Team;
@@ -358,6 +360,17 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     // revision as that write, and the server refused the second: the one
     // that takes the "has left" mark off, which nothing sends again.
     entersWithAWrite: () => !!session && enteredSessionRef.current !== session.id && entersWriting(session),
+  });
+
+  // The one-time hint that the avatar can be changed, by the retrospective's
+  // rule (useAvatarDiscoveryHint).
+  const avatarHint = useAvatarDiscoveryHint({
+    userId: currentUser.id,
+    hasChoice: ownAvatar.hasChoice,
+    anonymous: isAnonymousSession(session),
+    blocked: !!deniedReason,
+    pickerOpen: ownAvatar.pickerOpen,
+    openPicker: ownAvatar.openPicker,
   });
 
   // The status follows the phase, as in a retrospective: opening Close ends the
@@ -1009,6 +1022,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           avatarId={ownAvatar.avatarIdOf(currentUser.id)}
           onClick={ownAvatar.openPicker}
           visibilityClass={isFacilitator ? 'hidden min-[360px]:flex' : 'flex'}
+          marked={avatarHint.shown}
+          ref={avatarHint.openerRef}
         />
       </div>
     </header>
@@ -1819,6 +1834,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         onReturnToLogin={onSessionExpired ?? onExit}
       />
       <SyncStalledBanner />
+      <AvatarDiscoveryHint
+        user={currentUser}
+        hint={avatarHint}
+        visibilityClass={isFacilitator ? 'hidden min-[360px]:flex' : 'flex'}
+      />
       {showInvite && (
         <InviteModal
           team={team}

@@ -23,6 +23,35 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// Whether the viewer has ever used the picker, for the one-time avatar hint
+// (hasOwnAvatarChoice): the screens read it here, never off an entry.
+describe('useOwnAvatar, whether the viewer has a choice', () => {
+  const none = { ...team, memberAvatars: {} } as unknown as Team;
+  const plain = { id: 's1', participants: [{ ...me }] };
+
+  it("turns true once a pick's answered map reaches the team, a cleared choice included", async () => {
+    const answered = { ada: { id: null, at: 300 } };
+    vi.spyOn(dataService, 'setMemberAvatar').mockResolvedValue(answered);
+    const view = renderHook((props: { team: Team }) => useOwnAvatar({
+      session: plain, team: props.team, currentUser: me, updateSession: vi.fn(), canWrite: true,
+    }), { initialProps: { team: none } });
+    expect(view.result.current.hasChoice).toBe(false);
+    await act(async () => { await view.result.current.pick(null); });
+    // App's part: the answered map on a new team object.
+    view.rerender({ team: { ...none, memberAvatars: answered } as unknown as Team });
+    expect(view.result.current.hasChoice).toBe(true);
+    view.unmount();
+  });
+
+  it("is true for a pick made in another browser that reached the session's entry first", () => {
+    const stamped = { id: 's1', participants: [{ ...me, avatar: 'cat', avatarAt: 300 }] };
+    const { result } = renderHook(() => useOwnAvatar({
+      session: stamped, team: none, currentUser: me, updateSession: vi.fn(), canWrite: true,
+    }));
+    expect(result.current.hasChoice).toBe(true);
+  });
+});
+
 describe('useOwnAvatar, the own entry', () => {
   it('writes the newer choice once, and not again for the same state', () => {
     const updateSession = vi.fn(() => session);

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   avatarChoiceTime,
+  hasOwnAvatarChoice,
+  isAnonymousSession,
   ownAvatarChoice,
   ownAvatarEntry,
   ownAvatarEntryTime,
@@ -203,6 +205,79 @@ describe('ownAvatarChoice', () => {
 
   it("is the viewer's own and stays readable in an anonymous session", () => {
     expect(ownAvatarChoice(sessionWith([person('ada')], true), team, 'ada')).toBe('fox');
+  });
+});
+
+// Whether the viewer has ever used the picker: what the one-time avatar hint
+// asks before showing itself (AGENTS.md, *Avatars*). A clear ("my initials")
+// is a choice too: the person found the picker. Read here, so the hint and
+// the screens read no avatar field themselves (avatarSource.test.ts).
+describe('hasOwnAvatarChoice', () => {
+  it('is false for someone who never chose, in the team or in the session', () => {
+    expect(hasOwnAvatarChoice(sessionWith([person('ada')]), teamWith({}), 'ada')).toBe(false);
+    expect(hasOwnAvatarChoice(sessionWith([person('ada')]), teamWith(undefined), 'ada')).toBe(false);
+    expect(hasOwnAvatarChoice(sessionWith([]), teamWith({ bob: { id: 'owl', at: 200 } }), 'ada')).toBe(false);
+  });
+
+  it("is true for a choice in the team's map, a cleared one included", () => {
+    expect(hasOwnAvatarChoice(sessionWith([person('ada')]), teamWith({ ada: { id: 'fox', at: 100 } }), 'ada')).toBe(true);
+    expect(hasOwnAvatarChoice(sessionWith([person('ada')]), teamWith({ ada: { id: null, at: 100 } }), 'ada')).toBe(true);
+    // An id this release does not draw is still a choice the person made.
+    expect(hasOwnAvatarChoice(null, teamWith({ ada: { id: 'space-whale', at: 100 } }), 'ada')).toBe(true);
+  });
+
+  // A pick made in this session from another browser reaches the session's
+  // entry (the route's stamp) before this browser's copy of the team.
+  it("is true for the viewer's own entry stamped with a time, a cleared one included", () => {
+    expect(hasOwnAvatarChoice(sessionWith([person('ada', { avatar: 'cat', avatarAt: 150 })]), teamWith({}), 'ada')).toBe(true);
+    expect(hasOwnAvatarChoice(sessionWith([person('ada', { avatar: null, avatarAt: 150 })]), teamWith({}), 'ada')).toBe(true);
+  });
+
+  it('reads an entry with no time, or one that is not a time, as no choice', () => {
+    for (const avatarAt of [undefined, 0, Number.NaN, 1e300, -4, 99.5]) {
+      const entry = person('ada', avatarAt === undefined ? { avatar: 'cat' } : { avatar: 'cat', avatarAt });
+      expect(hasOwnAvatarChoice(sessionWith([entry]), teamWith({}), 'ada'), String(avatarAt)).toBe(false);
+    }
+    // A time with no avatar stated is no choice either.
+    expect(hasOwnAvatarChoice(sessionWith([person('ada', { avatarAt: 150 })]), teamWith({}), 'ada')).toBe(false);
+  });
+
+  it("reads only the viewer's own entry and map key", () => {
+    const session = sessionWith([person('bob', { avatar: 'owl', avatarAt: 150 })]);
+    expect(hasOwnAvatarChoice(session, teamWith({ bob: { id: 'owl', at: 1 } }), 'ada')).toBe(false);
+    // An inherited key of a hostile map is no choice.
+    expect(hasOwnAvatarChoice(null, teamWith(Object.create({ ada: { id: 'fox', at: 1 } })), 'ada')).toBe(false);
+  });
+
+  it("is the same in an anonymous session: the choice is the viewer's own", () => {
+    expect(hasOwnAvatarChoice(sessionWith([person('ada')], true), teamWith({ ada: { id: 'fox', at: 100 } }), 'ada')).toBe(true);
+    expect(hasOwnAvatarChoice(sessionWith([person('ada')], true), teamWith({}), 'ada')).toBe(false);
+  });
+
+  it('survives a session or team that is missing or malformed', () => {
+    expect(hasOwnAvatarChoice(null, null, 'ada')).toBe(false);
+    expect(hasOwnAvatarChoice(undefined, undefined, 'ada')).toBe(false);
+    expect(hasOwnAvatarChoice({ participants: 'nope' } as never, teamWith({}), 'ada')).toBe(false);
+    expect(hasOwnAvatarChoice({ participants: [null, 3] } as never, teamWith({ ada: 'fox' }), 'ada')).toBe(false);
+  });
+});
+
+// One rule for "this session draws no picture", shared by the drawing and the
+// avatar hint, which would otherwise promise a picture nobody sees there.
+describe('isAnonymousSession', () => {
+  it('reads the flag where both stored session types keep it, and a top-level one', () => {
+    expect(isAnonymousSession({ settings: { isAnonymous: true } })).toBe(true);
+    expect(isAnonymousSession({ isAnonymous: true })).toBe(true);
+    expect(isAnonymousSession({ settings: { isAnonymous: false } })).toBe(false);
+    expect(isAnonymousSession({ isAnonymous: false, settings: null })).toBe(false);
+    expect(isAnonymousSession({})).toBe(false);
+    expect(isAnonymousSession(null)).toBe(false);
+    expect(isAnonymousSession(undefined)).toBe(false);
+  });
+
+  it('takes only a real true: a value written by another client is data', () => {
+    expect(isAnonymousSession({ settings: { isAnonymous: 'yes' as unknown as boolean } })).toBe(false);
+    expect(isAnonymousSession({ isAnonymous: 1 as unknown as boolean })).toBe(false);
   });
 });
 

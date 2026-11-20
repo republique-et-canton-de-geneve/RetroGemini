@@ -3266,7 +3266,10 @@ pieces: `utils/avatars.js` (the ids, shared by server and client),
 given an `avatarId`), `components/common/AvatarPicker.tsx` (the dialog),
 `components/session/sessionAvatars.ts` (which avatar a session shows, and the
 own-entry rule), `components/session/useOwnAvatar.ts` (what both session
-screens share) and `components/session/ViewerAvatarButton.tsx` (the opener).
+screens share), `components/session/ViewerAvatarButton.tsx` (the opener) and
+`components/common/useAvatarDiscoveryHint.ts` with
+`components/common/AvatarDiscoveryHint.tsx` (the one-time hint that the
+avatar can be changed).
 Rules:
 
 - **The choice is the team's, keyed by member, with a date.**
@@ -3403,6 +3406,46 @@ Rules:
   holds it. `App` puts the answered map on a **new** team object, only for the
   team still open (`__tests__/appAvatar.test.tsx`: not after a sign-out, not
   on another team opened meanwhile), so nothing survives a sign-out.
+- **Each person is told once that the avatar can be changed** (the
+  maintainer: nothing said it, and not everybody reads What's New). A band
+  right under the header, `AvatarDiscoveryHint`: in both session screens after
+  `<SyncStalledBanner />`, on the dashboard as the top bar's sibling, never
+  inside a `<header>` (the header-fit spec measures the page's first one), and
+  a still dot on the opener (`ViewerAvatarButton`'s `marked`, on a button that
+  is `relative` in every state, so marking it moves nothing) while it shows.
+  It is a note named by its title, met in reading order: not a live region,
+  it never takes the focus and nothing about it animates. From `sm` it shows
+  three of the pictures (fox, rocket, moon) in the viewer's tone, hidden from
+  assistive technology; drawn by `Avatar`, they carry `data-avatar-art`, so a
+  page-wide count of pictures sees them while the band shows. On a phone its
+  sentence is read, not shown. Its rule is `useAvatarDiscoveryHint`, called by
+  the screen that draws the opener:
+  - **Decided with the screen**: shown when, at the first render, the viewer
+    has no stored choice (`hasOwnAvatarChoice` in a session, through
+    `useOwnAvatar`'s `hasChoice`; `memberAvatar(team, id) !== null` on the
+    dashboard, which App hands the bar), a cleared choice counting as one; the
+    session is not anonymous (`isAnonymousSession`, the drawing's rule: the
+    band would promise a picture nobody sees); the credential is not revoked
+    or the join refused (the picker could not save); and the member id is not
+    on its seen list. It takes the opener's visibility class, so there is no
+    band without an opener (a facilitator's, in a session, from 360px).
+  - **Once gone, gone for the mount**: a choice arriving, the session turning
+    anonymous, a blocked credential, the picker opening or "Got it" take it
+    away, and nothing brings it back while the screen lasts, so it never moves
+    the board while people work. Another member in the same mount is decided
+    afresh.
+  - **Remembered per member and browser** in `localStorage`
+    (`retro-avatar-hint-seen`, the one-time notes' shared seen list,
+    `components/common/seenOnce.ts`: the fifty most recent, a storage that
+    fails shows it) by its two buttons and whenever the picker opens, from
+    anywhere. A choice needs no write: it is the server's, and stops the hint
+    in every browser.
+  - "Choose my avatar" focuses the opener first, then opens the picker, so
+    the picker gives the focus back to the opener once the band has gone;
+    "Got it" moves the keyboard to what follows the band only when the
+    keyboard pressed it. Both are named by their words (`exact: true` in
+    e2e: "Choose my avatar" is part of every opener's name, and "Got it" of
+    What's New's "Got it!").
 
 Residuals, stated on purpose:
 
@@ -3452,6 +3495,15 @@ Residuals, stated on purpose:
   restore keeps drawing, and stamping into the sessions it enters, the choice
   it knew, until it reloads; the record holds the archive's choice, and the
   next pick is newer than both.
+- **The avatar hint is once per member and browser, not once per person.**
+  Everyone on the facilitator's seat is one member, so one choice hides it
+  for all of them; a second browser shows it once more until the person
+  chooses (the only stop shared by every browser); a browser whose storage
+  is blocked shows it on every load, until a choice; a second tab of the same
+  browser keeps it until it reloads. A participant of a team that only runs
+  anonymous sessions never sees it, where no picture would show anyway. It
+  pushes the screen down while it shows (about 70px on a phone), which is
+  why it is decided with the screen and never comes back during one.
 
 The guards: `__tests__/avatars.test.ts`, `teamAvatarRoutes.test.ts` (the
 route, its two failure answers, the stamp and a stamp dated ahead of the
@@ -3465,7 +3517,18 @@ entry carried by the entering write, the wait after a pick made in the
 session), the avatar cases of `sessionRoster.test.ts`, `avatarSource.test.ts`,
 `avatarColorSource.test.ts`, and `e2e/avatars.spec.ts` (two browsers: a pick
 reaching the other's panel and card, a reload, a clear, a refused save, an
-anonymous retrospective, and the picker in the axe audit).
+anonymous retrospective, and the picker in the axe audit). The hint's:
+`avatarDiscoveryHint.test.tsx` (the rule and the band: English and French,
+who sees it, the literal key, the latch, focus, the visibility class,
+contrast), `seenOnce.test.ts` (the shared seen list), `hasOwnAvatarChoice`
+and `isAnonymousSession` in `sessionAvatars.test.ts`, `hasChoice` in
+`useOwnAvatar.test.tsx`, the hint cases of `avatarScreensWiring.test.tsx`
+(both session types) and `appAvatar.test.tsx` (the dashboard),
+`sessionHeaderLook.test.tsx` and `healthCheckLook.test.tsx` (the same opener
+and dot in both headers), `i18nAvatars.test.ts`, the hint block of
+`e2e/avatars.spec.ts` (a French phone's guest and the dashboard, audited as
+`avatar-hint` and `avatar-hint-dashboard`; an anonymous retrospective shows
+none) and `e2e/i18n.spec.ts`'s header fit (the band in view, no overflow).
 
 ## Jira
 

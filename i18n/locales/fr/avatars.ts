@@ -14,6 +14,11 @@ const avatars: Record<keyof typeof en, string> = {
   'avatars.picker.saving': 'Enregistrement…',
   'avatars.picker.saved': 'Avatar enregistré.',
   'avatars.picker.unavailable': 'Votre avatar ne peut pas être enregistré pour le moment.',
+  // The one-time hint under the header
+  'avatars.hint.title': 'Nouveau\u00a0: choisissez votre avatar',
+  'avatars.hint.body': 'Remplacez vos initiales par l’un des {count} dessins. Vous pourrez le changer à tout moment depuis vos initiales, en haut à droite.',
+  'avatars.hint.choose': 'Choisir mon avatar',
+  'avatars.hint.dismiss': 'Compris',
   // Animals
   'avatars.family.animals': 'Bestiaire',
   'avatars.familyPitch.animals': 'Vingt animaux réduits à leur silhouette la plus parlante, du renard qui cligne de l’œil au koala en pleine sieste.',

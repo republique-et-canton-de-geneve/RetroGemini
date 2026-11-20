@@ -424,4 +424,91 @@ describe.each<Kind>(['retro', 'health check'])('avatars on the %s screen', (kind
       expect(dataService.setMemberAvatar).toHaveBeenCalledWith('me', 'cat', local.id);
     });
   });
+
+  // The one-time hint that the avatar can be changed (AGENTS.md, *Avatars*):
+  // a band under the header, and a dot on the opener while it shows.
+  describe('the avatar hint', () => {
+    const HINT = 'New: choose your avatar';
+    const HINT_KEY = 'retro-avatar-hint-seen';
+    const header = () => document.querySelector('header') as HTMLElement;
+    const opener = () => header().querySelector('[data-viewer-avatar]') as HTMLElement;
+    const dot = () => opener().querySelector('[data-avatar-hint-dot]');
+
+    beforeEach(() => {
+      localStorage.removeItem(HINT_KEY);
+    });
+
+    it('shows under the header to a viewer with no choice in a named session, the opener marked', () => {
+      renderScreen(kind, team(undefined), sessionOf(kind));
+      const note = screen.getByRole('note', { name: HINT });
+      // After the header in reading order, outside it.
+      expect(header().compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(header().contains(note)).toBe(false);
+      expect(dot()).not.toBeNull();
+      // The only pictures on the page are its samples: nobody here chose one.
+      expect(pictures()).toEqual(['fox', 'rocket', 'moon']);
+      expect([...document.querySelectorAll('[data-avatar-art]')].every((art) => note.contains(art))).toBe(true);
+    });
+
+    it('is not shown in an anonymous session, nor to a viewer who chose, a cleared choice included', () => {
+      renderScreen(kind, team(undefined), anonymousOf(kind));
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
+      // Nothing of it reaches the page: an anonymous session draws no picture at all.
+      expect(pictures()).toEqual([]);
+      cleanup();
+      renderScreen(kind, team({ me: { id: 'owl', at: 100 } }), sessionOf(kind));
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      cleanup();
+      renderScreen(kind, team({ me: { id: null, at: 100 } }), sessionOf(kind));
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
+    });
+
+    it('goes, remembered, once the picker opens from the header, and does not come back', () => {
+      renderScreen(kind, team(undefined), sessionOf(kind));
+      fireEvent.click(screen.getByRole('button', { name: /choose my avatar/ }));
+      expect(screen.getByRole('dialog', { name: 'Choose my avatar' })).toBeInTheDocument();
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
+      expect(JSON.parse(localStorage.getItem(HINT_KEY) ?? 'null')).toEqual(['me']);
+      fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+    });
+
+    it("opens the picker from its own button, and Escape gives the focus to the header's avatar", async () => {
+      const user = userEvent.setup();
+      renderScreen(kind, team(undefined), sessionOf(kind));
+      await user.click(screen.getByRole('button', { name: 'Choose my avatar' }));
+      expect(await screen.findByRole('dialog', { name: 'Choose my avatar' })).toBeInTheDocument();
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      await user.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(document.activeElement).toBe(opener());
+      expect(JSON.parse(localStorage.getItem(HINT_KEY) ?? 'null')).toEqual(['me']);
+    });
+
+    it("takes the opener's width: from 360px for a facilitator, at every width for a participant", () => {
+      renderScreen(kind, team(undefined), sessionOf(kind), fran);
+      const classes = (element: Element) => element.className.split(/\s+/);
+      expect(classes(screen.getByRole('note', { name: HINT }))).toEqual(expect.arrayContaining(['hidden', 'min-[360px]:flex']));
+      expect(classes(opener())).toEqual(expect.arrayContaining(['hidden', 'min-[360px]:flex']));
+      cleanup();
+      renderScreen(kind, team(undefined), sessionOf(kind));
+      expect(classes(screen.getByRole('note', { name: HINT }))).not.toContain('hidden');
+    });
+
+    it('goes when the session turns anonymous, and stays gone when it names its authors again', () => {
+      renderScreen(kind, team(undefined), sessionOf(kind));
+      expect(screen.getByRole('note', { name: HINT })).toBeInTheDocument();
+      act(() => { handlers.update?.(JSON.parse(JSON.stringify({ ...anonymousOf(kind), _rev: 5 }))); });
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      act(() => { handlers.update?.(JSON.parse(JSON.stringify({ ...sessionOf(kind), _rev: 6 }))); });
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
+      // It was never dismissed: another screen shows it again.
+      expect(localStorage.getItem(HINT_KEY)).toBeNull();
+    });
+  });
 });

@@ -3,6 +3,7 @@ import type { MemberAvatarChoice, Team, User } from '../../types';
 import { dataService } from '../../services/dataService';
 import {
   avatarChoiceTime,
+  hasOwnAvatarChoice,
   ownAvatarChoice,
   ownAvatarEntry,
   ownAvatarEntryTime,
@@ -61,6 +62,8 @@ interface Options<S extends AvatarSession> {
  * - The picker: its open state, the choice it marks, and the pick, stored by
  *   `dataService.setMemberAvatar` with the session's id, so the server also
  *   stamps the live session's entry for the room.
+ * - `hasChoice`: whether the viewer has ever used the picker, which decides
+ *   whether the one-time avatar hint shows (`useAvatarDiscoveryHint`).
  *
  * Nothing of it outlives the screen: the session unmounts on a sign-out, and
  * App applies the answered map only to the team still open.
@@ -154,6 +157,8 @@ export function useOwnAvatar<S extends AvatarSession>({
     closePicker: useCallback(() => setPickerOpen(false), []),
     /** The stored choice the picker marks (an id the release may not draw included). */
     currentChoice: ownAvatarChoice(session, team, me),
+    /** Whether the viewer has ever used the picker (a clear included): the one-time avatar hint asks. */
+    hasChoice: hasOwnAvatarChoice(session, team, me),
     pick,
   };
 }

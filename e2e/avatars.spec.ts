@@ -1,4 +1,4 @@
-import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { test, expect, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { dismissAnnouncementsIfPresent } from './helpers/announcements';
 import { audit } from './helpers/axe';
 
@@ -209,5 +209,146 @@ test.describe('avatars', () => {
     // Both chose a picture; neither screen draws one, the viewer's own header included.
     await expect(facilitator.locator('[data-avatar-art]')).toHaveCount(0);
     await expect(guest.locator('[data-avatar-art]')).toHaveCount(0);
+  });
+});
+
+/**
+ * The one-time hint that the avatar can be changed (AGENTS.md, *Avatars*): a
+ * band right under the header and a dot on the opener, for someone who never
+ * chose one, where a picture would be drawn. Each person sees it until they
+ * put it away or open the picker, in this browser; an anonymous retrospective
+ * shows neither. Its own team, and fresh guests: everyone here starts with no
+ * choice.
+ */
+test.describe('the avatar hint', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  const HINT_EN = 'New: choose your avatar';
+  const HINT_FR = 'Nouveau\u00a0: choisissez votre avatar';
+  const PHONE = { width: 390, height: 844 };
+
+  let facilitatorContext: BrowserContext;
+  let facilitator: Page;
+  const teamName = `E2E-Avatar-Hint-${Date.now()}`;
+
+  const band = (page: Page) => page.locator('[data-avatar-hint]');
+  const dot = (page: Page) => page.locator('header [data-viewer-avatar] [data-avatar-hint-dot]');
+
+  /** The band starts where the header ends, and nothing of it, or of the page, overflows. */
+  const expectRightUnderTheHeader = async (page: Page, note: Locator) => {
+    const header = await page.locator('header').first().boundingBox();
+    const box = await note.boundingBox();
+    expect(header, 'the header is drawn').not.toBeNull();
+    expect(box, 'the hint is drawn').not.toBeNull();
+    expect(Math.abs(box!.y - (header!.y + header!.height)), 'the hint starts where the header ends').toBeLessThanOrEqual(1);
+    const width = page.viewportSize()!.width;
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width + 0.5);
+    for (const button of await note.getByRole('button').all()) {
+      const r = (await button.boundingBox())!;
+      expect(r.x, 'a button of the hint in view').toBeGreaterThanOrEqual(0);
+      expect(r.x + r.width, 'a button of the hint in view').toBeLessThanOrEqual(width + 0.5);
+      // A target of 24px at least (WCAG 2.5.8).
+      expect(r.height).toBeGreaterThanOrEqual(24);
+    }
+    expect(await note.evaluate((element) => element.scrollWidth - element.clientWidth), 'hint overflow').toBe(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 'page overflow').toBeLessThanOrEqual(0);
+  };
+
+  /** Joins from an invite link as a new member, in a French browser. */
+  const joinInFrench = async (page: Page, url: string, name: string) => {
+    await page.goto(url);
+    await page.waitForLoadState('networkidle');
+    await page.getByText(/^Rejoindre /).first().waitFor({ state: 'visible', timeout: 15_000 });
+    const notInList = page.getByRole('button', { name: '+ Je ne suis pas dans la liste' });
+    if (await notInList.isVisible().catch(() => false)) await notInList.click();
+    await page.getByPlaceholder('p. ex. Jean Dupont').fill(name);
+    await page.getByRole('button', { name: 'Rejoindre la rétrospective' }).click();
+    await expect(page.locator('header [data-viewer-avatar]')).toBeVisible({ timeout: 15_000 });
+  };
+
+  const newGuest = (browser: Browser) =>
+    browser.newContext({ viewport: PHONE, locale: 'fr-CH', reducedMotion: 'reduce' });
+
+  test.beforeAll(async ({ browser }: { browser: Browser }) => {
+    facilitatorContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US', reducedMotion: 'reduce' });
+    facilitator = await facilitatorContext.newPage();
+  });
+
+  test.afterAll(async () => {
+    await facilitatorContext?.close();
+  });
+
+  test('the facilitator\'s dashboard shows it under the top bar, and "Got it" puts it away for good', async () => {
+    await createTeam(facilitator, teamName);
+    const note = facilitator.getByRole('note', { name: HINT_EN });
+    await expect(note).toBeVisible();
+    await expect(dot(facilitator)).toBeVisible();
+    await expectRightUnderTheHeader(facilitator, note);
+    await audit(facilitator, test.info(), 'avatar-hint-dashboard', { scope: note });
+
+    await note.getByRole('button', { name: 'Got it', exact: true }).click();
+    await expect(band(facilitator)).toHaveCount(0);
+    await expect(dot(facilitator)).toHaveCount(0);
+
+    await facilitator.reload();
+    await expect(facilitator.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 15_000 });
+    await expect(facilitator.locator('header [data-viewer-avatar]')).toBeVisible();
+    await expect(band(facilitator)).toHaveCount(0);
+    await expect(dot(facilitator)).toHaveCount(0);
+  });
+
+  test('a guest on a French phone sees it under the header of a named retrospective, and opens the picker from it', async ({ browser }) => {
+    await startRetro(facilitator);
+    // Put away on the dashboard: this browser does not show it in the retrospective either.
+    await expect(band(facilitator)).toHaveCount(0);
+    const url = await inviteLink(facilitator);
+
+    const guestContext = await newGuest(browser);
+    try {
+      const guest = await guestContext.newPage();
+      await joinInFrench(guest, url, 'Bea Indice');
+      const note = guest.getByRole('note', { name: HINT_FR });
+      await expect(note).toBeVisible();
+      await expect(dot(guest)).toBeVisible();
+      await expectRightUnderTheHeader(guest, note);
+      await audit(guest, test.info(), 'avatar-hint', { scope: note });
+
+      await note.getByRole('button', { name: 'Choisir mon avatar', exact: true }).click();
+      const picker = guest.getByRole('dialog', { name: 'Choisir mon avatar' });
+      await expect(picker).toBeVisible();
+      await expect(band(guest)).toHaveCount(0);
+      await guest.keyboard.press('Escape');
+      await expect(picker).toHaveCount(0);
+      // The picker gives the focus back to the avatar it opens from.
+      await expect(guest.locator('header [data-viewer-avatar]')).toBeFocused();
+      await expect(dot(guest)).toHaveCount(0);
+
+      // Opened once, it is remembered in this browser.
+      await guest.reload();
+      await expect(guest.locator('header [data-viewer-avatar]')).toBeVisible({ timeout: 15_000 });
+      await expect(band(guest)).toHaveCount(0);
+      await expect(dot(guest)).toHaveCount(0);
+    } finally {
+      await guestContext.close();
+    }
+  });
+
+  test('a guest in an anonymous retrospective sees no hint and no dot', async ({ browser }) => {
+    await facilitator.getByRole('button', { name: 'Leave the retrospective' }).click();
+    await startRetro(facilitator, { anonymous: true });
+    const url = await inviteLink(facilitator);
+
+    const guestContext = await newGuest(browser);
+    try {
+      const guest = await guestContext.newPage();
+      await joinInFrench(guest, url, 'Cy Anonyme');
+      // The session screen is drawn: its header shows the guest's own avatar.
+      await expect(guest.locator('header [data-viewer-avatar]')).toHaveAccessibleName(/, choisir mon avatar$/);
+      await expect(band(guest)).toHaveCount(0);
+      await expect(dot(guest)).toHaveCount(0);
+    } finally {
+      await guestContext.close();
+    }
   });
 });

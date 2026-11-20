@@ -169,6 +169,8 @@ describe('the header is the retrospective header', () => {
         onInvite={vi.fn()}
         isRetroTipsOpen={false}
         onToggleRetroTips={vi.fn()}
+        // Nobody here chose an avatar: the one-time hint shows, and marks the opener.
+        viewerAvatarMarked
       />
     ).container.querySelector('header') as HTMLElement;
   };
@@ -191,6 +193,8 @@ describe('the header is the retrospective header', () => {
       chipChildren: chip ? [...chip.children].map((child) => child.className) : null,
       name: header.querySelector('[data-viewer-avatar]')?.previousElementSibling?.className,
       avatar: header.querySelector('[data-viewer-avatar]')?.className,
+      // The avatar hint's dot on the opener: drawn the same in both headers.
+      dot: header.querySelector('[data-viewer-avatar] [data-avatar-hint-dot]')?.className ?? null,
     };
   };
 
@@ -200,6 +204,8 @@ describe('the header is the retrospective header', () => {
     renderSession(createSession(), user);
     const actual = shape(document.querySelector('header') as HTMLElement);
     expect(actual).toEqual(expected);
+    // Compared, not absent from both: the hint shows here, and marks the opener.
+    expect(actual.dot).not.toBeNull();
   });
 
   it("shows the viewer's avatar at every width for a participant, from 360px for a facilitator", () => {

@@ -33,6 +33,10 @@ interface Props {
   viewerAvatarId?: string | null;
   /** Opens the avatar picker from the viewer's own avatar. */
   onOpenAvatarPicker?: () => void;
+  /** True while the one-time avatar hint shows under the header: the viewer's avatar carries its dot. */
+  viewerAvatarMarked?: boolean;
+  /** The viewer's avatar button, which the hint focuses before it opens the picker. */
+  viewerAvatarRef?: React.Ref<HTMLButtonElement>;
 }
 
 const SessionHeader: React.FC<Props> = ({
@@ -52,7 +56,9 @@ const SessionHeader: React.FC<Props> = ({
   isLive = true,
   joinDeniedReason = null,
   viewerAvatarId = null,
-  onOpenAvatarPicker = () => {}
+  onOpenAvatarPicker = () => {},
+  viewerAvatarMarked = false,
+  viewerAvatarRef
 }) => {
   const { t, language } = useTranslation();
   // When the bar is narrower than its phases it scrolls, and nothing would
@@ -230,6 +236,8 @@ const SessionHeader: React.FC<Props> = ({
         avatarId={viewerAvatarId}
         onClick={onOpenAvatarPicker}
         visibilityClass={isFacilitator ? 'hidden min-[360px]:flex' : 'flex'}
+        marked={viewerAvatarMarked}
+        ref={viewerAvatarRef}
       />
     </div>
   </header>

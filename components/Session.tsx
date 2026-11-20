@@ -136,8 +136,10 @@ import { jiraLinkFields, sameJiraLink, withJiraLinkFrom } from './jira/jiraLinkM
 import { avatarColorClasses, participantToneHex } from '../utils/participantColors';
 import Avatar from './common/Avatar';
 import AvatarPicker from './common/AvatarPicker';
+import AvatarDiscoveryHint from './common/AvatarDiscoveryHint';
+import { useAvatarDiscoveryHint } from './common/useAvatarDiscoveryHint';
 import { useOwnAvatar } from './session/useOwnAvatar';
-import { sessionAvatarOf, stampOwnAvatarEntry, viewerInitials } from './session/sessionAvatars';
+import { isAnonymousSession, sessionAvatarOf, stampOwnAvatarEntry, viewerInitials } from './session/sessionAvatars';
 
 const generateLocalId = () => randomId();
 
@@ -1581,6 +1583,17 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // The presence write below goes out once on entering, whatever the
     // session holds, and carries the entry.
     entersWithAWrite: () => !presenceBroadcasted.current,
+  });
+
+  // The one-time hint that the avatar can be changed, under the header, for
+  // someone who never chose one, where a picture would be drawn and saved.
+  const avatarHint = useAvatarDiscoveryHint({
+    userId: currentUser.id,
+    hasChoice: ownAvatar.hasChoice,
+    anonymous: isAnonymousSession(session),
+    blocked: !!deniedReason,
+    pickerOpen: ownAvatar.pickerOpen,
+    openPicker: ownAvatar.openPicker,
   });
 
   // A vote of the viewer's, added or taken back by `write`, and the motion
@@ -4644,6 +4657,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           joinDeniedReason={deniedReason}
           viewerAvatarId={ownAvatar.avatarIdOf(currentUser.id)}
           onOpenAvatarPicker={ownAvatar.openPicker}
+          viewerAvatarMarked={avatarHint.shown}
+          viewerAvatarRef={avatarHint.openerRef}
         />
         <SessionConnectionBanner
           isLive={isLive}
@@ -4651,6 +4666,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           onReturnToLogin={onSessionExpired ?? onExit}
         />
         <SyncStalledBanner />
+        <AvatarDiscoveryHint
+          user={currentUser}
+          hint={avatarHint}
+          visibilityClass={isFacilitator ? 'hidden min-[360px]:flex' : 'flex'}
+        />
         {isRetroTipsOpen && (
           <RetroTipsPanel
             currentPhase={session.phase}

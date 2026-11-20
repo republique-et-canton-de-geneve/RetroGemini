@@ -154,8 +154,16 @@ test.describe('headers fit in both languages', () => {
       // where the header does not draw it at this width.
       const avatar = header.querySelector('[data-viewer-avatar]');
       const avatarShown = !!avatar && avatar.getBoundingClientRect().width > 0;
+      // The one-time avatar hint, a band right under the header for whoever
+      // never chose an avatar: null where it is not drawn (a facilitator's
+      // in a session below 360px, with their avatar).
+      const hint = document.querySelector('[data-avatar-hint]');
+      const hintShown = !!hint && hint.getBoundingClientRect().height > 0;
       return {
         overflow: header.scrollWidth - header.clientWidth,
+        hint: hintShown ? inView(hint) && [...hint!.querySelectorAll('button')].every(inView) : null,
+        hintOverflow: hintShown ? hint!.scrollWidth - hint!.clientWidth : null,
+        pageOverflow: document.documentElement.scrollWidth - width,
         avatar: avatarShown ? inView(avatar) : null,
         switcher: inView(header.querySelector('[data-testid="language-switcher"]')),
         logout: back ? null : inView(button('logout')),
@@ -206,10 +214,21 @@ test.describe('headers fit in both languages', () => {
         const where = `${screen}${state === 'live' ? '' : `, ${state}`} at ${width}px (${language})`;
         expect(m.overflow, `header overflow, ${where}`).toBe(0);
         expect(m.switcher, `language switcher in view, ${where}`).toBe(true);
+        // The avatar hint under the header (nobody here has chosen an
+        // avatar): wherever it is drawn, it and its buttons fit, and nothing
+        // pushes the page sideways.
+        if (m.hint !== null) {
+          expect(m.hint, `avatar hint and its buttons in view, ${where}`).toBe(true);
+          expect(m.hintOverflow, `avatar hint overflow, ${where}`).toBe(0);
+        }
+        expect(m.pageOverflow, `page overflow, ${where}`).toBeLessThanOrEqual(0);
         if (screen === 'dashboard') {
           expect(m.logout, `logout in view, ${where}`).toBe(true);
           // The dashboard's top bar draws the viewer's avatar at every width.
           expect(m.avatar, `own avatar in view, ${where}`).toBe(true);
+          // And the hint with it: the facilitator here never chose one, so
+          // the measurement above is never vacuous.
+          expect(m.hint, `avatar hint drawn, ${where}`).not.toBeNull();
         } else {
           expect(m.invite, `invite in view, ${where}`).toBe(true);
           expect(m.timer, `timer play button in view, ${where}`).toBe(true);
