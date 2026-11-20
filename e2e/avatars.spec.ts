@@ -352,3 +352,95 @@ test.describe('the avatar hint', () => {
     }
   });
 });
+
+/**
+ * The band's own height (45.3). From `sm` it put its three pictures, its
+ * sentence and its two buttons on one row that cannot wrap, which left the
+ * sentence about 250px: the band was 43px tall at 639px and 117px (French) or
+ * 97px (English) at 640px, and a landscape phone (667 × 375) kept 194px of
+ * session under the header and the band. The pictures and the sentence now
+ * show from `lg`, where they fit beside the buttons; below it the band keeps
+ * its title and its two buttons, and its sentence is read, not shown, as on a
+ * phone. Measured on the dashboard, whose top bar draws the opener, and so the
+ * band, at every width.
+ */
+test.describe('the avatar hint’s band from a phone to a desktop', () => {
+  // Below `lg`: a phone, the first `sm` width, a landscape phone, a tablet and the last width before `lg`.
+  const COMPACT = [390, 640, 667, 768, 1023];
+  const FULL = [1024, 1280];
+
+  const bandLayout = (page: Page) =>
+    page.evaluate(async () => {
+      await document.fonts.ready;
+      const band = document.querySelector<HTMLElement>('[data-avatar-hint]');
+      if (!band) throw new Error('no avatar band on this screen');
+      const title = document.getElementById(band.getAttribute('aria-labelledby') ?? '');
+      if (!title) throw new Error('the band names no title');
+      const column = title.parentElement!;
+      const sentence = title.nextElementSibling as HTMLElement;
+      const pictures = band.querySelector('[data-avatar-art]')?.closest('[aria-hidden="true"]');
+      const buttons = [...band.querySelectorAll('button')].map((button) => button.getBoundingClientRect());
+      const style = getComputedStyle(band);
+      // The band's padding and its borders: what it adds around its row.
+      const frame = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+        + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+      const top = Math.min(...buttons.map((button) => button.top));
+      const bottom = Math.max(...buttons.map((button) => button.bottom));
+      const c = column.getBoundingClientRect();
+      const s = sentence.getBoundingClientRect();
+      const lineOf = (element: Element) => parseFloat(getComputedStyle(element).lineHeight);
+      const sentenceShown = getComputedStyle(sentence).position !== 'absolute' && s.height > 1;
+      const p = pictures?.getBoundingClientRect();
+      return {
+        height: band.getBoundingClientRect().height,
+        frame,
+        rowGap: parseFloat(getComputedStyle(band.firstElementChild!).rowGap) || 0,
+        buttons: bottom - top,
+        column: c.height,
+        titleLine: lineOf(title),
+        titleLines: Math.round(title.getBoundingClientRect().height / lineOf(title)),
+        // The words beside the buttons, on one row.
+        oneRow: c.top < bottom && top < c.bottom,
+        pictures: p && p.width > 0 ? p.height : 0,
+        sentenceShown,
+        sentenceLines: sentenceShown ? Math.round(s.height / lineOf(sentence)) : 0,
+        sentence: (sentence.textContent ?? '').trim(),
+      };
+    });
+
+  test('keeps to its title and its buttons below lg, and shows its pictures and its sentence on two lines at most from lg', async ({ page }) => {
+    await createTeam(page, `E2E-Avatar-Band-${Date.now()}`);
+    await expect(page.getByRole('note', { name: 'New: choose your avatar' })).toBeVisible();
+    for (const language of ['en', 'fr'] as const) {
+      await page.getByTestId(`language-option-${language}`).click();
+      await expect(page.locator('html')).toHaveAttribute('lang', language);
+      for (const width of [...COMPACT, ...FULL]) {
+        await page.setViewportSize({ width, height: 900 });
+        const m = await bandLayout(page);
+        const where = `at ${width}px (${language}): ${JSON.stringify(m)}`;
+        expect(m.titleLines, `the band's title on one line, ${where}`).toBe(1);
+        // Still read where it is not shown: the note says what it offers.
+        expect(m.sentence, `the band's sentence in the page, ${where}`).not.toBe('');
+        if (width < 1024) {
+          expect(m.pictures, `pictures shown below lg, ${where}`).toBe(0);
+          expect(m.sentenceShown, `the sentence shown below lg, ${where}`).toBe(false);
+          if (width >= 640) {
+            // One row: no taller than its title's line or its buttons, whichever is taller, and its frame.
+            expect(m.oneRow, `the title beside the buttons, ${where}`).toBe(true);
+            expect(m.height, `the band's height, ${where}`).toBeLessThanOrEqual(Math.max(m.titleLine, m.buttons) + m.frame + 0.5);
+          } else {
+            // A phone: the title, with the buttons beside it or under it when they do not fit, and nothing else.
+            const bound = m.oneRow ? Math.max(m.titleLine, m.buttons) : m.titleLine + m.rowGap + m.buttons;
+            expect(m.height, `the band's height, ${where}`).toBeLessThanOrEqual(bound + m.frame + 0.5);
+          }
+        } else {
+          expect(m.pictures, `pictures shown from lg, ${where}`).toBeGreaterThan(0);
+          expect(m.sentenceShown, `the sentence shown from lg, ${where}`).toBe(true);
+          expect(m.sentenceLines, `the sentence on two lines at most, ${where}`).toBeLessThanOrEqual(2);
+          expect(m.oneRow, `the words beside the buttons, ${where}`).toBe(true);
+          expect(m.height, `the band's height, ${where}`).toBeLessThanOrEqual(Math.max(m.column, m.pictures, m.buttons) + m.frame + 0.5);
+        }
+      }
+    }
+  });
+});

@@ -384,14 +384,17 @@ describe('the avatar hint', () => {
       expect(tokens(sample)).toContain(tone);
       expect(sample.closest('[aria-hidden="true"]')).not.toBeNull();
     }
-    // One wrapper hides the three, shown from sm: on a phone the band keeps
-    // to its title and its buttons.
+    // One wrapper hides the three, shown from lg: below it the band keeps
+    // to its title and its buttons (from sm, beside them, the sentence ran to
+    // five lines; e2e/avatars.spec.ts measures the band's height).
     const wrapper = samples[0].parentElement!.closest('[aria-hidden="true"]') as HTMLElement;
     expect(samples.every((sample) => wrapper.contains(sample))).toBe(true);
-    expect(tokens(wrapper)).toEqual(expect.arrayContaining(['hidden', 'sm:flex']));
-    // The sentence is read on a phone too, where it is not shown.
+    expect(tokens(wrapper)).toEqual(expect.arrayContaining(['hidden', 'lg:flex']));
+    expect(tokens(wrapper)).not.toContain('sm:flex');
+    // The sentence is read below lg too, where it is not shown.
     const sentence = within(note).getByText(/Swap your initials/);
-    expect(tokens(sentence)).toEqual(expect.arrayContaining(['sr-only', 'sm:not-sr-only']));
+    expect(tokens(sentence)).toEqual(expect.arrayContaining(['sr-only', 'lg:not-sr-only']));
+    expect(tokens(sentence)).not.toContain('sm:not-sr-only');
   });
 
   it('reads at AA: every word at 4.5:1, the dot at 3:1 on the header', () => {

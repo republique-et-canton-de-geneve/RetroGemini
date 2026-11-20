@@ -20,6 +20,13 @@ const CHOOSE_CLASS = `${PRIMARY_BUTTON} px-2.5 py-1 text-xs ${FOCUS_CLASS}`;
 // The Jira note's "Got it", at the same size.
 const DISMISS_CLASS = `rounded-lg border border-indigo-300 bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 ${FOCUS_CLASS}`;
 const SAMPLE_CLASS = 'flex rounded-full ring-2 ring-white';
+// The pictures and the sentence show from `lg`, where they fit beside the
+// buttons; below it the band keeps its title and its two buttons, and the
+// sentence is read, not shown. From `sm` they shared a row that cannot wrap
+// with the buttons, which left the sentence about 250px: four or five lines,
+// and a band of 117px at 640px against 43px at 639px (e2e/avatars.spec.ts).
+const SAMPLES_CLASS = 'hidden lg:flex shrink-0';
+const SENTENCE_CLASS = 'sr-only lg:not-sr-only';
 
 /** Three of the pictures, one per family the eye knows at once: an animal, an object, the sky. */
 const SAMPLE_AVATAR_IDS = ['fox', 'rocket', 'moon'] as const;
@@ -75,7 +82,7 @@ const AvatarDiscoveryHint: React.FC<Props> = ({ user, hint, visibilityClass = 'f
       className={`${visibilityClass} ${BAND_CLASS}`}
     >
       <div className={ROW_CLASS}>
-        <span aria-hidden="true" className="hidden sm:flex shrink-0">
+        <span aria-hidden="true" className={SAMPLES_CLASS}>
           {SAMPLE_AVATAR_IDS.map((avatarId, index) => (
             <span key={avatarId} className={index === 0 ? SAMPLE_CLASS : `-ml-1.5 ${SAMPLE_CLASS}`}>
               {/* The picker's tile size: smaller, the drawings blur into each other. */}
@@ -85,7 +92,7 @@ const AvatarDiscoveryHint: React.FC<Props> = ({ user, hint, visibilityClass = 'f
         </span>
         <div className="min-w-0 sm:flex-1">
           <p id={titleId} className="font-semibold text-slate-900">{t('avatars.hint.title')}</p>
-          <p className="sr-only sm:not-sr-only">{t('avatars.hint.body', { count: AVATAR_IDS.length })}</p>
+          <p className={SENTENCE_CLASS}>{t('avatars.hint.body', { count: AVATAR_IDS.length })}</p>
         </div>
         <span className="flex shrink-0 gap-2">
           <button type="button" aria-haspopup="dialog" onClick={hint.choose} className={CHOOSE_CLASS}>
