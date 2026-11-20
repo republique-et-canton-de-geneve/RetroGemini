@@ -391,7 +391,14 @@ rules:
   `animationend`, with a timeout as a net; the lengths the net waits for,
   `EFFECT_LENGTH_MS`, are a copy of the stylesheet's, and
   `__tests__/motionEffects.test.ts` reads `index.css` and requires them
-  equal, so an animation lengthened in one place is not cut off by the other). On the board it is put on
+  equal, so an animation lengthened in one place is not cut off by the other).
+  Where React state puts the class on instead (a dialog's entrance, the avatar
+  picker's swap), its end is listened for in a **layout** effect, in the commit
+  that puts the class on: a passive effect runs after that commit, later still
+  when React's scheduler yields, and an end sent in between was lost, leaving
+  the class on until its net (`modalDialogEntrance.test.tsx` and
+  `avatarPicker.test.tsx` → *in the commit that puts its class on*; a loaded
+  CI runner failed the picker's test so). On the board it is put on
   imperatively: it costs no render of a component of nearly 5,000 lines, a
   remounted element simply has no class, and the unit tests of the screens
   keep seeing the class strings React wrote. `motionAllowed()` reads the

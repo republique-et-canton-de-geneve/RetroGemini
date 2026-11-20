@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import ModalDialog from '../components/common/ModalDialog';
@@ -64,6 +64,32 @@ describe('ModalDialog — the entrance', () => {
     // Added beside the call site's own classes, never in their place.
     expect(dialog.classList).toContain('b');
     expect(veilOf(dialog).classList).toContain('a');
+  });
+
+  it('listens for each end in the commit that puts its class on', () => {
+    // The rule of the avatar picker's swap: a parent's layout effect runs in
+    // the dialog's first commit, after the dialog's own effects, and sends both
+    // animations' ends there. Listened for in a passive effect, which runs
+    // after the commit, those ends were lost and the classes stayed until the
+    // net (ENTRANCE_NET_MS).
+    const EndInTheSameCommit: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+      useLayoutEffect(() => {
+        document.querySelectorAll('.fx-dialog-in, .fx-veil-in').forEach((element) => {
+          element.dispatchEvent(new Event('animationend', { bubbles: true }));
+        });
+      });
+      return <>{children}</>;
+    };
+    render(
+      <EndInTheSameCommit>
+        <ModalDialog label="Test">
+          <button type="button">Ok</button>
+        </ModalDialog>
+      </EndInTheSameCommit>
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.classList).not.toContain('fx-dialog-in');
+    expect(veilOf(dialog).classList).not.toContain('fx-veil-in');
   });
 
   it('takes each class off when that element’s own animation ends, not a descendant’s', () => {

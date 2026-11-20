@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import ModalDialog from './ModalDialog';
 import Avatar from './Avatar';
 import { motionAllowed } from './motion/effects';
@@ -119,9 +119,12 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
 
   // The swap's class comes off when its own animation ends (a native listener:
   // React picks the event's name once from what the environment supports), or
-  // after a while where no animation runs.
+  // after a while where no animation runs. A layout effect, so the listener is
+  // there in the commit that puts the class on: a passive effect runs after it,
+  // later still when React's scheduler yields, and an end sent in between was
+  // lost, leaving the class on until the fallback.
   const swapRef = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!swapping) return;
     const element = swapRef.current;
     const settle = (event: Event) => {

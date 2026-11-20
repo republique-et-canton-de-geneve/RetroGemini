@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isTopDialog, pushDialog } from './modalDialogStack';
 import { useReturnFocus } from './useReturnFocus';
 import { motionAllowed } from './motion/effects';
@@ -114,8 +114,10 @@ const useEntrance = (ref: React.RefObject<HTMLElement | null>) => {
   const [entering, setEntering] = useState(motionAllowed);
   // A native listener rather than React's `onAnimationEnd`: React picks the
   // event's name once, from what the environment supports, and a mismatch
-  // there would leave the class on for good with nothing reporting it.
-  useEffect(() => {
+  // there would leave the class on for good with nothing reporting it. A
+  // layout effect, so the listener is there in the commit that puts the class
+  // on: a passive effect runs after it, and an end sent in between was lost.
+  useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
     const settle = (e: Event) => {

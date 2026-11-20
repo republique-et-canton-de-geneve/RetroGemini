@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import { describe, it, expect, vi, onTestFinished } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import LanguageProvider from '../i18n/LanguageProvider';
@@ -214,6 +214,57 @@ describe('AvatarPicker', () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('listens for the swap’s end in the commit that puts its class on', async () => {
+    // The class and the listener that takes it off must arrive in one commit.
+    // A parent's layout effect runs in that very commit, after its children's
+    // effects, and sends the animation's end there. Listened for in a passive
+    // effect, which runs after the commit (later still when React's scheduler
+    // yields, as on a loaded CI runner), that end was lost and the class stayed
+    // until the fallback timer: CI run 44646041824 failed the test above so.
+    prefersMotion('no-preference');
+    onTestFinished(restoreMotionPreference);
+    let endsSent = 0;
+    const EndInTheSameCommit: React.FC<{ tick: number; children: React.ReactNode }> = ({ children }) => {
+      useLayoutEffect(() => {
+        const swap = document.querySelector('.fx-swap');
+        if (!swap) return;
+        endsSent += 1;
+        swap.dispatchEvent(new Event('animationend', { bubbles: true }));
+      });
+      return <>{children}</>;
+    };
+    const Harness: React.FC = () => {
+      const [tick, setTick] = useState(0);
+      // The write answers from a timer, and the parent renders again in the
+      // same batch as the picker's answer, so both land in one commit.
+      const onPick = () => new Promise<void>((resolve) => {
+        setTimeout(() => { setTick((value) => value + 1); resolve(); }, 0);
+      });
+      return (
+        <LanguageProvider initialLanguage="en">
+          <EndInTheSameCommit tick={tick}>
+            <AvatarPicker
+              open
+              onClose={() => {}}
+              colorClasses={avatarColorClasses('bg-rose-500')}
+              initials="LM"
+              name="Léa Martin"
+              currentAvatarId={null}
+              onPick={onPick}
+            />
+          </EndInTheSameCommit>
+        </LanguageProvider>
+      );
+    };
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Bee' }));
+    await waitFor(() => expect(endsSent).toBeGreaterThan(0));
+    // Heard in its own commit, the end takes the class off at once, long
+    // before the fallback timer (700 ms) would.
+    await waitFor(() => expect(document.querySelector('.fx-swap')).toBeNull(), { timeout: 400 });
+    expect(document.querySelector('[data-avatar-art="bee"]')).not.toBeNull();
   });
 
   it('shows the choice with no swap for a reader who asked for less motion', async () => {
