@@ -56,6 +56,17 @@ jobs:
       # been dead for two days and only manual dispatches were still shipping
       # images. `__tests__/deploymentManifestParity.test.ts` now checks the two
       # sides against each other.
+      #
+      # The image is built from the release's own tag, the commit the release
+      # points at, never from a branch. It used `--ref main`, which builds
+      # whatever main holds when the build starts: run by hand from a branch to
+      # release that branch, this workflow created the branch's release and
+      # then published main's code under the branch's version and as `latest`;
+      # and a second merge within the build's minute was published under the
+      # first one's version. A release that already exists (created from its
+      # branch before the merge) is rebuilt from its tag: the same commit, but
+      # a new build, which may take a newer base image and newer Alpine
+      # packages, and the version tag and `latest` move to it.
       - name: Publish matching Docker image
         env:
           GH_TOKEN: ${{ github.token }}
@@ -63,7 +74,7 @@ jobs:
         run: |
           gh workflow run docker-deploy.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref main \
+            --ref "$VERSION" \
             -f image_tag="$VERSION" \
             -f push_latest=true
 
@@ -87,6 +98,17 @@ jobs:
       # changes the production publish path, and nothing in the agent container
       # or in CI can verify that the registry mirror accepts the attestation
       # index before a release depends on it).
+      #
+      # The SBOM describes the release's commit, the one the image is built
+      # from, not the commit this run started from: the two differ when the
+      # release already existed, and an SBOM of the merge commit would list
+      # the dependency bumps main took since the release, which its image
+      # does not contain.
+      - name: Check out the release tag for the SBOM
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.version.outputs.value }}
+
       - name: Set up Node.js for the SBOM
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:

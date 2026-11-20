@@ -1937,6 +1937,18 @@ user cannot see it, so it does not belong in the user-facing "What's New".
   The release workflow publishes that version when `VERSION` changes on `main`,
   including internal and documentation changes, so catalogue metadata must
   describe the version the merge will publish.
+- **A release builds its image, and its SBOM, from its own tag.**
+  `github-release.yml` creates the GitHub release, its tag on the commit the run
+  started from, then dispatches `docker-deploy.yml` on that tag with the
+  version and `latest`, and generates the SBOM from a checkout of the same tag.
+  Run by hand from a branch (Actions → *Publish GitHub Release* → the branch),
+  it therefore releases that branch whole; with `--ref main`, as it was until
+  45.2, it published main's code under the branch's version. A merge whose
+  release already exists rebuilds the same commit from its tag, as a new build
+  (the base image and its Alpine packages may be newer), and the version tag
+  and `latest` move to it: deploy a tested image by its digest.
+  `__tests__/deploymentManifestParity.test.ts` → *the release builds its image
+  from its own tag*.
 - The Docker deploy action reads `VERSION`, so every deployable change needs a
   bump (user-visible → `X`, internal → `Y`).
 - ⚠️ **Those two rules meet as soon as a version has been deployed, and the

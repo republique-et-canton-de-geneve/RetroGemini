@@ -283,21 +283,19 @@ const dispatchInputsOf = (relativePath: string): Map<string, boolean> => {
   return declared;
 };
 
-type DispatchCall = { caller: string; target: string; inputs: string[] };
+type DispatchCall = { caller: string; target: string; inputs: string[]; ref: string | undefined; line: string };
 
 /**
- * Every `gh workflow run <target>` in a workflow's `run:` blocks, with the input
- * names it passes. Continuation lines are joined first, because the call this
- * exists to check is written across six of them.
+ * A workflow's lines with shell continuations joined, so that a command written
+ * across several lines reads as one. Comment lines are dropped before joining:
+ * a command that is commented out, or merely described in prose, as the
+ * dispatch caller below describes itself, is not a command.
  */
-const dispatchCallsIn = (relativePath: string): DispatchCall[] => {
+const logicalLinesOf = (relativePath: string): string[] => {
   const logicalLines: string[] = [];
   let pending = '';
 
   for (const line of read(relativePath).split('\n')) {
-    // Comment lines are dropped before joining: a dispatch that is commented
-    // out — or merely described in prose, as the caller below describes itself —
-    // is not a call.
     if (/^[^\S\n]*#/.test(line)) continue;
     const continues = /\\[^\S\n]*$/.test(line);
     pending += (pending === '' ? '' : ' ') + line.replace(/\\[^\S\n]*$/, '').trim();
@@ -306,13 +304,22 @@ const dispatchCallsIn = (relativePath: string): DispatchCall[] => {
     pending = '';
   }
   if (pending !== '') logicalLines.push(pending);
+  return logicalLines;
+};
 
-  return logicalLines.flatMap((line) => {
+/**
+ * Every `gh workflow run <target>` in a workflow's `run:` blocks, with the input
+ * names it passes and its `--ref`. Continuation lines are joined first, because
+ * the call this exists to check is written across six of them.
+ */
+const dispatchCallsIn = (relativePath: string): DispatchCall[] => {
+  return logicalLinesOf(relativePath).flatMap((line) => {
     const target = /gh workflow run[^\S\n]+(\S+)/.exec(line)?.[1];
     if (target === undefined) return [];
     const inputs = [...line.matchAll(/(?:--raw-field|--field|-f|-F)(?:=|[^\S\n]+)([A-Za-z_][\w-]*)=/g)]
       .map((match) => match[1]);
-    return [{ caller: relativePath, target, inputs }];
+    const ref = /--ref(?:=|[^\S\n]+)("[^"]*"|\S+)/.exec(line)?.[1];
+    return [{ caller: relativePath, target, inputs, ref, line }];
   });
 };
 
@@ -1104,6 +1111,62 @@ describe('cross-workflow dispatch inputs', () => {
       expect(required.filter((input) => !call.inputs.includes(input))).toEqual([]);
     });
   }
+});
+
+describe('the release builds its image from its own tag', () => {
+  /**
+   * `gh release create "$VERSION" --target "$GITHUB_SHA"` puts the release's
+   * tag on the commit the run started from. The image step dispatched
+   * `docker-deploy.yml` with `--ref main`, which builds whatever main holds
+   * when the build starts. Run by hand from a branch, to release that branch,
+   * the workflow created the branch's release and published main's code under
+   * the branch's version and as `latest`; and a second merge within the
+   * build's minute was published under the first one's version. Building the
+   * tag the release created is what ties the image to the release.
+   */
+  const caller = '.github/workflows/github-release.yml';
+  const workflow = read(caller);
+  const publishes = dispatchCallsIn(caller).filter((call) => call.target === 'docker-deploy.yml');
+  const releaseCreates = logicalLinesOf(caller).filter((line) => /gh release create/.test(line));
+
+  it('creates the release under the version it publishes, on the commit the run started from', () => {
+    // Without `--target`, gh puts a new tag on the default branch's head, and
+    // building that tag builds main again: the defect this suite is about.
+    expect(releaseCreates).toHaveLength(1);
+    expect(releaseCreates[0]).toMatch(/gh release create "\$VERSION"/);
+    expect(releaseCreates[0]).toMatch(/--target "\$GITHUB_SHA"/);
+  });
+
+  it('dispatches the image build once', () => {
+    expect(publishes).toHaveLength(1);
+  });
+
+  it('builds the image from the release tag, never from a branch', () => {
+    expect(
+      publishes[0]?.ref,
+      `${caller} dispatches docker-deploy.yml on ${publishes[0]?.ref ?? 'no --ref'}: `
+        + 'the image must be built from the tag the release created, "$VERSION"',
+    ).toBe('"$VERSION"');
+  });
+
+  it('tags the image with the same version', () => {
+    expect(publishes[0]?.line).toMatch(/-f image_tag="\$VERSION"/);
+  });
+
+  it('generates the SBOM from the release tag too', () => {
+    // The image and its SBOM must describe one commit. They differ from the
+    // run's own commit when the release already existed (created from its
+    // branch before the merge): an SBOM of the merge commit lists the
+    // dependency bumps main took since then, which the image does not contain.
+    const tagCheckout = workflow.search(
+      /uses: actions\/checkout@[^\n]*\n[^\S\n]*with:\n[^\S\n]*ref: refs\/tags\/\$\{\{ steps\.version\.outputs\.value \}\}/,
+    );
+    const lastCheckout = workflow.lastIndexOf('uses: actions/checkout@');
+    const sbom = workflow.indexOf('npm sbom');
+    expect(tagCheckout, `${caller} never checks out refs/tags/<version>`).toBeGreaterThan(-1);
+    expect(lastCheckout, 'another checkout comes after the release tag one').toBe(tagCheckout);
+    expect(sbom, 'the SBOM is generated before the release tag is checked out').toBeGreaterThan(tagCheckout);
+  });
 });
 
 describe('third-party action pinning (audit H37)', () => {
