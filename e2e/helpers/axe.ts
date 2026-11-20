@@ -56,6 +56,9 @@ import { expect, type Locator, type Page, type TestInfo } from '@playwright/test
 export const BASELINE: Record<string, number> = {
   // e2e/accessibility-audit.spec.ts
   login: 0,
+  // e2e/login-team-picker.spec.ts: the team list as tiles, in French (45.3).
+  // The audit above walks whatever list the server holds, which may be short.
+  'login-team-grid': 0,
   'create-team': 0,
   dashboard: 0,
   'retro-icebreaker': 0,

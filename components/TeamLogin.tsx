@@ -53,10 +53,35 @@ const ERROR_BOX = 'flex items-start gap-2 rounded-lg border border-rose-200 bg-r
 const NOTICE_BOX = 'flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 mb-4 text-sm text-amber-900';
 const SUCCESS_BOX = 'flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 mb-4 text-sm text-emerald-800';
 const BOX_ICON = 'material-symbols-outlined text-lg! leading-5! shrink-0';
-// The team list: rows in one frame, not a wall of boxes.
 // "Joining as …", which only a member-email invite link shows.
 const JOINING_AS = 'text-xs text-slate-700 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2';
+// The column every view shares, and its one card: the forms keep this width
+// at every size.
+const COLUMN = 'w-full max-w-md';
+const CARD = 'bg-white border border-slate-200 rounded-2xl shadow-sm p-6 sm:p-8';
+// The team list: rows in one frame, not a wall of boxes, in a box that scrolls.
 const TEAM_ROWS = 'rounded-xl border border-slate-200 divide-y divide-slate-200 overflow-hidden';
+const LIST_BOX = 'overflow-y-auto max-h-[min(26rem,52vh)]';
+const TEAM_NAME = 'block font-semibold text-slate-900 truncate';
+// A list of six teams or more (the search field's threshold) uses the width
+// from `lg`: the Dashboard's (`max-w-6xl`). The column, the card, the list and
+// its box form one flex chain capped at what the viewport leaves under the top
+// bar (46px) and the main's padding (72px), so the page never scrolls on top
+// of the list; the box, the one link of the chain that scrolls, is the one that
+// shrinks. Never under 30rem: in a window that short the page scrolls instead,
+// and the box keeps a few rows.
+const WIDE_COLUMN = `${COLUMN} lg:max-w-6xl lg:flex lg:flex-col lg:max-h-[max(calc(100dvh-7.5rem),30rem)]`;
+const WIDE_CARD = `${CARD} lg:flex lg:flex-col lg:min-h-0`;
+const WIDE_LIST_BOX = `${LIST_BOX} lg:max-h-none`;
+// Its rows become tiles, two per row, read row by row: the visual order is the
+// DOM order, which is also the tab order (WCAG 1.3.2, 2.4.3). Never
+// `grid-flow-dense` nor an `order-*`, which place a tile out of that order. Two
+// tracks, not `auto-fill`: with overlay scrollbars (macOS) a full-width card
+// holds three 22rem tracks, and the names would be cut again.
+const TEAM_GRID = `${TEAM_ROWS} lg:grid lg:grid-cols-2 lg:gap-2 lg:rounded-none lg:border-0 lg:divide-y-0`;
+const TEAM_TILE = 'lg:rounded-xl lg:border lg:border-slate-200';
+// A tile's name takes a second line rather than being cut.
+const WIDE_TEAM_NAME = `${TEAM_NAME} lg:whitespace-normal lg:line-clamp-2 lg:break-words`;
 
 const MESSAGE_LOOK = {
   error: { box: ERROR_BOX, icon: 'error' },
@@ -634,6 +659,12 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     return role;
   };
 
+  // One threshold decides the search field and the wide list. It reads every
+  // team, never the matches, so typing a search never changes the width; a
+  // short, loading, empty or failed list, and every form, stay narrow.
+  const searchable = teams.length > 5;
+  const wideList = view === 'LIST' && searchable;
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* The interface language, reachable from every view before anyone
@@ -644,7 +675,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
         <LanguageSwitcher />
       </div>
       <main className="flex-1 flex justify-center px-4 pt-2 pb-16 sm:items-center">
-        <div className="w-full max-w-md">
+        <div className={wideList ? WIDE_COLUMN : COLUMN}>
           {/* The product's name and mark, above the one card of the view. */}
           <div className="flex flex-col items-center text-center mb-6">
             <span
@@ -657,10 +688,10 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
             <p className="mt-1 max-w-xs text-sm text-slate-600">{t('login.brand.tagline')}</p>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 sm:p-8">
-            
+          <div className={wideList ? WIDE_CARD : CARD}>
+
             {view === 'LIST' && (
-                <div className="flex flex-col">
+                <div className={wideList ? 'flex flex-col lg:min-h-0' : 'flex flex-col'}>
                     {/* The reset-link handler reports failures by setting `error`
                         and dropping the user back here, so this view has to
                         render it — otherwise the explanation is set into state
@@ -705,8 +736,8 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                         </div>
                     ) : (
                         <>
-                        {teams.length > 5 && (
-                            <div className="relative mb-4">
+                        {searchable && (
+                            <div className="relative mb-4 lg:max-w-md">
                                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xl!" aria-hidden="true">search</span>
                                 <input
                                     type="text"
@@ -755,18 +786,30 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                     <button
                                         key={team.id}
                                         onClick={() => { setSelectedTeam(team); setView('LOGIN'); setError(null); setPassword(''); }}
-                                        className="w-full bg-white hover:bg-slate-50 px-3.5 py-3 text-left flex items-center gap-3 group transition-colors focus-visible:bg-slate-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-600"
+                                        className={`w-full bg-white hover:bg-slate-50 px-3.5 py-3 text-left flex items-center gap-3 group transition-colors focus-visible:bg-slate-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-600 ${wideList ? TEAM_TILE : ''}`}
                                     >
                                         <span className="w-9 h-9 shrink-0 rounded-lg bg-indigo-50 text-indigo-700 text-sm font-semibold flex items-center justify-center">
                                             {team.name.substring(0,2).toUpperCase()}
                                         </span>
                                         <span className="grow min-w-0">
-                                            <span className="block font-semibold text-slate-900 truncate">{team.name}</span>
-                                            {/* One line from `sm` up, two on a phone. */}
-                                            <span className="block sm:flex sm:gap-x-1.5 text-xs text-slate-500">
-                                                <span className="block sm:inline">{tp('login.list.memberCount', team.memberCount)}</span>
-                                                <span className="hidden sm:inline" aria-hidden="true">·</span>
-                                                <span className="block sm:inline">{t('login.list.lastActive', { when: formatLastConnection(team.lastConnectionDate) })}</span>
+                                            <span className={wideList ? WIDE_TEAM_NAME : TEAM_NAME}>{team.name}</span>
+                                            {/* Each part is whole: it wraps as a unit, never inside
+                                                ("7 membres" never splits). From `sm` the parts share a
+                                                line when it holds them; on a phone the last activity
+                                                goes under the count, and its only break falls between
+                                                the label and the value (which may break too at 320px,
+                                                rather than overflow). The separator belongs to the part
+                                                it introduces and sits in the gap before it: a part that
+                                                wraps to the start of a line takes it into the clipped
+                                                margin, so no line ends on a "·". */}
+                                            <span className="block sm:flex sm:flex-wrap sm:gap-x-4 sm:overflow-hidden text-xs text-slate-500">
+                                                <span className="block whitespace-nowrap">{tp('login.list.memberCount', team.memberCount)}</span>
+                                                <span className="block sm:-ml-4 sm:whitespace-nowrap">
+                                                    <span className="hidden sm:inline-block sm:w-4 sm:text-center" aria-hidden="true">·</span>
+                                                    {tRich('login.list.lastActive', {
+                                                        when: <span className="min-[22.5rem]:whitespace-nowrap">{formatLastConnection(team.lastConnectionDate)}</span>,
+                                                    })}
+                                                </span>
                                             </span>
                                         </span>
                                         {/* A filled star for a favourite, an outline otherwise: the
@@ -789,16 +832,27 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             const filtered = teams.filter(t => !searchQuery || t.name.toLowerCase().includes(searchQuery.toLowerCase()));
                             const favoriteTeams = filtered.filter(t => favoriteTeamIds.includes(t.id));
                             const otherTeams = filtered.filter(t => !favoriteTeamIds.includes(t.id));
+                            const noMatch = searchQuery !== '' && filtered.length === 0;
+                            const rows = wideList ? TEAM_GRID : TEAM_ROWS;
 
                             return (
-                                <div className="overflow-y-auto max-h-[min(26rem,52vh)]">
+                                <div className={wideList ? WIDE_LIST_BOX : LIST_BOX}>
+                                    {/* In the list whenever the search field is, empty until a
+                                        search matches nothing: a status region added at the
+                                        moment it has something to say is not reliably announced.
+                                        Visually hidden while empty, so it takes no room. */}
+                                    {searchable && (
+                                        <p role="status" className={noMatch ? 'py-8 text-center text-sm text-slate-600' : 'sr-only'}>
+                                            {noMatch ? t('login.list.noMatch', { query: searchQuery }) : ''}
+                                        </p>
+                                    )}
                                     {favoriteTeams.length > 0 && (
                                         <>
                                             <div className="flex items-center gap-1.5 mb-2 text-amber-500">
                                                 <Star fill={1} className="w-3.5 h-3.5" />
                                                 <span className="text-xs font-semibold text-slate-500">{t('login.list.favorites')}</span>
                                             </div>
-                                            <div className={`${TEAM_ROWS} mb-4`}>
+                                            <div className={`${rows} mb-4`}>
                                                 {favoriteTeams.map(renderTeamCard)}
                                             </div>
                                             {otherTeams.length > 0 && (
@@ -809,7 +863,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         </>
                                     )}
                                     {otherTeams.length > 0 && (
-                                        <div className={TEAM_ROWS}>
+                                        <div className={rows}>
                                             {otherTeams.map(renderTeamCard)}
                                         </div>
                                     )}

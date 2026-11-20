@@ -310,7 +310,14 @@ another look. Nine rules:
   no colour per verb, no gradient and no control faded by an opacity, which
   `__tests__/superAdminConsoleLook.test.tsx` refuses and measures. Reuse the
   recipe of the screen you are on before writing a new one: one primary button
-  per area, a secondary or a quiet one beside it.
+  per area, a secondary or a quiet one beside it. The login screen's team list
+  is its one wide view: from `lg`, six teams or more (the search field's
+  threshold, read from every team, never from the matches) take the
+  Dashboard's width (`max-w-6xl`) as tiles in exactly two columns, in DOM
+  order (never `grid-flow-dense` nor `order-*`), in a flex chain capped at
+  the viewport so the page never scrolls on top of the list, while every form,
+  a phone and a short list keep the narrow card (`WIDE_COLUMN` and its
+  siblings; `e2e/login-team-picker.spec.ts` measures it).
 - **A control's edge is slate-400, not slate-300** (3.41:1 on white against
   1.59:1). A text field's, a select's, a textarea's border and a switch's off
   track are often the only thing that shows where the control is (1.4.11); a
