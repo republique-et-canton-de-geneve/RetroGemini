@@ -5,6 +5,7 @@ import TeamLogin from '../components/TeamLogin';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { InviteAutoJoinError } from '../services/dataService';
 import type { Team, TeamSummary } from '../types';
+import { breakStorage } from './helpers/brokenStorage';
 
 /**
  * The layout of the team picker, read from its classes: jsdom lays out
@@ -51,8 +52,9 @@ const fullTeam = {
   globalActions: [],
 } as unknown as Team;
 
-// The classes only the wide list carries, one per element of the chain.
-const WIDE_ONLY = ['lg:max-w-6xl', 'lg:min-h-0', 'lg:max-h-none', 'lg:grid-cols-2', 'lg:border', 'lg:line-clamp-2'];
+// The classes only the wide list carries, one per element of the chain. A
+// team's name is not one of them: it takes two lines in every list.
+const WIDE_ONLY = ['lg:max-w-6xl', 'lg:min-h-0', 'lg:max-h-none', 'lg:grid-cols-2', 'lg:border'];
 
 const classTokens = (): Set<string> =>
   new Set(
@@ -130,11 +132,10 @@ describe('the team picker of six teams or more', () => {
 
     const tile = tileOf('Team A');
     expect(tile.className.split(/\s+/)).toEqual(expect.arrayContaining(['lg:rounded-xl', 'lg:border', 'lg:border-slate-200']));
-    const name = within(tile).getByText('Team A');
-    // Cut on one line below lg, as before; whole on up to two lines from lg.
-    expect(name.className.split(/\s+/)).toEqual(
-      expect.arrayContaining(['truncate', 'lg:whitespace-normal', 'lg:line-clamp-2', 'lg:break-words'])
-    );
+    const name = within(tile).getByText('Team A').className.split(/\s+/);
+    // Whole on up to two lines, then an ellipsis, as a row's name.
+    expect(name).toEqual(expect.arrayContaining(['line-clamp-2', 'wrap-break-word']));
+    expect(name).not.toContain('truncate');
 
     // Reading order is the DOM order: nothing reorders a tile.
     const tokens = [...classTokens()];
@@ -233,6 +234,31 @@ describe('every other state of the screen keeps the narrow card', () => {
   });
 });
 
+describe("a team's name", () => {
+  // Two lines, then an ellipsis, and a long word breaks rather than overflow:
+  // on a phone, in a short list and on a tile alike. A row's name was cut on
+  // its first line ("Équipe Plateforme…" at 390px) where a tile's took two;
+  // `e2e/login-team-picker.spec.ts` measures a long one on a phone.
+  const nameClasses = (name: string) => screen.getByText(name, { selector: 'span' }).className.split(/\s+/);
+
+  it('takes two lines in a short list, by the rule a tile follows', async () => {
+    mocks.listTeams.mockResolvedValue(teamsOf(5));
+    const { unmount } = render(<TeamLogin onLogin={vi.fn()} />);
+    await screen.findByText('Team A');
+    const row = nameClasses('Team A');
+    expect(row).toEqual(expect.arrayContaining(['line-clamp-2', 'wrap-break-word']));
+    expect(row).not.toContain('truncate');
+    // Nothing of its own at a breakpoint: the same rule at every width.
+    expect(row.filter((token) => token.includes(':'))).toEqual([]);
+    unmount();
+
+    mocks.listTeams.mockResolvedValue(teamsOf(8));
+    render(<TeamLogin onLogin={vi.fn()} />);
+    await screen.findByText('Team A');
+    expect(nameClasses('Team A')).toEqual(row);
+  });
+});
+
 describe("a team's meta line", () => {
   it('keeps each part whole: the count, and the last activity with its value', async () => {
     render(<TeamLogin onLogin={vi.fn()} />);
@@ -319,6 +345,27 @@ describe('a search that matches nothing', () => {
     mocks.listTeams.mockResolvedValue(teamsOf(5));
     render(<TeamLogin onLogin={vi.fn()} />);
     await screen.findByText('Team A');
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('stops filtering once the list is too short to be searched', async () => {
+    // The list is read again at every change of view: a team deleted
+    // meanwhile brings it under the field's threshold, and the search, left
+    // with no field to clear it and no status, hid every team.
+    mocks.listTeams.mockResolvedValueOnce(teamsOf(8)).mockResolvedValue(teamsOf(5));
+    render(<TeamLogin onLogin={vi.fn()} />);
+    fireEvent.change(await screen.findByPlaceholderText('Search teams...'), { target: { value: 'zzz' } });
+    expect(screen.queryByText('Team A')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '+ New Team' }));
+    await screen.findByRole('heading', { name: 'Create New Team' });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await screen.findByRole('heading', { name: 'Your Teams' });
+
+    for (const name of ['Team A', 'Team B', 'Team C', 'Team D', 'Team E']) {
+      expect(await screen.findByText(name)).toBeTruthy();
+    }
+    expect(screen.queryByPlaceholderText('Search teams...')).toBeNull();
     expect(screen.queryByRole('status')).toBeNull();
   });
 });
@@ -409,5 +456,63 @@ describe('the favourite star', () => {
 
     fireEvent.click(within(teamButton('Team A')).getByText('7 members'));
     expect(await screen.findByRole('heading', { name: 'Login to Team A' })).toBeTruthy();
+  });
+});
+
+/**
+ * The favourites are kept in this browser (`retro-favorite-teams`, a JSON
+ * array of team ids), where another tab, an older release or a hand edit can
+ * leave anything. They are read as data: a value that is not a list holds no
+ * favourite, and an entry that is not an id is none. A storage that refuses
+ * (a private window, blocked site data) keeps them for the visit. A stored
+ * object used to blank the login screen as soon as the teams arrived, and a
+ * refused write blanked it at the first star.
+ */
+describe('the favourites this browser keeps', () => {
+  const stored = (): unknown => JSON.parse(localStorage.getItem('retro-favorite-teams') ?? 'null');
+
+  it.each([
+    ['an object', '{"a":1}'],
+    ['a string', '"x"'],
+  ])('reads %s as no favourite, and stars a team over it', async (_, value) => {
+    localStorage.setItem('retro-favorite-teams', value);
+    render(<TeamLogin onLogin={vi.fn()} />);
+    await screen.findByText('Team A');
+    expect(screen.queryByText('Favorites')).toBeNull();
+    expect(screen.queryAllByRole('switch', { checked: true })).toEqual([]);
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Add Team B to favorites' }));
+    expect(screen.getByRole('switch', { name: 'Remove Team B from favorites' }).getAttribute('aria-checked')).toBe('true');
+    expect(stored()).toEqual(['team-1']);
+  });
+
+  it('keeps the team ids of a list, and drops what is not one', async () => {
+    localStorage.setItem('retro-favorite-teams', '[1,"team-1"]');
+    render(<TeamLogin onLogin={vi.fn()} />);
+    await screen.findByText('Team A');
+    expect(screen.getAllByRole('switch', { checked: true })).toEqual([
+      screen.getByRole('switch', { name: 'Remove Team B from favorites' }),
+    ]);
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Add Team A to favorites' }));
+    expect(stored()).toEqual(['team-1', 'team-0']);
+  });
+
+  it('keeps the favourites for the visit when storage refuses', async () => {
+    // Every read and write throws, as in a private window or with blocked site data.
+    const restore = breakStorage();
+    try {
+      render(<TeamLogin onLogin={vi.fn()} />);
+      await screen.findByText('Team A');
+      fireEvent.click(screen.getByRole('switch', { name: 'Add Team B to favorites' }));
+      expect(screen.getByRole('switch', { name: 'Remove Team B from favorites' }).getAttribute('aria-checked')).toBe('true');
+      expect(screen.getByText('Favorites')).toBeTruthy();
+
+      fireEvent.click(screen.getByRole('switch', { name: 'Remove Team B from favorites' }));
+      expect(screen.getByRole('switch', { name: 'Add Team B to favorites' }).getAttribute('aria-checked')).toBe('false');
+      expect(screen.queryByText('Favorites')).toBeNull();
+    } finally {
+      restore();
+    }
   });
 });

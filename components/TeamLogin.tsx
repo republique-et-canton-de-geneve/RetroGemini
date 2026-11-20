@@ -62,7 +62,11 @@ const CARD = 'bg-white border border-slate-200 rounded-2xl shadow-sm p-6 sm:p-8'
 // The team list: rows in one frame, not a wall of boxes, in a box that scrolls.
 const TEAM_ROWS = 'rounded-xl border border-slate-200 divide-y divide-slate-200 overflow-hidden';
 const LIST_BOX = 'overflow-y-auto max-h-[min(26rem,52vh)]';
-const TEAM_NAME = 'block font-semibold text-slate-900 truncate';
+// A team's name takes a second line rather than being cut, then ends in an
+// ellipsis, and a long word breaks rather than overflow: one rule for a phone's
+// rows, a short list's and the tiles. Cut on one line, a phone showed
+// "Équipe Plateforme…" at 390px.
+const TEAM_NAME = 'font-semibold text-slate-900 line-clamp-2 wrap-break-word';
 // A team's row: the button that opens the team, its favourite star, and a
 // chevron. The star is a button of its own after the team's, never inside it:
 // inside, no Tab reached it (WCAG 2.1.1) and the team's name read its label.
@@ -92,14 +96,40 @@ const WIDE_LIST_BOX = `${LIST_BOX} lg:max-h-none`;
 const TEAM_GRID = `${TEAM_ROWS} lg:grid lg:grid-cols-2 lg:gap-2 lg:rounded-none lg:border-0 lg:divide-y-0`;
 const TEAM_TILE = `${TEAM_ROW} lg:rounded-xl lg:border lg:border-slate-200`;
 const TILE_OPEN = `${TEAM_OPEN} lg:after:rounded-xl`;
-// A tile's name takes a second line rather than being cut.
-const WIDE_TEAM_NAME = `${TEAM_NAME} lg:whitespace-normal lg:line-clamp-2 lg:break-words`;
 
 const MESSAGE_LOOK = {
   error: { box: ERROR_BOX, icon: 'error' },
   notice: { box: NOTICE_BOX, icon: 'info' },
   success: { box: SUCCESS_BOX, icon: 'check_circle' },
 } as const;
+
+/** Where this browser keeps its favourite teams: a JSON array of team ids. */
+const FAVORITES_STORAGE_KEY = 'retro-favorite-teams';
+
+/**
+ * The favourite teams, read as data: another tab, an older release or a hand
+ * edit can leave anything under the key. A value that is not a list holds no
+ * favourite, and an entry that is not an id is none. Storage can throw (a
+ * private window, blocked site data), which reads as no favourite too.
+ */
+const readFavoriteTeamIds = (): string[] => {
+  try {
+    const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
+/** Keeps the favourites; when storage refuses, they last for the visit. */
+const storeFavoriteTeamIds = (ids: string[]): void => {
+  try {
+    localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    // The list on screen is the visit's.
+  }
+};
 
 /**
  * A banner of one of the views: the tone's icon (decoration) and the sentence.
@@ -181,14 +211,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [favoriteTeamIds, setFavoriteTeamIds] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem('retro-favorite-teams');
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [favoriteTeamIds, setFavoriteTeamIds] = useState<string[]>(readFavoriteTeamIds);
 
   // Each team's star, by team id. A star moves its team between the favourites
   // and the other teams, so React draws that row again in the other section and
@@ -201,15 +224,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
   const focusStarOf = useRef<string | null>(null);
 
   const toggleFavorite = (teamId: string, e: React.MouseEvent<HTMLButtonElement>) => {
-    e.stopPropagation();
     if (e.detail === 0 && e.currentTarget === document.activeElement) focusStarOf.current = teamId;
-    setFavoriteTeamIds(prev => {
-      const next = prev.includes(teamId)
-        ? prev.filter(id => id !== teamId)
-        : [...prev, teamId];
-      localStorage.setItem('retro-favorite-teams', JSON.stringify(next));
-      return next;
-    });
+    // Written here, never in a state updater: React calls an updater while it
+    // renders, and a write that throws there (blocked site data) blanked the
+    // screen. Each click is drawn before the next one is handled, so the list
+    // on screen is the current one.
+    const next = favoriteTeamIds.includes(teamId)
+      ? favoriteTeamIds.filter(id => id !== teamId)
+      : [...favoriteTeamIds, teamId];
+    setFavoriteTeamIds(next);
+    storeFavoriteTeamIds(next);
   };
 
   // A layout effect, so the focus moves in the commit that drew the star again.
@@ -824,7 +848,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                                 {team.name.substring(0,2).toUpperCase()}
                                             </span>
                                             <span className="grow min-w-0">
-                                                <span className={wideList ? WIDE_TEAM_NAME : TEAM_NAME}>{team.name}</span>
+                                                <span className={TEAM_NAME}>{team.name}</span>
                                                 {/* Each part is whole: it wraps as a unit, never inside
                                                     ("7 membres" never splits). From `sm` the parts share a
                                                     line when it holds them; on a phone the last activity
@@ -870,10 +894,15 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                 );
                             };
 
-                            const filtered = teams.filter(t => !searchQuery || t.name.toLowerCase().includes(searchQuery.toLowerCase()));
+                            // The query filters only while its field is drawn: a list
+                            // read again under the threshold (a team deleted meanwhile)
+                            // would otherwise stay filtered, with no field to clear it
+                            // and no status saying why teams are missing.
+                            const query = searchable ? searchQuery : '';
+                            const filtered = teams.filter(t => !query || t.name.toLowerCase().includes(query.toLowerCase()));
                             const favoriteTeams = filtered.filter(t => favoriteTeamIds.includes(t.id));
                             const otherTeams = filtered.filter(t => !favoriteTeamIds.includes(t.id));
-                            const noMatch = searchQuery !== '' && filtered.length === 0;
+                            const noMatch = query !== '' && filtered.length === 0;
                             const rows = wideList ? TEAM_GRID : TEAM_ROWS;
 
                             return (
@@ -884,7 +913,7 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                                         Visually hidden while empty, so it takes no room. */}
                                     {searchable && (
                                         <p role="status" className={noMatch ? 'py-8 text-center text-sm text-slate-600' : 'sr-only'}>
-                                            {noMatch ? t('login.list.noMatch', { query: searchQuery }) : ''}
+                                            {noMatch ? t('login.list.noMatch', { query }) : ''}
                                         </p>
                                     )}
                                     {favoriteTeams.length > 0 && (
