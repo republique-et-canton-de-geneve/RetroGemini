@@ -84,7 +84,7 @@ const frenchQuestion = (start: string) => {
   return found;
 };
 
-/** The two default questions, and the three longest French ones. */
+/** The two default questions, and the three French ones that take the most lines at 320px. */
 const QUESTIONS: ReadonlyArray<readonly [string, string]> = [
   ['the French default question', ICEBREAKER_QUESTIONS.fr[0]],
   ['the English default question', ICEBREAKER_QUESTIONS.en[0]],

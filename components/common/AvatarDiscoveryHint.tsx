@@ -23,8 +23,9 @@ const SAMPLE_CLASS = 'flex rounded-full ring-2 ring-white';
 // The pictures and the sentence show from `lg`, where they fit beside the
 // buttons; below it the band keeps its title and its two buttons, and the
 // sentence is read, not shown. From `sm` they shared a row that cannot wrap
-// with the buttons, which left the sentence about 250px: four or five lines,
-// and a band of 117px at 640px against 43px at 639px (e2e/avatars.spec.ts).
+// with the buttons, which left the sentence about 250px wide: at 640px it took
+// three lines in English and four in French, and the band 97px and 117px,
+// against 43px at 639px (e2e/avatars.spec.ts measures the band's height).
 const SAMPLES_CLASS = 'hidden lg:flex shrink-0';
 const SENTENCE_CLASS = 'sr-only lg:not-sr-only';
 

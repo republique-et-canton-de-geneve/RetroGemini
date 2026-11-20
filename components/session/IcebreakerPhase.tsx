@@ -77,9 +77,11 @@ const IcebreakerPhase: React.FC<Props> = ({
               {/* Below `sm` the field is as tall as the tallest built-in
                   question of the retro's language, or as its own words (its
                   placeholder while it is empty) when they are taller: it never
-                  scrolls inside itself, in every browser (`field-sizing` is not
-                  in all of them), and "Random" never moves the buttons from
-                  under the finger. These copies, never seen nor read, share the
+                  scrolls inside itself, with no `field-sizing` (a plain grid;
+                  only Chromium measures it), and "Random" does not move the
+                  buttons from one built-in question to the next (a typed
+                  question taller than all of them grows the field, and the
+                  next "Random" shrinks it back). These copies, never seen nor read, share the
                   field's grid cell, and the tallest gives the cell its height.
                   The space keeps a last empty line, which a copy ending in a
                   line break would not draw. */}

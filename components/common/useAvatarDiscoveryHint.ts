@@ -51,8 +51,11 @@ interface Decision {
  *   render.
  * - **Once gone, gone for the mount.** A choice arriving, the session turning
  *   anonymous, a blocked credential, the picker opening, or "Got it": the band
- *   leaves and nothing brings it back while the screen lasts, so it never
- *   moves the board while people work.
+ *   leaves and nothing brings it back while the screen lasts. Its going moves
+ *   what is under it up once, and three of those reasons can come from
+ *   outside the screen while people work (a choice made in another browser,
+ *   the session made anonymous, a revoked credential); the latch keeps it to
+ *   once.
  * - **Remembered** (the member id on the seen list) by its two buttons and
  *   whenever the picker opens, from anywhere. A choice needs no write: it is
  *   the server's, and stops the hint in every browser.

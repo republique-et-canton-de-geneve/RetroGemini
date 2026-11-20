@@ -20,7 +20,8 @@ import { effectivePair, tokenContrast } from './helpers/tailwindTheme';
  * a cleared one counting as one), where a picture would be drawn (not in an
  * anonymous session) and could be saved (not with a revoked credential). It
  * is decided at the first render and, once gone, never comes back in the
- * same mount, so it never moves the board while people work. It is
+ * same mount: its going moves what is under it up once, and it never comes
+ * back to push the board down again. It is
  * remembered per member and browser through the one-time notes' seen list,
  * under its own key: by its two buttons, and whenever the picker opens.
  */
@@ -386,7 +387,7 @@ describe('the avatar hint', () => {
     }
     // One wrapper hides the three, shown from lg: below it the band keeps
     // to its title and its buttons (from sm, beside them, the sentence ran to
-    // five lines; e2e/avatars.spec.ts measures the band's height).
+    // four lines in French; e2e/avatars.spec.ts measures the band's height).
     const wrapper = samples[0].parentElement!.closest('[aria-hidden="true"]') as HTMLElement;
     expect(samples.every((sample) => wrapper.contains(sample))).toBe(true);
     expect(tokens(wrapper)).toEqual(expect.arrayContaining(['hidden', 'lg:flex']));
