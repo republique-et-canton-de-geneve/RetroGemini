@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App from '../App';
 import { dataService } from '../services/dataService';
-import { clearSessionRevoked } from '../services/sessionRevocation';
+import { clearSessionRevoked, markSessionRevoked } from '../services/sessionRevocation';
 import type { MemberAvatarChoice, Team, User } from '../types';
 
 /**
@@ -198,7 +198,8 @@ describe('App — an avatar picked from the dashboard', () => {
 });
 
 // The one-time hint that the avatar can be changed (AGENTS.md, *Avatars*),
-// under the dashboard's top bar: App says whether the viewer has a choice.
+// under the dashboard's top bar: App says whether the viewer has a choice,
+// and whether the credential was revoked (the picker could not save).
 describe('App — the avatar hint on the dashboard', () => {
   const HINT = 'New: choose your avatar';
   const HINT_KEY = 'retro-avatar-hint-seen';
@@ -279,6 +280,48 @@ describe('App — the avatar hint on the dashboard', () => {
     }));
     render(<App />);
     expect(await screen.findByRole('note', { name: HINT })).toBeInTheDocument();
+  });
+
+  // The person found the picker on their own, from the top bar's avatar:
+  // remembered, and the band does not come back when the picker closes.
+  it("goes, remembered, when the picker opens from the top bar's avatar, and closing the picker does not bring it back", async () => {
+    await openDashboard();
+    expect(screen.getByRole('note', { name: HINT })).toBeInTheDocument();
+    const avatar = screen.getByRole('button', { name: 'FR, Fran, choose my avatar' });
+    expect(avatar).toBe(opener());
+
+    fireEvent.click(avatar);
+    const dialog = screen.getByRole('dialog', { name: 'Choose my avatar' });
+    expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+    expect(opener().querySelector('[data-avatar-hint-dot]')).toBeNull();
+    expect(JSON.parse(localStorage.getItem(HINT_KEY) ?? 'null')).toEqual(['fac-1']);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+    expect(opener().querySelector('[data-avatar-hint-dot]')).toBeNull();
+  });
+
+  // The team's password was changed under the dashboard: the picker could not
+  // save a choice, so the band goes. Another tab's new token clears the
+  // revocation, and the band stays gone: nothing brings it back while the
+  // screen lasts. It was never dismissed, so it is not remembered.
+  it('goes when the session is revoked, unwritten, and stays gone once the revocation is cleared', async () => {
+    await openDashboard();
+    expect(screen.getByRole('note', { name: HINT })).toBeInTheDocument();
+    expect(opener().querySelector('[data-avatar-hint-dot]')).not.toBeNull();
+
+    act(() => { markSessionRevoked(); });
+    // The dashboard says why, with the way out.
+    expect(screen.getByRole('button', { name: 'Log in again' })).toBeInTheDocument();
+    expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+    expect(opener().querySelector('[data-avatar-hint-dot]')).toBeNull();
+
+    act(() => { clearSessionRevoked(); });
+    expect(screen.queryByRole('button', { name: 'Log in again' })).toBeNull();
+    expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+    expect(opener().querySelector('[data-avatar-hint-dot]')).toBeNull();
+    expect(localStorage.getItem(HINT_KEY)).toBeNull();
   });
 
   it('shows nothing once signed out', async () => {

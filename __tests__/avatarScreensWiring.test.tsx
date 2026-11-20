@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within, type RenderOptions } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Session from '../components/Session';
 import HealthCheckSession from '../components/HealthCheckSession';
@@ -15,11 +15,18 @@ import type { HealthCheckSession as HealthCheckSessionType, MemberAvatarChoice, 
  * session, initials in an anonymous one or for an id this release does not
  * draw), the viewer's own entry carrying the team's newer choice in the write
  * that enters the session (one more write only where the screen sends none),
- * left to the server after a pick made in the session, and the picker opened
- * from the header's own avatar.
+ * left to the server after a pick made in the session, the picker opened
+ * from the header's own avatar, and the one-time avatar hint: shown with the
+ * screen, gone for the mount once a choice arrives, the session turns
+ * anonymous, the join is refused, the picker opens or "Got it" is pressed,
+ * and remembered only by the person's own gestures.
  */
 
-const handlers: { update: ((session: unknown) => void) | null } = { update: null };
+const handlers: {
+  update: ((session: unknown) => void) | null;
+  denied: ((data: { sessionId: string; reason: string }) => void) | null;
+  connection: ((connected: boolean) => void) | null;
+} = { update: null, denied: null, connection: null };
 
 vi.mock('../services/dataService', () => ({
   dataService: {
@@ -50,8 +57,14 @@ vi.mock('../services/syncService', () => ({
     onRoster: vi.fn(() => () => {}),
     onActivity: vi.fn(() => () => {}),
     sendActivity: vi.fn(),
-    onConnectionChange: vi.fn(() => () => {}),
-    onJoinDenied: vi.fn(() => () => {}),
+    onConnectionChange: vi.fn((callback: (connected: boolean) => void) => {
+      handlers.connection = callback;
+      return () => {};
+    }),
+    onJoinDenied: vi.fn((callback: (data: { sessionId: string; reason: string }) => void) => {
+      handlers.denied = callback;
+      return () => {};
+    }),
     onUpdateRefused: vi.fn(() => () => {}),
     onSyncHealth: vi.fn(() => () => {}),
     getSyncHealth: vi.fn(() => 'ok'),
@@ -139,14 +152,21 @@ const CHOICES: Record<string, MemberAvatarChoice> = { me: { id: 'owl', at: 100 }
 
 type Kind = 'retro' | 'health check';
 
-const renderScreen = (kind: Kind, theTeam: Team, local: RetroSession | HealthCheckSessionType, user: User = me, extra: Record<string, unknown> = {}) => {
+const renderScreen = (
+  kind: Kind,
+  theTeam: Team,
+  local: RetroSession | HealthCheckSessionType,
+  user: User = me,
+  extra: Record<string, unknown> = {},
+  options: Pick<RenderOptions, 'wrapper'> = {}
+) => {
   vi.mocked(syncService.getCurrentSessionId).mockReturnValue(local.id);
   if (kind === 'retro') {
     const withSession = { ...theTeam, retrospectives: [local as RetroSession] };
-    return { team: withSession, ...render(<Session team={withSession} sessionId={local.id} currentUser={user} onExit={() => {}} {...extra} />) };
+    return { team: withSession, ...render(<Session team={withSession} sessionId={local.id} currentUser={user} onExit={() => {}} {...extra} />, options) };
   }
   const withSession = { ...theTeam, healthChecks: [local as HealthCheckSessionType] };
-  return { team: withSession, ...render(<HealthCheckSession team={withSession} sessionId={local.id} currentUser={user} onExit={() => {}} {...extra} />) };
+  return { team: withSession, ...render(<HealthCheckSession team={withSession} sessionId={local.id} currentUser={user} onExit={() => {}} {...extra} />, options) };
 };
 
 const sessionOf = (kind: Kind, overrides: Record<string, unknown> = {}) =>
@@ -163,6 +183,8 @@ const pictures = () => [...document.querySelectorAll('[data-avatar-art]')].map((
 beforeEach(() => {
   vi.clearAllMocks();
   handlers.update = null;
+  handlers.denied = null;
+  handlers.connection = null;
   Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
   global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ enabled: false }) })) as unknown as typeof fetch;
 });
@@ -508,6 +530,88 @@ describe.each<Kind>(['retro', 'health check'])('avatars on the %s screen', (kind
       expect(screen.queryByRole('note', { name: HINT })).toBeNull();
       expect(dot()).toBeNull();
       // It was never dismissed: another screen shows it again.
+      expect(localStorage.getItem(HINT_KEY)).toBeNull();
+    });
+
+    // "Got it" says the person has read it: remembered for this member in this
+    // browser, so the next screen they open does not show it again.
+    it('goes, remembered, when "Got it" is pressed, and a new mount of the screen shows none', async () => {
+      const user = userEvent.setup();
+      renderScreen(kind, team(undefined), sessionOf(kind));
+      const note = screen.getByRole('note', { name: HINT });
+      expect(dot()).not.toBeNull();
+
+      await user.click(within(note).getByRole('button', { name: 'Got it' }));
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
+      expect(JSON.parse(localStorage.getItem(HINT_KEY) ?? 'null')).toEqual(['me']);
+      cleanup();
+
+      renderScreen(kind, team(undefined), sessionOf(kind));
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
+    });
+
+    // A pick made in the person's other browser, open on the same session: the
+    // server stamps their entry here, as it does for every pick that names the
+    // session. The band goes in the render that draws the picture, never a
+    // frame later, and nothing is written here: the choice is the server's,
+    // and stops the hint in every browser.
+    it('goes in the render that draws a choice made in another browser, and writes nothing', () => {
+      const local = sessionOf(kind);
+      // Every commit of the screen: a Profiler's onRender runs in the commit,
+      // once the DOM is written, where the checks after act() see only the
+      // last one. The band and the dot are never drawn beside the picture the
+      // stamped entry brings.
+      const drawnBeside: string[] = [];
+      const Commits: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+        <React.Profiler
+          id="screen"
+          onRender={() => {
+            if (!document.querySelector('header [data-viewer-avatar] [data-avatar-art="cat"]')) return;
+            if (document.querySelector('[data-avatar-hint]')) drawnBeside.push('band');
+            if (document.querySelector('[data-avatar-hint-dot]')) drawnBeside.push('dot');
+          }}
+        >
+          {children}
+        </React.Profiler>
+      );
+      renderScreen(kind, team(undefined), local, me, {}, { wrapper: Commits });
+      expect(screen.getByRole('note', { name: HINT })).toBeInTheDocument();
+      expect(dot()).not.toBeNull();
+
+      act(() => {
+        handlers.update?.(JSON.parse(JSON.stringify({ ...local, participants: [{ ...me, avatar: 'cat', avatarAt: 300 }, fran], _rev: 2 })));
+      });
+      expect(opener().querySelector('[data-avatar-art="cat"]')).not.toBeNull();
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
+      expect(drawnBeside).toEqual([]);
+      expect(localStorage.getItem(HINT_KEY)).toBeNull();
+    });
+
+    // The server refused the join: the picker could not save a choice, so the
+    // band goes and nothing brings it back while the screen lasts. It was
+    // never dismissed, so it is not remembered.
+    it('goes when the join is refused, unwritten, and stays gone afterwards', () => {
+      const local = sessionOf(kind);
+      renderScreen(kind, team(undefined), local);
+      expect(screen.getByRole('note', { name: HINT })).toBeInTheDocument();
+      expect(dot()).not.toBeNull();
+
+      act(() => { handlers.denied?.({ sessionId: local.id, reason: 'unauthenticated' }); });
+      // The connection banner says why, with the way out.
+      expect(screen.getByRole('button', { name: 'Log in again' })).toBeInTheDocument();
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
+
+      // Afterwards: the connection drops and comes back. Neither screen forgets
+      // a refused join today, and if one ever did, the hint would still stay
+      // gone for the mount.
+      act(() => { handlers.connection?.(false); });
+      act(() => { handlers.connection?.(true); });
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
       expect(localStorage.getItem(HINT_KEY)).toBeNull();
     });
   });
