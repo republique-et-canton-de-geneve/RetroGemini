@@ -3734,7 +3734,10 @@ Rules:
   exists.** `JiraDiscoveryNote` remembers who dismissed it in `localStorage`
   (`retro-jira-note-seen`, a list of user ids, every access in try/catch) and
   renders nothing until the status says Jira is on: a deployment without Jira
-  must never advertise it. Its last sentence follows the reader's role and the
+  must never advertise it. That list is the one-time notes' shared seen list
+  (`components/common/seenOnce.ts`, the avatar hint's too: the fifty most
+  recent people, and where the keyboard goes when a note is dismissed),
+  pinned by `__tests__/seenOnce.test.ts`. Its last sentence follows the reader's role and the
   token's state. The Settings card follows the same rule (nothing where Jira is
   off, unless a token is still stored, which it then offers to remove).
 - **The client sends again only what proves nothing ran.**

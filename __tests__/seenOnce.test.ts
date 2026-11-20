@@ -1,0 +1,138 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  MAX_REMEMBERED_USERS,
+  hasSeenUser,
+  nextFocusAfterDismiss,
+  nextFocusableAfter,
+  readSeenUsers,
+  rememberSeenUser,
+} from '../components/common/seenOnce';
+import { breakStorage } from './helpers/brokenStorage';
+
+/**
+ * The seen list of the one-time notes (the Jira discovery note, the avatar
+ * hint): who dismissed a note in this browser, one JSON array of member ids
+ * under each note's own key. One rule for both notes: per person, the fifty
+ * most recent kept, and a storage that fails shows the note again rather than
+ * hiding it, since "at least once" is the promise.
+ */
+
+const NOTE = 'test-note-seen';
+const OTHER_NOTE = 'test-other-note-seen';
+const stored = (key: string): unknown => JSON.parse(localStorage.getItem(key) ?? 'null');
+
+describe('the seen list of a one-time note', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("remembers a person under the note's own key, apart from every other note", () => {
+    rememberSeenUser(NOTE, 'u1');
+    expect(stored(NOTE)).toEqual(['u1']);
+    expect(hasSeenUser(NOTE, 'u1')).toBe(true);
+    // Dismissing one note never hides another.
+    expect(hasSeenUser(OTHER_NOTE, 'u1')).toBe(false);
+    expect(localStorage.getItem(OTHER_NOTE)).toBeNull();
+  });
+
+  it('is per person: another member of the same browser has not seen it', () => {
+    rememberSeenUser(NOTE, 'u1');
+    expect(hasSeenUser(NOTE, 'u2')).toBe(false);
+    rememberSeenUser(NOTE, 'u2');
+    expect(readSeenUsers(NOTE)).toEqual(['u1', 'u2']);
+  });
+
+  it('keeps the 50 most recent, a person seen again moving to the end', () => {
+    localStorage.setItem(NOTE, JSON.stringify(Array.from({ length: 50 }, (_, i) => `u${i}`)));
+    expect(MAX_REMEMBERED_USERS).toBe(50);
+
+    // Seen again: moved to the end, and nobody is pushed out.
+    rememberSeenUser(NOTE, 'u0');
+    let seen = readSeenUsers(NOTE);
+    expect(seen).toHaveLength(50);
+    expect(seen[0]).toBe('u1');
+    expect(seen[49]).toBe('u0');
+
+    rememberSeenUser(NOTE, 'new');
+    seen = readSeenUsers(NOTE);
+    expect(seen).toHaveLength(MAX_REMEMBERED_USERS);
+    expect(seen[49]).toBe('new');
+    // The oldest goes, and sees the note once more.
+    expect(seen).not.toContain('u1');
+    expect(hasSeenUser(NOTE, 'u1')).toBe(false);
+  });
+
+  it('keeps only the ids of what another tab left behind', () => {
+    localStorage.setItem(NOTE, JSON.stringify(['u1', 42, null, { id: 'u9' }, 'u2']));
+    expect(readSeenUsers(NOTE)).toEqual(['u1', 'u2']);
+    rememberSeenUser(NOTE, 'u3');
+    expect(stored(NOTE)).toEqual(['u1', 'u2', 'u3']);
+  });
+
+  it('reads a value that is not a list as nobody', () => {
+    for (const value of ['{not json', '{"u1":true}', '"u1"', 'null', '']) {
+      localStorage.setItem(NOTE, value);
+      expect(readSeenUsers(NOTE), value).toEqual([]);
+      expect(hasSeenUser(NOTE, 'u1'), value).toBe(false);
+    }
+  });
+
+  it('reads nobody, and writes nothing without throwing, when storage throws', () => {
+    // A private window, blocked site data: every read and write throws.
+    const restore = breakStorage();
+    try {
+      expect(readSeenUsers(NOTE)).toEqual([]);
+      expect(hasSeenUser(NOTE, 'u1')).toBe(false);
+      expect(() => rememberSeenUser(NOTE, 'u1')).not.toThrow();
+    } finally {
+      restore();
+    }
+    expect(localStorage.getItem(NOTE)).toBeNull();
+  });
+});
+
+describe('where the keyboard goes when a note goes', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  const page = () => {
+    document.body.innerHTML = `
+      <button id="before">Before</button>
+      <div id="note"><button id="inside">Got it</button></div>
+      <button disabled>Off</button>
+      <input type="hidden" />
+      <span tabindex="-1">Skipped</span>
+      <a>No address</a>
+      <a href="#next" id="next">Next</a>
+      <button id="later">Later</button>
+      <textarea id="field"></textarea>`;
+    return document.getElementById('note') as HTMLElement;
+  };
+
+  it('finds the first control after the note, skipping what cannot take the focus', () => {
+    const note = page();
+    expect(nextFocusableAfter(note)?.id).toBe('next');
+  });
+
+  it('finds nothing when no control follows the note', () => {
+    document.body.innerHTML = '<button id="before">Before</button><div id="note"><button>Got it</button></div>';
+    expect(nextFocusableAfter(document.getElementById('note') as HTMLElement)).toBeNull();
+  });
+
+  it('moves the keyboard on only when it was in the note, or nowhere', () => {
+    const note = page();
+    // The keyboard pressed the note's button: the next control takes it.
+    (document.getElementById('inside') as HTMLElement).focus();
+    expect(nextFocusAfterDismiss(note)?.id).toBe('next');
+    // A click that focuses nothing (Safari) leaves the page's body focused.
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    expect(nextFocusAfterDismiss(note)?.id).toBe('next');
+    // Someone typing elsewhere who clicks the note keeps their place.
+    (document.getElementById('field') as HTMLElement).focus();
+    expect(nextFocusAfterDismiss(note)).toBeNull();
+    // A note already gone moves nothing.
+    expect(nextFocusAfterDismiss(null)).toBeNull();
+  });
+});
