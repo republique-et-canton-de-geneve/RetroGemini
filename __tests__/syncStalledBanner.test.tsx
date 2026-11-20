@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import SyncStalledBanner from '../components/session/SyncStalledBanner';
 import { syncService, type SyncHealth } from '../services/syncService';
+import { effectivePair } from './helpers/tailwindTheme';
 
 /**
  * Incident ISS (2026-10-12). For a whole retrospective the server refused every
@@ -70,6 +71,16 @@ describe('SyncStalledBanner', () => {
 
     act(() => notify?.('ok'));
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('writes its words and its reload button in colours that read on the band', () => {
+    // The look (45.0): a light rose band, the action a small white button.
+    useHealth('stalled');
+    render(<SyncStalledBanner />);
+    for (const element of [screen.getByText('Your changes are not being saved.'), screen.getByRole('button', { name: 'Reload the page' })]) {
+      const pair = effectivePair(element);
+      expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it('reloads the page from its button', () => {

@@ -30,6 +30,7 @@ import {
   mergeLegacyHealthCheckTemplates
 } from './teamTemplateRoutes.js';
 import { registerJiraTeamRoutes } from './jiraRoutes.js';
+import { registerTeamAvatarRoutes } from './teamAvatarRoutes.js';
 
 // The team-record lists that only their own granular routes may change. See
 // the `/update` handler for why a whole-list write is refused. The feedbacks
@@ -56,6 +57,11 @@ const LEGACY_MERGED_LIST_FIELDS = ['customTemplates', 'customHealthCheckTemplate
 // `/jira/issues` alone, for the same two reasons: a stale tab must not put an
 // old parent back, and clearing a claim could create a parent twice.
 const JIRA_TEAM_FIELDS = ['jiraTarget', 'jiraClaims', 'jiraParents', 'jiraParentClaims'];
+
+// Each member's avatar, written by `/member/avatar` alone (teamAvatarRoutes.js)
+// with the server's clock: a stale tab sending its cached map here would put
+// older choices back over newer ones.
+const AVATAR_TEAM_FIELDS = ['memberAvatars'];
 
 // The actions of a full-blob persist, as the team record may store them: the
 // closed-action guard first (stored `done`, ratings, deferral and Jira link
@@ -213,6 +219,7 @@ const registerTeamRoutes = ({
   const { sanitizeTeamForClient, authenticateTeam, atomicUpdateTeam } = teamService;
 
   registerTeamTemplateRoutes({ app, authenticateTeam, atomicUpdateTeam });
+  registerTeamAvatarRoutes({ app, authenticateTeam, atomicUpdateTeam, liveSessionPatch });
 
   // The team's Jira status, token, target, issue types and issue creation
   // (`jiraRoutes.js`). Registered here rather than from `server.js`, so they
@@ -642,17 +649,21 @@ const registerTeamRoutes = ({
       const strippedLists = OWNED_LIST_FIELDS.filter(has);
       const mergedLists = LEGACY_MERGED_LIST_FIELDS.filter(has);
       const ignoredJiraFields = JIRA_TEAM_FIELDS.filter(has);
+      const ignoredAvatarFields = AVATAR_TEAM_FIELDS.filter(has);
       const safeUpdates = { ...requestedUpdates };
-      for (const field of [...strippedLists, ...mergedLists, ...ignoredJiraFields]) delete safeUpdates[field];
+      for (const field of [...strippedLists, ...mergedLists, ...ignoredJiraFields, ...ignoredAvatarFields]) delete safeUpdates[field];
       // Applied in the updater below, never spread: a clear must remove the key.
       delete safeUpdates.facilitatorEmail;
-      if (strippedLists.length > 0 || mergedLists.length > 0 || ignoredJiraFields.length > 0) {
+      if (strippedLists.length > 0 || mergedLists.length > 0 || ignoredJiraFields.length > 0 || ignoredAvatarFields.length > 0) {
         const parts = [];
         if (strippedLists.length > 0) {
           parts.push(`ignored ${strippedLists.join(', ')} (written through their own routes)`);
         }
         if (ignoredJiraFields.length > 0) {
           parts.push(`ignored ${ignoredJiraFields.join(', ')} (written by the Jira routes alone)`);
+        }
+        if (ignoredAvatarFields.length > 0) {
+          parts.push(`ignored ${ignoredAvatarFields.join(', ')} (written by /member/avatar alone)`);
         }
         if (mergedLists.length > 0) {
           parts.push(`merged ${mergedLists.join(', ')} add-only (a client from before the template routes; nothing is removed)`);

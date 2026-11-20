@@ -1,6 +1,6 @@
 # Accessibility statement — RetroGemini
 
-_Last reviewed: 2026-11-10. Audit method and remaining gaps below._
+_Last reviewed: 2026-11-20. Audit method and remaining gaps below._
 
 ## The standard we work to
 
@@ -16,29 +16,38 @@ those are worth doing and neither has been done — see *What we have not done*.
 ## How it is tested, and how that stays true
 
 Two automated gates run on **every pull request**, and both are ratchets: the
-number they allow can fall, never rise.
+number they allow can fall, never rise. Beside them, the unit suites measure
+the colours of what the audit cannot open (last row).
 
 | Gate | What it checks | Where |
 |---|---|---|
-| axe-core, the main flows | Serious/critical WCAG 2.0/2.1 A + AA rules on ten screens — login, team creation, the dashboard, five retrospective phases (icebreaker, open actions with a live impact-rating round, brainstorm, group, close) and two health-check screens (survey, close), including two **dark** screens, which a light-only sweep cannot check — and, since 2026-10-22, four states with more than one person: the Dashboard's Members tab with one member per participant colour (and one colour the palette does not know), the invite link's member picker, a participant's own Group screen, and the Group phase with a participant marked as departed. Since 43.0, two more: the Brainstorm phase while the participant writes a card (the typing cue on their row and, above the list, the line naming who is writing), and the Vote phase's participants panel, audited on its own, each row saying in words how many votes its person can still place. Every retrospective screen from the icebreaker on is audited with **two participants of different colours** (the facilitator's indigo and a lime participant, the palette's worst case for white initials) | `e2e/accessibility-audit.spec.ts` |
+| axe-core, the main flows | Serious/critical WCAG 2.0/2.1 A + AA rules on ten screens — login, team creation, the dashboard, five retrospective phases (icebreaker, open actions with a live impact-rating round, brainstorm, group, close) and two health-check screens (survey, close), including two **dark** screens, which a light-only sweep cannot check — and, since 2026-10-22, four states with more than one person: the Dashboard's Members tab with one member per participant colour (and one colour the palette does not know), the invite link's member picker, a participant's own Group screen, and the Group phase with a participant marked as departed. Since 43.0, two more: the Brainstorm phase while the participant writes a card (the typing cue on their row and, above the list, the line naming who is writing), and the Vote phase's participants panel, audited on its own, each row saying in words how many votes its person can still place. Every retrospective screen from the icebreaker on is audited with **two participants of different colours** (the facilitator's indigo and a lime participant, the pair that failed first while initials were white; since 45.0 the initials are the tone's dark ink on its pastel body, and `__tests__/participantColors.test.ts` measures every tone) | `e2e/accessibility-audit.spec.ts` |
 | axe-core, the administration console | The same rules on the whole console page, once per tab: Teams, and a team's inline editor open; the settings cards opened up (the AI fields shown, an info message previewed, a restore file chosen); Feedback, and its comment dialog; Live, with a session running in another browser; Server Logs; Backups, with a protected and an unprotected row. The run cannot change the server: every console call outside the reads and the three backup writes it means to make is aborted and fails the test. The merge, delete and one-team-restore dialogs are audited on their own, over real data, in the specs that open them | `e2e/admin-console-accessibility.spec.ts`, `e2e/admin-team-merge.spec.ts`, `e2e/admin-team-restore.spec.ts` |
 | axe-core, seven Jira screens | The same rules, with a Jira connected and a second participant in the session: the Review step with the discovery note, the "Create in Jira" button and a control on every action; the open batch dialog with its preview; the Dashboard's Actions tab with a linked and an unlinked action; the team's *Settings → Jira* card; the console's Jira card; and, since 41.0, two states of the one-parent-issue-per-session mode: the *Settings → Jira* card with its three modes and both issue-type lists loaded, and the batch dialog with its "Parent issue (optional)" field and its list of parent issues. The two cards (in both of the team card's states), the dialogs and the Review step (without the session header and participants panel, which `accessibility-audit.spec.ts` audits whole on five other phases, and the panel alone on a sixth (Vote), with two participants) are audited on their own; the Dashboard's Actions tab is audited whole. The console around its Jira card is audited whole by its own spec, which never turns Jira on; the Dashboard's Settings tab around the team's card is not otherwise audited (gap 2) | `e2e/jira.spec.ts` |
 | axe-core, the open board | The same rules on the open board (42.0), with cards, a vote and a second person connected: the board's bar with its search, its sort and the facilitator's controls, every column's add field, each card's vote button (named by the total it shows first, 2.5.3), and the participants panel listing the people connected right now, with the line above it naming who is writing a card; and, scoped, the board's settings dialog. The search's result count is a status message (4.1.3). Its keyboard paths are the Group phase's for a card (pick it up, then a card, a group or a column) and Brainstorm's for a group (pick it up, then "Move here"), pinned by `__tests__/sessionOpenBoard.test.tsx` | `e2e/retro-open-board.spec.ts` |
-| axe-core, the console's backup import card | The same rules on the Backups tab's *Import a backup file* card, audited on its own with a file chosen, before it is sent: the labelled file input, its hint, and the import button (white on teal-700, 5.39:1 — teal-600 would measure 3.66:1) | `e2e/admin-team-restore.spec.ts` |
+| axe-core, the console's backup import card | The same rules on the Backups tab's *Import a backup file* card, audited on its own with a file chosen, before it is sent: the labelled file input, its hint, and the import button (since 45.0 the console's secondary button: slate-700 on white, and slate-600 on slate-100 while a file is being sent) | `e2e/admin-team-restore.spec.ts` |
+| axe-core, the avatar picker | The same rules on the avatar picker (45.0), opened from the viewer's own avatar over a session and audited on its own: the large current avatar with the person's name, the family tabs (one in the Tab order, arrows between them), and the grid of pictures, each a button named by its picture's name with `aria-pressed`, "My initials" first | `e2e/avatars.spec.ts` |
+| axe-core, the avatar hint | The same rules on the band under the header that tells each person that the avatar can be changed, until they choose an avatar, open the picker or put the band away (45.3), audited on its own in two states: a guest's on a French phone (390 × 844) in a named retrospective, where it shows its title and its two buttons and its sentence is read but not shown, and the facilitator's on the dashboard at 1280px, where its three sample pictures, hidden from assistive technology, and its sentence sit beside the buttons. A note named by its title, "Choose my avatar" with `aria-haspopup="dialog"`, and "Got it" described by the title. The same tests measure that the band starts where the header ends and that each of its buttons is in view and at least 24px tall | `e2e/avatars.spec.ts` |
+| axe-core, the login screen's team list | The same rules on the login screen's team list as tiles (45.3), the whole page, in French at 1280 × 800: fourteen teams with long names, found by a search, two of them favourites listed first, each team a button holding its name and its meta line, followed by its star, a switch with `aria-checked` named "Ajouter … aux favoris" or "Retirer … des favoris". The main flows' audit of the login screen reads whatever list the server holds, which may be short | `e2e/login-team-picker.spec.ts` |
 | `eslint-plugin-jsx-a11y` | Accessibility rules across the whole React tree, inside the repository's two-way lint budget | `eslint.config.js`, `scripts/lint.mjs` |
+| Measured colour pairs, in the unit suites | What a screen paints, measured with axe-core's own colour engine against the colours the build actually ships: Tailwind's palette and then the application's own theme tokens (`index.css`), a translucent background blended over the one behind it, and a colour the helper cannot name (an arbitrary value, a gradient, an opacity) refused rather than guessed. Each token's job is stated as a pair (muted text, a control's edge, the brand on its tints, the initials of each person's tone); a card's colours are measured for hundreds of column colours, the facilitator's and random ones; every field's edge in `components/` is read from the source and measured against its fill. This is the layer that reaches what the e2e audit never opens: a hover, a tooltip, a state only one kind of link shows | `__tests__/helpers/tailwindTheme.ts`, `__tests__/lookTokens.test.ts`, `__tests__/cardTones.test.ts`, `__tests__/fieldEdgeContrast.test.ts`, `__tests__/participantColors.test.ts` and the `*Look.test.tsx` suites |
 
-**Current measurement (2026-11-10): zero axe violations at any severity on
-every audited state — 37 in all: sixteen in the main flows, eight console
+**Current measurement (2026-11-20): zero serious or critical axe violations
+on every audited state — 41 in all: sixteen in the main flows, eight console
 states and three console dialogs, seven Jira screens, the backup import card,
-and the open board and its settings dialog.** The ten main screens have been at zero since 2026-08-26,
+the open board and its settings dialog, the avatar picker, the avatar hint in
+its two states, and the login screen's team list as tiles.** The main
+screens have been at zero since 2026-08-25 (nine then, ten now),
 the Jira screens since 2026-10-20 (five, seven since 41.0), the import card
 since 41.0, the four multi-participant states and the console since
 2026-10-22, the open board since it joined (42.0), its settings dialog
-since it joined (42.1), and the Brainstorm phase while a participant writes
-and the Vote phase's participants panel since they joined (43.0). The cap
+since it joined (42.1), the Brainstorm phase while a participant writes
+and the Vote phase's participants panel since they joined (43.0), the
+avatar picker since it joined (45.0), and the avatar hint's two states and
+the team list as tiles since they joined (45.3). The cap
 for every state is one table, `BASELINE` in `e2e/helpers/axe.ts`, and each
 `color-contrast` finding is printed with its colour pairs and ratios, so a fix
-can be checked against the surface it lands on. The lint budget carries 17 accessibility warnings (2026-10-08), listed by
+can be checked against the surface it lands on. The lint budget carries 15 accessibility warnings (recounted 2026-11-20, two fewer since the login screen's favourite star became a button), listed by
 rule in `scripts/lint.mjs` — down from 71, after every form label was
 associated with its control and each `autoFocus` was judged (see below). The
 largest remaining group is controls that respond to a click with no keyboard
@@ -47,6 +56,17 @@ equivalent.
 A gate at zero is what makes the claim durable: a new serious or critical
 violation on those screens now fails the pull request instead of being absorbed
 by an allowance.
+
+**Motion is tested both ways (45.0).** Every animation of the interface is
+declared for readers who have not asked for less motion, so the end-to-end
+suites emulate *reduced motion* by default: a card still rising or a row still
+fading would otherwise be measured or audited half-way. A second project runs
+the specs an animation can change — the touch timings, the full flow, the wide
+board and the accessibility audit — with motion on, and a spec of its own proves
+that each animation plays once, leaves nothing behind, moves no box a click
+aims at, and that reduced motion plays none. With motion on, every audit first
+waits for the page's animations to end, so axe never samples a colour
+mid-fade.
 
 **Automated testing is a floor, not a conformance claim.** axe inspects the
 markup that exists; it cannot report an operation that has *no* keyboard path,
@@ -91,6 +111,37 @@ where a light-screen contrast sweep had made things worse.
 | **The "IN PROGRESS" and "OPEN BOARD" statuses** of the Dashboard's retrospective and health-check lists, 12px green on white at 3.22:1, and the two "saved" notices of its Settings tab in the same green | 1.4.3 Contrast | **Fixed 2026-10-28**, one step darker (4.94:1). The e2e audit never opens a list holding a session in progress, so `__tests__/dashboardOpenBoard.test.tsx` measures both lists as rendered |
 | **The participants panel's typing cue**. The icon beside "writing a ticket" was read out as its ligature ("stylus_note"). It was drawn at 24px in a 16px line, so a row grew 8px when its person started writing and every row below moved under the pointer, the facilitator's hover-revealed *Mark as left* among them. A first card shrank its author's row by 7px the same way, and the session's first card added the contribution line to every row at once. Its dots kept blinking for readers who asked for less motion | 1.1.1 Non-text Content | **Fixed 2026-11-10** (43.0). The icon is hidden from assistive technology and sized to its line. The contribution line keeps one height with or without cards, and is drawn on every row from the start of Brainstorm (found by the review of 43.0). The dots stand still under `prefers-reduced-motion`. The line above the list that names who is writing reserves three lines, which hold every case measured (1 to 5, 12 and 30 people writing, first and last names, in English and French, in Inter and DejaVu Sans): with two, the third name was cut in French. Names longer than those measured can still be cut: the line's title holds every name, but only a mouse reaches it, and each person's row still shows their cue. `__tests__/participantsPanel.test.tsx` pins the classes; `e2e/retro-full-flow.spec.ts` measures the rows at the session's first card, while a participant writes, after their first card and when they finish voting |
 | **The participants panel's status check** — "Finished" and "Vote recorded", the only sign on a row that its person is done, drawn in emerald-400 and emerald-500: 1.73 to 2.46:1 on white and on the current user's tinted row | 1.4.11 Non-text Contrast | **Fixed 2026-11-10** (43.0), found by the review of 43.0: emerald-600 for the soft tone, a person finished in a retrospective (3.67:1 on white, 3.28:1 on the tinted row), and emerald-700 for the strong tone, a vote recorded and every check of the health check, which draws the same one (5.37:1 and 4.80:1). `__tests__/avatarInitialsContrast.test.tsx` measures both tones on both surfaces with axe-core's own colour engine; axe-core itself skips icon ligatures |
+| **States said by fading or pulsing** (found by the 45.0 restyle) — the Welcome phase's unchosen moods drawn at 40% and in greyscale, a participant's disabled action controls at 50%, a postponed action at 60%, an applied AI group at 70%, disabled buttons of the Dashboard, the Feedback Hub, the comments dialog and the health check faded by an opacity, empty score bars faded, a done action faded; and two states that pulsed forever, the Icebreaker's waiting line and the "Vote needed" badge. A fade takes text under 4.5:1 whatever its colour, and a pulse spends half its time there | 1.4.3 Contrast, 1.4.1 Use of Colour | **Fixed 2026-11-19** (45.0) on the restyled screens: each state has colours of its own, measured (a postponed action in slate-600, a crossed-out done action, a tinted applied group, a disabled button in slate-600 on slate-100), and the two pulses are gone, their words kept. Not every disabled control is done yet (gap 9) |
+| **Contrast failures the restyle measured** — the Icebreaker's waiting line slate-500 on slate-800 (2.6:1); the Discuss chevron (1.5:1); a proposal's Save, white on emerald-500 (2.46:1), its tooltip's "Not voted" (3.19:1) and its dark variant's delete (2.6:1); the Members tab's edit and remove icons (1.5:1); the archive confirmations, white on amber-500 (about 2:1); the AI suggestions' *Accept* (4.46:1) and *Accept all* (2.54:1); the health check's score on its tile, its "Saved" and its accepted actions' delete (about 1.9:1); a column's remove button in *Edit Layout* and the feedback form's remove-image control, white on red-500; the origin chip's icon in the raw column colour; and text of 10 and 11px in several dialogs and the health check | 1.4.3 Contrast, 1.4.11 Non-text Contrast | **Fixed 2026-11-19** (45.0). Each takes a darker step of its hue, or the brand primary, measured on the surface it lands on; the small text is 12px. The `*Look.test.tsx` suites measure them |
+| **Colours that were not measured for every value** — a person's initials and presence dots, and a card on a column whose colour the facilitator picks | 1.4.3 Contrast, 1.4.11 Non-text Contrast | **Fixed 2026-11-19** (45.0). A person is drawn in one of nine measured tones (a pastel body, an ink of the same hue for the initials and the dots: 4.5:1 for the initials, and the ink on white and on the reader's own row). A card is a soft tint of its column's colour with near-black words, and its controls take that colour's ink, both computed for any colour: `__tests__/cardTones.test.ts` measures the words at 7:1 and the controls at 4.5:1 on hundreds of colours |
+| **The edges of fields and switches** — a text field, select or textarea drawn with a slate-300 border (1.59:1 on white), often the only thing that shows where the control is, and a switch's off track in the same grey | 1.4.11 Non-text Contrast | **Fixed 2026-11-19** (45.0): slate-400, 3.41:1 on white. `__tests__/fieldEdgeContrast.test.ts` reads every field of the interface from its source and measures each border against each fill it can take |
+| **A chosen option said by its colour alone** — the Welcome phase's moods, the ROTI scores of both session types, the health check's survey scores, *Move On* in Discuss, the invite dialog's tabs and its member rows | 4.1.2 Name, Role, Value | **Fixed 2026-11-19** (45.0): each is a button with `aria-pressed`, and so is every picture of the new avatar picker |
+| **Icons read as part of a button's name, and two icon names read as words** — on a phone "What's New" was announced as "auto_awesome"; the login screens' "Back" as "arrow_back Back"; each member row of the invite dialog ended in "toggle_on". Two names no cut of the icon font draws, `groups_off` and `clarity`, showed and were read as the raw words | 1.1.1 Non-text Content, 2.5.3 Label in Name | **Fixed 2026-11-19** (45.0). Icons beside a label are hidden from assistive technology: 51 buttons announced an icon beside their label, and none does any more (`__tests__/iconButtonNames.test.tsx` fails on the next one). The last six needed more than hiding. A card's comments button and a proposal's three vote buttons hold only an icon and a count, so the icon *was* their name ("comment 2", "thumb_up 1", and "remove" for a neutral vote): they are named in words, the count they show first ("2 comments", "1 vote for", "Vote neutral"). *Suggest groups with AI* says with `aria-busy` what only its spinner said, and the release analysis' copy button already said its outcome in words. The two names are drawn with glyphs the font has, a stored `clarity` read as `light_mode`, and `e2e-prod/icon-ligatures.spec.ts` measures every icon name the application can draw as one glyph in the built app |
+| **The Icebreaker cut its question off on short phones.** Its card had a fixed 600px, which a short phone squeezed, so the facilitator's field scrolled inside itself and hid part of the French default question (78px at 320 × 568, 36px at 360 × 640, and 9px at 375 × 667 under the avatar hint), and a participant's card, centred in a screen too short for it, lost its top where no scroll reaches (60px at 320 × 568) | 1.4.10 Reflow | **Fixed 2026-11-20** (45.3). Below 640px the card is as tall as what it holds and the screen scrolls instead, the card's top never cut off; the facilitator's field is as tall as the tallest built-in question of the retro's language, so it never scrolls inside itself and "Random" stays under the finger from one built-in question to the next; a participant's question breaks a word longer than its box. `e2e/no-stray-scrollbars.spec.ts` measures it on five phones from 320 × 568 to 414 × 896, under the avatar hint and without it. A phone held sideways is not covered (gap 12) |
+
+**What 45.0 adds, and how it stays accessible.** *Motion*: a guest who
+arrives, a card that lands, a vote cast, hidden cards shown and a dialog
+opening each have a short animation. All of it is decoration — what it
+accompanies is already on screen in words or in a count — and a reader whose
+system asks for reduced motion gets none of it: every animation is declared
+for readers who have not asked, and nothing animates on the way out, so a
+dialog gives the focus back at once. No animation changes the size or place
+of a control a click aims at. *Avatars*: each person can choose a
+picture in place of their initials. The picture is decoration: an avatar is
+named by the person ("Alice Roux"), never by its picture, and the picker's
+opener is a button named "Alice Roux, choose my avatar" (its initials first
+while it shows them, since what is seen must be in the name, 2.5.3). The picker
+is a dialog like every other, reached by Tab, with arrow keys between its
+families, and it says "Avatar saved." or why it could not save. An anonymous
+session shows no chosen avatar anywhere: a picture beside a card would say who
+wrote it. Since 45.3 a band under the header says that the avatar can be
+changed: a note named by its title and met in reading order, never a live
+region and never taking the focus. Each person is shown it until they choose
+an avatar and, in each browser, until they open the picker there or put the
+band away. Its "Got it", pressed from the keyboard, hands the keyboard to the
+next control drawn after the band, or, when none is drawn, to the person's
+own avatar in the header, the button that opens the picker: never to the
+page.
 
 ## Languages
 
@@ -123,14 +174,19 @@ headers.
 
 Stated because a documented gap is honest and silence is not.
 
-1. **Controls that answer a click and not a key — now the largest group.** 16
+1. **Controls that answer a click and not a key — now the largest group.** 14
    lint findings across the React tree: click handlers on static elements,
    elements that take a click without being focusable. The Group phase was the
    one this audit measured and fixed; it is not the only one. Choosing which
    dimension to discuss during a health check (the dimension header of the
    Discuss phase in `components/HealthCheckSession.tsx`) is a `div` with a
    click handler, no keyboard path and no role — the same shape, on a
-   facilitator-only control. Do not read "grouping is keyboard-accessible" as
+   facilitator-only control. So are the participants chip of both session
+   headers, which expands a collapsed participants panel, and the product
+   mark of the dashboard's top bar, which takes a facilitator back to the
+   dashboard: each is a clickable `div` the keyboard cannot reach (recounted
+   2026-11-19; the 45.0 restyle kept their structure, since turning them into
+   buttons changes behaviour). Do not read "grouping is keyboard-accessible" as
    "the application is". (Feedback image thumbnails, on the team board and
    the super-admin console, were four of these findings; since 2026-10-07
    they are buttons opening the image in a dialog. The session timer was four
@@ -139,7 +195,9 @@ Stated because a documented gap is honest and silence is not.
    silence it at all. Since 2026-10-08, in the one timer both session types
    share, the time is a button whenever pressing it does something — setting
    the duration, silencing the alarm — and its name carries the time shown; the
-   editor it opens takes focus, saves on Enter and cancels on Escape.)
+   editor it opens takes focus, saves on Enter and cancels on Escape. The login
+   screen's favourite star was two more, a `span` with `role="switch"` inside a
+   team's button; since 2026-11-20 it is a button of its own, see gap 10.)
 2. **Screens not covered by the automated audit.** The sixteen states of
    `e2e/accessibility-audit.spec.ts` are the main flows, and they include a
    dark screen at each end (both close screens). `e2e/jira.spec.ts` adds seven
@@ -155,33 +213,39 @@ Stated because a documented gap is honest and silence is not.
    Discuss phases, its Vote phase outside the participants panel, its Review
    step outside the Jira scope, and the health
    check's Discuss and Review phases are checked by the lint rules but have no
-   axe run. **This gap has now cost something measurable:** the nameless switch
+   axe run. (The open board, its settings dialog, the avatar picker, the
+   avatar hint in its two states and the login screen's team list as tiles are
+   audited by their own specs.) The 45.0 restyle measured the colours of most of
+   those screens in the unit suites instead (*How it is tested*, last row), which
+   covers contrast and nothing else axe checks. **This gap has now cost something measurable:** the nameless switch
    in the row above is a defect axe *does* report, sitting on a dialog the audit
    never opens. A source-level guard found it; the run would have, had it gone
    there. (The console was the previous case: measured once on 2026-10-20 at
    182 `color-contrast` nodes and one `label` finding, both fixed — the label in
    41.0, the contrast on 2026-10-22.)
-3. **51 buttons announce their icon beside their label** (48 before it, 3
-   after it; counted with the TypeScript parser on 2026-11-10, 54 before the
-   console's sortable Teams headers hid theirs in 43.0). A button with both
-   an icon and text — "Save Message", "What's New" — has no `aria-hidden` on
-   the icon span, so its name is the ligature *and* the text:
-   "auto_awesome What's New". This is not a conformance failure: the name
-   exists, it contains the visible label, and the control is identifiable. It
-   is noise, on 51 controls, and no test guards them: new code hides the icon
-   (`AGENTS.md`, *An icon is not a name*). It is not swept here on purpose — several of those
-   icons are state-bearing (a spinner while saving, a lock on a protected
-   backup), and hiding one loses information a sighted user gets. Like the 17
-   `autoFocus` attributes, this needs a judgement per site rather than a
-   find-and-replace.
+3. *(Closed 2026-11-19, kept so that the other gaps keep their numbers.)*
+   **Buttons that announced their icon beside their label.** 51 did on the
+   release before 45.0 and 23 after its first restyle (counted with the
+   TypeScript parser over `App.tsx` and `components/`: a `<button>` with no
+   `aria-label`, an icon span not hidden from assistive technology, and other
+   content). The console's restyle hid its seventeen, saying in words what an
+   icon alone had said (a spinner while saving, a lock on a protected backup),
+   and the last six were settled one by one (the row *Icons read as part of a
+   button's name* above). None is left, and the same count is now a test:
+   `__tests__/iconButtonNames.test.tsx` fails on the next button that reads an
+   icon beside its words.
 4. **No testing with real assistive technology.** Everything above is measured
    with automated tools and a scripted keyboard walk. Nobody has driven this
    product with a screen reader, a switch device or voice control, and no
    external audit has been commissioned. Automated tools are estimated to catch
    roughly a third of real accessibility barriers.
 5. **Colour choices are the facilitator's.** Column colours are user-chosen.
-   Titles are darkened automatically until they are readable, but a facilitator
-   can still pick two colours that are hard to tell apart from each other.
+   Whatever colour is picked, a card is drawn as a light tint of it with
+   near-black words, and the column's title is near-black too (since 45.0;
+   the template editors still darken a title in its own colour until it reads),
+   but a facilitator can still pick two colours whose tints are hard to tell
+   apart. The column's title and icon say which column a card is in, never its
+   colour alone.
 6. ~~Participants' avatars in a session with more than one person.~~ Closed
    2026-10-22, see *What was found*.
 7. ~~A hidden card is hidden from sight only.~~ Closed 2026-10-28. With
@@ -208,6 +272,39 @@ Stated because a documented gap is honest and silence is not.
    No audited state has a list long enough to scroll, so axe's
    `scrollable-region-focusable` never runs on it. Found by the review of 43.0;
    the list was the same before it.
+9. **Some disabled controls are still faded by an opacity** (21, in eight
+   files, counted 2026-11-19 after the console's restyle, which removed its
+   own): the board's action bars, the Jira screens, two login controls, the
+   icebreaker's and the column move buttons. WCAG
+   exempts an inactive control from the contrast floor, so this is not a
+   failure, but their look is not measured as the restyled screens' disabled
+   states now are, and the helper that measures colours refuses an opacity
+   rather than guess it. They are left for the screens' next change.
+10. **The team list's favourite star is drawn under 3:1.** On the login
+    screen the star is amber-500, 2.15:1 on white, under the 3:1 an icon that
+    carries a state needs (1.4.11); its two states differ in shape (filled or
+    outlined), not only in colour. Its keyboard half closed on 2026-11-20: the
+    star was a `span` with `role="switch"` inside the team's button, a nested
+    control that no Tab reached and whose label the team's button read as part
+    of its name. It is now a button of its own after the team's, still a switch
+    with the same names: Tab reaches it right after its team, Space or Enter
+    turns it on or off, and when the keyboard moves the team between the
+    favourites and the other teams the focus follows it. The rest of the row
+    still opens the team. `__tests__/teamLoginLayout.test.tsx` and
+    `e2e/login-team-picker.spec.ts` pin it.
+11. **What a screen reader says for an avatar has not been listened to.** The
+    names are measured in tests (the person's name, the opener's "…, choose my
+    avatar" with its initials first while it shows them), but no one has heard
+    them with a screen reader; gap 4 applies to this release's additions too.
+12. **A phone held sideways can cut off the top of the Icebreaker.** The fix
+    for short phones (*What was found*) applies below 640px wide only. From
+    640px the Icebreaker keeps its larger layout, its card centred in what
+    the screen leaves under the header, and nothing scrolls up to a card
+    taller than that: at 667 × 375, with 268px of session under the header
+    and the avatar hint, the card loses its top 120px (its icon, down to the
+    top of its title) where no scroll reaches, measured on 2026-11-20.
+    Closing it needs a change from 640px up, which the fix left alone on
+    purpose.
 
 ## Feedback
 
@@ -224,12 +321,23 @@ and what assistive technology you use, if any.
   `e2e/helpers/axe.ts` and `BUDGET` in `scripts/lint.mjs` in the
   same change that removes a finding. A screen joins the audit at zero. A new accessibility violation is a defect
   like any other.
+- A state that joins or leaves `BASELINE` changes the count of audited states
+  this statement gives (under *How it is tested*) in the same change:
+  `__tests__/accessibilityStatementCount.test.ts` counts the table's keys and
+  fails until the two agree.
 - When adding a modal, use `components/common/ModalDialog.tsx`. Rebuilding the
   overlay by hand is how the product ended up with thirteen of them and one
   `role="dialog"`.
 - As a class, a participant's colour reaches the screen only through
-  `utils/participantColors.ts` (`avatarColorClasses` for initials,
-  `participantColorClass` for dots), never raw — not in a local variable
-  either. A colour added to
-  the palette needs its initials' colour in that module's table, and the theme
-  test will ask for it.
+  `utils/participantColors.ts` (`avatarColorClasses` for an avatar,
+  `participantColorClass` for dots, `participantToneHex` for a surface painted
+  inline), never raw — not in a local variable either — and every person is
+  drawn by `components/common/Avatar.tsx`. A colour added to the palette needs
+  its tone in `index.css` and in that module's tables, and the theme tests will
+  ask for both.
+- A chosen avatar is read through `components/session/sessionAvatars.ts`
+  alone, which shows none in an anonymous session; `__tests__/avatarSource.test.ts`
+  refuses any other read.
+- An animation is decoration, declared only for readers who have not asked for
+  reduced motion (`AGENTS.md`, *Motion*). Never convey a state by an animation
+  alone, and never by fading the other options.

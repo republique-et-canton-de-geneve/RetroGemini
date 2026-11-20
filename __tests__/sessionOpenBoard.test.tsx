@@ -5,8 +5,10 @@ import React from 'react';
 import Session from '../components/Session';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { RetroSession, Team, User } from '../types';
-import { classColor, effectivePair } from './helpers/tailwindTheme';
+import { classColor, effectivePair, themeValue, tokenContrast } from './helpers/tailwindTheme';
 import { contrastRatio, rgbToHex } from '../utils/colorUtils';
+import { cardTones } from '../utils/cardTones';
+import { participantToneHex } from '../utils/participantColors';
 
 /**
  * The open board (utils/openBoard.ts): every card activity of a retrospective
@@ -141,6 +143,17 @@ const renderBoard = (session: RetroSession = createBoard(), user: User = facilit
   render(<Session team={createTeam(session)} sessionId={session.id} currentUser={user} onExit={() => {}} />);
 
 const button = (name: RegExp) => screen.getByRole('button', { name });
+
+// A column with no hue at all (no hex, no class naming one): its cards are white.
+const hueless = (id: string, title: string) => ({ ...column(id, title), color: '', border: '', text: '', ring: '' });
+
+// What an inline style paints, as a hex: the card's tint, a control's ink.
+const cssHex = (value: string): string | null => {
+  const channels = value.match(/\d+/g);
+  if (!channels) return null;
+  const [r, g, b] = channels.map(Number);
+  return rgbToHex(r, g, b);
+};
 
 const tabTo = async (user: ReturnType<typeof userEvent.setup>, name: RegExp) => {
   const target = button(name);
@@ -3672,6 +3685,34 @@ describe('Open board — every hold and every drop', () => {
     expect(commentControl.className).toContain('focus-within:opacity-100');
   });
 
+  // The comments button holds an icon and, once a card has comments, their
+  // number: nothing else. Its name was the icon's ligature read as a word
+  // ("comment 3"). It is named in words, the number it shows first (2.5.3).
+  it('names a card\u2019s comments button in words, with the count it shows first', () => {
+    const remark = (id: string) => ({ id, authorId: 'fac', authorName: 'Facilitator', text: 'A remark', createdAt: '2026-11-01T10:00:00.000Z' });
+    renderBoard(groupedBoard({
+      tickets: [
+        ticket('t-none', 'No remark yet'),
+        ticket('t-one', 'One remark', { comments: [remark('c1')] }),
+        ticket('t-two', 'Two remarks', { comments: [remark('c2'), remark('c3')] }),
+      ],
+      groups: [],
+    }));
+    const comments = (text: string) => within(cardElement(text)).getByTestId('ticket-comment-btn');
+
+    expect(comments('No remark yet').getAttribute('aria-label')).toBe('Comments');
+    expect(comments('One remark').getAttribute('aria-label')).toBe('1 comment');
+    expect(comments('Two remarks').getAttribute('aria-label')).toBe('2 comments');
+    // The number on the button is a word of its name, and the icon is decoration.
+    expect(within(comments('Two remarks')).getByTestId('comment-count').textContent).toBe('2');
+    for (const text of ['No remark yet', 'One remark', 'Two remarks']) {
+      expect(comments(text).querySelector('.material-symbols-outlined')!.getAttribute('aria-hidden')).toBe('true');
+    }
+    // What the browser computes: found by its words, never by the ligature.
+    expect(within(cardElement('Two remarks')).getByRole('button', { name: '2 comments' })).toBe(comments('Two remarks'));
+    expect(within(cardElement('Two remarks')).queryByRole('button', { name: /^comment\b/ })).toBeNull();
+  });
+
   // Review finding (pass 15 of 42.1): a comment's edit and Delete were
   // hidden by a bare opacity-0 until hovered: on a phone, where nothing
   // hovers, the Delete was invisible yet tapped, and a keyboard user tabbed
@@ -3715,28 +3756,34 @@ describe('Open board — every hold and every drop', () => {
   // first column of every custom template (#10B981), amber, lime, cyan —
   // take black. The open state is measured on its own background, laid over
   // the card's, and the card's other controls the same way.
+  // Since 45.0 a card is no longer painted in the column's saturated colour:
+  // it takes a soft tint of it (utils/cardTones.ts), its words stay in the
+  // look's ink, and its controls take the hue's ink. Measured here as painted,
+  // from the inline style, on the colours the templates and the picker give.
   it.each([
     ['#475569'], ['#D97706'], ['#059669'], ['#64748B'], ['#E11D48'], ['#2563EB'],
     ['#10B981'], ['#F59E0B'], ['#84CC16'], ['#06B6D4'],
-  ])('draws the card’s controls at a contrast that can be seen on a card coloured %s, Add reaction closed and open', async (customColor) => {
+  ])('draws the card’s words and controls at a contrast that can be seen on a card of a %s column, Add reaction closed and open', async (customColor) => {
     const user = userEvent.setup();
     renderBoard(createBoard({ columns: [{ ...column('todo', 'To Discuss'), customColor }, column('doing', 'Discussing')] }));
     const cardEl = cardElement('Too many meetings');
-    const [r, g, b] = cardEl.style.backgroundColor.match(/\d+/g)!.map(Number);
-    const bg = rgbToHex(r, g, b);
-    // bg-black/10 over the card: a tenth of black laid over its colour.
-    const opened = rgbToHex(Math.round(r * 0.9), Math.round(g * 0.9), Math.round(b * 0.9));
-    // The colour it is painted in at rest: its one text colour with no variant
-    // and no opacity (a hover's, or a translucent one, is not what is seen).
-    // Review finding (pass 19 of 42.1): read as a substring of the class list,
-    // slate-500 at rest with a white hover, and white at 40%, read as white.
-    const fgOf = (control: HTMLElement) => ({ white: '#FFFFFF', black: '#000000' } as Record<string, string>)[classColor(control.className, 'text') ?? ''] ?? null;
+    const bg = cssHex(cardEl.style.backgroundColor)!;
+    // The soft tint of the hue, never the saturated colour itself.
+    expect(bg).toBe(cardTones(customColor)!.tint);
+    expect(cssHex(cardEl.style.borderColor)).toBe(cardTones(customColor)!.line);
+    // Its words: the look's ink, as a token the build paints.
+    const words = cardEl.querySelector('.whitespace-pre-wrap') as HTMLElement;
+    expect(classColor(words.className, 'text')).toBe('slate-900');
+    expect(contrastRatio(themeValue('slate-900'), bg)).toBeGreaterThanOrEqual(4.5);
+
+    // A control's colour at rest: its inline ink, never a class beside it
+    // (which one would win is stylesheet order).
     const measured = (control: HTMLElement, surface: string) => {
-      const fg = fgOf(control);
+      const fg = cssHex(control.style.color);
       expect(fg).not.toBeNull();
+      expect(classColor(control.className, 'text')).toBeNull();
       return contrastRatio(fg!, surface);
     };
-
     const add = within(cardEl).getByRole('button', { name: 'Add reaction' });
     expect(measured(add, bg)).toBeGreaterThanOrEqual(3);
     expect(measured(within(cardEl).getByRole('button', { name: 'Edit ticket' }), bg)).toBeGreaterThanOrEqual(3);
@@ -3744,28 +3791,64 @@ describe('Open board — every hold and every drop', () => {
     await user.click(add);
     expect(screen.getAllByTestId('emoji-option').length).toBeGreaterThan(0);
     const open = within(cardEl).getByRole('button', { name: 'Add reaction' });
-    // Its own background, a token of its own — not the hover's.
-    expect(open.className.split(/\s+/)).toContain('bg-black/10');
-    expect(open.className.split(/\s+/).filter((token) => /^bg-/.test(token))).toEqual(['bg-black/10']);
-    expect(measured(open, opened)).toBeGreaterThanOrEqual(3);
+    // Open, it stands on a background of its own, measured as painted.
+    const openBg = cssHex(open.style.backgroundColor);
+    expect(openBg).not.toBeNull();
+    expect(openBg).not.toBe(bg);
+    expect(open.className.split(/\s+/).filter((token) => /^bg-/.test(token))).toEqual([]);
+    expect(measured(open, openBg!)).toBeGreaterThanOrEqual(3);
   });
 
-  it('draws the add-reaction control open at a contrast that can be seen on a white card', async () => {
-    const user = userEvent.setup();
-    renderBoard(groupedBoard());
-    await screen.findByText('Too many meetings');
-    await user.click(within(cardElement('Too many meetings')).getByRole('button', { name: 'Add reaction' }));
+  it('colours a card by its author in the author’s tone, words and controls readable', async () => {
+    renderBoard(createBoard({ settings: { ...createBoard().settings, colorBy: 'author' } }));
+    await screen.findByText('Flaky deploys');
+    for (const [text, author] of [['Flaky deploys', alice], ['Slow rollbacks', bob]] as const) {
+      const card = cardElement(text);
+      const tones = cardTones(participantToneHex(author.color).pop)!;
+      const bg = cssHex(card.style.backgroundColor)!;
+      expect(bg).toBe(tones.tint);
+      expect(contrastRatio(themeValue('slate-900'), bg)).toBeGreaterThanOrEqual(4.5);
+      for (const control of [within(card).getByRole('button', { name: 'Add reaction' }), within(card).getByTestId('ticket-comment-btn')]) {
+        expect(contrastRatio(cssHex(control.style.color)!, bg)).toBeGreaterThanOrEqual(3);
+      }
+    }
+    // Two authors, two tones.
+    expect(cardElement('Flaky deploys').style.backgroundColor).not.toBe(cardElement('Slow rollbacks').style.backgroundColor);
+  });
 
+  it('tints a hidden card by its topic only, never in its author’s tone', async () => {
+    renderBoard(createBoard({
+      columns: [{ ...column('todo', 'To Discuss'), customColor: '#059669' }, column('doing', 'Discussing')],
+      settings: { ...createBoard().settings, colorBy: 'author', revealBrainstorm: false },
+    }), bob);
+    await screen.findByText('Slow rollbacks');
+    // Alice's card, hidden from Bob: the column's tint, not her rose.
+    const hidden = cardById('t-a');
+    expect(hidden.querySelector('.ticket-blur')).not.toBeNull();
+    expect(cssHex(hidden.style.backgroundColor)).toBe(cardTones('#059669')!.tint);
+    expect(cssHex(hidden.style.backgroundColor)).not.toBe(cardTones(participantToneHex(alice.color).pop)!.tint);
+  });
+
+  it('draws a white card, in the look’s own classes, where the column has no hue', async () => {
+    const user = userEvent.setup();
+    renderBoard(createBoard({ columns: [hueless('todo', 'To Discuss'), hueless('doing', 'Discussing')] }));
+    const card = cardElement('Too many meetings');
+    expect(card.style.backgroundColor).toBe('');
+    expect(card.className.split(/\s+/)).toContain('bg-white');
+    const add = within(card).getByRole('button', { name: 'Add reaction' });
+    expect(effectivePair(add).ratio).toBeGreaterThanOrEqual(3);
+    expect(effectivePair(within(card).getByRole('button', { name: 'Edit ticket' })).ratio).toBeGreaterThanOrEqual(3);
+    expect(effectivePair(card.querySelector('.whitespace-pre-wrap') as HTMLElement).ratio).toBeGreaterThanOrEqual(4.5);
+    await user.click(add);
     expect(screen.getAllByTestId('emoji-option').length).toBeGreaterThan(0);
     expect(effectivePair(within(cardElement('Too many meetings')).getByRole('button', { name: 'Add reaction' })).ratio).toBeGreaterThanOrEqual(3);
   });
 
-  it('draws the add-reaction control at a contrast that can be seen', async () => {
-    renderBoard(groupedBoard());
-    await screen.findByText('Too many meetings');
-
-    const add = within(cardElement('Too many meetings')).getByRole('button', { name: 'Add reaction' });
-    expect(effectivePair(add).ratio).toBeGreaterThanOrEqual(3);
+  // Custom templates saved by older releases hold classes only (AGENTS.md, *A card's colour*):
+  // their cards are tinted by the hue the classes name, not left white.
+  it('tints the cards of a column that holds Tailwind classes only', async () => {
+    renderBoard(createBoard({ columns: [{ ...hueless('todo', 'To Discuss'), color: 'bg-rose-50', text: 'text-rose-700' }, column('doing', 'Discussing')] }));
+    expect(cssHex(cardElement('Too many meetings').style.backgroundColor)).toBe(cardTones('#e11d48')!.tint);
   });
 
   it('keeps the first line clear of the edit control, on every screen', async () => {
@@ -3788,9 +3871,10 @@ describe('Open board — every hold and every drop', () => {
     renderBoard(groupedBoard());
     await screen.findByText('Too many meetings');
 
-    const edit = within(cardElement('Too many meetings')).getByRole('button', { name: 'Edit ticket' });
-    // An icon is non-text: 3:1 (1.4.11).
-    expect(effectivePair(edit).ratio).toBeGreaterThanOrEqual(3);
+    const card = cardElement('Too many meetings');
+    const edit = within(card).getByRole('button', { name: 'Edit ticket' });
+    // An icon is non-text: 3:1 (1.4.11), its ink on the card's tint.
+    expect(contrastRatio(cssHex(edit.style.color)!, cssHex(card.style.backgroundColor)!)).toBeGreaterThanOrEqual(3);
   });
 
   it('takes the corner delete away while the card is edited', async () => {
@@ -3810,15 +3894,19 @@ describe('Open board — every hold and every drop', () => {
       settings: { ...createBoard().settings, isAnonymous, colorBy: 'author' },
     });
 
+    const aliceTint = cardTones(participantToneHex(alice.color).pop)!.tint;
+    const topicTint = cardTones('#475569')!.tint; // the slate the column's classes name
     const { unmount } = renderBoard(colourful(false));
     await screen.findByText('Flaky deploys');
     // Alice's rose: the control the anonymous case is measured against.
-    expect(cardElement('Flaky deploys').style.backgroundColor).not.toBe('');
+    expect(cssHex(cardElement('Flaky deploys').style.backgroundColor)).toBe(aliceTint);
     unmount();
 
     renderBoard(colourful(true));
     await screen.findByText('Flaky deploys');
-    expect(cardElement('Flaky deploys').style.backgroundColor).toBe('');
+    // The topic's tint, the same for every author.
+    expect(cssHex(cardElement('Flaky deploys').style.backgroundColor)).toBe(topicTint);
+    expect(cardElement('Slow rollbacks').style.backgroundColor).toBe(cardElement('Flaky deploys').style.backgroundColor);
     const settings = await openSettings(userEvent.setup());
     const select = settings.getByRole('combobox', { name: /colou?r/i }) as HTMLSelectElement;
     expect(select.value).toBe('topic');
@@ -4169,7 +4257,11 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
       Promise.resolve({ json: () => Promise.resolve({ enabled: true }) }),
     ) as unknown as typeof fetch;
     const { unmount } = renderBoard();
-    expect(await screen.findByRole('button', { name: /Suggest groups with AI/ })).toBeTruthy();
+    // Named by its words alone: its icon (a spinner while the assistant works)
+    // is decoration, and the working state is said with aria-busy.
+    const suggest = await screen.findByRole('button', { name: 'Suggest groups with AI' });
+    expect(suggest.querySelector('.material-symbols-outlined')!.getAttribute('aria-hidden')).toBe('true');
+    expect(suggest.getAttribute('aria-busy')).toBe('false');
     unmount();
 
     renderBoard(createBoard({ settings: settingsOf({ revealBrainstorm: false }) }));
@@ -4986,5 +5078,78 @@ describe('Open board — sort, search, votes and the facilitator’s settings', 
 
     expect((screen.getByRole('checkbox', { name: '1 vote/item' }) as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole('checkbox', { name: 'Unlimited votes' }) as HTMLInputElement).disabled).toBe(true);
+  });
+});
+
+/**
+ * The board's chrome in the Clarté look (45.0): what is painted with classes
+ * is measured as the build paints it, on the surface it lands on.
+ */
+describe('Board chrome — measured on the surfaces it lands on', () => {
+  // The one border colour token of an element, as a theme token name.
+  const borderToken = (element: Element) => {
+    const found = (element.getAttribute('class') ?? '').split(/\s+/).filter((token) => /^border-(slate|indigo|rose|emerald|amber)-\d+$/.test(token));
+    expect(found).toHaveLength(1);
+    return found[0].replace(/^border-/, '');
+  };
+
+  it('writes “Finished” and Next Phase at 4.5:1 (white on emerald-500 measured 2.5:1)', async () => {
+    renderBoard(createBoard({ phase: 'BRAINSTORM', finishedUsers: ['fac'] }));
+    const finished = await screen.findByRole('button', { name: 'Finished!' });
+    expect(effectivePair(finished).ratio).toBeGreaterThanOrEqual(4.5);
+    expect(effectivePair(screen.getByRole('button', { name: 'Next Phase' })).ratio).toBeGreaterThanOrEqual(4.5);
+    expect(effectivePair(screen.getByRole('button', { name: /Switch to an open board/ })).ratio).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('draws the add field with an edge that can be seen, and its hint at 12px', async () => {
+    renderBoard(createBoard({ phase: 'BRAINSTORM' }));
+    const field = await screen.findAllByPlaceholderText('Add an idea...');
+    const frame = field[0].parentElement!;
+    // Its outline is its only edge: 3:1 against the column's white (1.4.11).
+    expect(tokenContrast(borderToken(frame), 'white')).toBeGreaterThanOrEqual(3);
+    // The focus is shown (2.4.7).
+    expect(frame.className).toMatch(/focus-within:ring-\d/);
+    const hint = within(frame).getByText('Press Enter to add');
+    expect(hint.className).not.toMatch(/text-\[(9|10|11)px\]/);
+    expect(effectivePair(hint).ratio).toBeGreaterThanOrEqual(4.5);
+    // The add button stays a grandchild of the frame: its click finds the
+    // field through parentElement.parentElement.
+    const add = within(frame).getByRole('button', { name: 'Add idea' });
+    expect(add.parentElement!.parentElement).toBe(frame);
+  });
+
+  it('writes the column head in the look’s ink, its count readable, its icon on its hue', async () => {
+    renderBoard(createBoard({ phase: 'BRAINSTORM', columns: [{ ...column('todo', 'To Discuss'), customColor: '#e11d48' }, column('doing', 'Discussing')] }));
+    const title = (await screen.findAllByText('To Discuss')).find((el) => el.hasAttribute('data-column-title'))!;
+    expect(effectivePair(title).ratio).toBeGreaterThanOrEqual(4.5);
+    const head = title.closest('[data-column-id]')!.firstElementChild as HTMLElement;
+    const count = within(head).getByText('3');
+    expect(effectivePair(count).ratio).toBeGreaterThanOrEqual(4.5);
+    // The tile: the hue's ink on its stronger tint.
+    const tile = head.querySelector('[aria-hidden="true"]') as HTMLElement;
+    const tones = cardTones('#e11d48')!;
+    expect(cssHex(tile.style.backgroundColor)).toBe(tones.tintStrong);
+    expect(contrastRatio(cssHex(tile.style.color)!, tones.tintStrong)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('labels a group and invites its name at a contrast that can be read', async () => {
+    renderBoard(createBoard({
+      phase: 'GROUP',
+      groups: [{ id: 'g1', title: '', colId: 'todo', votes: [] }],
+      tickets: [
+        { id: 't-a', colId: 'todo', text: 'Flaky deploys', authorId: 'alice', groupId: 'g1', votes: [] },
+        { id: 't-b', colId: 'todo', text: 'Slow rollbacks', authorId: 'bob', groupId: 'g1', votes: [] },
+      ],
+    }));
+    const group = (await screen.findByText('Flaky deploys')).closest('.group-container') as HTMLElement;
+    expect(group.className).toContain('col-span-full');
+    const title = group.querySelector('input[data-group-title-id]') as HTMLInputElement;
+    // The placeholder is the field's only instruction (indigo-300 measured 1.9:1).
+    const placeholder = /(?:^|\s)placeholder:text-([a-z]+-\d+)(?:\s|$)/.exec(title.className);
+    expect(placeholder).not.toBeNull();
+    expect(tokenContrast(placeholder![1], classColor(group.className, 'bg')!)).toBeGreaterThanOrEqual(4.5);
+    expect(effectivePair(within(group).getByText('Group')).ratio).toBeGreaterThanOrEqual(4.5);
+    // No uppercase 10px label any more: 12px at least.
+    expect(within(group).getByText('Group').className).not.toMatch(/text-\[(9|10|11)px\]/);
   });
 });

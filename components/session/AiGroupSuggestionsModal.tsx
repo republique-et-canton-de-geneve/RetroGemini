@@ -132,22 +132,24 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
     <ModalDialog
       label={t('session.aiGroups.dialogLabel')}
       onClose={onClose}
-      overlayClassName="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4"
-      panelClassName="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
+      overlayClassName="fixed inset-0 bg-slate-900/45 z-50 flex items-center justify-center p-4"
+      panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
     >
       <>
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-violet-500">auto_awesome</span>
-            <h2 className="font-bold text-slate-800 text-lg">{t('session.aiGroups.title')}</h2>
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 flex items-center justify-center rounded-lg bg-violet-50 text-violet-700 shrink-0" aria-hidden="true">
+              <span className="material-symbols-outlined text-lg! leading-none">auto_awesome</span>
+            </span>
+            <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{t('session.aiGroups.title')}</h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-500 hover:text-slate-600 p-1 rounded-sm"
+            className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition shrink-0"
             aria-label={t('session.aiGroups.closeAria')}
           >
-            <span className="material-symbols-outlined">close</span>
+            <span className="material-symbols-outlined" aria-hidden="true">close</span>
           </button>
         </div>
 
@@ -157,8 +159,8 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
           </p>
 
           {loading && (
-            <div className="flex flex-col items-center justify-center py-10 text-violet-600">
-              <span className="material-symbols-outlined animate-spin text-4xl">progress_activity</span>
+            <div className="flex flex-col items-center justify-center py-10 text-violet-700">
+              <span className="material-symbols-outlined motion-safe:animate-spin text-4xl! leading-none" aria-hidden="true">progress_activity</span>
               <p className="mt-3 text-sm font-medium">{t('session.aiGroups.analyzing')}</p>
             </div>
           )}
@@ -166,7 +168,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
           {!loading && error && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 px-4 py-3 text-sm">
               <div className="flex items-start gap-2">
-                <span className="material-symbols-outlined text-base mt-0.5">error</span>
+                <span className="material-symbols-outlined text-base! leading-none mt-0.5" aria-hidden="true">error</span>
                 <div>
                   <div className="font-semibold mb-1">{t('session.aiGroups.errorTitle')}</div>
                   <div>{error}</div>
@@ -176,7 +178,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
           )}
 
           {!loading && !error && suggestions && suggestions.length === 0 && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 text-slate-600 px-4 py-6 text-sm text-center">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 text-slate-600 px-4 py-6 text-sm text-center">
               {t('session.aiGroups.noClusters')}
             </div>
           )}
@@ -195,19 +197,22 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                 return (
                   <div
                     key={`${suggestion.title}-${index}`}
-                    className={`rounded-xl border-2 p-3 transition ${
+                    // An applied group is told by its tint and its "Applied"
+                    // chip, never by fading it: 70% opacity took its words
+                    // below 4.5:1.
+                    className={`rounded-xl border p-3 transition-shadow ${
                       accepted
-                        ? 'border-emerald-300 bg-emerald-50/50 opacity-70'
-                        : 'border-indigo-200 bg-indigo-50/40'
+                        ? 'border-emerald-200 bg-emerald-50'
+                        : 'border-slate-200 bg-white shadow-xs hover:shadow-md'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-indigo-500 text-base">layers</span>
-                        <span className="font-bold text-slate-800 text-sm">
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                        <span className="material-symbols-outlined text-indigo-600 text-base! leading-none" aria-hidden="true">layers</span>
+                        <span className="font-semibold text-slate-900 text-sm">
                           {suggestion.title || t('session.aiGroups.untitledCluster')}
                         </span>
-                        <span className="text-xs text-slate-500">
+                        <span className="text-xs text-slate-600 tabular-nums">
                           {includedCount === groupTickets.length
                             ? t(
                                 groupTickets.length > 1
@@ -222,16 +227,16 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                         </span>
                       </div>
                       {accepted ? (
-                        <span className="flex items-center gap-1 text-emerald-700 text-xs font-bold">
-                          <span className="material-symbols-outlined text-sm">check_circle</span>
+                        <span className="flex items-center gap-1 rounded-full px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-xs font-semibold shrink-0">
+                          <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">check_circle</span>
                           {t('session.aiGroups.applied')}
                         </span>
                       ) : (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             type="button"
                             onClick={() => handleDismiss(index)}
-                            className="text-xs font-semibold text-slate-500 hover:text-slate-700 px-2 py-1 rounded-sm hover:bg-white"
+                            className="text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-2.5 py-1.5 rounded-lg transition"
                           >
                             {t('session.aiGroups.dismiss')}
                           </button>
@@ -240,14 +245,20 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                             onClick={() => handleAccept(index, suggestion)}
                             disabled={!canAccept}
                             title={canAccept ? undefined : t('session.aiGroups.needTwoTicketsTitle')}
-                            className="text-xs font-bold text-white bg-indigo-500 hover:bg-indigo-600 px-3 py-1 rounded-sm shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                            // White on indigo-500 measured 4.46:1. Both states
+                            // are colours a test can measure, not an opacity.
+                            className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
+                              canAccept
+                                ? 'bg-indigo-600 text-white hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800'
+                                : 'bg-slate-200 text-slate-600 cursor-not-allowed'
+                            }`}
                           >
                             {t('session.aiGroups.accept')}
                           </button>
                         </div>
                       )}
                     </div>
-                    <ul className="space-y-1 pl-1">
+                    <ul className="space-y-1.5 pl-1">
                       {groupTickets.map(ticket => {
                         const col = columnById.get(ticket.colId);
                         const included = isIncluded(index, ticket.id);
@@ -261,7 +272,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                                 checked={included}
                                 disabled={accepted}
                                 onChange={() => toggleTicket(index, ticket.id)}
-                                className="mt-0.5 w-3.5 h-3.5 accent-indigo-600 shrink-0 disabled:opacity-60"
+                                className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0"
                                 aria-label={t('session.aiGroups.includeTicket', { text: ticket.text })}
                               />
                               {col && (
@@ -273,12 +284,12 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                               )}
                               <span
                                 className={`grow whitespace-pre-wrap wrap-break-word ${
-                                  included ? 'text-slate-700' : 'text-slate-500 line-through'
+                                  included ? 'text-slate-700' : 'text-slate-600 line-through'
                                 }`}
                               >
                                 {ticket.text}
                                 {col && (
-                                  <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-500">
+                                  <span className="ml-2 text-xs text-slate-600">
                                     {col.title}
                                   </span>
                                 )}
@@ -289,7 +300,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                       })}
                     </ul>
                     {!accepted && !canAccept && (
-                      <p className="mt-2 pl-1 text-[11px] text-amber-600">
+                      <p className="mt-2 pl-1 text-xs text-amber-700">
                         {t('session.aiGroups.needTwoTickets')}
                       </p>
                     )}
@@ -297,7 +308,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                 );
               })}
               {visibleCount === 0 && (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 text-slate-600 px-4 py-6 text-sm text-center">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 text-slate-600 px-4 py-6 text-sm text-center">
                   {t('session.aiGroups.allDismissed')}
                 </div>
               )}
@@ -306,7 +317,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
         </div>
 
         <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-slate-600 tabular-nums">
             {visibleCount > 0 && (
               <span>
                 {t('session.aiGroups.acceptedCount', { accepted: acceptedCount, total: visibleCount })}
@@ -318,16 +329,20 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
               type="button"
               onClick={onRegenerate}
               disabled={loading}
-              className="text-xs font-semibold text-violet-700 hover:text-violet-900 px-3 py-1 rounded-sm hover:bg-white disabled:opacity-50 flex items-center gap-1"
+              className={`text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1 transition ${
+                loading ? 'text-slate-600 cursor-not-allowed' : 'text-violet-700 hover:bg-violet-50'
+              }`}
             >
-              <span className="material-symbols-outlined text-sm">refresh</span>
+              <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">refresh</span>
               {t('session.aiGroups.regenerate')}
             </button>
             {!loading && !error && remaining.length > 1 && (
               <button
                 type="button"
                 onClick={handleAcceptAll}
-                className="text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 px-3 py-1.5 rounded-sm shadow-xs"
+                // White on emerald-500 measured 2.54:1: the footer's main
+                // action takes the brand, like every primary button.
+                className="text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 px-3 py-1.5 rounded-lg transition"
               >
                 {t('session.aiGroups.acceptAllRemaining')}
               </button>
@@ -335,7 +350,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
             <button
               type="button"
               onClick={onClose}
-              className="text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 px-3 py-1.5 rounded-sm"
+              className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 px-3 py-1.5 rounded-lg transition"
             >
               {t('session.aiGroups.close')}
             </button>

@@ -5,6 +5,7 @@ import TeamLogin from '../components/TeamLogin';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { dataService } from '../services/dataService';
 import type { Team } from '../types';
+import { effectivePair } from './helpers/tailwindTheme';
 
 /**
  * The two email fields of the login screen: the recovery address a team must be
@@ -174,7 +175,11 @@ describe('TeamLogin — forgotten password', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send Reset Link' }));
 
     const message = await screen.findByText(/not available on this server/);
-    expect(message.className).toContain('red');
+    // Announced, and visibly an error: a red hue the contrast helper measures.
+    expect(message.getAttribute('role')).toBe('alert');
+    const pair = effectivePair(message);
+    expect(pair.fg).toMatch(/^(rose|red)-/);
+    expect(pair.ratio).toBeGreaterThanOrEqual(4.5);
     expect(screen.getByLabelText('Recovery Email')).toHaveValue('lead@corp.ch');
   });
 

@@ -10,14 +10,14 @@ const ProposalNumber: React.FC<{ number: number; surface?: 'light' | 'dark' }> =
   const { t } = useTranslation();
   const colorClass = surface === 'dark'
     ? 'bg-slate-700 text-slate-50 border border-slate-500'
-    : 'bg-slate-700 text-white';
+    : 'bg-slate-900 text-white';
 
   return (
     <span
       data-testid="proposal-number"
       data-proposal-number={number}
       title={t('phases.proposal.number', { number })}
-      className={`inline-flex items-center justify-center min-w-6 h-6 px-1.5 mr-2 rounded-full text-xs font-bold tabular-nums shrink-0 ${colorClass}`}
+      className={`inline-flex items-center justify-center min-w-6 h-6 px-1.5 mr-2 rounded-full font-mono text-xs font-semibold tabular-nums shrink-0 ${colorClass}`}
     >
       <span aria-hidden="true">{number}</span>
       <span className="sr-only">{t('phases.proposal.number', { number })}</span>

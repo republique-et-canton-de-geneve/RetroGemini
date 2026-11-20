@@ -234,7 +234,11 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
     await page.keyboard.type(' again');
     sent.length = 0;
     const box = (await group.boundingBox())!;
-    await group.tap({ position: { x: box.width - 6, y: box.height - 6 } });
+    // The middle of the group's bottom padding: blank whatever the radius of
+    // its corners. A tap 6px from the corner stopped reaching the group once
+    // the look rounded it at 18px (`rounded-2xl`) instead of 12px: the column
+    // under it took the tap.
+    await group.tap({ position: { x: box.width / 2, y: box.height - 6 } });
     await expect(group.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
     await expect(page.getByText('Slow rollbacks again', { exact: true })).toBeVisible();
     await expect(page.locator('textarea:not([placeholder])')).toHaveCount(0);
@@ -706,8 +710,9 @@ const controlAt = (page: Page, at: { x: number; y: number }) => page.evaluate(({
 test('taps after one on a group’s title that closes an editor press nothing the layout moved under them, past the browser’s count', async ({ browser }) => {
   const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
   const context = await browser.newContext({ ...phone, locale: 'en-US' });
-  // The font CI renders in (it has no Inter), so that a run here lays the
-  // board out as CI does: the points below are measured, never assumed.
+  // One wide font, the one Linux falls back to, so that a run here lays the
+  // board out as CI does whatever fonts the machine has: the points below are
+  // measured, never assumed.
   await context.addInitScript(() => {
     document.addEventListener('DOMContentLoaded', () => {
       const style = document.createElement('style');
@@ -782,13 +787,25 @@ test('taps after one on a group’s title that closes an editor press nothing th
     // Inside the board's fingertip (24 px), with room to spare.
     expect(pair.distance).toBeLessThanOrEqual(18);
     const { first, next: at } = pair;
+    // The card as it stands when it has grown back: where `at` was measured.
+    const grown = await rectOf(card(page, `${long} too`));
     // The editor took its Edit off the page when it opened: a tap on the Edit
     // that came back, at the same point within half a second of the first, is
     // the next of a double tap on another element, and presses nothing
     // (doubleGestureGuard). A person closes the editor with a gesture of their
     // own, which starts over; the test closed it with none.
     await page.waitForTimeout(600);
-    await openEditor(`${long} too`, ' again');
+    // The second edit changes the text (it must be written) without changing
+    // what the card measures: the same three letters in another order, so the
+    // last line keeps its width. A longer text ("too again") wrapped onto one
+    // more line as soon as a look made the card's text a little narrower: the
+    // card grew back 21 px taller than measured, and no control was under the
+    // later taps.
+    await card(page, `${long} too`).getByRole('button', { name: 'Edit ticket' }).tap();
+    await expect(editor).toBeFocused();
+    await editor.press('Control+End');
+    for (let letter = 0; letter < 3; letter += 1) await page.keyboard.press('Backspace');
+    await page.keyboard.type('oto');
     expect(await rectOf(title)).toEqual(titleRect);
     await page.waitForTimeout(700);
     const before = sent.length;
@@ -820,7 +837,10 @@ test('taps after one on a group’s title that closes an editor press nothing th
     expect(lifts).toHaveLength(3);
     for (const n of [1, 2]) expect(presses[n].at - lifts[n - 1].at).toBeLessThanOrEqual(500);
 
-    const edited = `${long} too again`;
+    const edited = `${long} oto`;
+    // The premise of the points above, said out loud: the card grew back to
+    // exactly the box they were measured in.
+    expect(await rectOf(card(page, edited)), 'the card grew back to the box the taps were aimed at').toEqual(grown);
     // What the later taps reached: a control of the card that grew back.
     expect((await controlAt(page, at)).card).toContain(edited);
     await expect(editor).toHaveCount(0);

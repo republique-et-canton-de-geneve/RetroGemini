@@ -181,6 +181,33 @@ describe('planTeamRestore — a team that still exists', () => {
   });
 });
 
+// Each member's avatar (AGENTS.md, *Avatars*): a choice is the person's, made
+// since the backup or not, and rolling it back would put an older avatar on
+// everyone's screen with a date that loses to nothing. A team deleted since
+// the backup has no current map and comes back with the archive's.
+describe('planTeamRestore — each member\'s avatar', () => {
+  const archivedMap = { u1: { id: 'fox', at: 10 } };
+  const currentMap = { u1: { id: 'owl', at: 90 }, u2: { id: null, at: 80 } };
+
+  it('keeps the current map on a team that still exists, and shares nothing with it', () => {
+    const current = { ...currentTeam(), memberAvatars: currentMap };
+    const { team } = plan({ archived: { ...archivedTeam(), memberAvatars: archivedMap }, current });
+    expect(team.memberAvatars).toEqual(currentMap);
+    expect(team.memberAvatars).not.toBe(current.memberAvatars);
+    expect(KEPT_FROM_CURRENT).toContain('memberAvatars');
+  });
+
+  it('drops the archived map when the team that exists has none now', () => {
+    const { team } = plan({ archived: { ...archivedTeam(), memberAvatars: archivedMap }, current: currentTeam() });
+    expect('memberAvatars' in team).toBe(false);
+  });
+
+  it('brings a deleted team\'s choices back as the archive holds them', () => {
+    const { team } = plan({ archived: { ...archivedTeam(), memberAvatars: archivedMap }, current: null });
+    expect(team.memberAvatars).toEqual(archivedMap);
+  });
+});
+
 // sessionParent mode (F2): each session's parent issue is a routing decision
 // the team keeps making, and the claims on parents being created are live
 // bookkeeping. Rolled back, the first would send a session's next actions

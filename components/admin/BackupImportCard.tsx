@@ -4,6 +4,8 @@ import { Notice, noticeText } from '../../i18n/notice';
 import type { BackupEntry, BackupLimits } from '../../types';
 import { importBackupFile, type ListReload } from './backupImportApi';
 import { formatBackupSize, megabytes, withLocalizedMax } from './backupFormat';
+import { CARD, FIELD_LABEL, SECONDARY_BUTTON } from '../dashboard/dashboardLook';
+import { ADMIN_SETTING_TITLE, ADMIN_SUBTITLE_ICON } from './adminLook';
 
 /**
  * The Backups tab's "Import a backup file" card, between "Create Checkpoint"
@@ -20,7 +22,9 @@ import { formatBackupSize, megabytes, withLocalizedMax } from './backupFormat';
  * - the status is always mounted (so it is announced) and always visible,
  *   and both messages wrap: they quote file names, one unbreakable token wider
  *   than a 320 px screen;
- * - white on teal-700 (5.39:1); teal-600 measures 3.66:1 and is not used.
+ * - the button is the dashboard's secondary one (the checkpoint above is the
+ *   tab's primary action); busy, it is drawn in colours of its own, never
+ *   faded, which no contrast check can read.
  *
  * Messages are kept as what to say, never as the sentence, so they follow the
  * language switcher while they are on screen.
@@ -95,15 +99,15 @@ const BackupImportCard: React.FC<Props> = ({ sessionToken, limits, onImported, o
       : t('adminBackups.import.imported', { name: status.name, count: status.count });
 
   return (
-    <section aria-labelledby={titleId} data-testid="backup-import-card" className="bg-white rounded-lg shadow-sm p-4 mb-6">
-      <h3 id={titleId} className="text-sm font-semibold text-slate-700 mb-1 flex items-center gap-2">
-        <span aria-hidden="true" className="material-symbols-outlined text-base text-teal-700">upload</span>
+    <section aria-labelledby={titleId} data-testid="backup-import-card" className={`${CARD} p-4 mb-6`}>
+      <h3 id={titleId} className={`${ADMIN_SETTING_TITLE} mb-1`}>
+        <span aria-hidden="true" className={ADMIN_SUBTITLE_ICON}>upload</span>
         {t('adminBackups.import.title')}
       </h3>
       <p className="text-sm text-slate-600 mb-3">{t('adminBackups.import.description')}</p>
       <div className="flex flex-col gap-3 md:flex-row md:items-end">
         <div className="flex-1 min-w-0">
-          <label htmlFor={inputId} className="block text-sm font-medium text-slate-700 mb-1">
+          <label htmlFor={inputId} className={`${FIELD_LABEL} mb-1`}>
             {t('adminBackups.import.fileLabel')}
           </label>
           <input
@@ -118,7 +122,7 @@ const BackupImportCard: React.FC<Props> = ({ sessionToken, limits, onImported, o
               setError(null);
               setFileError(false);
             }}
-            className="w-full text-sm text-slate-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+            className="w-full text-sm text-slate-700 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border file:border-slate-200 file:text-sm file:font-semibold file:bg-white file:text-slate-700 hover:file:bg-slate-50 hover:file:border-slate-300"
           />
           <p id={hintId} className="text-xs text-slate-600 mt-1">
             {limits
@@ -130,16 +134,16 @@ const BackupImportCard: React.FC<Props> = ({ sessionToken, limits, onImported, o
           type="button"
           onClick={busy ? undefined : () => void submit()}
           aria-disabled={busy ? true : undefined}
-          className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center justify-center gap-2 bg-teal-700 text-white hover:bg-teal-800 aria-disabled:cursor-wait aria-disabled:opacity-70"
+          className={`${SECONDARY_BUTTON} px-4 py-2 text-sm shrink-0 aria-disabled:cursor-wait aria-disabled:bg-slate-100 aria-disabled:text-slate-600`}
         >
-          <span aria-hidden="true" className={`material-symbols-outlined text-base ${busy ? 'animate-spin' : ''}`}>
+          <span aria-hidden="true" className={`material-symbols-outlined text-lg! leading-none ${busy ? 'motion-safe:animate-spin' : ''}`}>
             {busy ? 'sync' : 'upload'}
           </span>
           {busy ? t('adminBackups.import.importing') : t('adminBackups.import.submit')}
         </button>
       </div>
       {error && (
-        <p id={errorId} role="alert" className="mt-2 text-sm text-red-700 wrap-anywhere">
+        <p id={errorId} role="alert" className="mt-2 text-sm text-rose-700 wrap-anywhere">
           {noticeText(withLocalizedMax(error, locale), t)}
         </p>
       )}

@@ -32,7 +32,7 @@ const BoardViewControls: React.FC<Props> = ({ search, onSearch, sort, onSort, ca
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="relative">
-        <span className="material-symbols-outlined text-base! leading-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" aria-hidden="true">search</span>
+        <span className="material-symbols-outlined text-lg! leading-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" aria-hidden="true">search</span>
         <input
           type="search"
           value={search}
@@ -47,7 +47,7 @@ const BoardViewControls: React.FC<Props> = ({ search, onSearch, sort, onSort, ca
           }}
           aria-label={t('session.openBoard.search')}
           placeholder={t('session.openBoard.searchPlaceholder')}
-          className="w-40 sm:w-48 text-sm bg-white border border-slate-300 rounded-sm pl-7 pr-2 py-1 text-slate-900 placeholder:text-slate-500 hover:border-slate-400"
+          className="w-40 sm:w-48 text-sm bg-white border border-slate-400 rounded-lg pl-8 pr-2 py-1.5 text-slate-900 placeholder:text-slate-500 hover:border-slate-400 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
         />
       </div>
       {/* Always in the page, empty with no search: a status region added (or
@@ -57,12 +57,12 @@ const BoardViewControls: React.FC<Props> = ({ search, onSearch, sort, onSort, ca
         {resultCount === null ? '' : tp('session.openBoard.searchResults', resultCount)}
       </span>
       <div className="flex items-center gap-1">
-        <span className="material-symbols-outlined text-base! leading-none text-slate-500" aria-hidden="true">sort</span>
+        <span className="material-symbols-outlined text-lg! leading-none text-slate-500" aria-hidden="true">sort</span>
         <select
           aria-label={t('session.openBoard.sortBy')}
           value={sort}
           onChange={(e) => onSort(toBoardSort(e.target.value))}
-          className="text-xs bg-white border border-slate-300 rounded-sm px-2 py-1 text-slate-700 font-medium cursor-pointer hover:border-slate-400"
+          className="text-sm bg-white border border-slate-400 rounded-lg px-2 py-1.5 text-slate-800 font-semibold cursor-pointer hover:border-slate-400 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15"
         >
           {BOARD_SORTS.map((option) => (
             <option key={option} value={option} disabled={option === 'votes' && !canSortByVotes}>

@@ -56,6 +56,9 @@ import { expect, type Locator, type Page, type TestInfo } from '@playwright/test
 export const BASELINE: Record<string, number> = {
   // e2e/accessibility-audit.spec.ts
   login: 0,
+  // e2e/login-team-picker.spec.ts: the team list as tiles, in French (45.3).
+  // The audit above walks whatever list the server holds, which may be short.
+  'login-team-grid': 0,
   'create-team': 0,
   dashboard: 0,
   'retro-icebreaker': 0,
@@ -106,6 +109,12 @@ export const BASELINE: Record<string, number> = {
   // e2e/admin-team-merge.spec.ts: the merge and delete dialogs, scoped.
   'admin-team-merge-dialog': 0,
   'admin-team-delete-dialog': 0,
+  // e2e/avatars.spec.ts: the avatar picker over a session, scoped (45.0).
+  'avatar-picker': 0,
+  // The one-time avatar hint under the header, scoped: a guest's in a
+  // retrospective (a French phone) and the facilitator's on the dashboard.
+  'avatar-hint': 0,
+  'avatar-hint-dashboard': 0,
 };
 
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
@@ -160,12 +169,59 @@ const contrastPairs = (nodes: Array<{ any: Array<{ id: string; data: unknown }>;
   return [...pairs.values()].sort((a, b) => b.nodes - a.nodes);
 };
 
+/** Long enough for every entrance of the look (the longest is under 2 s), short enough to fail a stuck one. */
+const ANIMATION_SETTLE_TIMEOUT_MS = 5_000;
+
+/**
+ * Waits until every finite animation of the page has ended. axe measures text
+ * under CSS opacity at its blended colour, so a fade or an entrance caught
+ * half-way reads as a `color-contrast` finding on a screen capped at zero.
+ * Animations that repeat for ever (the typing dots) never end and are not
+ * waited for; a finite one still running after the bound fails the audit with
+ * its name and target, rather than letting the run hang or measure it mid-way.
+ */
+export const waitForFiniteAnimations = async (
+  page: Page,
+  { timeoutMs = ANIMATION_SETTLE_TIMEOUT_MS }: { timeoutMs?: number } = {},
+) => {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const running = await page.evaluate(() =>
+      document.getAnimations()
+        .filter((animation) => {
+          const { endTime } = animation.effect?.getComputedTiming() ?? {};
+          return animation.playState === 'running'
+            && typeof endTime === 'number' && Number.isFinite(endTime);
+        })
+        .map((animation) => {
+          const name = (animation as CSSAnimation).animationName
+            || (animation as CSSTransition).transitionProperty
+            || animation.id || 'animation';
+          const target = (animation.effect as KeyframeEffect | null)?.target;
+          const where = target
+            ? `${target.tagName.toLowerCase()}${target.id ? `#${target.id}` : ''}`
+            : 'no target';
+          return `${name} on ${where}`;
+        }));
+    if (running.length === 0) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `axe audit: ${running.length} animation(s) still running after ${timeoutMs} ms: ${running.join(', ')}. `
+          + 'An audit would measure them half-way.',
+      );
+    }
+    await page.waitForTimeout(50);
+  }
+};
+
 export const audit = async (page: Page, testInfo: TestInfo, screen: string, { scope }: AuditOptions = {}) => {
   // A screen with no cap would be compared with `undefined` and fail with a
   // message that names nothing useful: say what is missing instead.
   if (!Object.prototype.hasOwnProperty.call(BASELINE, screen)) {
     throw new Error(`axe audit: "${screen}" has no entry in BASELINE (e2e/helpers/axe.ts); add it at 0.`);
   }
+
+  await waitForFiniteAnimations(page);
 
   const builder = new AxeBuilder({ page }).withTags(WCAG_TAGS);
   if (scope) {

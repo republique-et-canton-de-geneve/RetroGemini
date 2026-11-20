@@ -32,6 +32,7 @@ const KNOWN_ERRORS: Record<string, MessageKey> = {
   'Valid email required': 'errors.validEmailRequired',
   'The team could not be deleted. Please try again.': 'errors.deleteTeamFailed',
   'The recovery email could not be saved. Please try again.': 'errors.recoveryEmailNotSaved',
+  'The avatar could not be saved.': 'errors.avatarNotSaved',
   // The shared email rule (utils/emailAddress.js): the sentence the data layer
   // throws, and the code every write path answers with.
   [INVALID_EMAIL_MESSAGE]: 'errors.invalidEmail',

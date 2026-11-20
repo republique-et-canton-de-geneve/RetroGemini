@@ -32,6 +32,8 @@ export default defineConfig({
     baseURL: 'http://localhost:3100',
     // See playwright.config.ts: the interface language follows the browser.
     locale: 'en-US',
+    // See playwright.config.ts: animations off, so nothing is measured mid-way.
+    reducedMotion: 'reduce',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     ...(process.env.PW_CHROMIUM_PATH

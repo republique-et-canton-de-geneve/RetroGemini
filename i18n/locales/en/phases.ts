@@ -185,6 +185,17 @@ const phases = {
   'phases.proposal.delete': 'Delete proposal',
   'phases.proposal.votedBadge': 'Voted',
   'phases.proposal.voteNeeded': 'Vote needed',
+  // A vote button's accessible name: what it does, or the count it shows and
+  // what those votes are (the visible number is part of the name, WCAG 2.5.3).
+  'phases.proposal.voteFor': 'Vote for',
+  'phases.proposal.voteNeutral': 'Vote neutral',
+  'phases.proposal.voteAgainst': 'Vote against',
+  'phases.proposal.votesFor_one': '{count} vote for',
+  'phases.proposal.votesFor_other': '{count} votes for',
+  'phases.proposal.votesNeutral_one': '{count} neutral vote',
+  'phases.proposal.votesNeutral_other': '{count} neutral votes',
+  'phases.proposal.votesAgainst_one': '{count} vote against',
+  'phases.proposal.votesAgainst_other': '{count} votes against',
   'phases.proposal.rejectTitle': 'Reject proposal (can be undone)',
   'phases.proposal.reject': 'Reject',
   'phases.proposal.accept': 'Accept',

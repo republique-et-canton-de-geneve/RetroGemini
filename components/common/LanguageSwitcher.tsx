@@ -24,7 +24,9 @@ const LanguageSwitcher: React.FC<Props> = ({ className = '' }) => {
     <div
       role="group"
       aria-label={t('common.language.label')}
-      className={`inline-flex items-center rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-bold ${className}`}
+      // A segmented control: a white track with a hairline, the current
+      // language filled with the brand colour.
+      className={`inline-flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 text-xs font-semibold ${className}`}
       data-testid="language-switcher"
     >
       {SUPPORTED_LANGUAGES.map(option => {
@@ -41,8 +43,8 @@ const LanguageSwitcher: React.FC<Props> = ({ className = '' }) => {
             onClick={() => {
               if (!active) setLanguage(option);
             }}
-            className={`rounded-md px-2 py-1 uppercase transition ${
-              active ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+            className={`rounded-md px-1.5 sm:px-2 py-1 uppercase transition focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-600 ${
+              active ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
             data-testid={`language-option-${option}`}
           >

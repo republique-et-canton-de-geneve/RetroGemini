@@ -23,6 +23,7 @@ const errors = {
   'errors.recoveryEmailRequired': 'Enter a recovery email: it is the only way to reset the password if it is forgotten',
   'errors.deleteTeamFailed': 'The team could not be deleted. Please try again.',
   'errors.recoveryEmailNotSaved': 'The recovery email could not be saved. Please try again.',
+  'errors.avatarNotSaved': 'The avatar could not be saved.',
   'errors.invalidInviteLink': 'Failed to join team - invalid invite link',
   // The other ways an invite import fails: the login limiter, an answer worth
   // retrying (a 5xx, a gateway during a rolling update), and no answer at all.

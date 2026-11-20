@@ -1,4 +1,5 @@
 import React from 'react';
+import type { CardTones } from '../../utils/cardTones';
 
 /**
  * Appearance of a brainstorm/group ticket card.
@@ -18,8 +19,12 @@ export interface TicketCardAppearance {
   isDragTarget: boolean;
   /** True while this card is the one being dragged / tapped for grouping. */
   isSelected: boolean;
-  /** Resolved background colour of the card, or null for the default white. */
-  cardBgHex: string | null;
+  /**
+   * The tones of the card's hue (`utils/cardTones.ts`), or null for the
+   * default white card. The card takes the soft tint and its line; its words
+   * stay in the look's ink, whatever hue the facilitator picked.
+   */
+  tones: CardTones | null;
   /**
    * True where this card can be picked up: the Group phase, and a card the
    * viewer may move between columns in Brainstorm. Named for what it grants
@@ -31,31 +36,32 @@ export interface TicketCardAppearance {
 export const getTicketCardClassName = ({
   isDragTarget,
   isSelected,
-  cardBgHex,
+  tones,
   isDraggable
 }: TicketCardAppearance): string =>
   // No margin of its own: the column's grid gap and a group's own grid gap
-  // space the cards, and a margin here would add to the gap.
-  `p-3 rounded shadow-xs border group relative transition-all
+  // space the cards, and a margin here would add to the gap. A hover deepens
+  // the shadow and moves nothing (boxes are measured), and only what is
+  // painted transitions.
+  `p-3 rounded-xl border shadow-xs group relative transition-[box-shadow,border-color,background-color] [@media(hover:hover)]:hover:shadow-md
                 ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''}
-                ${isDragTarget ? 'ring-4 ring-indigo-400 border-indigo-500 z-20' : isSelected ? 'ring-4 ring-blue-400 border-blue-500 shadow-lg z-10' : ''}
-                ${!cardBgHex ? 'bg-white border-slate-200' : ''}
+                ${isDragTarget ? 'ring-4 ring-indigo-300 border-indigo-600 z-20' : isSelected ? 'ring-4 ring-indigo-200 border-indigo-600 shadow-lg z-10' : ''}
+                ${!tones ? `bg-white ${isDragTarget || isSelected ? '' : 'border-slate-200'}` : ''}
             `;
 
 export const getTicketCardStyle = ({
   isDragTarget,
   isSelected,
-  cardBgHex
+  tones
 }: TicketCardAppearance): React.CSSProperties | undefined =>
-  cardBgHex
+  tones
     ? {
         // Unconditional: a dragged or selected card keeps its colour so its
         // text stays legible against it.
-        backgroundColor: cardBgHex,
+        backgroundColor: tones.tint,
         // The ring already marks these states; leaving the border colour unset
         // lets the ring's own border class show through.
-        borderColor: isDragTarget ? undefined : isSelected ? undefined : cardBgHex,
-        borderWidth: '2px'
+        borderColor: isDragTarget || isSelected ? undefined : tones.line
       }
     : undefined;
 

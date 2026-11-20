@@ -13,6 +13,8 @@ export default defineConfig({
     ...devices['Desktop Chrome'],
     baseURL: 'http://127.0.0.1:34100',
     locale: 'en-US',
+    // See playwright.config.ts: animations off, so nothing is measured mid-way.
+    reducedMotion: 'reduce',
     ...(process.env.PW_CHROMIUM_PATH
       ? { launchOptions: { executablePath: process.env.PW_CHROMIUM_PATH } }
       : {}),

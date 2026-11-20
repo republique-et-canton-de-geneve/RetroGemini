@@ -18,8 +18,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # One commit and no tags is enough: the content check below compares
+      # trees, never history, and fetches the release tag's commit itself.
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
 
       - name: Read version
         id: version
@@ -31,19 +35,123 @@ jobs:
           fi
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # `gh release view` finds a draft as well as a published release, and a
+      # draft has no tag until it is published: the dispatch below failed on it
+      # with a bare "No ref found", and no image was built. A draft named
+      # VERSION is therefore refused here, before anything is created.
+      #
+      # A missing release is created on the commit this run started from. When
+      # a tag named VERSION exists already (deleting a release keeps its tag),
+      # GitHub attaches the new release to that tag and ignores `--target`: the
+      # next step finds out whether the tag holds this run's content.
       - name: Create GitHub release if missing
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.value }}
         run: |
-          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $VERSION already exists; nothing to create."
+          set -euo pipefail
+          if IS_DRAFT=$(gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            if [ "$IS_DRAFT" = true ]; then
+              echo "::error::A draft release named ${VERSION} exists. A draft has no tag, so there is nothing to build ${VERSION} from, and no image was published. Publish the draft (GitHub then creates its tag on the commit it targets) or delete it, then run this workflow again."
+              exit 1
+            fi
+            echo "Release ${VERSION} already exists. The next step checks that its tag holds this run's content."
+            echo "created=false" >> "$GITHUB_OUTPUT"
           else
             gh release create "$VERSION" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "RetroGemini $VERSION" \
               --generate-notes
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The release's tag must hold the content of the commit this run started
+      # from, whoever made the tag: the step above, or someone before this run.
+      # A branch released by hand before its merge is the usual case. Merged
+      # as it was released (squashed or rebased: another commit, the same
+      # tree), its tag is rebuilt as it is. Fixed after its release without a
+      # bump, or merged into a main that took a Dependabot fix meanwhile, it
+      # holds another tree: building the tag would publish the old content
+      # under VERSION, and the merge itself would never be published. A stale
+      # tag left by a deleted release is the same case. So the run stops here,
+      # before anything is published, on a push to main and on a manual
+      # dispatch from a branch alike. Trees are compared, not commits, and a
+      # re-run finds the release and checks its tag again.
+      - name: Check that the release tag holds this run's content
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          CREATED: ${{ steps.release.outputs.created }}
+        run: |
+          set -euo pipefail
+          # The checkout fetched this run's commit alone, without tags. The tag
+          # is fetched with the one commit it names; a tag the step above has
+          # just created is asked for again after a pause, should it not be
+          # served at once.
+          fetched=false
+          for attempt in 1 2 3; do
+            if git fetch --no-tags --depth=1 origin "+refs/tags/${VERSION}:refs/tags/${VERSION}"; then
+              fetched=true
+              break
+            fi
+            echo "The tag ${VERSION} could not be fetched (attempt ${attempt} of 3)."
+            if [ "$attempt" -lt 3 ]; then
+              sleep 5
+            fi
+          done
+          if [ "$fetched" != true ]; then
+            echo "::error::The tag ${VERSION} of release ${VERSION} could not be fetched, so its content could not be checked. No image was published; run this workflow again."
+            exit 1
+          fi
+          # An annotated tag names a tag object: ^{commit} follows it to the commit.
+          if ! TAG_COMMIT=$(git rev-parse --verify --quiet "refs/tags/${VERSION}^{commit}"); then
+            echo "::error::The tag ${VERSION} does not point at a commit. No image was published."
+            exit 1
+          fi
+          TAG_TREE=$(git rev-parse --verify "refs/tags/${VERSION}^{tree}")
+          RUN_TREE=$(git rev-parse --verify "${GITHUB_SHA}^{tree}")
+          if [ "$TAG_TREE" != "$RUN_TREE" ]; then
+            if [ "$CREATED" = true ]; then
+              FOUND="The tag ${VERSION} existed before this run with no release, and the release this run created was attached to it (GitHub ignores the target of a release whose tag exists)."
+            else
+              FOUND="Release ${VERSION} existed before this run."
+            fi
+            echo "Files that differ between the tag ${VERSION} (${TAG_COMMIT}) and this run's commit (${GITHUB_SHA}):"
+            git diff --stat --stat-count=40 "$TAG_COMMIT" "$GITHUB_SHA" || true
+            echo "::error::${FOUND} Its tag points at ${TAG_COMMIT}, whose content differs from this run's commit ${GITHUB_SHA}, so building it would publish other content as ${VERSION}. No image was published. Bump VERSION so this content gets its own release. If the tag is stale and nothing was published from it, delete the release with its tag (gh release delete ${VERSION} --cleanup-tag --yes) and run this workflow again."
+            exit 1
+          fi
+          if [ "$TAG_COMMIT" = "$GITHUB_SHA" ]; then
+            echo "The tag ${VERSION} points at this run's commit ${GITHUB_SHA}."
+          else
+            echo "The tag ${VERSION} points at ${TAG_COMMIT}, another commit with the same content as this run's commit ${GITHUB_SHA}. The image is built from the tag."
+          fi
+
+      # `latest` is what render.yaml and the README pull, so it moves to the
+      # newest release only: a re-run of an older release's run, or a release
+      # of an older line, publishes that version under its own tag alone. The
+      # releases are listed once this run's release exists, drafts left out
+      # (they publish nothing), and this run's version is counted in by hand in
+      # case the list does not show a release created a moment ago.
+      - name: Decide whether this release is the newest
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          if ! RELEASES=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 1000 --json tagName --jq '.[].tagName'); then
+            echo "::error::The releases could not be listed, so whether ${VERSION} is the newest is unknown. No image was published; run this workflow again."
+            exit 1
+          fi
+          NEWEST=$(printf '%s\n%s\n' "$VERSION" "$RELEASES" | grep -E '^[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          if [ "$NEWEST" = "$VERSION" ]; then
+            echo "Release ${VERSION} is the newest: the image is published as ${VERSION} and as latest."
+            echo "push_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Release ${NEWEST} is newer than ${VERSION}, so the image is published as ${VERSION} only and latest is not moved."
+            echo "push_latest=false" >> "$GITHUB_OUTPUT"
           fi
 
       # Only inputs `docker-deploy.yml` declares may be passed: the dispatch API
@@ -56,16 +164,38 @@ jobs:
       # been dead for two days and only manual dispatches were still shipping
       # images. `__tests__/deploymentManifestParity.test.ts` now checks the two
       # sides against each other.
+      #
+      # The image is built from the release's own tag, the commit the release
+      # points at, never from a branch. It used `--ref main`, which builds
+      # whatever main holds when the build starts: run by hand from a branch to
+      # release that branch, this workflow created the branch's release and
+      # then published main's code under the branch's version and as `latest`;
+      # and a second merge within the build's minute was published under the
+      # first one's version. A release that already exists is rebuilt from its
+      # tag once the check above has found this run's content in it: the same
+      # content, but a new build, which may take a newer base image and newer
+      # Alpine packages, and the version tag moves to it (and `latest`, when
+      # the step above found the release the newest). `--ref` names the tag by
+      # its short name, which the dispatch API takes for a branch or a tag.
       - name: Publish matching Docker image
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.value }}
+          PUSH_LATEST: ${{ steps.latest.outputs.push_latest }}
         run: |
+          set -euo pipefail
+          case "$PUSH_LATEST" in
+            true | false) ;;
+            *)
+              echo "::error::push_latest is '${PUSH_LATEST}', neither true nor false. No image was published."
+              exit 1
+              ;;
+          esac
           gh workflow run docker-deploy.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref main \
+            --ref "$VERSION" \
             -f image_tag="$VERSION" \
-            -f push_latest=true
+            -f push_latest="$PUSH_LATEST"
 
       # The SBOM (audit H47). An air-gapped operator installs this image inside a
       # network that cannot query npm, so "what is actually in it" has to travel
@@ -87,6 +217,17 @@ jobs:
       # changes the production publish path, and nothing in the agent container
       # or in CI can verify that the registry mirror accepts the attestation
       # index before a release depends on it).
+      #
+      # The SBOM is generated from a checkout of the release tag, the commit the
+      # image is built from. That commit can be another than the one this run
+      # started from (a branch released by hand, then squash-merged): the
+      # content check above has made their trees equal, and reading the tag
+      # keeps the document tied to the image whatever becomes of that check.
+      - name: Check out the release tag for the SBOM
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.version.outputs.value }}
+
       - name: Set up Node.js for the SBOM
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:

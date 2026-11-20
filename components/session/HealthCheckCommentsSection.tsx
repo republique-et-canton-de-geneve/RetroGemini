@@ -16,6 +16,10 @@ interface Props {
   onDeleteComment: () => void;
 }
 
+// The primary button, and its disabled look in measured colours: a fade
+// (half the opacity) left the label under 4.5:1 and cannot be measured.
+const PRIMARY_BUTTON = 'bg-indigo-600 text-white hover:bg-indigo-700 btn-brand-glow disabled:bg-slate-100 disabled:text-slate-600 disabled:shadow-none disabled:cursor-not-allowed';
+
 /**
  * A single comment card. The current user's own comment is editable in place
  * (classic "submit then edit" pattern), so a participant only ever sees their
@@ -48,25 +52,25 @@ const CommentCard: React.FC<{
 
   if (isOwn && isEditing) {
     return (
-      <div className="bg-white rounded-lg p-3 text-sm border border-retro-primary ring-1 ring-indigo-100">
+      <div className="bg-white rounded-xl p-3 text-sm border border-indigo-600 ring-4 ring-indigo-600/15">
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           // eslint-disable-next-line jsx-a11y/no-autofocus -- the edit button it replaces is unmounted by this very click
           autoFocus
-          className="w-full bg-white border border-slate-200 rounded-lg p-2 text-slate-700 text-sm resize-none h-16 focus:outline-hidden focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+          className="w-full bg-white border border-slate-400 rounded-lg px-2.5 py-2 text-slate-900 text-sm resize-none h-16 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 transition"
         />
         <div className="flex justify-end space-x-2 mt-2">
           <button
             onClick={() => { setDraft(comment); setIsEditing(false); }}
-            className="px-3 py-1 rounded-sm text-xs font-bold text-slate-500 hover:bg-slate-100"
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition"
           >
             {t('common.cancel')}
           </button>
           <button
             onClick={handleSave}
             disabled={!draft.trim()}
-            className="px-3 py-1 rounded-sm text-xs font-bold bg-retro-primary text-white hover:bg-retro-primaryHover disabled:opacity-50"
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${PRIMARY_BUTTON}`}
           >
             {t('common.save')}
           </button>
@@ -76,41 +80,41 @@ const CommentCard: React.FC<{
   }
 
   return (
-    <div className="bg-white rounded-lg p-3 text-sm text-slate-700 border border-slate-200 flex items-start">
+    <div className="bg-white rounded-xl px-3 py-2.5 text-sm text-slate-900 border border-slate-200 shadow-xs flex items-start gap-2">
       <div className="grow min-w-0 wrap-break-word">
         {label && (
-          <span className="text-slate-500 text-xs font-medium mr-2">
+          <span className="text-slate-500 text-xs font-semibold mr-2">
             {t('phases.comments.authorLabel', { name: label })}
           </span>
         )}
         {comment}
       </div>
       {isOwn && (
-        <div className="ml-2 shrink-0">
+        <div className="shrink-0">
           {!confirmingDelete ? (
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center gap-0.5 -my-1">
               <button
                 onClick={() => setIsEditing(true)}
-                className="text-slate-500 hover:text-retro-primary transition"
+                className="grid place-items-center w-7 h-7 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-indigo-700 transition"
                 title={t('phases.comments.editTitle')}
                 aria-label={t('phases.comments.edit')}
               >
-                <span className="material-symbols-outlined text-sm">edit</span>
+                <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">edit</span>
               </button>
               <button
                 onClick={() => setConfirmingDelete(true)}
-                className="text-slate-500 hover:text-rose-500 transition"
+                className="grid place-items-center w-7 h-7 rounded-lg text-slate-500 hover:bg-rose-50 hover:text-rose-700 transition"
                 title={t('phases.comments.deleteTitle')}
                 aria-label={t('phases.comments.delete')}
               >
-                <span className="material-symbols-outlined text-sm">delete</span>
+                <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">delete</span>
               </button>
             </div>
           ) : (
-            <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-2 py-1 shadow-xs">
-              <span className="text-slate-500">{t('phases.comments.confirmDelete')}</span>
-              <button className="text-rose-700 font-bold" onClick={onDelete}>{t('common.yes')}</button>
-              <button className="text-slate-500" onClick={() => setConfirmingDelete(false)}>{t('common.no')}</button>
+            <div className="flex items-center gap-2 text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1 shadow-xs">
+              <span className="text-slate-600">{t('phases.comments.confirmDelete')}</span>
+              <button className="text-rose-700 font-semibold rounded-md px-1.5 py-0.5 hover:bg-rose-50" onClick={onDelete}>{t('common.yes')}</button>
+              <button className="text-slate-600 font-semibold rounded-md px-1.5 py-0.5 hover:bg-slate-100" onClick={() => setConfirmingDelete(false)}>{t('common.no')}</button>
             </div>
           )}
         </div>
@@ -146,7 +150,7 @@ const HealthCheckCommentsSection: React.FC<Props> = ({
 
   return (
     <div className="mb-4">
-      <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">{t('phases.comments.title')}</h4>
+      <h4 className="text-sm font-semibold text-slate-700 mb-2">{t('phases.comments.title')}</h4>
       {comments.length > 0 ? (
         <div className="space-y-2 mb-3">
           {comments.map((c) => (
@@ -161,7 +165,8 @@ const HealthCheckCommentsSection: React.FC<Props> = ({
           ))}
         </div>
       ) : (
-        <p className="text-slate-500 text-sm mb-3">{t('phases.comments.empty')}</p>
+        // On the Discuss panel's grey: slate-600, the muted ink of a tinted surface.
+        <p className="text-slate-600 text-sm mb-3">{t('phases.comments.empty')}</p>
       )}
 
       {!hasOwnComment && (
@@ -170,13 +175,13 @@ const HealthCheckCommentsSection: React.FC<Props> = ({
             placeholder={t('phases.comments.placeholder')}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            className="w-full bg-white border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-16 focus:outline-hidden focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+            className="w-full bg-white border border-slate-400 rounded-lg px-3 py-2.5 text-slate-900 text-sm placeholder:text-slate-500 resize-none h-16 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 transition"
           />
           <div className="flex justify-end mt-2">
             <button
               onClick={handleAdd}
               disabled={!draft.trim()}
-              className="px-4 py-1.5 rounded-sm text-sm font-bold bg-retro-primary text-white hover:bg-retro-primaryHover disabled:opacity-50 transition"
+              className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition ${PRIMARY_BUTTON}`}
             >
               {t('phases.comments.submit')}
             </button>

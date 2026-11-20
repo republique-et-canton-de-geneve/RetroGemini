@@ -1,6 +1,6 @@
 import { appFetch, appPath, localPath } from './services/publicPath';
 import React, { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
-import { Team, User, AppVersion, VersionAnnouncement } from './types';
+import { Team, User, AppVersion, VersionAnnouncement, MemberAvatarChoice } from './types';
 import { dataService, OPEN_SESSION_STORAGE_KEY } from './services/dataService';
 import TeamLogin, { InviteData } from './components/TeamLogin';
 import Dashboard from './components/Dashboard';
@@ -8,13 +8,13 @@ import Session from './components/Session';
 import HealthCheckSession from './components/HealthCheckSession';
 import SuperAdmin from './components/SuperAdmin';
 import AnnouncementModal from './components/AnnouncementModal';
-import LanguageSwitcher from './components/common/LanguageSwitcher';
+import AppHeader from './components/AppHeader';
 import DashboardRevokedBanner from './components/dashboard/DashboardRevokedBanner';
 import { useTranslation } from './i18n/I18nContext';
 import { isSessionInProgress } from './utils/sessionStatus';
+import { memberAvatar, memberAvatarId } from './utils/avatars.js';
 import { isSessionRevoked, newerToken, onSessionRevokedChange, onSessionTokenChanged } from './services/sessionRevocation';
 import type { Notice } from './i18n/notice';
-import { avatarColorClasses } from './utils/participantColors';
 
 const LAST_SEEN_VERSION_KEY = 'retro-last-seen-version';
 // Shared with dataService, which patches the blob's teamPassword in place
@@ -476,6 +476,14 @@ const App: React.FC = () => {
     setCurrentTeam((open) => (open?.id === copy.id ? copy : open));
   }, []);
 
+  // The avatar map the server answered after a pick, on a new team object so
+  // every screen holding the team draws it (the header, the Members tab, a
+  // session). Only onto the team still open: an answer arriving after a
+  // sign-out opens nothing.
+  const showTeamAvatars = useCallback((teamId: string, memberAvatars: Record<string, MemberAvatarChoice>) => {
+    setCurrentTeam((open) => (open?.id === teamId ? { ...open, memberAvatars } : open));
+  }, []);
+
   // Decision D3b: the team's password was changed and this client's token is
   // revoked. A session and the Dashboard say so themselves, with "Log in
   // again" — useSessionRevoked in a session, DashboardRevokedBanner here — so
@@ -713,53 +721,24 @@ const App: React.FC = () => {
   const renderHeader = (isSession: boolean) => {
     if (!currentUser || !currentTeam) return null;
     return (
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-6 shrink-0 z-50 shadow-xs">
-            <div
-              className={`flex items-center ${currentUser.role === 'participant' ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-              onClick={() => currentUser.role !== 'participant' && setView('DASHBOARD')}
-            >
-                <div className="w-8 h-8 bg-linear-to-br from-indigo-500 to-purple-600 rounded-sm flex items-center justify-center text-white font-bold mr-3 text-lg">R</div>
-                <div className="font-bold text-slate-700 text-lg hidden md:block">RetroGemini <span className="text-slate-500 font-normal text-sm mx-2">/</span> {currentTeam.name}</div>
-            </div>
-
-            <div className="flex items-center space-x-2 sm:space-x-4">
-                {/* What's New Button - Only for facilitators */}
-                {currentUser.role === 'facilitator' && versionInfo && (
-                    <button
-                        onClick={handleOpenAnnouncements}
-                        className="relative flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                        title={t('app.whatsNew')}
-                    >
-                        <span className="material-symbols-outlined text-lg">auto_awesome</span>
-                        <span className="hidden sm:inline">{t('app.whatsNew')}</span>
-                        {hasUnreadAnnouncements && (
-                            <span className="absolute -top-1 -right-1 w-5 h-5 bg-linear-to-r from-rose-500 to-pink-500 text-white text-xs font-bold rounded-full flex items-center justify-center shadow-md">
-                                {unreadAnnouncements.reduce((acc, a) => acc + a.items.length, 0)}
-                            </span>
-                        )}
-                    </button>
-                )}
-
-                <LanguageSwitcher />
-
-                {/* On phones the name column yields to the language switcher; the
-                    initials stay, so Logout never leaves the screen. */}
-                <div className="flex items-center border-l pl-2 sm:pl-4 border-slate-200">
-                    <div className="hidden sm:flex flex-col items-end mr-2">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase leading-none mb-1">{t('app.user')}</span>
-                        <div className="text-sm font-bold text-slate-700">{currentUser.name}</div>
-                    </div>
-                    <div className={`w-8 h-8 rounded-full ${avatarColorClasses(currentUser.color)} flex items-center justify-center text-xs font-bold shadow-md ring-2 ring-white`}>
-                        {currentUser.name.substring(0, 2).toUpperCase()}
-                    </div>
-                </div>
-                {!isSession && (
-                     <button onClick={handleLogout} className="ml-1 sm:ml-4 text-slate-500 hover:text-red-500" title={t('app.logoutTeam')} aria-label={t('app.logoutTeam')}>
-                        <span className="material-symbols-outlined">logout</span>
-                    </button>
-                )}
-            </div>
-        </header>
+        <AppHeader
+            teamName={currentTeam.name}
+            currentUser={currentUser}
+            onHome={() => setView('DASHBOARD')}
+            announcementsAvailable={!!versionInfo}
+            unreadCount={hasUnreadAnnouncements ? unreadAnnouncements.reduce((acc, a) => acc + a.items.length, 0) : null}
+            onOpenAnnouncements={handleOpenAnnouncements}
+            onLogout={isSession ? undefined : handleLogout}
+            avatarId={memberAvatarId(currentTeam, currentUser.id)}
+            avatarChoice={memberAvatar(currentTeam, currentUser.id)?.id ?? null}
+            // A cleared choice is a choice: the one-time avatar hint shows only to someone who never used the picker.
+            hasAvatarChoice={memberAvatar(currentTeam, currentUser.id) !== null}
+            onPickAvatar={async (avatarId) => {
+                const teamId = currentTeam.id;
+                showTeamAvatars(teamId, await dataService.setMemberAvatar(currentUser.id, avatarId));
+            }}
+            avatarPickerDisabled={sessionRevoked}
+        />
     );
   };
 
@@ -784,6 +763,7 @@ const App: React.FC = () => {
             <Session
                 team={currentTeam}
                 currentUser={currentUser}
+                onTeamAvatars={showTeamAvatars}
                 sessionId={activeSessionId}
                 // A refused socket join means the team credential is gone or
                 // expired (audit H12): send the user back to the login screen
@@ -807,6 +787,7 @@ const App: React.FC = () => {
             <HealthCheckSession
                 team={currentTeam}
                 currentUser={currentUser}
+                onTeamAvatars={showTeamAvatars}
                 sessionId={activeHealthCheckId}
                 // See the retrospective session above (audit H12).
                 onSessionExpired={handleSessionExpired}

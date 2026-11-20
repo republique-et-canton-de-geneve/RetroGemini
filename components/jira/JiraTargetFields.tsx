@@ -239,7 +239,7 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
   else if (types && types.length === 0) typeStatus = t('jira.target.noTypes');
 
   const keyField = value.mode === 'parent' ? 'parentKey' : 'projectKey';
-  const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 aria-invalid:border-red-500';
+  const inputClass = 'w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-600 focus:outline-hidden focus:ring-4 focus:ring-indigo-600/15 aria-invalid:border-red-600';
   // A stored type stays selectable (by its id) until the list of its key is
   // read; a change of key has already forgotten it. Each select on its own.
   const keepStoredType = !!value.issueTypeId && !types?.some(type => type.id === value.issueTypeId);

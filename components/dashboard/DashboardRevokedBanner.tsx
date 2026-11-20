@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
+import { BANNER_ACTION_CLASS, BANNER_ALERT_CLASS, BANNER_CLASS, BANNER_ICON_CLASS } from '../session/SessionConnectionStatus';
 
 interface Props {
   onLogInAgain: () => void;
@@ -15,20 +16,23 @@ interface Props {
  * it. Nothing is saved meanwhile: every write is refused (`dataService`
  * sends none while revoked, the feedback routes answer `401`), and each form
  * already says so in its own words. "Log in again" is the way out.
+ *
+ * It is drawn as the session's own "signed out" band (the recipes of
+ * `SessionConnectionStatus`): one revocation, one look, on both screens.
  */
 const DashboardRevokedBanner: React.FC<Props> = ({ onLogInAgain }) => {
   const { t } = useTranslation();
   return (
     <div
       role="alert"
-      className="shrink-0 bg-rose-100 border-b border-rose-300 text-rose-900 text-sm px-4 sm:px-6 py-2 flex flex-wrap items-center justify-center gap-2"
+      className={`shrink-0 ${BANNER_CLASS} ${BANNER_ALERT_CLASS}`}
     >
-      <span className="material-symbols-outlined text-base" aria-hidden="true">lock</span>
+      <span className={BANNER_ICON_CLASS} aria-hidden="true">lock</span>
       <span>{t('app.sessionRevoked.banner')}</span>
       <button
         type="button"
         onClick={onLogInAgain}
-        className="font-bold underline underline-offset-2 hover:text-rose-700"
+        className={BANNER_ACTION_CLASS}
       >
         {t('app.sessionRevoked.logInAgain')}
       </button>

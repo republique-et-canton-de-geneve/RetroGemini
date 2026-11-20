@@ -72,6 +72,27 @@ describe('mergeRosterIntoParticipants', () => {
     expect(merged).toEqual([{ ...alice, id: 'u-alice-new-device', name: 'alice' }]);
   });
 
+  // An avatar is a member's choice, kept under their id in the team's map.
+  // The row someone takes over under a new id is matched by name, and may be
+  // another person's of the same name: its picture does not pass with it.
+  it('leaves the avatar behind when a row passes to a new id', () => {
+    const chosen = deepFreeze([{ ...alice, avatar: 'fox', avatarAt: 100 }]);
+
+    const merged = mergeRosterIntoParticipants(chosen, [{ id: 'u-alice-new-device', name: 'alice' }], [alice]);
+
+    expect(merged).toEqual([{ ...alice, id: 'u-alice-new-device', name: 'alice' }]);
+    expect(merged?.[0]).not.toHaveProperty('avatar');
+    expect(merged?.[0]).not.toHaveProperty('avatarAt');
+  });
+
+  it("keeps the avatar of a row that only takes the roster's spelling of its name", () => {
+    const chosen = deepFreeze([{ ...alice, name: 'alice ', avatar: 'fox', avatarAt: 100 }]);
+
+    const merged = mergeRosterIntoParticipants(chosen, [{ id: alice.id, name: 'Alice' }], [alice]);
+
+    expect(merged).toEqual([{ ...alice, name: 'Alice', avatar: 'fox', avatarAt: 100 }]);
+  });
+
   it('adds a newcomer, with the colour and role the team record gives them', () => {
     const carol: User = { id: 'u-carol', name: 'Carol', color: 'bg-lime-500', role: 'facilitator' };
 

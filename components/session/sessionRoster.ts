@@ -1,5 +1,6 @@
 import type { User } from '../../types';
 import { PARTICIPANT_PALETTE } from '../../utils/participantColors';
+import { withoutAvatar } from './sessionAvatars';
 
 /**
  * Folding the server's live roster (`member-roster`) into a session's
@@ -32,7 +33,8 @@ const nameKey = (name: string) => name.trim().toLowerCase();
  * changes nothing — the caller then must not write.
  *
  * A roster entry matching a listed participant (by id, or else by name) makes that
- * participant adopt the roster's id and name; one matching nobody is added with
+ * participant adopt the roster's id and name (and, under a new id, lose the
+ * avatar the row carried); one matching nobody is added with
  * the colour and role the team record gives them. Nobody is ever removed: the
  * roster is who is connected now, the participant list is who took part.
  *
@@ -65,7 +67,11 @@ export const mergeRosterIntoParticipants = (
     if (index !== -1) {
       const known = next[index];
       if (known.id !== entry.id || known.name !== entry.name) {
-        next[index] = { ...known, id: entry.id, name: entry.name };
+        // A row that passes to another id leaves its avatar behind: the
+        // picture is the choice of the member whose id it was (the team's
+        // map), and a row matched by name may be someone else's.
+        const row = known.id !== entry.id ? withoutAvatar(known) : known;
+        next[index] = { ...row, id: entry.id, name: entry.name };
         changed = true;
       }
       continue;

@@ -33,7 +33,7 @@ spec:
           # __tests__/deploymentManifestParity.test.ts now fails when the majors
           # diverge again. No overlay retags it: the only image an overlay
           # changes is PostgreSQL's (k8s/overlays/openshift).
-          image: jpfroud/retrogemini:44.0
+          image: jpfroud/retrogemini:45.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8080

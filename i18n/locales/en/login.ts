@@ -23,6 +23,8 @@ const login = {
   'login.list.empty': 'No teams found. Create one to get started!',
   'login.list.searchPlaceholder': 'Search teams...',
   'login.list.clearSearch': 'Clear search',
+  // A search that matches no team, in the status under the field.
+  'login.list.noMatch': 'No team matches "{query}".',
   'login.list.favorites': 'Favorites',
   'login.list.allTeams': 'All Teams',
   'login.list.addFavorite': 'Add {teamName} to favorites',

@@ -3,6 +3,7 @@ import ModalDialog from '../common/ModalDialog';
 import { useTranslation } from '../../i18n/I18nContext';
 import { Notice, noticeText } from '../../i18n/notice';
 import { TEAM_NAME_MAX_LENGTH } from '../../utils/teamNamePolicy.js';
+import { CHIP, DIALOG_TITLE, ERROR_NOTICE, FIELD, FIELD_LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from '../dashboard/dashboardLook';
 import { listBackupTeams, restoreTeamFromBackup, RestorableTeam } from './teamAdminApi';
 
 /**
@@ -94,7 +95,7 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
   };
 
   const statusTone = (team: RestorableTeam) =>
-    team.status === 'deleted' ? 'bg-red-100 text-red-800' : team.status === 'renamed' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800';
+    team.status === 'deleted' ? 'bg-rose-100 text-rose-800' : team.status === 'renamed' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-800';
 
   const canRestore = !!selected && !busy && (!deleted || name.trim().length > 0);
 
@@ -136,14 +137,14 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
     <ModalDialog
       labelledBy={titleId}
       onClose={busy ? undefined : onClose}
-      overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center p-4"
-      panelClassName="bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto"
+      overlayClassName="fixed inset-0 bg-slate-900/45 z-100 flex items-center justify-center p-4"
+      panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto"
     >
-      <h2 id={titleId} className="text-xl font-bold text-slate-800 mb-1">{t('adminBackups.teamRestore.title')}</h2>
+      <h2 id={titleId} className={`${DIALOG_TITLE} mb-1`}>{t('adminBackups.teamRestore.title')}</h2>
       <p className="text-sm text-slate-600 mb-4 wrap-anywhere">{t('adminBackups.teamRestore.subtitle', { name: backupName })}</p>
 
       {error && (
-        <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">{noticeText(error, t)}</div>
+        <div role="alert" className={`${ERROR_NOTICE} mb-4`}>{noticeText(error, t)}</div>
       )}
 
       {teams === null ? (
@@ -152,18 +153,18 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
         !error && <p className="text-sm text-slate-600 py-6 text-center">{t('adminBackups.teamRestore.empty')}</p>
       ) : (
         <>
-          <label htmlFor={searchId} className="block text-sm font-bold text-slate-600 mb-1">{t('adminBackups.teamRestore.search')}</label>
+          <label htmlFor={searchId} className={`${FIELD_LABEL} mb-1`}>{t('adminBackups.teamRestore.search')}</label>
           <input
             id={searchId}
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoComplete="off"
-            className="w-full border border-slate-300 rounded-lg p-2 mb-3 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+            className={`${FIELD} mb-3`}
           />
           <fieldset className="mb-4">
-            <legend className="text-sm font-bold text-slate-600 mb-1">{t('adminBackups.teamRestore.listLabel')}</legend>
-            <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+            <legend className="text-sm font-semibold text-slate-700 mb-1">{t('adminBackups.teamRestore.listLabel')}</legend>
+            <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-200">
               {visible.length === 0 && (
                 <p className="text-sm text-slate-600 p-3">{t('adminBackups.teamRestore.noResult')}</p>
               )}
@@ -185,11 +186,11 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
                       checked={team.id === selectedId}
                       onChange={() => select(team)}
                       aria-describedby={`${optionId}-status ${optionId}-counts`}
-                      className="mt-1"
+                      className="mt-1 accent-indigo-600"
                     />
                     <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <label htmlFor={optionId} className="font-bold text-slate-800 wrap-anywhere cursor-pointer">{team.name}</label>
-                      <span id={`${optionId}-status`} className={`text-xs font-bold px-2 py-0.5 rounded-sm ${statusTone(team)}`}>
+                      <label htmlFor={optionId} className="font-semibold text-slate-900 wrap-anywhere cursor-pointer">{team.name}</label>
+                      <span id={`${optionId}-status`} className={`${CHIP} ${statusTone(team)}`}>
                         {statusText(team)}
                       </span>
                       <span id={`${optionId}-counts`} className="basis-full text-xs text-slate-600">
@@ -227,7 +228,7 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
                 maxLength={TEAM_NAME_MAX_LENGTH}
                 autoComplete="off"
                 aria-describedby={selected.nameTaken ? nameHintId : undefined}
-                className="w-full border border-amber-300 rounded-lg p-2 bg-white text-slate-900 outline-hidden focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                className="w-full border border-amber-600 rounded-lg px-3 py-2 bg-white text-slate-900 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 transition"
               />
               {selected.nameTaken && (
                 <p id={nameHintId} className="text-xs mt-1">{t('adminBackups.teamRestore.nameTaken', { name: selected.name })}</p>
@@ -242,7 +243,7 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
           type="button"
           onClick={onClose}
           disabled={busy}
-          className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg font-bold hover:bg-slate-200 disabled:opacity-50"
+          className={`${SECONDARY_BUTTON} flex-1 py-2`}
         >
           {t('common.cancel')}
         </button>
@@ -250,7 +251,7 @@ const TeamRestoreDialog: React.FC<Props> = ({ backupId, backupName, sessionToken
           type="button"
           onClick={restore}
           disabled={!canRestore}
-          className="flex-1 bg-amber-700 text-white py-2 px-3 rounded-lg font-bold hover:bg-amber-800 disabled:opacity-50 disabled:cursor-not-allowed wrap-anywhere"
+          className={`${PRIMARY_BUTTON} flex-1 py-2 px-3 wrap-anywhere`}
         >
           {busy
             ? t('adminBackups.teamRestore.restoring')

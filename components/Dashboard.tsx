@@ -45,7 +45,46 @@ import {
 import { effectiveSessionStatus } from '../utils/sessionStatus';
 import { isOpenBoard } from '../utils/openBoard';
 import { avatarColorClasses } from '../utils/participantColors';
+import Avatar from './common/Avatar';
+import { memberAvatarId } from '../utils/avatars.js';
 import { HEALTH_RATING_BADGE } from '../utils/healthRatingColors';
+import { columnIconName } from './iconPickerIcons';
+import {
+  CARD,
+  CHIP,
+  COLUMN_COLOR_BUTTON,
+  COLUMN_ICON_BUTTON,
+  DANGER_BUTTON,
+  DANGER_ICON_BUTTON,
+  DANGER_SECONDARY_BUTTON,
+  DIALOG_OVERLAY,
+  DIALOG_PANEL,
+  DIALOG_TITLE,
+  EMPTY_STATE,
+  ERROR_NOTICE,
+  ERROR_TEXT,
+  FIELD,
+  FIELD_BOX,
+  FIELD_LABEL,
+  GHOST_BUTTON,
+  ICON_BUTTON,
+  LINK_BUTTON,
+  LIST_ROW,
+  PRIMARY_BUTTON,
+  SECONDARY_BUTTON,
+  SECTION_LABEL,
+  SEGMENTED,
+  SETTING_ICON,
+  SETTING_TITLE,
+  SEGMENT_OFF,
+  SEGMENT_ON,
+  SUCCESS_TEXT,
+  SWITCH_KNOB,
+  SWITCH_OFF,
+  SWITCH_ON,
+  SWITCH_TRACK,
+  sessionStatusChip
+} from './dashboard/dashboardLook';
 
 interface Props {
   team: Team;
@@ -642,24 +681,24 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
         <ModalDialog
           labelledBy="dashboard-delete-team-title"
           onClose={() => { setShowDeleteModal(false); setDeleteConfirmText(''); setDeleteTeamError(null); }}
-          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
-          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full"
+          overlayClassName={DIALOG_OVERLAY}
+          panelClassName={`${DIALOG_PANEL} p-6 sm:p-8 max-w-md`}
         >
           <>
             <div className="text-center mb-6">
-              <div className="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
-                <span className="material-symbols-outlined text-3xl">warning</span>
+              <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-700 flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined text-3xl" aria-hidden="true">warning</span>
               </div>
-              <h2 id="dashboard-delete-team-title" className="text-xl font-bold text-slate-800 mb-2">{t('dashboard.deleteTeam.title')}</h2>
-              <p className="text-slate-500 text-sm">
+              <h2 id="dashboard-delete-team-title" className={`${DIALOG_TITLE} mb-2`}>{t('dashboard.deleteTeam.title')}</h2>
+              <p className="text-slate-600 text-sm">
                 {tRich('dashboard.deleteTeam.warning', {
-                  irreversible: <strong className="text-red-600">{t('dashboard.deleteTeam.irreversible')}</strong>
+                  irreversible: <strong className="text-rose-700">{t('dashboard.deleteTeam.irreversible')}</strong>
                 })}
               </p>
             </div>
 
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-red-700 mb-3">
+            <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6">
+              <p className="text-sm text-rose-800 mb-3">
                 {tRich('dashboard.deleteTeam.confirmPrompt', { name: <strong>{team.name}</strong> })}
               </p>
               <input
@@ -667,14 +706,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 value={deleteConfirmText}
                 onChange={(e) => setDeleteConfirmText(e.target.value)}
                 placeholder={t('dashboard.deleteTeam.placeholder')}
-                className="w-full border border-red-300 rounded-lg p-3 bg-white text-slate-900 outline-hidden focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                className={FIELD}
                 // eslint-disable-next-line jsx-a11y/no-autofocus -- inside ModalDialog, which moves focus in regardless; this only picks the field the user must type in
                 autoFocus
               />
             </div>
 
             {deleteTeamError && (
-              <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+              <p role="alert" className={`${ERROR_NOTICE} mb-4`}>
                 {translateErrorMessage(deleteTeamError, t)}
               </p>
             )}
@@ -683,14 +722,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
               <button
                 onClick={() => { setShowDeleteModal(false); setDeleteConfirmText(''); setDeleteTeamError(null); }}
                 disabled={deletingTeam}
-                className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-200 disabled:opacity-50 transition"
+                className={`${SECONDARY_BUTTON} flex-1 py-2.5`}
               >
                 {t('common.cancel')}
               </button>
               <button
                 onClick={handleDeleteTeam}
                 disabled={deleteConfirmText !== team.name || deletingTeam}
-                className="flex-1 bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                className={`${DANGER_BUTTON} flex-1 py-2.5`}
               >
                 {deletingTeam ? t('dashboard.deleteTeam.deleting') : t('dashboard.deleteTeam.title')}
               </button>
@@ -704,30 +743,30 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
         <ModalDialog
           labelledBy="dashboard-delete-retro-title"
           onClose={() => setRetroToDelete(null)}
-          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
-          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full"
+          overlayClassName={DIALOG_OVERLAY}
+          panelClassName={`${DIALOG_PANEL} p-6 sm:p-8 max-w-md`}
         >
           <>
             <div className="text-center mb-6">
-              <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
-                <span className="material-symbols-outlined text-3xl">archive</span>
+              <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined text-3xl" aria-hidden="true">archive</span>
               </div>
-              <h2 id="dashboard-delete-retro-title" className="text-xl font-bold text-slate-800 mb-2">{t('dashboard.deleteRetro.title')}</h2>
-              <p className="text-slate-500 text-sm">
-                {tRich('dashboard.deleteSession.keepActions', { name: <strong>{retroToDelete.name}</strong> })}
+              <h2 id="dashboard-delete-retro-title" className={`${DIALOG_TITLE} mb-2`}>{t('dashboard.deleteRetro.title')}</h2>
+              <p className="text-slate-600 text-sm">
+                {tRich('dashboard.deleteSession.keepActions', { name: <strong className="text-slate-900">{retroToDelete.name}</strong> })}
               </p>
             </div>
 
             <div className="flex gap-3">
               <button
                 onClick={() => setRetroToDelete(null)}
-                className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-200 transition"
+                className={`${SECONDARY_BUTTON} flex-1 py-2.5`}
               >
                 {t('common.cancel')}
               </button>
               <button
                 onClick={handleDeleteRetro}
-                className="flex-1 bg-amber-500 text-white py-3 rounded-lg font-bold hover:bg-amber-600 transition"
+                className={`${DANGER_BUTTON} flex-1 py-2.5`}
               >
                 {t('dashboard.deleteRetro.confirm')}
               </button>
@@ -743,36 +782,39 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
             onClose={() => setShowNewRetroModal(false)}
             // Holds unsaved input: only a deliberate Escape or Cancel closes it.
             closeOnBackdropClick={false}
-            overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
-            panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            overlayClassName={DIALOG_OVERLAY}
+            panelClassName={`${DIALOG_PANEL} p-6 sm:p-8 max-w-2xl max-h-[90vh] overflow-y-auto`}
           >
               <>
                   <div className="flex justify-between items-center mb-6">
-                      <h2 id="dashboard-new-retro-title" className="text-2xl font-bold text-slate-800">{t('dashboard.newRetro.title')}</h2>
-                      <button onClick={() => setShowNewRetroModal(false)} className="text-slate-500 hover:text-slate-600" aria-label={t('dashboard.newRetro.close')}><span className="material-symbols-outlined">close</span></button>
+                      <h2 id="dashboard-new-retro-title" className={DIALOG_TITLE}>{t('dashboard.newRetro.title')}</h2>
+                      <button onClick={() => setShowNewRetroModal(false)} className={`${ICON_BUTTON} -mr-2`} aria-label={t('dashboard.newRetro.close')}><span className="material-symbols-outlined" aria-hidden="true">close</span></button>
                   </div>
-                  
+
                   <div className="mb-6">
-                      <label htmlFor="new-retro-name" className="block text-sm font-bold text-slate-700 mb-1">{t('dashboard.form.sessionName')}</label>
-                      <input 
+                      <label htmlFor="new-retro-name" className={`${FIELD_LABEL} mb-1.5`}>{t('dashboard.form.sessionName')}</label>
+                      <input
                         id="new-retro-name"
-                        type="text" 
-                        value={retroName} 
-                        onChange={(e) => setRetroName(e.target.value)} 
-                        className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900 font-medium"
+                        type="text"
+                        value={retroName}
+                        onChange={(e) => setRetroName(e.target.value)}
+                        className={`${FIELD} font-medium`}
                       />
                   </div>
-                  
+
                   {!isCreatingCustom ? (
                       <div className="space-y-6">
-                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                        {/* The three settings of the new session: one panel, hairlines
+                            between them, rather than a box per setting. */}
+                        <div className="rounded-xl border border-slate-200 divide-y divide-slate-200">
+                        <div className="p-4">
                           <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div id="board-type-label" className="text-sm font-bold text-slate-700">{t('dashboard.newRetro.boardTypeLabel')}</div>
+                            <div id="board-type-label" className="text-sm font-semibold text-slate-900">{t('dashboard.newRetro.boardTypeLabel')}</div>
                             <div
                               role="group"
                               aria-labelledby="board-type-label"
                               aria-describedby="board-type-hint"
-                              className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-bold shrink-0"
+                              className={SEGMENTED}
                             >
                               {(['guided', 'open'] as const).map(option => (
                                 <button
@@ -780,7 +822,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   type="button"
                                   aria-pressed={boardType === option}
                                   onClick={() => handleBoardTypeChange(option)}
-                                  className={`rounded-md px-3 py-1 transition ${boardType === option ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                                  className={boardType === option ? SEGMENT_ON : SEGMENT_OFF}
                                   data-testid={`board-type-${option}`}
                                 >
                                   {option === 'open' ? t('dashboard.newRetro.boardTypeOpen') : t('dashboard.newRetro.boardTypeGuided')}
@@ -788,33 +830,33 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                               ))}
                             </div>
                           </div>
-                          <p id="board-type-hint" className="text-xs text-slate-500 mt-1">
+                          <p id="board-type-hint" className="text-xs text-slate-600 mt-1.5">
                             {boardType === 'open' ? t('dashboard.newRetro.boardTypeOpenHint') : t('dashboard.newRetro.boardTypeGuidedHint')}
                           </p>
                         </div>
 
-                        <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                        <div className="flex items-center justify-between gap-3 p-4">
                           <div>
-                            <div className="text-sm font-bold text-slate-700">{t('dashboard.form.anonymousMode')}</div>
-                            <p className="text-xs text-slate-500">{t('dashboard.newRetro.anonymousHint')}</p>
+                            <div className="text-sm font-semibold text-slate-900">{t('dashboard.form.anonymousMode')}</div>
+                            <p className="text-xs text-slate-600 mt-0.5">{t('dashboard.newRetro.anonymousHint')}</p>
                           </div>
                           <button
                             onClick={() => setIsAnonymous(!isAnonymous)}
-                            className={`w-12 h-6 rounded-full relative transition ${isAnonymous ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                            className={`${SWITCH_TRACK} ${isAnonymous ? SWITCH_ON : SWITCH_OFF}`}
                             aria-label={t('dashboard.form.toggleAnonymous')}
                           >
-                            <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm transition ${isAnonymous ? 'translate-x-6' : ''}`}></span>
+                            <span className={`${SWITCH_KNOB} ${isAnonymous ? 'translate-x-5' : ''}`}></span>
                           </button>
                         </div>
 
-                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                        <div className="p-4">
                           <div className="flex items-center justify-between gap-3">
-                            <div id="template-language-label" className="text-sm font-bold text-slate-700">{t('templates.language.label')}</div>
+                            <div id="template-language-label" className="text-sm font-semibold text-slate-900">{t('templates.language.label')}</div>
                             <div
                               role="group"
                               aria-labelledby="template-language-label"
                               aria-describedby="template-language-hint"
-                              className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-bold shrink-0"
+                              className={SEGMENTED}
                             >
                               {SUPPORTED_LANGUAGES.map(option => (
                                 <button
@@ -823,7 +865,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   lang={option}
                                   aria-pressed={templateLanguage === option}
                                   onClick={() => handleTemplateLanguageChange(option)}
-                                  className={`rounded-md px-3 py-1 transition ${templateLanguage === option ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                                  className={templateLanguage === option ? SEGMENT_ON : SEGMENT_OFF}
                                   data-testid={`template-language-${option}`}
                                 >
                                   {LANGUAGE_NATIVE_NAMES[option]}
@@ -831,21 +873,22 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                               ))}
                             </div>
                           </div>
-                          <p id="template-language-hint" className="text-xs text-slate-500 mt-1">{t('templates.language.hint')}</p>
+                          <p id="template-language-hint" className="text-xs text-slate-600 mt-1.5">{t('templates.language.hint')}</p>
+                        </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-80 overflow-y-auto pr-2" lang={templateLanguage}>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-80 overflow-y-auto p-0.5 pr-2" lang={templateLanguage}>
                             {RETRO_TEMPLATES.map(template => {
                                 const words = getRetroTemplateWords(template.id, templateLanguage);
                                 return (
                                     <button
                                         key={template.id}
                                         onClick={() => handleStartRetro(getRetroTemplateColumns(template.id, templateLanguage))}
-                                        className="p-4 border border-slate-200 rounded-xl hover:border-retro-primary hover:bg-indigo-50 transition text-left group"
+                                        className="p-4 bg-white border border-slate-200 rounded-xl shadow-xs hover:border-indigo-600 hover:bg-indigo-50 hover:shadow-md transition text-left group"
                                         data-testid={`retro-template-${template.id}`}
                                     >
-                                        <div className="font-bold text-indigo-700 mb-2 group-hover:text-retro-primary">{words.name}</div>
-                                        <p className="text-xs text-slate-500">{words.description}</p>
+                                        <div className="font-semibold text-slate-900 mb-1 group-hover:text-indigo-700">{words.name}</div>
+                                        <p className="text-xs text-slate-600">{words.description}</p>
                                     </button>
                                 );
                             })}
@@ -853,10 +896,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
                         {team.customTemplates.length > 0 && (
                             <div>
-                                <h3 className="text-sm font-bold text-slate-500 uppercase mb-3">{t('dashboard.newRetro.savedTemplates')}</h3>
+                                <h3 className={`${SECTION_LABEL} mb-3`}>{t('dashboard.newRetro.savedTemplates')}</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                     {team.customTemplates.map((savedTemplate, idx) => (
-                                        <button key={idx} onClick={() => handleStartRetro(savedTemplate.cols)} className="p-3 border border-slate-200 rounded-lg hover:border-retro-primary hover:bg-indigo-50 text-sm font-bold text-slate-700">
+                                        <button key={idx} onClick={() => handleStartRetro(savedTemplate.cols)} className="p-3 bg-white border border-slate-200 rounded-xl shadow-xs hover:border-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 text-sm font-semibold text-slate-900 text-left transition">
                                             {savedTemplate.name}
                                         </button>
                                     ))}
@@ -864,26 +907,26 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             </div>
                         )}
 
-                        <div className="border-t border-slate-100 pt-4 text-center">
-                            <button onClick={() => setIsCreatingCustom(true)} className="text-retro-primary font-bold hover:underline flex items-center justify-center w-full py-2">
-                                <span className="material-symbols-outlined mr-2">edit</span> {t('dashboard.newRetro.createCustom')}
+                        <div className="border-t border-slate-200 pt-4 flex justify-center">
+                            <button onClick={() => setIsCreatingCustom(true)} className={`${LINK_BUTTON} py-2 px-2`}>
+                                <span className="material-symbols-outlined text-xl" aria-hidden="true">edit</span> {t('dashboard.newRetro.createCustom')}
                             </button>
                         </div>
                       </div>
                   ) : (
                       <div className="space-y-4">
                           <div>
-                              <label htmlFor="custom-template-name" className="block text-sm font-bold text-slate-700 mb-1">{t('dashboard.newRetro.customTemplateName')}</label>
-                              <input 
+                              <label htmlFor="custom-template-name" className={`${FIELD_LABEL} mb-1.5`}>{t('dashboard.newRetro.customTemplateName')}</label>
+                              <input
                                 id="custom-template-name"
                                 value={templateName}
                                 onChange={(e) => setTemplateName(e.target.value)}
-                                className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900"
+                                className={FIELD}
                                 placeholder={t('dashboard.retroTemplate.namePlaceholder')}
                               />
                           </div>
                           <div role="group" aria-labelledby="custom-template-columns-label">
-                              <span id="custom-template-columns-label" className="block text-sm font-bold text-slate-700 mb-2">{t('dashboard.columns.label')}</span>
+                              <span id="custom-template-columns-label" className={`${FIELD_LABEL} mb-2`}>{t('dashboard.columns.label')}</span>
                               {customCols.map((c, idx) => (
                                   <div key={c.id} className="flex gap-2 mb-3 items-center">
                                       <ColumnMoveButtons
@@ -902,15 +945,16 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                             setIconPickerOpen(iconPickerOpen === c.id ? null : c.id);
                                             setColorPickerOpen(null);
                                           }}
-                                          className="w-10 h-10 border-2 border-slate-300 rounded-lg flex items-center justify-center hover:border-indigo-400 hover:bg-indigo-50 transition-all bg-white"
+                                          className={COLUMN_ICON_BUTTON}
                                           title={t('dashboard.columns.pickIcon')}
                                           aria-label={t('dashboard.columns.pickIconFor', { number: idx + 1 })}
                                         >
                                           <span
                                             className="material-symbols-outlined text-xl"
+                                            aria-hidden="true"
                                             style={{ color: readableTextColor(c.customColor || '#64748B') }}
                                           >
-                                            {c.icon}
+                                            {columnIconName(c.icon)}
                                           </span>
                                         </button>
                                         {iconPickerOpen === c.id && (
@@ -934,7 +978,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                             setColorPickerOpen(colorPickerOpen === c.id ? null : c.id);
                                             setIconPickerOpen(null);
                                           }}
-                                          className="w-10 h-10 border-2 border-slate-300 rounded-lg hover:scale-105 transition-transform"
+                                          className={COLUMN_COLOR_BUTTON}
                                           style={{ backgroundColor: c.customColor || '#6366F1' }}
                                           title={t('dashboard.columns.pickColor')}
                                           aria-label={t('dashboard.columns.pickColorFor', { number: idx + 1 })}
@@ -959,7 +1003,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                             newCols[idx] = { ...newCols[idx], title: e.target.value };
                                             setCustomCols(newCols);
                                         }}
-                                        className="grow min-w-0 border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-hidden"
+                                        className={`${FIELD_BOX} grow min-w-0 text-sm`}
                                         placeholder={t('dashboard.columns.numbered', { number: idx + 1 })}
                                       />
                                       {customCols.length > 2 && (
@@ -969,25 +1013,25 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                             if (colorPickerOpen === c.id) setColorPickerOpen(null);
                                             if (iconPickerOpen === c.id) setIconPickerOpen(null);
                                           }}
-                                          className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-sm transition-colors"
+                                          className={DANGER_ICON_BUTTON}
                                           aria-label={t('dashboard.columns.remove', { number: idx + 1 })}
                                         >
-                                          <span className="material-symbols-outlined">delete</span>
+                                          <span className="material-symbols-outlined" aria-hidden="true">delete</span>
                                         </button>
                                       )}
                                   </div>
                               ))}
                               <button
                                 onClick={() => setCustomCols([...customCols, {id: randomId(), title: '', color: 'bg-slate-50', border: 'border-slate-300', icon: 'star', text: 'text-slate-700', ring: 'focus:ring-slate-200', customColor: '#64748B'}])}
-                                className="text-sm font-bold text-indigo-600 hover:underline flex items-center gap-1"
+                                className={LINK_BUTTON}
                               >
-                                <span className="material-symbols-outlined text-lg">add</span>
+                                <span className="material-symbols-outlined text-lg" aria-hidden="true">add</span>
                                 {t('dashboard.columns.add')}
                               </button>
                           </div>
-                          <div className="flex justify-between pt-4 border-t border-slate-100 mt-4">
-                              <button onClick={() => setIsCreatingCustom(false)} className="text-slate-500">{t('common.back')}</button>
-                              <button onClick={() => handleStartRetro(customCols)} className="bg-retro-primary text-white px-6 py-2 rounded-lg font-bold hover:bg-retro-primaryHover">{t('dashboard.newRetro.start')}</button>
+                          <div className="flex justify-between gap-3 pt-4 border-t border-slate-200 mt-4">
+                              <button onClick={() => setIsCreatingCustom(false)} className={`${GHOST_BUTTON} px-4 py-2`}>{t('common.back')}</button>
+                              <button onClick={() => handleStartRetro(customCols)} className={`${PRIMARY_BUTTON} px-6 py-2`}>{t('dashboard.newRetro.start')}</button>
                           </div>
                       </div>
                   )}
@@ -1002,36 +1046,36 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           onClose={() => setShowNewHealthCheckModal(false)}
           // Holds unsaved input: only a deliberate Escape or Cancel closes it.
           closeOnBackdropClick={false}
-          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
-          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-lg w-full"
+          overlayClassName={DIALOG_OVERLAY}
+          panelClassName={`${DIALOG_PANEL} p-6 sm:p-8 max-w-lg`}
         >
           <>
             <div className="flex justify-between items-center mb-6">
-              <h2 id="dashboard-new-healthcheck-title" className="text-2xl font-bold text-slate-800">{t('dashboard.newHealthCheck.title')}</h2>
-              <button onClick={() => setShowNewHealthCheckModal(false)} className="text-slate-500 hover:text-slate-600" aria-label={t('dashboard.newHealthCheck.close')}>
+              <h2 id="dashboard-new-healthcheck-title" className={DIALOG_TITLE}>{t('dashboard.newHealthCheck.title')}</h2>
+              <button onClick={() => setShowNewHealthCheckModal(false)} className={`${ICON_BUTTON} -mr-2`} aria-label={t('dashboard.newHealthCheck.close')}>
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label htmlFor="new-healthcheck-name" className="block text-sm font-bold text-slate-700 mb-1">{t('dashboard.form.sessionName')}</label>
+                <label htmlFor="new-healthcheck-name" className={`${FIELD_LABEL} mb-1.5`}>{t('dashboard.form.sessionName')}</label>
                 <input
                   id="new-healthcheck-name"
                   type="text"
                   value={healthCheckName}
                   onChange={(e) => setHealthCheckName(e.target.value)}
-                  className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900 font-medium"
+                  className={`${FIELD} font-medium`}
                 />
               </div>
 
               <div>
-                <label htmlFor="healthcheck-template" className="block text-sm font-bold text-slate-700 mb-1">{t('dashboard.newHealthCheck.template')}</label>
+                <label htmlFor="healthcheck-template" className={`${FIELD_LABEL} mb-1.5`}>{t('dashboard.newHealthCheck.template')}</label>
                 <select
                   id="healthcheck-template"
                   value={selectedTemplateId}
                   onChange={(e) => setSelectedTemplateId(e.target.value)}
-                  className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900"
+                  className={FIELD}
                 >
                   {healthCheckTemplates.map(tpl => (
                     <option key={tpl.id} value={tpl.id}>
@@ -1041,24 +1085,24 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 </select>
               </div>
 
-              <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+              <div className="flex items-center justify-between gap-3 p-4 border border-slate-200 rounded-xl">
                 <div>
-                  <div className="text-sm font-bold text-slate-700">{t('dashboard.form.anonymousMode')}</div>
-                  <p className="text-xs text-slate-500">{t('dashboard.newHealthCheck.anonymousHint')}</p>
+                  <div className="text-sm font-semibold text-slate-900">{t('dashboard.form.anonymousMode')}</div>
+                  <p className="text-xs text-slate-600 mt-0.5">{t('dashboard.newHealthCheck.anonymousHint')}</p>
                 </div>
                 <button
                   onClick={() => setIsHealthCheckAnonymous(!isHealthCheckAnonymous)}
-                  className={`w-12 h-6 rounded-full relative transition ${isHealthCheckAnonymous ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                  className={`${SWITCH_TRACK} ${isHealthCheckAnonymous ? SWITCH_ON : SWITCH_OFF}`}
                   aria-label={t('dashboard.form.toggleAnonymous')}
                 >
-                  <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm transition ${isHealthCheckAnonymous ? 'translate-x-6' : ''}`}></span>
+                  <span className={`${SWITCH_KNOB} ${isHealthCheckAnonymous ? 'translate-x-5' : ''}`}></span>
                 </button>
               </div>
 
               <button
                 onClick={handleStartHealthCheck}
                 disabled={!selectedTemplateId}
-                className="w-full bg-cyan-600 text-white py-3 rounded-lg font-bold hover:bg-cyan-700 disabled:opacity-50 transition"
+                className={`${PRIMARY_BUTTON} w-full py-3`}
               >
                 {t('dashboard.newHealthCheck.title')}
               </button>
@@ -1072,29 +1116,29 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
         <ModalDialog
           labelledBy="dashboard-delete-healthcheck-title"
           onClose={() => setHealthCheckToDelete(null)}
-          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
-          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full"
+          overlayClassName={DIALOG_OVERLAY}
+          panelClassName={`${DIALOG_PANEL} p-6 sm:p-8 max-w-md`}
         >
           <>
             <div className="text-center mb-6">
-              <div className="w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
-                <span className="material-symbols-outlined text-3xl">archive</span>
+              <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined text-3xl" aria-hidden="true">archive</span>
               </div>
-              <h2 id="dashboard-delete-healthcheck-title" className="text-xl font-bold text-slate-800 mb-2">{t('dashboard.deleteHealthCheck.title')}</h2>
-              <p className="text-slate-500 text-sm">
-                {tRich('dashboard.deleteSession.keepActions', { name: <strong>{healthCheckToDelete.name}</strong> })}
+              <h2 id="dashboard-delete-healthcheck-title" className={`${DIALOG_TITLE} mb-2`}>{t('dashboard.deleteHealthCheck.title')}</h2>
+              <p className="text-slate-600 text-sm">
+                {tRich('dashboard.deleteSession.keepActions', { name: <strong className="text-slate-900">{healthCheckToDelete.name}</strong> })}
               </p>
             </div>
             <div className="flex gap-3">
               <button
                 onClick={() => setHealthCheckToDelete(null)}
-                className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-200 transition"
+                className={`${SECONDARY_BUTTON} flex-1 py-2.5`}
               >
                 {t('common.cancel')}
               </button>
               <button
                 onClick={handleDeleteHealthCheck}
-                className="flex-1 bg-amber-500 text-white py-3 rounded-lg font-bold hover:bg-amber-600 transition"
+                className={`${DANGER_BUTTON} flex-1 py-2.5`}
               >
                 {t('common.delete')}
               </button>
@@ -1110,42 +1154,42 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           onClose={() => setShowTemplateEditor(false)}
           // Holds unsaved input: only a deliberate Escape or Cancel closes it.
           closeOnBackdropClick={false}
-          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
-          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-3xl w-full max-h-[90vh] overflow-y-auto"
+          overlayClassName={DIALOG_OVERLAY}
+          panelClassName={`${DIALOG_PANEL} p-6 sm:p-8 max-w-3xl max-h-[90vh] overflow-y-auto`}
         >
           <>
             <div className="flex justify-between items-center mb-6">
-              <h2 id="dashboard-template-editor-title" className="text-2xl font-bold text-slate-800">
+              <h2 id="dashboard-template-editor-title" className={DIALOG_TITLE}>
                 {editingTemplate ? t('dashboard.hcTemplate.editTitle') : t('dashboard.hcTemplate.createTitle')}
               </h2>
-              <button onClick={() => setShowTemplateEditor(false)} className="text-slate-500 hover:text-slate-600" aria-label={t('dashboard.hcTemplate.close')}>
+              <button onClick={() => setShowTemplateEditor(false)} className={`${ICON_BUTTON} -mr-2`} aria-label={t('dashboard.hcTemplate.close')}>
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label htmlFor="healthcheck-template-name" className="block text-sm font-bold text-slate-700 mb-1">{t('dashboard.form.templateName')}</label>
+                <label htmlFor="healthcheck-template-name" className={`${FIELD_LABEL} mb-1.5`}>{t('dashboard.form.templateName')}</label>
                 <input
                   id="healthcheck-template-name"
                   type="text"
                   value={newTemplateName}
                   onChange={(e) => setNewTemplateName(e.target.value)}
                   placeholder={t('dashboard.hcTemplate.namePlaceholder')}
-                  className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900"
+                  className={FIELD}
                 />
               </div>
 
               <div>
-                <span id="healthcheck-template-dimensions-label" className="block text-sm font-bold text-slate-700 mb-2">{t('dashboard.hcTemplate.dimensions')}</span>
+                <span id="healthcheck-template-dimensions-label" className={`${FIELD_LABEL} mb-2`}>{t('dashboard.hcTemplate.dimensions')}</span>
                 <div role="group" aria-labelledby="healthcheck-template-dimensions-label" className="space-y-4">
                   {newTemplateDimensions.map((dim, idx) => (
-                    <div key={dim.id} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
-                      <div className="flex justify-between items-start mb-3">
-                        <span className="text-xs font-bold text-slate-500">{t('dashboard.hcTemplate.dimensionNumber', { number: idx + 1 })}</span>
+                    <div key={dim.id} className={`${CARD} p-4`}>
+                      <div className="flex justify-between items-center mb-3">
+                        <span className={SECTION_LABEL}>{t('dashboard.hcTemplate.dimensionNumber', { number: idx + 1 })}</span>
                         {newTemplateDimensions.length > 1 && (
-                          <button onClick={() => removeDimension(idx)} className="text-red-500 hover:text-red-700" aria-label={t('dashboard.hcTemplate.removeDimension', { number: idx + 1 })}>
-                            <span className="material-symbols-outlined text-sm">delete</span>
+                          <button onClick={() => removeDimension(idx)} className={`${DANGER_ICON_BUTTON} -my-1.5 -mr-1.5`} aria-label={t('dashboard.hcTemplate.removeDimension', { number: idx + 1 })}>
+                            <span className="material-symbols-outlined text-xl" aria-hidden="true">delete</span>
                           </button>
                         )}
                       </div>
@@ -1154,43 +1198,43 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         placeholder={t('dashboard.hcTemplate.dimensionName')}
                         value={dim.name}
                         onChange={(e) => updateDimension(idx, 'name', e.target.value)}
-                        className="w-full border border-slate-300 rounded-sm p-2 mb-2 bg-white text-slate-900 font-medium"
+                        className={`${FIELD} mb-2 font-medium`}
                       />
                       <textarea
                         placeholder={t('dashboard.hcTemplate.goodPlaceholder')}
                         value={dim.goodDescription}
                         onChange={(e) => updateDimension(idx, 'goodDescription', e.target.value)}
-                        className="w-full border border-slate-300 rounded-sm p-2 mb-2 bg-white text-slate-900 text-sm resize-none h-16"
+                        className={`${FIELD} mb-2 text-sm resize-none h-16`}
                       />
                       <textarea
                         placeholder={t('dashboard.hcTemplate.badPlaceholder')}
                         value={dim.badDescription}
                         onChange={(e) => updateDimension(idx, 'badDescription', e.target.value)}
-                        className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900 text-sm resize-none h-16"
+                        className={`${FIELD} text-sm resize-none h-16`}
                       />
                     </div>
                   ))}
                 </div>
                 <button
                   onClick={addDimension}
-                  className="mt-3 text-sm font-bold text-indigo-600 hover:underline flex items-center"
+                  className={`${LINK_BUTTON} mt-3`}
                 >
-                  <span className="material-symbols-outlined mr-1 text-sm">add</span>
+                  <span className="material-symbols-outlined text-lg" aria-hidden="true">add</span>
                   {t('dashboard.hcTemplate.addDimension')}
                 </button>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
                 <button
                   onClick={() => setShowTemplateEditor(false)}
-                  className="px-4 py-2 text-slate-500 hover:text-slate-700"
+                  className={`${GHOST_BUTTON} px-4 py-2`}
                 >
                   {t('common.cancel')}
                 </button>
                 <button
                   onClick={handleSaveTemplate}
                   disabled={!newTemplateName.trim() || newTemplateDimensions.every(d => !d.name.trim())}
-                  className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50"
+                  className={`${PRIMARY_BUTTON} px-6 py-2`}
                 >
                   {t('dashboard.form.saveTemplate')}
                 </button>
@@ -1206,32 +1250,32 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           onClose={() => setShowRetroTemplateBuilder(false)}
           // Holds unsaved input: only a deliberate Escape or Cancel closes it.
           closeOnBackdropClick={false}
-          overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs"
-          panelClassName="bg-white rounded-2xl shadow-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+          overlayClassName={DIALOG_OVERLAY}
+          panelClassName={`${DIALOG_PANEL} p-6 sm:p-8 max-w-2xl max-h-[90vh] overflow-y-auto`}
         >
           <>
             <div className="flex justify-between items-center mb-6">
-              <h2 id="dashboard-retro-template-title" className="text-2xl font-bold text-slate-800">{t('dashboard.retroTemplate.title')}</h2>
-              <button onClick={() => setShowRetroTemplateBuilder(false)} className="text-slate-500 hover:text-slate-600" aria-label={t('dashboard.retroTemplate.close')}>
+              <h2 id="dashboard-retro-template-title" className={DIALOG_TITLE}>{t('dashboard.retroTemplate.title')}</h2>
+              <button onClick={() => setShowRetroTemplateBuilder(false)} className={`${ICON_BUTTON} -mr-2`} aria-label={t('dashboard.retroTemplate.close')}>
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label htmlFor="retro-template-name" className="block text-sm font-bold text-slate-700 mb-1">{t('dashboard.form.templateName')}</label>
+                <label htmlFor="retro-template-name" className={`${FIELD_LABEL} mb-1.5`}>{t('dashboard.form.templateName')}</label>
                 <input
                   id="retro-template-name"
                   type="text"
                   value={retroTemplateName}
                   onChange={(e) => setRetroTemplateName(e.target.value)}
                   placeholder={t('dashboard.retroTemplate.namePlaceholder')}
-                  className="w-full border border-slate-300 rounded-sm p-2 bg-white text-slate-900"
+                  className={FIELD}
                 />
               </div>
 
               <div role="group" aria-labelledby="retro-template-columns-label">
-                <span id="retro-template-columns-label" className="block text-sm font-bold text-slate-700 mb-2">{t('dashboard.columns.label')}</span>
+                <span id="retro-template-columns-label" className={`${FIELD_LABEL} mb-2`}>{t('dashboard.columns.label')}</span>
                 {retroTemplateCols.map((c, idx) => {
                   return (
                     <div key={c.id} className="flex gap-2 mb-3 items-center">
@@ -1251,15 +1295,16 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             setIconPickerOpen(iconPickerOpen === c.id ? null : c.id);
                             setColorPickerOpen(null);
                           }}
-                          className="w-12 h-12 border-2 border-slate-300 rounded-lg flex items-center justify-center hover:border-indigo-400 hover:bg-indigo-50 transition-all bg-white"
+                          className={COLUMN_ICON_BUTTON}
                           title={t('dashboard.columns.pickIcon')}
                           aria-label={t('dashboard.columns.pickIconFor', { number: idx + 1 })}
                         >
                           <span
-                            className="material-symbols-outlined text-2xl"
+                            className="material-symbols-outlined text-xl"
+                            aria-hidden="true"
                             style={{ color: readableTextColor(c.customColor || '#64748B') }}
                           >
-                            {c.icon}
+                            {columnIconName(c.icon)}
                           </span>
                         </button>
                         {iconPickerOpen === c.id && (
@@ -1283,7 +1328,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             setColorPickerOpen(colorPickerOpen === c.id ? null : c.id);
                             setIconPickerOpen(null);
                           }}
-                          className="w-12 h-12 border-2 border-slate-300 rounded-lg hover:scale-105 transition-transform"
+                          className={COLUMN_COLOR_BUTTON}
                           style={{ backgroundColor: c.customColor || '#6366F1' }}
                           title={t('dashboard.columns.pickColor')}
                           aria-label={t('dashboard.columns.pickColorFor', { number: idx + 1 })}
@@ -1309,7 +1354,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           next[idx] = { ...next[idx], title: e.target.value };
                           setRetroTemplateCols(next);
                         }}
-                        className="grow min-w-0 border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-hidden"
+                        className={`${FIELD_BOX} grow min-w-0 text-sm`}
                         placeholder={t('dashboard.columns.numbered', { number: idx + 1 })}
                       />
 
@@ -1322,10 +1367,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             if (colorPickerOpen === c.id) setColorPickerOpen(null);
                             if (iconPickerOpen === c.id) setIconPickerOpen(null);
                           }}
-                          className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-sm transition-colors"
+                          className={DANGER_ICON_BUTTON}
                           aria-label={t('dashboard.columns.remove', { number: idx + 1 })}
                         >
-                          <span className="material-symbols-outlined">delete</span>
+                          <span className="material-symbols-outlined" aria-hidden="true">delete</span>
                         </button>
                       )}
                     </div>
@@ -1345,16 +1390,16 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       customColor: '#64748B'
                     }]);
                   }}
-                  className="text-sm font-bold text-indigo-600 hover:underline flex items-center gap-1"
+                  className={LINK_BUTTON}
                 >
-                  <span className="material-symbols-outlined text-lg">add</span>
+                  <span className="material-symbols-outlined text-lg" aria-hidden="true">add</span>
                   {t('dashboard.columns.add')}
                 </button>
               </div>
 
-              <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
-                <button onClick={() => setShowRetroTemplateBuilder(false)} className="px-4 py-2 rounded-sm border border-slate-200 text-slate-600">{t('common.cancel')}</button>
-                <button onClick={handleSaveRetroTemplate} className="px-4 py-2 rounded-sm bg-retro-primary text-white font-bold hover:bg-retro-primaryHover">{t('dashboard.form.saveTemplate')}</button>
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+                <button onClick={() => setShowRetroTemplateBuilder(false)} className={`${SECONDARY_BUTTON} px-4 py-2`}>{t('common.cancel')}</button>
+                <button onClick={handleSaveRetroTemplate} className={`${PRIMARY_BUTTON} px-6 py-2`}>{t('dashboard.form.saveTemplate')}</button>
               </div>
             </div>
           </>
@@ -1362,31 +1407,32 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       )}
 
       {infoMessage && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
           <div className="flex items-start gap-3">
-            <span className="material-symbols-outlined text-amber-600 text-xl shrink-0">info</span>
-            <p className="text-sm text-amber-800 whitespace-pre-wrap">{infoMessage}</p>
+            <span className="material-symbols-outlined text-amber-700 text-xl shrink-0" aria-hidden="true">info</span>
+            <p className="text-sm text-amber-900 whitespace-pre-wrap">{infoMessage}</p>
           </div>
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-800">{t('dashboard.header.title', { name: team.name })}</h1>
-            <p className="text-slate-500">{t('dashboard.header.subtitle')}</p>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+          <div className="min-w-0">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 break-words">{t('dashboard.header.title', { name: team.name })}</h1>
+            {/* slate-600: this line sits on the page's grey, where slate-500 falls under 4.5:1. */}
+            <p className="text-slate-600 mt-1">{t('dashboard.header.subtitle')}</p>
           </div>
           {isAdmin && (
-            <div className="flex gap-2 mt-4 md:mt-0">
-                <button onClick={handleOpenNewRetroModal} className="bg-retro-primary text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-retro-primaryHover shadow-lg transition">
-                    <span className="material-symbols-outlined mr-2">add</span> {t('dashboard.header.newRetro')}
+            <div className="flex gap-2 shrink-0">
+                <button onClick={handleOpenNewRetroModal} className={`${PRIMARY_BUTTON} px-4 py-2 text-sm`}>
+                    <span className="material-symbols-outlined text-xl" aria-hidden="true">add</span> {t('dashboard.header.newRetro')}
                 </button>
                 <button
                     onClick={() => setShowDeleteModal(true)}
-                    className="bg-white border border-red-300 text-red-600 px-3 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-red-50 hover:border-red-400 shadow-xs transition"
+                    className={`${DANGER_SECONDARY_BUTTON} px-3 py-2`}
                     title={t('dashboard.deleteTeam.title')}
                     aria-label={t('dashboard.deleteTeam.title')}
                 >
-                    <span className="material-symbols-outlined">delete</span>
+                    <span className="material-symbols-outlined text-xl" aria-hidden="true">delete</span>
                 </button>
             </div>
           )}
@@ -1424,24 +1470,24 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   <button
                     onClick={() => setShowReleaseAnalysisModal(true)}
                     data-testid="open-release-analysis"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 transition"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 transition"
                     title={t('dashboard.retros.analyzeTitle')}
                   >
-                    <span className="material-symbols-outlined text-sm">smart_toy</span>
+                    <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">smart_toy</span>
                     {t('dashboard.retros.analyze')}
                   </button>
                 </div>
               )}
               {team.retrospectives.length === 0 ? (
-                  <div className="text-center text-slate-500 py-10">{t('dashboard.retros.empty')}</div>
+                  <div className={EMPTY_STATE}>{t('dashboard.retros.empty')}</div>
               ) : (
                   team.retrospectives.map(retro => (
-                    <div key={retro.id} className="bg-white p-5 rounded-lg shadow-xs border border-slate-200 flex items-center justify-between mb-3 hover:shadow-md transition">
-                        <div className="flex items-center grow">
-                            <div className="w-12 h-12 rounded-sm bg-indigo-50 text-indigo-600 flex items-center justify-center mr-4">
+                    <div key={retro.id} className={`${LIST_ROW} p-4 sm:p-5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 mb-3`}>
+                        <div className="flex items-center grow min-w-0">
+                            <div className="w-11 h-11 shrink-0 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mr-4">
                                 <span className="material-symbols-outlined" aria-hidden="true">{isOpenBoard(retro) ? 'view_kanban' : 'event_note'}</span>
                             </div>
-                            <div className="grow">
+                            <div className="grow min-w-0">
                                 {editingRetroId === retro.id ? (
                                     <div className="flex items-center gap-2">
                                         <input
@@ -1455,38 +1501,38 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                                     setEditingRetroName('');
                                                 }
                                             }}
-                                            className="border border-indigo-500 rounded-sm px-2 py-1 text-lg font-bold text-slate-800 outline-hidden focus:ring-2 focus:ring-indigo-200"
+                                            className={`${FIELD_BOX} text-lg font-semibold min-w-0`}
                                             // eslint-disable-next-line jsx-a11y/no-autofocus -- the rename button it replaces is unmounted by this very click
                                             autoFocus
                                         />
                                         <button
                                             onClick={() => handleRenameRetro(retro.id)}
-                                            className="p-1.5 text-white bg-indigo-600 hover:bg-indigo-700 rounded-sm"
+                                            className={`${PRIMARY_BUTTON} w-9 h-9 shrink-0`}
                                             title={t('common.save')}
                                             aria-label={t('dashboard.retros.saveName')}
                                         >
-                                            <span className="material-symbols-outlined text-base">check</span>
+                                            <span className="material-symbols-outlined text-xl" aria-hidden="true">check</span>
                                         </button>
                                         <button
                                             onClick={() => {
                                                 setEditingRetroId(null);
                                                 setEditingRetroName('');
                                             }}
-                                            className="p-1.5 text-slate-600 hover:text-slate-800 rounded-sm"
+                                            className={ICON_BUTTON}
                                             title={t('common.cancel')}
                                             aria-label={t('dashboard.retros.cancelRename')}
                                         >
-                                            <span className="material-symbols-outlined text-base">close</span>
+                                            <span className="material-symbols-outlined text-xl" aria-hidden="true">close</span>
                                         </button>
                                     </div>
                                 ) : (
-                                    <h3 className="font-bold text-slate-800 text-lg">{retro.name}</h3>
+                                    <h3 className="font-semibold text-slate-900 text-lg leading-snug break-words">{retro.name}</h3>
                                 )}
-                                <div className="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center gap-2">
-                                    <span>{retro.date}</span> •
+                                <div className="mt-1 text-xs text-slate-600 font-medium flex flex-wrap items-center gap-2">
+                                    <span className="tabular-nums">{retro.date}</span>
                                     {/* A board is never closed: the list says what it is instead.
-                                        green-700, not 600: 12px green-600 on white measures 3.22:1. */}
-                                    <span className={retro.status === 'IN_PROGRESS' ? 'text-green-700' : 'text-slate-500'}>
+                                        Each chip's ink is the 700 of its tint, measured at 4.5:1. */}
+                                    <span className={`${CHIP} uppercase tracking-wide ${sessionStatusChip(isOpenBoard(retro) ? 'OPEN_BOARD' : retro.status)}`}>
                                         {isOpenBoard(retro) ? t('dashboard.retroStatus.OPEN_BOARD') : t(`dashboard.retroStatus.${retro.status}`)}
                                     </span>
                                 </div>
@@ -1573,7 +1619,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 })()}
                             </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1 ml-auto shrink-0">
                             {isAdmin && editingRetroId !== retro.id && (
                               <>
                                 <button
@@ -1581,25 +1627,25 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                       setEditingRetroId(retro.id);
                                       setEditingRetroName(retro.name);
                                   }}
-                                  className="p-2 text-slate-500 hover:text-indigo-600 border border-transparent hover:border-indigo-200 rounded-sm"
+                                  className={ICON_BUTTON}
                                   title={t('dashboard.retros.rename')}
                                   aria-label={t('dashboard.retros.rename')}
                                 >
-                                  <span className="material-symbols-outlined">edit</span>
+                                  <span className="material-symbols-outlined text-xl" aria-hidden="true">edit</span>
                                 </button>
                                 <button
                                   onClick={() => setRetroToDelete(retro)}
-                                  className="p-2 text-slate-500 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded-sm"
+                                  className={DANGER_ICON_BUTTON}
                                   title={t('dashboard.deleteRetro.title')}
                                   aria-label={t('dashboard.deleteRetro.title')}
                                 >
-                                  <span className="material-symbols-outlined">delete</span>
+                                  <span className="material-symbols-outlined text-xl" aria-hidden="true">delete</span>
                                 </button>
                               </>
                             )}
                             <button
                                 onClick={() => onOpenSession(retro.id)}
-                                className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-sm font-bold text-sm hover:border-retro-primary hover:text-retro-primary transition"
+                                className={`${SECONDARY_BUTTON} px-4 py-2 text-sm ml-1`}
                             >
                                 {retro.status === 'IN_PROGRESS' ? t('dashboard.session.resume') : t('dashboard.retros.viewSummary')}
                             </button>
@@ -1613,93 +1659,93 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       {tab === 'MEMBERS' && (
         <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
           {team.members.map((member) => (
-            <div key={member.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-full ${avatarColorClasses(member.color)} flex items-center justify-center font-bold uppercase`}>
-                {member.name.substring(0, 2)}
-              </div>
-              <div className="flex flex-col flex-1">
+            <div key={member.id} className={`${CARD} p-4 flex flex-wrap items-center gap-3`}>
+              <Avatar colorClasses={avatarColorClasses(member.color)} initials={member.name.substring(0, 2)} size={40} avatarId={memberAvatarId(team, member.id)} />
+              {/* At least 8rem for the name: the removal question goes to its own line rather than squeeze it. */}
+              <div className="flex flex-col flex-1 min-w-[8rem]">
                 {editingMemberId === member.id ? (
                   <div className="space-y-2">
                     <div>
-                      <label htmlFor={`member-name-${member.id}`} className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">{t('dashboard.members.name')}</label>
+                      <label htmlFor={`member-name-${member.id}`} className={`${SECTION_LABEL} block mb-1`}>{t('dashboard.members.name')}</label>
                       <input
                         id={`member-name-${member.id}`}
                         type="text"
                         value={editingMemberName}
                         onChange={(e) => setEditingMemberName(e.target.value)}
-                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm text-slate-800 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 outline-hidden"
+                        className={`${FIELD} text-sm`}
                       />
                     </div>
                     <div>
-                      <label htmlFor={`member-email-${member.id}`} className="block text-[11px] uppercase tracking-wide text-slate-500 mb-1">{t('dashboard.members.email')}</label>
+                      <label htmlFor={`member-email-${member.id}`} className={`${SECTION_LABEL} block mb-1`}>{t('dashboard.members.email')}</label>
                       <input
                         id={`member-email-${member.id}`}
                         type="email"
                         value={editingMemberEmail}
                         onChange={(e) => setEditingMemberEmail(e.target.value)}
                         placeholder={t('dashboard.members.emailPlaceholder')}
-                        className="w-full border border-slate-200 rounded-lg px-2 py-1 text-sm text-slate-800 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 outline-hidden"
+                        className={`${FIELD} text-sm`}
                       />
                     </div>
                     {memberEditError && (
-                      <div className="text-xs text-rose-700 bg-rose-50 border border-rose-100 rounded-sm px-2 py-1">
+                      <div className={`${ERROR_NOTICE} text-xs`}>
                         {noticeText(memberEditError, t)}
                       </div>
                     )}
                   </div>
                 ) : (
                   <>
-                    <span className="text-sm font-bold text-slate-800">{member.name}</span>
-                    <span className="text-[11px] uppercase tracking-wide text-slate-500">{t(`dashboard.members.role.${member.role}`)}</span>
-                    {member.email && <span className="text-xs text-slate-500">{member.email}</span>}
+                    <span className="text-sm font-semibold text-slate-900 truncate">{member.name}</span>
+                    {/* The role words are lowercase in both dictionaries; the list used to show them in capitals. */}
+                    <span className="text-xs text-slate-600 first-letter:uppercase">{t(`dashboard.members.role.${member.role}`)}</span>
+                    {member.email && <span className="text-xs text-slate-600 truncate">{member.email}</span>}
                   </>
                 )}
               </div>
               {isAdmin && (
-                <div className="ml-auto flex items-center gap-2">
+                <div className="ml-auto flex items-center gap-1 shrink-0">
                   {editingMemberId === member.id ? (
                     <>
                       <button
                         onClick={handleSaveMemberEdit}
-                        className="text-emerald-700 hover:text-emerald-700"
+                        className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-emerald-700 hover:bg-emerald-50 transition"
                         title={t('dashboard.members.save')}
                         aria-label={t('dashboard.members.save')}
                       >
-                        <span className="material-symbols-outlined">check_circle</span>
+                        <span className="material-symbols-outlined" aria-hidden="true">check_circle</span>
                       </button>
                       <button
                         onClick={handleCancelMemberEdit}
-                        className="text-slate-500 hover:text-slate-600"
+                        className={ICON_BUTTON}
                         title={t('dashboard.members.cancelEdit')}
                         aria-label={t('dashboard.members.cancelEdit')}
                       >
-                        <span className="material-symbols-outlined">cancel</span>
+                        <span className="material-symbols-outlined" aria-hidden="true">cancel</span>
                       </button>
                     </>
                   ) : (
                     <>
                       <button
                         onClick={() => handleStartMemberEdit(member)}
-                        className="text-slate-300 hover:text-indigo-500"
+                        className={ICON_BUTTON}
                         title={t('dashboard.members.edit')}
                         aria-label={t('dashboard.members.edit')}
                       >
-                        <span className="material-symbols-outlined">edit</span>
+                        <span className="material-symbols-outlined text-xl" aria-hidden="true">edit</span>
                       </button>
                       {member.id !== currentUser.id && (
                         <>
                           {memberPendingRemoval === member.id ? (
-                            <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-full px-3 py-1 text-xs font-semibold text-red-700">
+                            <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 rounded-full pl-3 pr-1 py-1 text-xs font-semibold text-rose-800">
                               <span>{t('dashboard.members.removeConfirm')}</span>
                               <button
                                 onClick={() => handleRemoveMember(member.id)}
-                                className="bg-red-600 text-white px-2 py-0.5 rounded-full hover:bg-red-700"
+                                className="bg-rose-700 text-white px-2.5 py-0.5 rounded-full hover:bg-rose-800"
                               >
                                 {t('common.confirm')}
                               </button>
                               <button
                                 onClick={() => setMemberPendingRemoval(null)}
-                                className="text-red-600 hover:text-red-700"
+                                className="px-1.5 py-0.5 rounded-full text-rose-800 hover:bg-rose-100"
                               >
                                 {t('common.cancel')}
                               </button>
@@ -1707,11 +1753,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           ) : (
                             <button
                               onClick={() => setMemberPendingRemoval(member.id)}
-                              className="text-slate-300 hover:text-red-500"
+                              className={DANGER_ICON_BUTTON}
                               title={t('dashboard.members.remove')}
                               aria-label={t('dashboard.members.remove')}
                             >
-                              <span className="material-symbols-outlined">person_remove</span>
+                              <span className="material-symbols-outlined text-xl" aria-hidden="true">person_remove</span>
                             </button>
                           )}
                         </>
@@ -1723,7 +1769,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
             </div>
           ))}
           {team.members.length === 0 && (
-            <div className="text-center text-slate-500 py-10 col-span-full">{t('dashboard.members.empty')}</div>
+            <div className={`${EMPTY_STATE} col-span-full`}>{t('dashboard.members.empty')}</div>
           )}
         </div>
       )}
@@ -1736,15 +1782,15 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
             <div className="mb-6 flex justify-between items-center">
               <button
                 onClick={() => handleOpenNewHealthCheckModal()}
-                className="bg-cyan-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-cyan-700 shadow-lg transition"
+                className={`${PRIMARY_BUTTON} px-4 py-2 text-sm`}
               >
-                <span className="material-symbols-outlined mr-2">add</span> {t('dashboard.healthChecks.start')}
+                <span className="material-symbols-outlined text-xl" aria-hidden="true">add</span> {t('dashboard.healthChecks.start')}
               </button>
             </div>
           )}
 
           {healthChecks.length === 0 ? (
-            <div className="text-center text-slate-500 py-10">{t('dashboard.healthChecks.empty')}</div>
+            <div className={EMPTY_STATE}>{t('dashboard.healthChecks.empty')}</div>
           ) : (
             <>
               {/* Trend Table */}
@@ -1771,11 +1817,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 const hasNewer = offset > 0;
 
                 return (
-                  <div key={group.templateId} className="bg-white border border-slate-200 rounded-xl shadow-xs mb-6">
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+                  <div key={group.templateId} className={`${CARD} mb-6`}>
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50 rounded-t-xl">
                       <div>
-                        <div className="text-sm font-bold text-slate-700">{group.templateName}</div>
-                        <div className="text-xs text-slate-500">
+                        <div className="text-sm font-semibold text-slate-900">{group.templateName}</div>
+                        <div className="text-xs text-slate-600">
                           {/* `> 1`, not tp: the original rule, under which 0 reads singular. */}
                           {t(group.checks.length > 1 ? 'dashboard.healthChecks.sessionsPlural' : 'dashboard.healthChecks.sessionsSingular', { count: group.checks.length })}
                         </div>
@@ -1783,7 +1829,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => hasNewer && setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: Math.max(0, offset - 1) }))}
-                          className={`p-1 rounded-sm transition ${hasNewer ? 'text-slate-500 hover:text-cyan-600 hover:bg-cyan-50' : 'text-slate-300 cursor-not-allowed'}`}
+                          className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition ${hasNewer ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200' : 'text-slate-400 cursor-not-allowed'}`}
                           title={t('dashboard.healthChecks.showNewer')}
                           disabled={!hasNewer}
                           aria-disabled={!hasNewer}
@@ -1793,7 +1839,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         </button>
                         <button
                           onClick={() => hasOlder && setHealthCheckOffsets(prev => ({ ...prev, [group.templateId]: offset + 1 }))}
-                          className={`p-1 rounded-sm transition ${hasOlder ? 'text-slate-500 hover:text-cyan-600 hover:bg-cyan-50' : 'text-slate-300 cursor-not-allowed'}`}
+                          className={`inline-flex items-center justify-center w-8 h-8 rounded-lg transition ${hasOlder ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200' : 'text-slate-400 cursor-not-allowed'}`}
                           title={t('dashboard.healthChecks.showOlder')}
                           disabled={!hasOlder}
                           aria-disabled={!hasOlder}
@@ -1817,7 +1863,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   <button
                                     type="button"
                                     onClick={() => onOpenHealthCheck(hc.id)}
-                                    className="block w-full text-xs font-bold text-slate-700 truncate text-left leading-tight hover:text-cyan-700 hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-cyan-500 rounded-sm"
+                                    className="block w-full text-xs font-semibold text-slate-900 truncate text-left leading-tight hover:text-indigo-700 hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-indigo-600 rounded-sm"
                                     title={t('dashboard.healthChecks.openTitle', { name: hc.name })}
                                   >
                                     {hc.name}
@@ -1832,10 +1878,10 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             <th className="px-3 py-2 text-left w-16">
                               <button
                                 onClick={() => handleOpenNewHealthCheckModal(group.templateId)}
-                                className="text-cyan-600 hover:text-cyan-700 flex flex-col items-start justify-center w-full"
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-indigo-700 hover:bg-indigo-50 transition"
                                 aria-label={t('dashboard.healthChecks.newAria')}
                               >
-                                <span className="material-symbols-outlined text-xl">add</span>
+                                <span className="material-symbols-outlined text-xl" aria-hidden="true">add</span>
                               </button>
                             </th>
                           </tr>
@@ -1849,7 +1895,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                   {(dim.goodDescription || dim.badDescription) && (
                                     <div className="relative inline-block group/info">
                                       <span className="material-symbols-outlined text-xs text-slate-500 cursor-help hover:text-slate-600">info</span>
-                                      <div className="invisible group-hover/info:visible absolute left-full top-0 ml-2 mt-1 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl w-72 pointer-events-none z-9999">
+                                      <div className="invisible group-hover/info:visible absolute left-full top-0 ml-2 mt-1 bg-white border border-slate-200 text-slate-900 text-xs rounded-xl p-3 shadow-lg w-72 pointer-events-none z-9999">
                                         {dim.goodDescription && (
                                           <div className="mb-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
                                             <div className="font-bold text-emerald-700 mb-1">{t('dashboard.healthChecks.good')}</div>
@@ -1911,7 +1957,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                     </div>
                                     {/* Hover tooltip with detailed distribution */}
                                     {totalVotes > 0 && (
-                                      <div className="invisible group-hover/cell:visible absolute left-1/2 bottom-full mb-2 -translate-x-1/2 bg-white border-2 border-slate-300 text-slate-800 text-xs rounded-lg p-3 shadow-2xl pointer-events-none min-w-[200px] z-50">
+                                      <div className="invisible group-hover/cell:visible absolute left-1/2 bottom-full mb-2 -translate-x-1/2 bg-white border border-slate-200 text-slate-900 text-xs rounded-xl p-3 shadow-lg pointer-events-none min-w-[200px] z-50">
                                         <div className="space-y-1.5">
                                           {([5, 4, 3, 2, 1] as const).map(rating => {
                                             const count = distribution[rating] || 0;
@@ -1958,12 +2004,12 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   // stored status never caught up (see utils/sessionStatus.ts).
                   const hcStatus = effectiveSessionStatus(hc);
                   return (
-                    <div key={hc.id} className="bg-white p-5 rounded-lg shadow-xs border border-slate-200 flex items-center justify-between hover:shadow-md transition">
-                      <div className="flex items-center grow">
-                        <div className="w-12 h-12 rounded-sm bg-cyan-50 text-cyan-600 flex items-center justify-center mr-4">
-                          <span className="material-symbols-outlined">monitoring</span>
+                    <div key={hc.id} className={`${LIST_ROW} p-4 sm:p-5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3`}>
+                      <div className="flex items-center grow min-w-0">
+                        <div className="w-11 h-11 shrink-0 rounded-xl bg-cyan-50 text-cyan-700 flex items-center justify-center mr-4">
+                          <span className="material-symbols-outlined" aria-hidden="true">monitoring</span>
                         </div>
-                        <div className="grow">
+                        <div className="grow min-w-0">
                           {editingHealthCheckId === hc.id ? (
                             <div className="flex items-center gap-2">
                               <input
@@ -1977,44 +2023,46 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                     setEditingHealthCheckName('');
                                   }
                                 }}
-                                className="border border-cyan-500 rounded-sm px-2 py-1 text-lg font-bold text-slate-800 outline-hidden focus:ring-2 focus:ring-cyan-200"
+                                className={`${FIELD_BOX} text-lg font-semibold min-w-0`}
                                 // eslint-disable-next-line jsx-a11y/no-autofocus -- the rename button it replaces is unmounted by this very click
                                 autoFocus
                               />
                               <button
                                 onClick={() => handleRenameHealthCheck(hc.id)}
-                                className="p-1.5 text-white bg-cyan-600 hover:bg-cyan-700 rounded-sm"
+                                className={`${PRIMARY_BUTTON} w-9 h-9 shrink-0`}
                                 title={t('common.save')}
                                 aria-label={t('dashboard.healthChecks.saveName')}
                               >
-                                <span className="material-symbols-outlined text-base">check</span>
+                                <span className="material-symbols-outlined text-xl" aria-hidden="true">check</span>
                               </button>
                               <button
                                 onClick={() => {
                                   setEditingHealthCheckId(null);
                                   setEditingHealthCheckName('');
                                 }}
-                                className="p-1.5 text-slate-600 hover:text-slate-800 rounded-sm"
+                                className={ICON_BUTTON}
                                 title={t('common.cancel')}
                                 aria-label={t('dashboard.healthChecks.cancelRename')}
                               >
-                                <span className="material-symbols-outlined text-base">close</span>
+                                <span className="material-symbols-outlined text-xl" aria-hidden="true">close</span>
                               </button>
                             </div>
                           ) : (
-                            <h3 className="font-bold text-slate-800 text-lg">{hc.name}</h3>
+                            <h3 className="font-semibold text-slate-900 text-lg leading-snug break-words">{hc.name}</h3>
                           )}
-                          <div className="text-xs text-slate-500 font-medium uppercase tracking-wide flex items-center gap-2">
-                            <span>{hc.date}</span> •
-                            <span>{hc.templateName}</span> •
-                            <span>{tp('dashboard.healthChecks.participants', participantCount)}</span> •
-                            <span className={hcStatus === 'IN_PROGRESS' ? 'text-green-700' : 'text-slate-500'}>
+                          <div className="mt-1 text-xs text-slate-600 font-medium flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="tabular-nums">{hc.date}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>{hc.templateName}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>{tp('dashboard.healthChecks.participants', participantCount)}</span>
+                            <span className={`${CHIP} uppercase tracking-wide ${sessionStatusChip(hcStatus)}`}>
                               {t(`dashboard.healthCheckStatus.${hcStatus}`)}
                             </span>
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 ml-auto shrink-0">
                         {isAdmin && editingHealthCheckId !== hc.id && (
                           <>
                             <button
@@ -2022,25 +2070,25 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                 setEditingHealthCheckId(hc.id);
                                 setEditingHealthCheckName(hc.name);
                               }}
-                              className="p-2 text-slate-500 hover:text-cyan-600 border border-transparent hover:border-cyan-200 rounded-sm"
+                              className={ICON_BUTTON}
                               title={t('dashboard.healthChecks.rename')}
                               aria-label={t('dashboard.healthChecks.rename')}
                             >
-                              <span className="material-symbols-outlined">edit</span>
+                              <span className="material-symbols-outlined text-xl" aria-hidden="true">edit</span>
                             </button>
                             <button
                               onClick={() => setHealthCheckToDelete(hc)}
-                              className="p-2 text-slate-500 hover:text-amber-600 border border-transparent hover:border-amber-200 rounded-sm"
+                              className={DANGER_ICON_BUTTON}
                               title={t('dashboard.deleteHealthCheck.title')}
                               aria-label={t('dashboard.deleteHealthCheck.title')}
                             >
-                              <span className="material-symbols-outlined">delete</span>
+                              <span className="material-symbols-outlined text-xl" aria-hidden="true">delete</span>
                             </button>
                           </>
                         )}
                         <button
                           onClick={() => onOpenHealthCheck(hc.id)}
-                          className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-sm font-bold text-sm hover:border-cyan-500 hover:text-cyan-600 transition"
+                          className={`${SECONDARY_BUTTON} px-4 py-2 text-sm ml-1`}
                         >
                           {hcStatus === 'IN_PROGRESS' ? t('dashboard.session.resume') : t('dashboard.healthChecks.viewResults')}
                         </button>
@@ -2060,17 +2108,17 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           {/* Team Settings */}
           {isAdmin && (
             <div className="mb-8">
-              <h2 className="text-xl font-bold text-slate-800 mb-4">{t('dashboard.settings.teamSettings')}</h2>
-              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
+              <h2 className="text-lg font-bold tracking-tight text-slate-900 mb-3">{t('dashboard.settings.teamSettings')}</h2>
+              <div className={`${CARD} p-5 sm:p-6`}>
                 {/* Team Name Section */}
                 <div className="mb-6 pb-6 border-b border-slate-200">
-                  <h3 className="font-bold text-slate-700 mb-2 flex items-center">
-                    <span className="material-symbols-outlined mr-2 text-slate-500">badge</span>
+                  <h3 className={SETTING_TITLE}>
+                    <span className={SETTING_ICON} aria-hidden="true">badge</span>
                     {t('dashboard.settings.teamName')}
                   </h3>
-                  <p className="text-sm text-slate-500 mb-3">
+                  <p className="text-sm text-slate-600 mb-3">
                     {tRich('dashboard.settings.currentTeamName', {
-                      name: <span className="font-semibold text-slate-700">{team.name}</span>
+                      name: <span className="font-semibold text-slate-900">{team.name}</span>
                     })}
                   </p>
                   <div className="space-y-3">
@@ -2078,25 +2126,25 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       type="text"
                       value={newTeamName}
                       onChange={(e) => setNewTeamName(e.target.value)}
-                      className="w-full border border-slate-300 rounded-lg p-2 text-sm"
+                      className={`${FIELD} text-sm`}
                       placeholder={t('dashboard.settings.newTeamNamePlaceholder')}
                     />
                     <button
                       onClick={handleRenameTeam}
                       disabled={!newTeamName.trim()}
-                      className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className={`${PRIMARY_BUTTON} px-4 py-2 text-sm`}
                     >
                       {t('dashboard.settings.renameTeam')}
                     </button>
                     {teamRenameError && (
-                      <p className="text-xs text-red-600 flex items-center">
-                        <span className="material-symbols-outlined text-xs mr-1">error</span>
+                      <p className={ERROR_TEXT}>
+                        <span className="material-symbols-outlined text-sm! leading-none mr-1" aria-hidden="true">error</span>
                         {noticeText(teamRenameError, t)}
                       </p>
                     )}
                     {teamRenameSuccess && (
-                      <p className="text-xs text-green-700 flex items-center">
-                        <span className="material-symbols-outlined text-xs mr-1">check_circle</span>
+                      <p className={SUCCESS_TEXT}>
+                        <span className="material-symbols-outlined text-sm! leading-none mr-1" aria-hidden="true">check_circle</span>
                         {noticeText(teamRenameSuccess, t)}
                       </p>
                     )}
@@ -2107,14 +2155,14 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                     Team-scoped rather than per-user because it changes what the
                     round asks, not how one person sees it. */}
                 <div className="mb-6 pb-6 border-b border-slate-200">
-                  <h3 className="font-bold text-slate-700 mb-2 flex items-center">
-                    <span className="material-symbols-outlined mr-2 text-slate-500">insights</span>
+                  <h3 className={SETTING_TITLE}>
+                    <span className={SETTING_ICON} aria-hidden="true">insights</span>
                     {t('dashboard.settings.impactTitle')}
                   </h3>
-                  <p className="text-sm text-slate-500 mb-3">
+                  <p className="text-sm text-slate-600 mb-3">
                     {t('dashboard.settings.impactDescription')}
                   </p>
-                  <label className="flex items-center gap-3 text-sm text-slate-700">
+                  <label className="flex items-center gap-3 text-sm text-slate-900">
                     <input
                       type="checkbox"
                       checked={isActionImpactRatingEnabled(team)}
@@ -2134,11 +2182,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
                 {/* Password Change Section */}
                 <div className="mt-6 pt-6 border-t border-slate-200">
-                  <h3 className="font-bold text-slate-700 mb-2 flex items-center">
-                    <span className="material-symbols-outlined mr-2 text-slate-500">lock</span>
+                  <h3 className={SETTING_TITLE}>
+                    <span className={SETTING_ICON} aria-hidden="true">lock</span>
                     {t('dashboard.settings.changePassword')}
                   </h3>
-                  <p className="text-sm text-slate-500 mb-3">
+                  <p className="text-sm text-slate-600 mb-3">
                     {t('dashboard.settings.changePasswordDescription')}
                   </p>
                   <div className="space-y-3">
@@ -2147,7 +2195,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         type="password"
                         value={currentPassword}
                         onChange={(e) => setCurrentPassword(e.target.value)}
-                        className="w-full border border-slate-300 rounded-lg p-2 text-sm"
+                        className={`${FIELD} text-sm`}
                         placeholder={t('dashboard.settings.currentPassword')}
                       />
                     )}
@@ -2155,32 +2203,32 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       type="password"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full border border-slate-300 rounded-lg p-2 text-sm"
+                      className={`${FIELD} text-sm`}
                       placeholder={t('dashboard.settings.newPassword', { min: PASSWORD_MIN_LENGTH })}
                     />
                     <input
                       type="password"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full border border-slate-300 rounded-lg p-2 text-sm"
+                      className={`${FIELD} text-sm`}
                       placeholder={t('dashboard.settings.confirmPassword')}
                     />
                     <button
                       onClick={handleChangePassword}
                       disabled={!newPassword || !confirmPassword}
-                      className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className={`${PRIMARY_BUTTON} px-4 py-2 text-sm`}
                     >
                       {t('dashboard.settings.changePassword')}
                     </button>
                     {passwordChangeError && (
-                      <p className="text-xs text-red-600 flex items-center">
-                        <span className="material-symbols-outlined text-xs mr-1">error</span>
+                      <p className={ERROR_TEXT}>
+                        <span className="material-symbols-outlined text-sm! leading-none mr-1" aria-hidden="true">error</span>
                         {noticeText(passwordChangeError, t)}
                       </p>
                     )}
                     {passwordChangeSuccess && (
-                      <p className="text-xs text-green-700 flex items-center">
-                        <span className="material-symbols-outlined text-xs mr-1">check_circle</span>
+                      <p className={SUCCESS_TEXT}>
+                        <span className="material-symbols-outlined text-sm! leading-none mr-1" aria-hidden="true">check_circle</span>
                         {noticeText(passwordChangeSuccess, t)}
                       </p>
                     )}
@@ -2197,60 +2245,60 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           {/* Health Check Templates (Custom Only) */}
           <div className="mb-8">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-slate-800">{t('dashboard.settings.hcTemplates')}</h2>
+              <h2 className="text-lg font-bold tracking-tight text-slate-900">{t('dashboard.settings.hcTemplates')}</h2>
               {isAdmin && (
                 <button
                   onClick={() => handleOpenTemplateEditor()}
-                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-indigo-700"
+                  className={`${SECONDARY_BUTTON} px-3.5 py-2 text-sm`}
                 >
-                  <span className="material-symbols-outlined mr-2">add</span> {t('dashboard.settings.createHcTemplate')}
+                  <span className="material-symbols-outlined text-xl" aria-hidden="true">add</span> {t('dashboard.settings.createHcTemplate')}
                 </button>
               )}
             </div>
 
             <div className="space-y-3">
               {healthCheckTemplates.filter(tpl => !tpl.isDefault).length === 0 ? (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-center">
-                  <span className="material-symbols-outlined text-4xl text-slate-300 mb-2">dashboard_customize</span>
-                  <p className="text-slate-500">{t('dashboard.settings.noHcTemplates')}</p>
-                  {isAdmin && <p className="text-sm text-slate-500 mt-1">{t('dashboard.settings.noHcTemplatesHint')}</p>}
+                <div className={EMPTY_STATE}>
+                  <span className="material-symbols-outlined text-4xl text-slate-400 mb-2" aria-hidden="true">dashboard_customize</span>
+                  <p className="text-slate-700 font-medium">{t('dashboard.settings.noHcTemplates')}</p>
+                  {isAdmin && <p className="text-sm text-slate-600 mt-1">{t('dashboard.settings.noHcTemplatesHint')}</p>}
                 </div>
               ) : (
                 healthCheckTemplates.filter(tpl => !tpl.isDefault).map(template => (
-                  <div key={template.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="font-bold text-slate-800 flex items-center">
+                  <div key={template.id} className={`${CARD} p-4`}>
+                    <div className="flex justify-between items-start gap-3">
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-slate-900 flex items-center break-words">
                           {template.name}
                         </h3>
-                        <p className="text-sm text-slate-500 mt-1">{tp('dashboard.settings.dimensionCount', template.dimensions.length)}</p>
+                        <p className="text-sm text-slate-600 mt-0.5">{tp('dashboard.settings.dimensionCount', template.dimensions.length)}</p>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 shrink-0 -mr-1.5 -mt-1">
                         <button
                           onClick={() => toggleTemplateDetails(template.id)}
-                          className="text-slate-500 hover:text-slate-600"
+                          className={ICON_BUTTON}
                           title={expandedTemplates.includes(template.id) ? t('dashboard.settings.hideDetails') : t('dashboard.settings.viewDetails')}
                           aria-label={expandedTemplates.includes(template.id) ? t('dashboard.settings.hideDetails') : t('dashboard.settings.viewDetails')}
                         >
-                          <span className="material-symbols-outlined">{expandedTemplates.includes(template.id) ? 'expand_less' : 'expand_more'}</span>
+                          <span className="material-symbols-outlined" aria-hidden="true">{expandedTemplates.includes(template.id) ? 'expand_less' : 'expand_more'}</span>
                         </button>
                         {isAdmin && (
                           <>
                             <button
                               onClick={() => handleOpenTemplateEditor(template)}
-                              className="text-slate-500 hover:text-indigo-600"
+                              className={ICON_BUTTON}
                               title={t('dashboard.settings.editTemplate')}
                               aria-label={t('dashboard.settings.editTemplate')}
                             >
-                              <span className="material-symbols-outlined">edit</span>
+                              <span className="material-symbols-outlined text-xl" aria-hidden="true">edit</span>
                             </button>
                             <button
                               onClick={() => handleDeleteTemplate(template.id)}
-                              className="text-slate-500 hover:text-red-500"
+                              className={DANGER_ICON_BUTTON}
                               title={t('dashboard.settings.deleteTemplate')}
                               aria-label={t('dashboard.settings.deleteTemplate')}
                             >
-                              <span className="material-symbols-outlined">delete</span>
+                              <span className="material-symbols-outlined text-xl" aria-hidden="true">delete</span>
                             </button>
                           </>
                         )}
@@ -2259,12 +2307,12 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
 
                     <div className="mt-3 flex flex-wrap gap-2">
                       {template.dimensions.slice(0, 5).map(dim => (
-                        <span key={dim.id} className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-sm">
+                        <span key={dim.id} className={`${CHIP} bg-slate-100 text-slate-700`}>
                           {dim.name}
                         </span>
                       ))}
                       {template.dimensions.length > 5 && (
-                        <span className="text-xs text-slate-500">{t('dashboard.settings.moreDimensions', { count: template.dimensions.length - 5 })}</span>
+                        <span className="text-xs text-slate-600 self-center">{t('dashboard.settings.moreDimensions', { count: template.dimensions.length - 5 })}</span>
                       )}
                     </div>
 
@@ -2272,7 +2320,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       <div className="mt-4 space-y-2">
                         {template.dimensions.map(dim => (
                           <div key={dim.id} className="border border-slate-200 rounded-lg p-3 bg-slate-50">
-                            <div className="font-bold text-slate-800 text-sm">{dim.name}</div>
+                            <div className="font-semibold text-slate-900 text-sm">{dim.name}</div>
                             <div className="text-xs text-emerald-700 mt-1"><strong className="text-emerald-700">👍</strong> {dim.goodDescription}</div>
                             <div className="text-xs text-rose-700 mt-1"><strong className="text-rose-700">👎</strong> {dim.badDescription}</div>
                           </div>
@@ -2288,7 +2336,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
           {/* Retro Templates (Custom Only) */}
           <div>
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-slate-800">{t('dashboard.settings.retroTemplates')}</h2>
+              <h2 className="text-lg font-bold tracking-tight text-slate-900">{t('dashboard.settings.retroTemplates')}</h2>
               {isAdmin && (
                 <button
                   onClick={() => {
@@ -2299,26 +2347,26 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                     ]);
                     setShowRetroTemplateBuilder(true);
                   }}
-                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center hover:bg-indigo-700"
+                  className={`${SECONDARY_BUTTON} px-3.5 py-2 text-sm`}
                 >
-                  <span className="material-symbols-outlined mr-2">add</span> {t('dashboard.retroTemplate.title')}
+                  <span className="material-symbols-outlined text-xl" aria-hidden="true">add</span> {t('dashboard.retroTemplate.title')}
                 </button>
               )}
             </div>
             <div className="space-y-3">
               {(!team.customTemplates || team.customTemplates.length === 0) ? (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-center">
-                  <span className="material-symbols-outlined text-4xl text-slate-300 mb-2">view_column</span>
-                  <p className="text-slate-500">{t('dashboard.settings.noRetroTemplates')}</p>
-                  {isAdmin && <p className="text-sm text-slate-500 mt-1">{t('dashboard.settings.noRetroTemplatesHint')}</p>}
+                <div className={EMPTY_STATE}>
+                  <span className="material-symbols-outlined text-4xl text-slate-400 mb-2" aria-hidden="true">view_column</span>
+                  <p className="text-slate-700 font-medium">{t('dashboard.settings.noRetroTemplates')}</p>
+                  {isAdmin && <p className="text-sm text-slate-600 mt-1">{t('dashboard.settings.noRetroTemplatesHint')}</p>}
                 </div>
               ) : (
                 team.customTemplates.map((template, idx) => (
-                  <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="font-bold text-slate-800">{template.name}</h3>
-                        <p className="text-sm text-slate-500 mt-1">{tp('dashboard.settings.columnCount', template.cols.length)}</p>
+                  <div key={idx} className={`${CARD} p-4`}>
+                    <div className="flex justify-between items-start gap-3">
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-slate-900 break-words">{template.name}</h3>
+                        <p className="text-sm text-slate-600 mt-0.5">{tp('dashboard.settings.columnCount', template.cols.length)}</p>
                       </div>
                       {isAdmin && (
                         <button
@@ -2333,11 +2381,11 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             dataService.deleteCustomTemplate(team.id, idx, template.name);
                             onRefresh();
                           }}
-                          className="text-slate-500 hover:text-red-500"
+                          className={`${DANGER_ICON_BUTTON} -mr-1.5 -mt-1`}
                           title={t('dashboard.settings.deleteTemplate')}
                           aria-label={t('dashboard.settings.deleteTemplate')}
                         >
-                          <span className="material-symbols-outlined">delete</span>
+                          <span className="material-symbols-outlined text-xl" aria-hidden="true">delete</span>
                         </button>
                       )}
                     </div>

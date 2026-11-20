@@ -6,6 +6,15 @@ import { noteRevokedResponse } from '../../services/sessionRevocation';
 import MarkdownContent from '../common/MarkdownContent';
 import ModalDialog from '../common/ModalDialog';
 import { useTranslation } from '../../i18n/I18nContext';
+import {
+  DIALOG_OVERLAY,
+  DIALOG_PANEL,
+  FIELD,
+  ICON_BUTTON,
+  PRIMARY_BUTTON,
+  SECONDARY_BUTTON,
+  SECTION_LABEL
+} from './dashboardLook';
 
 interface Props {
   retrospectives: RetroSession[];
@@ -227,7 +236,8 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 transition"
       title={t('dashboard.releaseAnalysis.copyTitle')}
     >
-      <span className="material-symbols-outlined text-sm">
+      {/* The words beside it say the outcome (Copied, Copy failed): the icon is decoration. */}
+      <span className="material-symbols-outlined text-sm" aria-hidden="true">
         {copyState === 'copied' ? 'check' : copyState === 'failed' ? 'error' : 'content_copy'}
       </span>
       {copyState === 'copied'
@@ -246,34 +256,34 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
       // a stray backdrop click must not throw it away. Escape still closes.
       closeOnBackdropClick={false}
       overlayTestId="release-analysis-modal"
-      overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center backdrop-blur-xs p-4"
-      panelClassName="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col"
+      overlayClassName={DIALOG_OVERLAY}
+      panelClassName={`${DIALOG_PANEL} max-w-3xl max-h-[90vh] flex flex-col`}
     >
       <>
-        <div className="flex items-start justify-between px-6 py-4 border-b border-slate-200">
+        <div className="flex items-start justify-between gap-3 px-6 py-4 border-b border-slate-200">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-violet-50 text-violet-700 flex items-center justify-center">
-              <span className="material-symbols-outlined">smart_toy</span>
+            <div className="w-10 h-10 shrink-0 rounded-xl bg-violet-50 text-violet-700 flex items-center justify-center">
+              <span className="material-symbols-outlined" aria-hidden="true">smart_toy</span>
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-800">{t('dashboard.releaseAnalysis.title')}</h2>
-              <p className="text-xs text-slate-500">
+              <h2 className="text-lg font-bold tracking-tight text-slate-900">{t('dashboard.releaseAnalysis.title')}</h2>
+              <p className="text-xs text-slate-600">
                 {t('dashboard.releaseAnalysis.intro')}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-slate-500 hover:text-slate-700"
+            className={`${ICON_BUTTON} -mr-2`}
             aria-label={t('dashboard.releaseAnalysis.close')}
           >
-            <span className="material-symbols-outlined">close</span>
+            <span className="material-symbols-outlined" aria-hidden="true">close</span>
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
           <div>
-            <label htmlFor="release-analysis-keyword" className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
+            <label htmlFor="release-analysis-keyword" className={`${SECTION_LABEL} block mb-1`}>
               {t('dashboard.releaseAnalysis.keywordLabel')}
             </label>
             <p className="text-xs text-slate-500 mb-2">
@@ -286,7 +296,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
               onChange={(event) => setKeyword(event.target.value)}
               placeholder={t('dashboard.releaseAnalysis.keywordPlaceholder')}
               data-testid="release-analysis-keyword"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 outline-hidden focus:border-violet-400 focus:ring-1 focus:ring-violet-100"
+              className={`${FIELD} text-sm`}
             />
             {keyword.trim() && (
               <p className="mt-1 text-xs text-slate-500">
@@ -297,7 +307,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span id="release-analysis-retros-label" className="block text-xs font-bold text-slate-500 uppercase tracking-wide">
+              <span id="release-analysis-retros-label" className={`${SECTION_LABEL} block`}>
                 {t('dashboard.releaseAnalysis.retrosLabel')}
               </span>
               <span className="text-xs text-slate-500">
@@ -305,7 +315,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
               </span>
             </div>
             {retrospectives.length === 0 ? (
-              <div className="text-center text-slate-500 py-6 text-sm border border-dashed border-slate-200 rounded-lg">
+              <div className="text-center text-slate-600 py-6 text-sm border border-dashed border-slate-300 rounded-xl">
                 {t('dashboard.releaseAnalysis.noRetros')}
               </div>
             ) : (
@@ -327,12 +337,12 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
                           type="checkbox"
                           checked={checked}
                           onChange={() => toggleSelect(retro.id)}
-                          className="w-4 h-4 accent-violet-600"
+                          className="w-4 h-4 accent-indigo-600"
                           aria-label={t('dashboard.releaseAnalysis.toggleRetro', { name: retro.name })}
                         />
                         <span className="flex flex-col">
-                          <span className="text-sm font-semibold text-slate-700">{retro.name}</span>
-                          <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                          <span className="text-sm font-semibold text-slate-900">{retro.name}</span>
+                          <span className="text-xs text-slate-600">
                             {retro.date} · {t(`dashboard.retroStatus.${retro.status}`)}
                           </span>
                         </span>
@@ -345,7 +355,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
           </div>
 
           <div>
-            <span id="release-analysis-style-label" className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
+            <span id="release-analysis-style-label" className={`${SECTION_LABEL} block mb-2`}>
               {t('dashboard.releaseAnalysis.styleLabel')}
             </span>
             <div className="flex gap-2 mb-3" role="radiogroup" aria-labelledby="release-analysis-style-label">
@@ -357,8 +367,8 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
                 data-testid="release-analysis-mode-default"
                 className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold border transition ${
                   promptMode === 'default'
-                    ? 'bg-violet-50 border-violet-300 text-violet-700'
-                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                    ? 'bg-indigo-50 border-indigo-600 text-indigo-700'
+                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
                 }`}
               >
                 {t('dashboard.releaseAnalysis.modeDefault')}
@@ -371,8 +381,8 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
                 data-testid="release-analysis-mode-custom"
                 className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold border transition ${
                   promptMode === 'custom'
-                    ? 'bg-violet-50 border-violet-300 text-violet-700'
-                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                    ? 'bg-indigo-50 border-indigo-600 text-indigo-700'
+                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
                 }`}
               >
                 {t('dashboard.releaseAnalysis.modeCustom')}
@@ -381,7 +391,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
 
             {promptMode === 'default' ? (
               <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1" htmlFor="release-analysis-additional">
+                <label className="block text-sm font-semibold text-slate-700 mb-1" htmlFor="release-analysis-additional">
                   {t('dashboard.releaseAnalysis.additionalLabel')}
                 </label>
                 <p className="text-xs text-slate-500 mb-2">
@@ -394,12 +404,12 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
                   placeholder={t('dashboard.releaseAnalysis.additionalPlaceholder')}
                   rows={3}
                   data-testid="release-analysis-additional"
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 outline-hidden focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-y"
+                  className={`${FIELD} text-sm resize-y`}
                 />
               </div>
             ) : (
               <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1" htmlFor="release-analysis-custom-prompt">
+                <label className="block text-sm font-semibold text-slate-700 mb-1" htmlFor="release-analysis-custom-prompt">
                   {t('dashboard.releaseAnalysis.modeCustom')}
                 </label>
                 <p className="text-xs text-slate-500 mb-2">
@@ -412,7 +422,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
                   placeholder={t('dashboard.releaseAnalysis.customPlaceholder')}
                   rows={5}
                   data-testid="release-analysis-custom-prompt"
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 outline-hidden focus:border-violet-400 focus:ring-1 focus:ring-violet-100 resize-y"
+                  className={`${FIELD} text-sm resize-y`}
                 />
               </div>
             )}
@@ -433,7 +443,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
               }`}
             >
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                <h3 className={SECTION_LABEL}>
                   {t('dashboard.releaseAnalysis.resultTitle')}
                 </h3>
                 {renderCopyButton('release-analysis-copy-inline')}
@@ -445,28 +455,26 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl">
           <div className="flex items-center">
             {analysis && renderCopyButton('release-analysis-copy-footer')}
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-bold hover:bg-white"
+              className={`${SECONDARY_BUTTON} px-4 py-2 text-sm`}
             >
               {t('common.close')}
             </button>
+            {/* Disabled, it is drawn by the recipe's own disabled colours,
+                measured like every other pair (dashboardLook.test.tsx). */}
             <button
               onClick={handleGenerate}
               disabled={!canGenerate}
               data-testid="release-analysis-generate"
-              className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition ${
-                canGenerate
-                  ? 'bg-violet-600 text-white hover:bg-violet-700'
-                  : 'bg-slate-200 text-slate-500 cursor-not-allowed'
-              }`}
+              className={`${PRIMARY_BUTTON} px-4 py-2 text-sm`}
             >
-              <span className={`material-symbols-outlined text-base ${isGenerating ? 'animate-spin' : ''}`}>
+              <span className={`material-symbols-outlined text-lg! leading-none ${isGenerating ? 'motion-safe:animate-spin' : ''}`} aria-hidden="true">
                 {isGenerating ? 'progress_activity' : 'smart_toy'}
               </span>
               {isGenerating ? t('dashboard.releaseAnalysis.generating') : t('dashboard.releaseAnalysis.generate')}

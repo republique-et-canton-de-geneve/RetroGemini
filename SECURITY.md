@@ -238,6 +238,77 @@ Residuals, stated rather than discovered:
   "Pre-delete snapshot", which holds every link. Each such issue repeats the
   action's content in Jira.
 
+### Avatars
+
+Each member can choose a picture in place of their initials (45.0). The choice
+is stored on the team record, `memberAvatars[memberId] = { id, at }`, written
+by one route, `POST /api/team/:teamId/member/avatar`.
+
+- **Any team credential can set any member's avatar.** The route checks the
+  credential (password or session token, an invitation-link login included),
+  the shape of the member id and the avatar id — not who is asking, which it
+  cannot know: a credential names a team, not a person. "Your own avatar" is a
+  rule of the screens. The harm is bounded to a picture from the list below,
+  shown beside a member's name, and the next choice replaces it.
+- **Inside a session, a participant can change the picture shown for another
+  participant there.** A live session's participant list is written by every
+  client of the session, like its cards, and each entry carries a copy of its
+  person's choice and of the time it was made. A client can therefore put any
+  picture of the list, with any time, on another person's entry in that
+  session, as it already can a name or a colour. The team's own record is out
+  of its reach (only the route writes it), nothing but a picture of the list
+  is ever drawn, and no other session or screen shows what was planted. A
+  later choice of the person replaces it: any choice, when the planted time
+  is not ahead of that choice; and for a time planted ahead of the clock, a
+  choice made in that session, where the route's stamp replaces a time more
+  than five minutes ahead of the server's clock (no choice wrote it). A time
+  planted less than five minutes ahead stands until it has passed: that is
+  how far two servers' clocks are allowed to differ. A choice made elsewhere
+  does not reach that session while a planted time is ahead of it. The browsers compare the two times and never judge one by
+  their own clock: a browser whose clock is wrong would otherwise write over
+  a newer choice made in the person's other browser, and the two would undo
+  each other without end.
+- **The id is checked against a closed list and refused, never coerced.** An
+  avatar id is one of the application's own ids (`utils/avatars.js`), or `null`
+  for none; anything else is answered `400 invalid_avatar`. The map is rebuilt
+  from its valid entries on every write, so junk another path left heals, and
+  it is capped at 500 entries. A date is whole milliseconds that a number
+  counts exactly: a value nothing could be dated after (1e300) is not a date,
+  on the map or on a session's copy, so it cannot outrank every later choice.
+  During a rolling update, the update route of a server from before 45.0
+  accepts the whole map from any team credential (it keeps the keys it does
+  not know): the readers take it as data, the next choice through the route
+  rebuilds it, and the most it does is set a member's picture.
+- **A picture is drawn from data, never from markup or a URL.** Each picture is
+  a list of shapes in a closed vocabulary (eight SVG element types, seven
+  colour classes, a fixed list of attributes) compiled into the bundle, and the
+  screen draws it with React; a stored value only selects one of them, after it
+  has been checked against the list, and is never written into the page as
+  markup, an image source or a class. A value the client does not know draws
+  the initials. Nothing is fetched: there is no
+  upload and no remote image, so the CSP's `img-src` is not involved.
+- **An anonymous session shows no chosen avatar.** One resolver decides what a
+  session draws and answers nothing while the session is anonymous, because a
+  picture beside a card would say who wrote it; a source test refuses any other
+  read of an avatar in the components. This is what the screens show, like
+  the rest of an anonymous session: its data still carries each participant's
+  entry, avatar included, as it carries each card's author.
+- **Nothing of it is in a URL or a log.** The choice travels in the request
+  body, and the route logs no member id, avatar id or choice: a failure logs
+  the error alone. A choice is not a privileged action and writes no row to the
+  audit trail.
+
+### Fonts and icons
+
+The interface typeface (Geist, Geist Mono) and the icon font (Material Symbols)
+are served by the deployment itself, from `public/fonts/`, and the
+`font-src 'self'` directive of the CSP refuses any other origin. Nothing is
+loaded from a font service, so a browser on a network without internet access
+draws the same screens and tells no third party who opened them.
+`e2e-prod/production-csp.spec.ts` loads the built application under its
+production policy, checks that the text font and the icon font are each
+loaded by name, and fails on any request that leaves the application's origin.
+
 ### Database Security
 
 - SQLite database is unencrypted at rest
