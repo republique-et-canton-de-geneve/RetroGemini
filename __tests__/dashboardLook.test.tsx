@@ -38,6 +38,8 @@ vi.mock('../components/IconPicker', () => ({
 
 const TEXT = 4.5;
 const EDGE = 3;
+/** A negative margin class, with or without a variant: `-mb-px`, `sm:-mx-1`, `mt-[-2px]`. */
+const NEGATIVE_MARGIN = /(^|:)(-m[trblxyse]?-|m[trblxyse]?-\[-)/;
 
 /** The one colour token a recipe sets with this prefix (`text-`, `disabled:bg-`…), variants excluded. */
 const tokenOf = (classes: string, prefix: string): string => {
@@ -254,6 +256,20 @@ describe('the Dashboard’s screens, measured', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('lays its tabs on a strip that scrolls sideways, with no negative margin to scroll it vertically', () => {
+    renderDashboard(buildTeam(), 'RETROS');
+    const tabs = [...document.querySelectorAll('.dash-tab')];
+    expect(tabs).toHaveLength(6);
+    // The strip scrolls sideways on a phone, so it clips at its padding box
+    // and scrolls vertically too: the `-mb-px` each tab carried gave it a
+    // scrollbar for one pixel at every width (e2e/no-stray-scrollbars.spec.ts).
+    expect(tabs[0].parentElement).toHaveClass('overflow-x-auto');
+    for (const tab of tabs) {
+      const negative = (tab.getAttribute('class') ?? '').split(/\s+/).filter((token) => NEGATIVE_MARGIN.test(token));
+      expect(negative, tab.textContent ?? '').toEqual([]);
+    }
   });
 
   it('reads a closed retrospective’s status and date', () => {

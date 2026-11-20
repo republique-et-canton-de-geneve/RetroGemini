@@ -36,8 +36,11 @@ const IcebreakerPhase: React.FC<Props> = ({
     isBuiltInIcebreaker(question, templateLanguage) ? templateLanguage : undefined;
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-slate-900 text-white">
-      <div className="bg-slate-800 p-10 rounded-2xl shadow-xl border border-slate-700 max-w-4xl w-full h-[600px] flex flex-col">
+    // Less padding and a smaller question below `sm`: on a phone the three
+    // paddings left the default question too narrow a field, which scrolled
+    // inside itself (e2e/no-stray-scrollbars.spec.ts).
+    <div className="flex flex-col items-center justify-center h-full p-8 max-sm:p-4 text-center bg-slate-900 text-white">
+      <div className="bg-slate-800 p-10 max-sm:p-5 rounded-2xl shadow-xl border border-slate-700 max-w-4xl w-full h-[600px] flex flex-col">
         <div className="w-16 h-16 bg-indigo-500/20 rounded-full flex items-center justify-center text-3xl mb-4 mx-auto shrink-0" aria-hidden="true">🧊</div>
         <h2 className="text-3xl font-semibold tracking-tight mb-6 shrink-0">{t('phases.icebreaker.title')}</h2>
 
@@ -51,7 +54,7 @@ const IcebreakerPhase: React.FC<Props> = ({
               lang={questionLanguage(localIcebreakerQuestion !== null ? localIcebreakerQuestion : session.icebreakerQuestion)}
               value={localIcebreakerQuestion !== null ? localIcebreakerQuestion : session.icebreakerQuestion}
               onChange={(event) => onQuestionChange(event.target.value)}
-              className="w-full h-full bg-slate-900 border border-slate-500 rounded-xl p-6 text-3xl text-center text-indigo-300 font-medium leading-relaxed placeholder:text-slate-400 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/25 outline-hidden resize-none grow"
+              className="w-full h-full bg-slate-900 border border-slate-500 rounded-xl p-6 text-3xl max-sm:text-2xl text-center text-indigo-300 font-medium leading-relaxed placeholder:text-slate-400 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/25 outline-hidden resize-none grow"
               placeholder={t('phases.icebreaker.placeholder')}
             />
           ) : (

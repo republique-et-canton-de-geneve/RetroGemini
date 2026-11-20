@@ -36,7 +36,10 @@ const WelcomePhase: React.FC<Props> = ({
       <h2 className="text-2xl font-semibold tracking-tight text-slate-900 mb-2">{t('phases.welcome.title')}</h2>
       <p className="text-slate-600 mb-8">{t('phases.welcome.question')}</p>
 
-      <div className="flex gap-2 sm:gap-4 mb-12">
+      {/* Five moods fit beside each other from 360px; on a narrower screen the
+          row wraps rather than scroll the screen sideways and cut its first
+          mood off (e2e/no-stray-scrollbars.spec.ts). */}
+      <div className="flex flex-wrap justify-center gap-2 sm:gap-4 mb-12">
         {[1, 2, 3, 4, 5].map((score) => (
           <button
             key={score}
@@ -50,7 +53,7 @@ const WelcomePhase: React.FC<Props> = ({
             // contrast can be measured on. `text-6xl` stays: the e2e flow finds
             // the five choices by it. Smaller on a phone, where five did not fit.
             aria-pressed={myVote === score}
-            className={`text-6xl max-sm:text-4xl leading-none p-2 sm:p-3 rounded-2xl border transition ${
+            className={`text-6xl max-sm:text-3xl leading-none max-sm:p-1.5 sm:p-3 rounded-2xl border transition ${
               myVote === score
                 ? 'bg-indigo-100 border-indigo-600 ring-4 ring-indigo-600/15'
                 : 'bg-white border-slate-200 hover:border-slate-400 hover:shadow-md'

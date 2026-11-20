@@ -1364,9 +1364,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
     session.phase === LIVE_PLACEHOLDER.phase ? t('adminLive.unknownPhase') : codeLabel(PHASE_KEYS, session.phase);
 
   // The tabs are the dashboard's: the same shape and the same `.dash-tab`
-  // hook, one colour for every tab.
+  // hook, one colour for every tab, and no negative margin (their strip
+  // scrolls sideways, and would scroll a pixel vertically too).
   const tabClass = (id: TabType) =>
-    `dash-tab -mb-px px-4 py-3 font-semibold text-sm flex items-center gap-2 rounded-t-lg transition whitespace-nowrap ${tab === id ? 'active' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`;
+    `dash-tab px-4 py-3 font-semibold text-sm flex items-center gap-2 rounded-t-lg transition whitespace-nowrap ${tab === id ? 'active' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`;
 
   // Contrast is decided by the surface a token lands on (audit H42): muted
   // text is `text-slate-500` on the white cards (5.41:1 with the 45.0 tokens)

@@ -316,6 +316,16 @@ body {
   color: var(--color-indigo-600);
 }
 
+/* The phase bar's ring, drawn inside the tab: the tab strips scroll sideways,
+   so they clip at their padding box, and the browser's ring, drawn outside the
+   tab, lost its bottom edge there. Focus given back to a tab the pointer used
+   still shows no ring (the `[data-focus-restore='pointer']` rule above, which
+   this one would otherwise outrank by coming later). */
+.dash-tab:focus-visible:not([data-focus-restore='pointer']) {
+  outline: 2px solid var(--color-indigo-600);
+  outline-offset: -2px;
+}
+
 @layer components {
   /* A person's tone, for what is drawn rather than written: an avatar picture
      reads these three. Text and backgrounds use the `person-*` utilities, which

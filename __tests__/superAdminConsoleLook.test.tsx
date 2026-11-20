@@ -19,6 +19,8 @@ import { classColor, effectivePair, tokenContrast } from './helpers/tailwindThem
 const TEXT = 4.5;
 const EDGE = 3;
 const ROOT = join(__dirname, '..');
+/** A negative margin class, with or without a variant: `-mb-px`, `sm:-mx-1`, `mt-[-2px]`. */
+const NEGATIVE_MARGIN = /(^|:)(-m[trblxyse]?-|m[trblxyse]?-\[-)/;
 
 const team = (id: string, name: string): Team => ({
   id,
@@ -211,6 +213,14 @@ describe('the console in the dashboard vocabulary', () => {
     const tabs = [/^Teams \(2\)/, /^Feedback \(4\)/, /^Live Sessions/, /^Server Logs/, /^Backups/]
       .map((name) => screen.getByRole('button', { name }));
     tabs.forEach((tab) => expect(tab).toHaveClass('dash-tab'));
+    // Their strip scrolls sideways on a phone, so it clips at its padding box
+    // and scrolls vertically too: the `-mb-px` each tab carried gave it a
+    // scrollbar for one pixel at every width (e2e/no-stray-scrollbars.spec.ts).
+    expect(tabs[0].parentElement).toHaveClass('overflow-x-auto');
+    tabs.forEach((tab) => {
+      const negative = (tab.getAttribute('class') ?? '').split(/\s+/).filter((token) => NEGATIVE_MARGIN.test(token));
+      expect(negative, tab.textContent ?? '').toEqual([]);
+    });
     expect(tabs[0]).toHaveClass('active');
     tabs.slice(1).forEach((tab) => {
       expect(tab).not.toHaveClass('active');

@@ -249,7 +249,7 @@ The interface's look lives in the `@theme` block of `index.css`, not in the
 components. A component keeps its Tailwind classes (`bg-slate-50`,
 `text-indigo-600`, `rounded-xl`, `shadow-xs`) and the block gives those names
 their values, so every screen changes at once and none can be left behind in
-another look. Eight rules:
+another look. Nine rules:
 
 - **`slate` is the neutral scale and `indigo` the brand**, both redefined step
   by step (slate-900 `#171a2b` is the ink, slate-50 the page, indigo-600
@@ -319,6 +319,16 @@ another look. Eight rules:
   class list through constants and conditionals, and measures each border
   against each fill it can take; a native checkbox or radio stays native
   (`accent-indigo-600`) and is not read.
+- **A strip that scrolls sideways scrolls vertically too, and clips at its
+  padding box.** `overflow-x-auto` turns `overflow-y` to `auto`, so an item
+  that hangs a pixel past the strip draws a classic scrollbar and is cut off:
+  the tabs' `-mb-px` gave the dashboard's and the console's strips a 1px
+  vertical scrollbar at every width, a 1px underline and a focus ring with no
+  bottom edge. Such a strip's items take no negative margin and draw their ring
+  inside (`.dash-tab:focus-visible`, the phase bar's `outline-offset: -2px`).
+  `e2e/no-stray-scrollbars.spec.ts` measures `scrollHeight` and `scrollWidth`
+  (Playwright's Chromium hides scrollbars): both strips, and on a phone the
+  Welcome moods and the Icebreaker's question field.
 
 ### A card's colour
 

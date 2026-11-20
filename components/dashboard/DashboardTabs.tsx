@@ -25,13 +25,15 @@ const DashboardTabs: React.FC<Props> = ({ activeTab, onChange }) => {
   return (
     // The current tab is drawn by `.dash-tab.active` in index.css (the brand
     // colour and its underline); the others are slate-600, which reads on the
-    // page's grey where slate-500 does not.
+    // page's grey where slate-500 does not. No negative margin on a tab: the
+    // strip scrolls sideways, so it clips at its padding box and a tab that
+    // hangs past it gives the strip a vertical scrollbar.
     <div className="flex gap-1 border-b border-slate-200 mb-6 overflow-x-auto">
       {TABS.map((tab) => (
         <button
           key={tab.id}
           onClick={() => onChange(tab.id)}
-          className={`dash-tab -mb-px px-4 py-3 font-semibold text-sm flex items-center gap-2 rounded-t-lg transition whitespace-nowrap ${activeTab === tab.id ? 'active' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
+          className={`dash-tab px-4 py-3 font-semibold text-sm flex items-center gap-2 rounded-t-lg transition whitespace-nowrap ${activeTab === tab.id ? 'active' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
         >
           <span className="material-symbols-outlined text-xl! leading-none" aria-hidden="true">{tab.icon}</span>
           {t(tab.labelKey)}
