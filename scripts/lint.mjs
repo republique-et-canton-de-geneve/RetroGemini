@@ -19,12 +19,12 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * The number of warnings this repository currently tolerates. Lower it whenever
  * the count drops — never raise it without saying why in the pull request.
  *
- * Current composition (2026-11-19): **77 pre-existing** — 11 no-explicit-any,
+ * Current composition (2026-11-20): **77 pre-existing** — 11 no-explicit-any,
  * 16 no-unused-vars, 14 no-non-null-assertion, 14 react-hooks/exhaustive-deps,
- * 14 no-console, 7 no-alert, 1 unattributed — plus **17 accessibility**
- * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 8
+ * 14 no-console, 7 no-alert, 1 unattributed — plus **15 accessibility**
+ * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 7
  * click-events-have-key-events, 7 no-static-element-interactions, 1
- * interactive-supports-focus, 1 media-has-caption.
+ * media-has-caption.
  *
  * Lot L23 took 46 out of this budget, and the two halves left different
  * things behind. The 29 label-has-associated-control findings were **fixed**:
@@ -69,7 +69,10 @@ import { evaluateLintBudget } from './lintBudget.mjs';
 // 95 -> 94: the health check's end-to-end flow read the header's name block
 // into a `facilitatorName` it never used; the line went with the header's
 // restyle.
-const BUDGET = 94;
+// 94 -> 92: the login screen's favourite star was a `span role="switch"`
+// inside the team's button, which no Tab reached (click-events-have-key-events
+// and interactive-supports-focus); it is a button of its own beside it.
+const BUDGET = 92;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

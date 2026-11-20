@@ -158,7 +158,10 @@ const measure = (page: Page) =>
     const card = buttons[0]?.closest('.rounded-2xl');
     const listBox = buttons[0]?.closest('.overflow-y-auto');
     const tiles = buttons.map((button) => {
-      const box = button.getBoundingClientRect();
+      // The tile holds the team's button and its star: the star used to be
+      // inside the button, which was then the tile itself.
+      const tile = button.querySelector('[role="switch"]') ? button : (button.parentElement as HTMLElement);
+      const box = tile.getBoundingClientRect();
       const name = button.querySelector('.truncate') as HTMLElement;
       const meta = name.nextElementSibling as HTMLElement;
       // The count, then the last activity; the separator is decoration.
@@ -167,10 +170,8 @@ const measure = (page: Page) =>
       const label = lastActive
         ? [...lastActive.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())
         : null;
-      // Inside the row before 45.3, its sibling since.
-      const star = (button.querySelector('[role="switch"]') ??
-        button.parentElement?.querySelector(':scope > [role="switch"]')) as HTMLElement;
-      const chevron = [...button.querySelectorAll('.material-symbols-outlined')].find(
+      const star = tile.querySelector('[role="switch"]') as HTMLElement;
+      const chevron = [...tile.querySelectorAll('.material-symbols-outlined')].find(
         (icon) => icon.textContent === 'chevron_right'
       ) as HTMLElement;
       const nameBox = name.getBoundingClientRect();
@@ -297,6 +298,42 @@ test.describe('the team picker of the login screen', () => {
       await expect(page.getByRole('button', { name: PREFIX })).toHaveCount(0);
       await search(page).fill(PREFIX);
       await expect(page.getByRole('status')).toHaveText('');
+    } finally {
+      await page.context().close();
+    }
+  });
+
+  test('reaches each team and then its star with Tab, and stars from the keyboard', async ({ browser }) => {
+    const page = await openPicker(browser, { width: 1280, height: 800 });
+    try {
+      const field = search(page);
+      await field.fill(PREFIX);
+      const [first, second] = FAVORITE_INDEXES.map((index) => TEAMS[index].name);
+
+      // From the search field: its clear button, then the first favourite, its
+      // star, the next favourite, its star.
+      await field.focus();
+      await page.keyboard.press('Tab');
+      await expect(page.getByRole('button', { name: 'Effacer la recherche' })).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(page.getByRole('button', { name: first })).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(page.getByRole('switch', { name: `Retirer ${first} des favoris` })).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(page.getByRole('button', { name: second })).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(page.getByRole('switch', { name: `Retirer ${second} des favoris` })).toBeFocused();
+
+      // Space takes the team out of the favourites; its star, drawn again in
+      // the other section, keeps the focus. Enter puts it back.
+      await page.keyboard.press('Space');
+      const unstarred = page.getByRole('switch', { name: `Ajouter ${second} aux favoris` });
+      await expect(unstarred).toBeFocused();
+      await expect(unstarred).toHaveAttribute('aria-checked', 'false');
+      await page.keyboard.press('Enter');
+      const starred = page.getByRole('switch', { name: `Retirer ${second} des favoris` });
+      await expect(starred).toBeFocused();
+      await expect(starred).toHaveAttribute('aria-checked', 'true');
     } finally {
       await page.context().close();
     }

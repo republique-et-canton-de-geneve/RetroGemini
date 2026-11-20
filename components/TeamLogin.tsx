@@ -63,6 +63,17 @@ const CARD = 'bg-white border border-slate-200 rounded-2xl shadow-sm p-6 sm:p-8'
 const TEAM_ROWS = 'rounded-xl border border-slate-200 divide-y divide-slate-200 overflow-hidden';
 const LIST_BOX = 'overflow-y-auto max-h-[min(26rem,52vh)]';
 const TEAM_NAME = 'block font-semibold text-slate-900 truncate';
+// A team's row: the button that opens the team, its favourite star, and a
+// chevron. The star is a button of its own after the team's, never inside it:
+// inside, no Tab reached it (WCAG 2.1.1) and the team's name read its label.
+// The team button's `::after` covers the row, so the whole row still opens the
+// team, the star excepted, which is drawn above that layer; the focus ring is
+// drawn on that layer too, round the whole row.
+const TEAM_ROW = 'relative group flex items-center gap-3 bg-white px-3.5 py-3 hover:bg-slate-50 has-focus-visible:bg-slate-50 transition-colors';
+const TEAM_OPEN =
+  'flex-1 min-w-0 flex items-center gap-3 text-left outline-hidden after:absolute after:inset-0 focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-indigo-600';
+const FAVORITE_STAR =
+  'relative z-10 shrink-0 p-1 rounded-md text-amber-500 hover:bg-slate-100 transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-600';
 // A list of six teams or more (the search field's threshold) uses the width
 // from `lg`: the Dashboard's (`max-w-6xl`). The column, the card, the list and
 // its box form one flex chain capped at what the viewport leaves under the top
@@ -79,7 +90,8 @@ const WIDE_LIST_BOX = `${LIST_BOX} lg:max-h-none`;
 // tracks, not `auto-fill`: with overlay scrollbars (macOS) a full-width card
 // holds three 22rem tracks, and the names would be cut again.
 const TEAM_GRID = `${TEAM_ROWS} lg:grid lg:grid-cols-2 lg:gap-2 lg:rounded-none lg:border-0 lg:divide-y-0`;
-const TEAM_TILE = 'lg:rounded-xl lg:border lg:border-slate-200';
+const TEAM_TILE = `${TEAM_ROW} lg:rounded-xl lg:border lg:border-slate-200`;
+const TILE_OPEN = `${TEAM_OPEN} lg:after:rounded-xl`;
 // A tile's name takes a second line rather than being cut.
 const WIDE_TEAM_NAME = `${TEAM_NAME} lg:whitespace-normal lg:line-clamp-2 lg:break-words`;
 
@@ -178,8 +190,16 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
     }
   });
 
-  const toggleFavorite = (teamId: string, e: React.MouseEvent) => {
+  // Each team's star, by team id. A star moves its team between the favourites
+  // and the other teams, so React draws that row again in the other section and
+  // the focus would fall back to the page. A star pressed while it had the
+  // focus (Space or Enter) hands it to the same team's star in its new place.
+  const favoriteStars = useRef(new Map<string, HTMLButtonElement>());
+  const focusStarOf = useRef<string | null>(null);
+
+  const toggleFavorite = (teamId: string, e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
+    if (e.currentTarget === document.activeElement) focusStarOf.current = teamId;
     setFavoriteTeamIds(prev => {
       const next = prev.includes(teamId)
         ? prev.filter(id => id !== teamId)
@@ -188,6 +208,14 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
       return next;
     });
   };
+
+  // A layout effect, so the focus moves in the commit that drew the star again.
+  useLayoutEffect(() => {
+    const teamId = focusStarOf.current;
+    if (!teamId) return;
+    focusStarOf.current = null;
+    favoriteStars.current.get(teamId)?.focus();
+  }, [favoriteTeamIds]);
 
   // The shared rule (utils/emailAddress.js), as in dataService: a legacy member
   // address stored with a pasted `;` still matches the invite's clean one.
@@ -783,49 +811,59 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
                             const renderTeamCard = (team: TeamSummary) => {
                                 const isFav = favoriteTeamIds.includes(team.id);
                                 return (
-                                    <button
-                                        key={team.id}
-                                        onClick={() => { setSelectedTeam(team); setView('LOGIN'); setError(null); setPassword(''); }}
-                                        className={`w-full bg-white hover:bg-slate-50 px-3.5 py-3 text-left flex items-center gap-3 group transition-colors focus-visible:bg-slate-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-600 ${wideList ? TEAM_TILE : ''}`}
-                                    >
-                                        <span className="w-9 h-9 shrink-0 rounded-lg bg-indigo-50 text-indigo-700 text-sm font-semibold flex items-center justify-center">
-                                            {team.name.substring(0,2).toUpperCase()}
-                                        </span>
-                                        <span className="grow min-w-0">
-                                            <span className={wideList ? WIDE_TEAM_NAME : TEAM_NAME}>{team.name}</span>
-                                            {/* Each part is whole: it wraps as a unit, never inside
-                                                ("7 membres" never splits). From `sm` the parts share a
-                                                line when it holds them; on a phone the last activity
-                                                goes under the count, and its only break falls between
-                                                the label and the value (which may break too at 320px,
-                                                rather than overflow). The separator belongs to the part
-                                                it introduces and sits in the gap before it: a part that
-                                                wraps to the start of a line takes it into the clipped
-                                                margin, so no line ends on a "·". */}
-                                            <span className="block sm:flex sm:flex-wrap sm:gap-x-4 sm:overflow-hidden text-xs text-slate-500">
-                                                <span className="block whitespace-nowrap">{tp('login.list.memberCount', team.memberCount)}</span>
-                                                <span className="block sm:-ml-4 sm:whitespace-nowrap">
-                                                    <span className="hidden sm:inline-block sm:w-4 sm:text-center" aria-hidden="true">·</span>
-                                                    {tRich('login.list.lastActive', {
-                                                        when: <span className="min-[22.5rem]:whitespace-nowrap">{formatLastConnection(team.lastConnectionDate)}</span>,
-                                                    })}
+                                    <div key={team.id} className={wideList ? TEAM_TILE : TEAM_ROW}>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setSelectedTeam(team); setView('LOGIN'); setError(null); setPassword(''); }}
+                                            className={wideList ? TILE_OPEN : TEAM_OPEN}
+                                        >
+                                            <span className="w-9 h-9 shrink-0 rounded-lg bg-indigo-50 text-indigo-700 text-sm font-semibold flex items-center justify-center">
+                                                {team.name.substring(0,2).toUpperCase()}
+                                            </span>
+                                            <span className="grow min-w-0">
+                                                <span className={wideList ? WIDE_TEAM_NAME : TEAM_NAME}>{team.name}</span>
+                                                {/* Each part is whole: it wraps as a unit, never inside
+                                                    ("7 membres" never splits). From `sm` the parts share a
+                                                    line when it holds them; on a phone the last activity
+                                                    goes under the count, and its only break falls between
+                                                    the label and the value (which may break too at 320px,
+                                                    rather than overflow). The separator belongs to the part
+                                                    it introduces and sits in the gap before it: a part that
+                                                    wraps to the start of a line takes it into the clipped
+                                                    margin, so no line ends on a "·". */}
+                                                <span className="block sm:flex sm:flex-wrap sm:gap-x-4 sm:overflow-hidden text-xs text-slate-500">
+                                                    <span className="block whitespace-nowrap">{tp('login.list.memberCount', team.memberCount)}</span>
+                                                    <span className="block sm:-ml-4 sm:whitespace-nowrap">
+                                                        <span className="hidden sm:inline-block sm:w-4 sm:text-center" aria-hidden="true">·</span>
+                                                        {tRich('login.list.lastActive', {
+                                                            when: <span className="min-[22.5rem]:whitespace-nowrap">{formatLastConnection(team.lastConnectionDate)}</span>,
+                                                        })}
+                                                    </span>
                                                 </span>
                                             </span>
-                                        </span>
+                                        </button>
                                         {/* A filled star for a favourite, an outline otherwise: the
                                             two differ in shape, not only in colour (the icon font
                                             has no FILL axis, see StarRating). */}
-                                        <span
+                                        <button
+                                            type="button"
                                             role="switch"
                                             aria-checked={isFav}
                                             aria-label={isFav ? t('login.list.removeFavorite', { teamName: team.name }) : t('login.list.addFavorite', { teamName: team.name })}
+                                            ref={(star) => {
+                                                if (!star) return;
+                                                favoriteStars.current.set(team.id, star);
+                                                return () => {
+                                                    if (favoriteStars.current.get(team.id) === star) favoriteStars.current.delete(team.id);
+                                                };
+                                            }}
                                             onClick={(e) => toggleFavorite(team.id, e)}
-                                            className="shrink-0 p-1 rounded-md text-amber-500 hover:bg-slate-100 transition-colors"
+                                            className={FAVORITE_STAR}
                                         >
                                             <Star fill={isFav ? 1 : 0} className="w-5 h-5" />
-                                        </span>
+                                        </button>
                                         <span className="material-symbols-outlined shrink-0 text-slate-400 group-hover:text-indigo-600 transition-colors" aria-hidden="true">chevron_right</span>
-                                    </button>
+                                    </div>
                                 );
                             };
 

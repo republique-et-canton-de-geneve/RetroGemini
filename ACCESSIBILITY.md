@@ -42,7 +42,7 @@ and the Vote phase's participants panel since they joined (43.0), and the
 avatar picker since it joined (45.0). The cap
 for every state is one table, `BASELINE` in `e2e/helpers/axe.ts`, and each
 `color-contrast` finding is printed with its colour pairs and ratios, so a fix
-can be checked against the surface it lands on. The lint budget carries 17 accessibility warnings (unchanged since 2026-10-08, recounted 2026-11-19), listed by
+can be checked against the surface it lands on. The lint budget carries 15 accessibility warnings (recounted 2026-11-20, two fewer since the login screen's favourite star became a button), listed by
 rule in `scripts/lint.mjs` — down from 71, after every form label was
 associated with its control and each `autoFocus` was judged (see below). The
 largest remaining group is controls that respond to a click with no keyboard
@@ -161,7 +161,7 @@ headers.
 
 Stated because a documented gap is honest and silence is not.
 
-1. **Controls that answer a click and not a key — now the largest group.** 16
+1. **Controls that answer a click and not a key — now the largest group.** 14
    lint findings across the React tree: click handlers on static elements,
    elements that take a click without being focusable. The Group phase was the
    one this audit measured and fixed; it is not the only one. Choosing which
@@ -182,7 +182,9 @@ Stated because a documented gap is honest and silence is not.
    silence it at all. Since 2026-10-08, in the one timer both session types
    share, the time is a button whenever pressing it does something — setting
    the duration, silencing the alarm — and its name carries the time shown; the
-   editor it opens takes focus, saves on Enter and cancels on Escape.)
+   editor it opens takes focus, saves on Enter and cancels on Escape. The login
+   screen's favourite star was two more, a `span` with `role="switch"` inside a
+   team's button; since 2026-11-20 it is a button of its own, see gap 10.)
 2. **Screens not covered by the automated audit.** The sixteen states of
    `e2e/accessibility-audit.spec.ts` are the main flows, and they include a
    dark screen at each end (both close screens). `e2e/jira.spec.ts` adds seven
@@ -264,14 +266,18 @@ Stated because a documented gap is honest and silence is not.
    failure, but their look is not measured as the restyled screens' disabled
    states now are, and the helper that measures colours refuses an opacity
    rather than guess it. They are left for the screens' next change.
-10. **The team list's favourite star is a switch inside a button.** On the
-    login screen each team row is a button, and its star is a `span` with
-    `role="switch"` inside it: a nested interactive element the keyboard cannot
-    reach on its own (lint counts it under gap 1). The structure predates 45.0
-    and was kept, since the favourites flow and its tests depend on it. The
-    star is drawn in amber-500, 2.15:1 on white, under the 3:1 an icon that
-    carries a state needs (1.4.11); its two states differ in shape (filled or
-    outlined), not only in colour.
+10. ~~The team list's favourite star is a switch inside a button.~~ Closed
+    2026-11-20. On the login screen the star was a `span` with `role="switch"`
+    inside the team's button: a nested control that no Tab reached, and whose
+    label the team's button read as part of its name. It is now a button of its
+    own after the team's (still a switch, with the same names): Tab reaches it
+    right after its team, Space or Enter turns it on or off, and the focus
+    follows the team when that moves it between the favourites and the other
+    teams. The rest of the row still opens the team.
+    `__tests__/teamLoginLayout.test.tsx` and `e2e/login-team-picker.spec.ts`
+    pin it. Still open: the star is drawn in amber-500, 2.15:1 on white, under
+    the 3:1 an icon that carries a state needs (1.4.11); its two states differ
+    in shape (filled or outlined), not only in colour.
 11. **What a screen reader says for an avatar has not been listened to.** The
     names are measured in tests (the person's name, the opener's "…, choose my
     avatar" with its initials first while it shows them), but no one has heard

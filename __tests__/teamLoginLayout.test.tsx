@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import TeamLogin from '../components/TeamLogin';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { InviteAutoJoinError } from '../services/dataService';
@@ -73,6 +74,9 @@ const columnOf = () => screen.getByRole('heading', { level: 1, name: 'RetroGemin
 /** The team rows: buttons that open a team, named by it. */
 const teamButton = (name: string) => screen.getByText(name, { selector: 'span' }).closest('button')!;
 
+/** A team's tile: its button and its favourite star, side by side. */
+const tileOf = (name: string) => teamButton(name).parentElement!;
+
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
@@ -124,9 +128,9 @@ describe('the team picker of six teams or more', () => {
       );
     }
 
-    const row = teamButton('Team A');
-    expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['lg:rounded-xl', 'lg:border', 'lg:border-slate-200']));
-    const name = within(row).getByText('Team A');
+    const tile = tileOf('Team A');
+    expect(tile.className.split(/\s+/)).toEqual(expect.arrayContaining(['lg:rounded-xl', 'lg:border', 'lg:border-slate-200']));
+    const name = within(tile).getByText('Team A');
     // Cut on one line below lg, as before; whole on up to two lines from lg.
     expect(name.className.split(/\s+/)).toEqual(
       expect.arrayContaining(['truncate', 'lg:whitespace-normal', 'lg:line-clamp-2', 'lg:break-words'])
@@ -316,5 +320,80 @@ describe('a search that matches nothing', () => {
     render(<TeamLogin onLogin={vi.fn()} />);
     await screen.findByText('Team A');
     expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
+/**
+ * The star was a `span role="switch"` inside the team's button: no Tab reached
+ * it (WCAG 2.1.1), and a control inside a button is no control to assistive
+ * technology, so favourites were for the mouse alone. It is now a button of
+ * its own, after its team's.
+ */
+describe('the favourite star', () => {
+  it('is a button of its own beside the team button, never inside it', async () => {
+    render(<TeamLogin onLogin={vi.fn()} />);
+    await screen.findByText('Team A');
+    const team = teamButton('Team A');
+    const star = screen.getByRole('switch', { name: 'Add Team A to favorites' });
+
+    expect(star.tagName).toBe('BUTTON');
+    expect(star.getAttribute('type')).toBe('button');
+    expect(star.getAttribute('aria-checked')).toBe('false');
+    expect(team.contains(star)).toBe(false);
+    expect(star.parentElement).toBe(team.parentElement);
+    // After its team in DOM order, so after it in the tab order.
+    expect(team.compareDocumentPosition(star) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // The team's button is named by the team, and no longer swallows the
+    // star's name ("…Last active: Today Add Team A to favorites").
+    expect(screen.getAllByRole('button', { name: /Team A/ })).toEqual([team]);
+    expect(screen.queryAllByRole('button', { name: /favorites/ })).toHaveLength(0);
+  });
+
+  it('is reached by Tab right after its team, then the next team', async () => {
+    const user = userEvent.setup();
+    render(<TeamLogin onLogin={vi.fn()} />);
+    await screen.findByText('Team A');
+
+    teamButton('Team A').focus();
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('switch', { name: 'Add Team A to favorites' }));
+    await user.tab();
+    expect(document.activeElement).toBe(teamButton('Team B'));
+  });
+
+  it('toggles from the keyboard, the focus following its team to the other section', async () => {
+    const user = userEvent.setup();
+    render(<TeamLogin onLogin={vi.fn()} />);
+    await screen.findByText('Team A');
+
+    // Space makes Team B a favourite: it moves to the top of the list, and
+    // React draws its star again there. The focus goes with it rather than
+    // falling back to the page.
+    screen.getByRole('switch', { name: 'Add Team B to favorites' }).focus();
+    await user.keyboard(' ');
+    const on = screen.getByRole('switch', { name: 'Remove Team B from favorites' });
+    expect(on.getAttribute('aria-checked')).toBe('true');
+    expect(JSON.parse(localStorage.getItem('retro-favorite-teams') ?? '[]')).toEqual(['team-1']);
+    expect(screen.getByText('Favorites')).toBeTruthy();
+    expect(document.activeElement).toBe(on);
+
+    // Enter takes it back out, and the focus follows again.
+    await user.keyboard('{Enter}');
+    const off = screen.getByRole('switch', { name: 'Add Team B to favorites' });
+    expect(off.getAttribute('aria-checked')).toBe('false');
+    expect(screen.queryByText('Favorites')).toBeNull();
+    expect(document.activeElement).toBe(off);
+  });
+
+  it('opens the team from the rest of its tile, and nothing from the star', async () => {
+    render(<TeamLogin onLogin={vi.fn()} />);
+    await screen.findByText('Team A');
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Add Team A to favorites' }));
+    expect(screen.getByRole('heading', { name: 'Your Teams' })).toBeTruthy();
+
+    fireEvent.click(within(teamButton('Team A')).getByText('7 members'));
+    expect(await screen.findByRole('heading', { name: 'Login to Team A' })).toBeTruthy();
   });
 });
