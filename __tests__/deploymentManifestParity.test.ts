@@ -291,11 +291,11 @@ type DispatchCall = { caller: string; target: string; inputs: string[]; ref: str
  * a command that is commented out, or merely described in prose, as the
  * dispatch caller below describes itself, is not a command.
  */
-const logicalLinesOf = (relativePath: string): string[] => {
+const logicalLinesIn = (source: string): string[] => {
   const logicalLines: string[] = [];
   let pending = '';
 
-  for (const line of read(relativePath).split('\n')) {
+  for (const line of source.split('\n')) {
     if (/^[^\S\n]*#/.test(line)) continue;
     const continues = /\\[^\S\n]*$/.test(line);
     pending += (pending === '' ? '' : ' ') + line.replace(/\\[^\S\n]*$/, '').trim();
@@ -306,6 +306,8 @@ const logicalLinesOf = (relativePath: string): string[] => {
   if (pending !== '') logicalLines.push(pending);
   return logicalLines;
 };
+
+const logicalLinesOf = (relativePath: string): string[] => logicalLinesIn(read(relativePath));
 
 /**
  * Every `gh workflow run <target>` in a workflow's `run:` blocks, with the input
@@ -322,6 +324,100 @@ const dispatchCallsIn = (relativePath: string): DispatchCall[] => {
     return [{ caller: relativePath, target, inputs, ref, line }];
   });
 };
+
+type WorkflowStep = {
+  name: string | undefined;
+  id: string | undefined;
+  uses: string | undefined;
+  env: Map<string, string>;
+  with: Map<string, string>;
+  /** The `run:` script, dedented, comments included. */
+  run: string;
+};
+
+/** A `key: value` line: the key, and everything after its colon. */
+const keyLineOf = (line: string) => /^[^\S\n]*([\w-]+):(.*)$/.exec(line);
+
+const workflowStepOf = (item: string[]): WorkflowStep => {
+  // The first line carries the list's `-`: read it as the key it introduces.
+  const lines = [item[0].replace(/^([^\S\n]*)-/, '$1 '), ...item.slice(1)];
+  const keyIndent = indentOf(lines[0]);
+  const keyAt = (key: string) =>
+    lines.findIndex((line) => indentOf(line) === keyIndent && keyLineOf(line)?.[1] === key);
+  const scalar = (key: string) => {
+    const at = keyAt(key);
+    return at === -1 ? undefined : keyLineOf(lines[at])?.[2].trim();
+  };
+  const block = (key: string) => {
+    const at = keyAt(key);
+    const body: string[] = [];
+    if (at === -1) return body;
+    for (const line of lines.slice(at + 1)) {
+      if (line.trim() !== '' && indentOf(line) <= keyIndent) break;
+      body.push(line);
+    }
+    while (body.length > 0 && body[body.length - 1].trim() === '') body.pop();
+    return body;
+  };
+  const mapOf = (key: string) => new Map(block(key).flatMap((line): [string, string][] => {
+    const entry = keyLineOf(line);
+    return entry ? [[entry[1], entry[2].trim()]] : [];
+  }));
+  const runLines = block('run');
+  const runIndent = Math.min(...runLines.filter((line) => line.trim() !== '').map(indentOf));
+
+  return {
+    name: scalar('name'),
+    id: scalar('id'),
+    uses: scalar('uses'),
+    env: mapOf('env'),
+    with: mapOf('with'),
+    run: runLines.map((line) => line.slice(runIndent)).join('\n'),
+  };
+};
+
+/**
+ * The steps of a workflow's first `steps:` list, in order, which for the
+ * single-job release workflow is all of them.
+ *
+ * Read line by line like everything above. A step starts at a `-` at the list's
+ * indentation, and a comment line never starts or ends anything. A key of a step
+ * is a line at the step's own indentation, and a block under a key (`run: |`,
+ * `env:`, `with:`) is every line indented deeper than the key, blank lines
+ * included: a line back at the key's indentation ends it, which is also where
+ * YAML ends a block scalar.
+ */
+const workflowStepsOf = (relativePath: string): WorkflowStep[] => {
+  const items: string[][] = [];
+  let stepsIndent: number | undefined;
+  let itemIndent: number | undefined;
+
+  for (const line of read(relativePath).split('\n')) {
+    if (stepsIndent === undefined) {
+      if (/^[^\S\n]*steps:[^\S\n]*$/.test(line)) stepsIndent = indentOf(line);
+      continue;
+    }
+    const structural = line.trim() !== '' && !/^[^\S\n]*#/.test(line);
+    if (structural && indentOf(line) <= stepsIndent) break;
+    const startsItem = structural
+      && /^[^\S\n]*-[^\S\n]/.test(line)
+      && (itemIndent === undefined || indentOf(line) === itemIndent);
+    if (startsItem) {
+      itemIndent = indentOf(line);
+      items.push([line]);
+    } else if (items.length > 0) {
+      items[items.length - 1].push(line);
+    }
+  }
+  return items.map(workflowStepOf);
+};
+
+/** A step's shell commands: continuations joined, comments and blank lines dropped. */
+const commandsOf = (step: WorkflowStep | undefined): string[] =>
+  logicalLinesIn(step?.run ?? '').filter((line) => line !== '');
+
+/** Whether a shell line expands the variable `name`, as `$name` or `${name}`. */
+const expands = (line: string, name: string) => line.includes(`$${name}`) || line.includes(`\${${name}}`);
 
 const SURFACES = {
   envExample: '.env.example',
@@ -1123,11 +1219,50 @@ describe('the release builds its image from its own tag', () => {
    * the branch's version and as `latest`; and a second merge within the
    * build's minute was published under the first one's version. Building the
    * tag the release created is what ties the image to the release.
+   *
+   * A tag is only as good as what it points at, and three reviews of that
+   * change found it pointing elsewhere, or nowhere, with nothing saying so:
+   *
+   * - a release created before the merge (a branch released by hand, then
+   *   fixed without a bump, or main taking a Dependabot fix meanwhile): the
+   *   merge rebuilt the old tag and moved the version and `latest` to it, and
+   *   its only log line was "already exists; nothing to create";
+   * - a tag left behind by a deleted release: `--target` is ignored for a tag
+   *   that exists, so the new release was attached to the stale commit, and
+   *   that commit was published, green;
+   * - a draft named VERSION: `gh release view` finds it, a draft has no tag,
+   *   and the dispatch failed with a bare "No ref found", so no image at all.
+   *
+   * And `latest` was pushed on every run, so re-running an older release's run
+   * republished that older version as `latest`, which render.yaml and the
+   * README pull.
    */
   const caller = '.github/workflows/github-release.yml';
   const workflow = read(caller);
   const publishes = dispatchCallsIn(caller).filter((call) => call.target === 'docker-deploy.yml');
   const releaseCreates = logicalLinesOf(caller).filter((line) => /gh release create/.test(line));
+
+  const steps = workflowStepsOf(caller);
+  const stepRunning = (pattern: RegExp) =>
+    steps.findIndex((step) => commandsOf(step).some((line) => pattern.test(line)));
+  const createAt = stepRunning(/gh release create/);
+  const dispatchAt = stepRunning(/gh workflow run[^\S\n]+docker-deploy\.yml/);
+  const checkAt = stepRunning(/\^\{tree\}/);
+  const tagCheckoutAt = steps.findIndex((step) =>
+    /^actions\/checkout@/.test(step.uses ?? '') && /^refs\/tags\//.test(step.with.get('ref') ?? ''));
+
+  it("reads the workflow's steps", () => {
+    // Pins the step reader the order checks below stand on: one that lost a
+    // step, or a key of one, would make them pass or fail for the wrong reason.
+    const readVersion = steps.find((step) => step.name === 'Read version');
+    expect(readVersion?.id).toBe('version');
+    expect(readVersion?.run).toContain('echo "value=$VERSION" >> "$GITHUB_OUTPUT"');
+    expect(steps.filter((step) => /^actions\/checkout@/.test(step.uses ?? ''))).toHaveLength(2);
+    expect(steps[dispatchAt]?.env.get('VERSION')).toBe('${{ steps.version.outputs.value }}');
+    expect(createAt).toBeGreaterThan(-1);
+    expect(dispatchAt).toBeGreaterThan(-1);
+    expect(tagCheckoutAt).toBeGreaterThan(-1);
+  });
 
   it('creates the release under the version it publishes, on the commit the run started from', () => {
     // Without `--target`, gh puts a new tag on the default branch's head, and
@@ -1154,10 +1289,10 @@ describe('the release builds its image from its own tag', () => {
   });
 
   it('generates the SBOM from the release tag too', () => {
-    // The image and its SBOM must describe one commit. They differ from the
-    // run's own commit when the release already existed (created from its
-    // branch before the merge): an SBOM of the merge commit lists the
-    // dependency bumps main took since then, which the image does not contain.
+    // The image and its SBOM must describe one commit, the tag's. The tag can
+    // be another commit than the run's own (a released branch, squash-merged):
+    // the content check below makes their trees equal, and reading the tag
+    // still ties the document to the image if that check ever changes.
     const tagCheckout = workflow.search(
       /uses: actions\/checkout@[^\n]*\n[^\S\n]*with:\n[^\S\n]*ref: refs\/tags\/\$\{\{ steps\.version\.outputs\.value \}\}/,
     );
@@ -1166,6 +1301,110 @@ describe('the release builds its image from its own tag', () => {
     expect(tagCheckout, `${caller} never checks out refs/tags/<version>`).toBeGreaterThan(-1);
     expect(lastCheckout, 'another checkout comes after the release tag one').toBe(tagCheckout);
     expect(sbom, 'the SBOM is generated before the release tag is checked out').toBeGreaterThan(tagCheckout);
+  });
+
+  it('creates the release before it dispatches the image or checks out the tag for the SBOM', () => {
+    // A missing tag is created with the release. Read before that step, the
+    // tag is either not there or not yet the one the release is attached to.
+    expect(createAt, `${caller} never creates the release`).toBeGreaterThan(-1);
+    expect(dispatchAt, 'the image is dispatched before the release step').toBeGreaterThan(createAt);
+    expect(tagCheckoutAt, 'the tag is checked out for the SBOM before the release step').toBeGreaterThan(createAt);
+  });
+
+  it("checks that the tag holds this run's content before anything is published", () => {
+    expect(checkAt, `${caller} never compares the tag's tree with this run's`).toBeGreaterThan(-1);
+    expect(checkAt, 'the content check runs before the release step creates a missing tag').toBeGreaterThan(createAt);
+    expect(checkAt, 'the content check runs after the image is dispatched').toBeLessThan(dispatchAt);
+
+    const commands = commandsOf(steps[checkAt]);
+    // The checkout fetches the run's commit alone, without its tags.
+    expect(
+      commands.some((line) => /\bgit fetch\b[^\n]*refs\/tags\/\$\{?VERSION\}?/.test(line)),
+      'the tag is never fetched',
+    ).toBe(true);
+
+    // An annotated tag names a tag object: `^{commit}` follows it to the commit.
+    const tagCommit = commands
+      .map((line) => /(\w+)=\$\(git rev-parse\b[^\n]*"refs\/tags\/\$\{?VERSION\}?\^\{commit\}"/.exec(line)?.[1])
+      .find((name) => name !== undefined);
+    expect(tagCommit, 'the tag is never followed to its commit').toBeDefined();
+
+    // Trees, not commits: a branch released by hand and then squash-merged
+    // holds the same content under another commit, and that is not a refusal.
+    const trees = commands.flatMap((line) => {
+      const assigned = /(\w+)=\$\(git rev-parse\b[^\n]*"([^"\s]+)\^\{tree\}"\)/.exec(line);
+      return assigned ? [{ name: assigned[1], revision: assigned[2] }] : [];
+    });
+    const tagTree = trees.find(({ revision }) => /^refs\/tags\/\$\{?VERSION\}?$/.test(revision));
+    const runTree = trees.find(({ revision }) => /^(?:\$\{?GITHUB_SHA\}?|HEAD)$/.test(revision));
+    expect(tagTree, "the tag's tree is never read").toBeDefined();
+    expect(runTree, 'the tree of the commit the run started from is never read').toBeDefined();
+    expect(
+      commands.some((line) => /!=/.test(line) && expands(line, tagTree!.name) && expands(line, runTree!.name)),
+      'the two trees are never compared',
+    ).toBe(true);
+
+    // When they differ the run stops, naming both commits and the way out.
+    const refusal = commands.findIndex((line) =>
+      /::error::/.test(line) && expands(line, tagCommit!) && expands(line, 'GITHUB_SHA'));
+    expect(refusal, "no error names the tag's commit and this run's").toBeGreaterThan(-1);
+    expect(commands[refusal]).toMatch(/Bump VERSION/);
+    expect(commands[refusal]).toMatch(/\bdelete\b/);
+    expect(commands[refusal + 1], 'the error is not followed by an exit').toMatch(/^exit[^\S\n]+1$/);
+  });
+
+  it('refuses a draft release named VERSION with its own message', () => {
+    // `gh release view` finds a draft too, and a draft has no tag yet: the
+    // dispatch failed on it with a bare "No ref found", and no image was built.
+    const draftAt = stepRunning(/gh release view\b[^\n]*--json[^\S\n]+isDraft\b/);
+    expect(draftAt, `${caller} never asks whether release VERSION is a draft`).toBeGreaterThan(-1);
+    expect(draftAt, 'the draft is looked for after the release step').toBeLessThanOrEqual(createAt);
+
+    const commands = commandsOf(steps[draftAt]);
+    const refusal = commands.findIndex((line) => /::error::[^\n]*\bdraft\b/i.test(line));
+    expect(refusal, 'no error says that a draft named VERSION is in the way').toBeGreaterThan(-1);
+    expect(commands[refusal]).toMatch(/\bpublish\b/i);
+    expect(commands[refusal]).toMatch(/\bdelete\b/i);
+    expect(commands[refusal + 1], 'the error is not followed by an exit').toMatch(/^exit[^\S\n]+1$/);
+  });
+
+  it('moves latest only to the newest release', () => {
+    // render.yaml and the README pull `latest`: a re-run of an older release's
+    // run republished that older version under it.
+    const dispatch = publishes[0]?.line ?? '';
+    expect(dispatch, 'the image is pushed as latest whatever the release').not.toMatch(/push_latest=["']?true\b/);
+    const variable = /(?:-f|--raw-field)[^\S\n]+push_latest="\$\{?(\w+)\}?"/.exec(dispatch)?.[1];
+    expect(variable, `push_latest is not passed from a variable: ${dispatch}`).toBeDefined();
+
+    const source = steps[dispatchAt]?.env.get(variable!) ?? '';
+    const decidedBy = /^\$\{\{[^\S\n]*steps\.([\w-]+)\.outputs\.push_latest[^\S\n]*\}\}$/.exec(source)?.[1];
+    expect(decidedBy, `push_latest is ${source || 'unset'}, not the output of a step`).toBeDefined();
+    const decideAt = steps.findIndex((step) => step.id === decidedBy);
+    expect(decideAt, "the releases are listed before this run's release exists").toBeGreaterThan(createAt);
+    expect(decideAt, 'the newest release is decided after the image is dispatched').toBeLessThan(dispatchAt);
+
+    const decision = commandsOf(steps[decideAt]);
+    expect(
+      decision.some((line) => /\bgh release list\b[^\n]*--exclude-drafts\b/.test(line)),
+      'the releases are not listed without their drafts',
+    ).toBe(true);
+    expect(decision.some((line) => /\bsort[^\S\n]+-V\b/.test(line)), 'the versions are not sorted as versions').toBe(true);
+    expect(decision.some((line) => /push_latest=true/.test(line))).toBe(true);
+    expect(decision.some((line) => /push_latest=false/.test(line))).toBe(true);
+    expect(decision.some((line) => /::notice::/.test(line)), 'nothing says why latest is not moved').toBe(true);
+  });
+
+  it('stops at the first failure in every step from the release to the dispatch', () => {
+    // A `run:` block with no `shell:` runs under `bash -e`, with neither
+    // pipefail nor nounset: a command that fails inside a pipeline goes
+    // unnoticed, and an unset variable reads as an empty word.
+    expect(createAt).toBeGreaterThan(-1);
+    expect(dispatchAt).toBeGreaterThan(createAt);
+    const loose = steps.slice(createAt, dispatchAt + 1)
+      .filter((step) => step.run !== '')
+      .filter((step) => commandsOf(step)[0] !== 'set -euo pipefail')
+      .map((step) => step.name);
+    expect(loose).toEqual([]);
   });
 });
 
