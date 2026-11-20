@@ -50,10 +50,11 @@ const AvatarDiscoveryHint: React.FC<Props> = ({ user, hint, visibilityClass = 'f
   const rootRef = useRef<HTMLDivElement>(null);
   if (!hint.shown) return null;
 
-  const dismiss = () => {
-    // Only when the keyboard was here: someone typing a card who clicks
-    // "Got it" keeps their place.
-    const next = nextFocusAfterDismiss(rootRef.current);
+  const dismiss = (event: React.MouseEvent<HTMLButtonElement>) => {
+    // Only when the keyboard pressed it: a pointer leaves the focus where the
+    // browser put it, so a tap never lands in a field (a phone would open its
+    // keyboard) and someone typing a card who clicks "Got it" keeps their place.
+    const next = nextFocusAfterDismiss(rootRef.current, event);
     hint.dismiss();
     next?.focus();
   };

@@ -150,8 +150,22 @@ describe('JiraDiscoveryNote', () => {
     );
     const card = screen.getByRole('textbox', { name: 'Card' });
     card.focus();
-    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }), { detail: 1 });
     expect(screen.queryByRole('note')).toBeNull();
     expect(card).toHaveFocus();
+  });
+
+  it('puts the keyboard nowhere after a pointer, even on a button the browser focused', () => {
+    render(
+      <div>
+        <JiraDiscoveryNote status={statusWith()} isFacilitator userId="u1" />
+        <textarea aria-label="Summary" />
+      </div>
+    );
+    const dismiss = screen.getByRole('button', { name: 'Got it' });
+    dismiss.focus();
+    fireEvent.click(dismiss, { detail: 1 });
+    expect(screen.queryByRole('note')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Summary' })).not.toHaveFocus();
   });
 });

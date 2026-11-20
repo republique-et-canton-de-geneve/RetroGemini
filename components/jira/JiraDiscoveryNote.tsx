@@ -49,10 +49,11 @@ const JiraDiscoveryNote: React.FC<Props> = ({ status, isFacilitator, userId }) =
     else lastSentence = 'jira.note.facilitatorSetUp';
   }
 
-  const dismiss = () => {
-    // Only when the keyboard was here: someone typing elsewhere who clicks
-    // "Got it" keeps their place.
-    const next = nextFocusAfterDismiss(rootRef.current);
+  const dismiss = (event: React.MouseEvent<HTMLButtonElement>) => {
+    // Only when the keyboard pressed it: a pointer leaves the focus where the
+    // browser put it, and someone typing elsewhere who clicks "Got it" keeps
+    // their place.
+    const next = nextFocusAfterDismiss(rootRef.current, event);
     rememberSeenUser(JIRA_NOTE_STORAGE_KEY, userId);
     setDismissedFor(userId);
     next?.focus();

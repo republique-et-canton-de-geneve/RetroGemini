@@ -386,6 +386,20 @@ describe('the favourite star', () => {
     expect(document.activeElement).toBe(off);
   });
 
+  it('leaves the focus to the pointer: a click does not send it after the moved star', async () => {
+    // A pointer user starring teams down a long list: focused in its new
+    // place, the star scrolled the list to the favourites at the top, away
+    // from the next team to star (measured in Chromium: 906px to 0).
+    const user = userEvent.setup();
+    render(<TeamLogin onLogin={vi.fn()} />);
+    await screen.findByText('Team A');
+
+    await user.click(screen.getByRole('switch', { name: 'Add Team B to favorites' }));
+    const on = screen.getByRole('switch', { name: 'Remove Team B from favorites' });
+    expect(on.getAttribute('aria-checked')).toBe('true');
+    expect(document.activeElement).not.toBe(on);
+  });
+
   it('opens the team from the rest of its tile, and nothing from the star', async () => {
     render(<TeamLogin onLogin={vi.fn()} />);
     await screen.findByText('Team A');

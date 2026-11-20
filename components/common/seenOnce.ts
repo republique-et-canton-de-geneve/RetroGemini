@@ -60,12 +60,15 @@ export const nextFocusableAfter = (root: HTMLElement): HTMLElement | null =>
   ) ?? null;
 
 /**
- * Where to put the keyboard once the note `root` is dismissed: the next
- * control, only when the keyboard was in the note, or nowhere (a click in
- * Safari focuses nothing). Someone typing elsewhere who clicks the note keeps
- * their place, so the answer is then null.
+ * Where to put the keyboard once the note `root` is dismissed by `click`: the
+ * next control when the keyboard pressed the note's button, or nowhere. The
+ * click says which: one a key sends (Enter or Space) carries no `detail`, a
+ * pointer's carries its count. Where the browser left the focus says nothing:
+ * Chrome and Firefox focus the button they press, Safari does not, and moved
+ * on after a tap the focus landed in the next field, where a phone opened its
+ * keyboard (the facilitator's Icebreaker question, under the avatar hint).
  */
-export const nextFocusAfterDismiss = (root: HTMLElement | null): HTMLElement | null => {
-  const active = document.activeElement;
-  return root && (root.contains(active) || active === document.body) ? nextFocusableAfter(root) : null;
-};
+export const nextFocusAfterDismiss = (
+  root: HTMLElement | null,
+  click: Pick<MouseEvent, 'detail'>
+): HTMLElement | null => (root && click.detail === 0 ? nextFocusableAfter(root) : null);

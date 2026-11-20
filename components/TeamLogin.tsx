@@ -192,14 +192,17 @@ const TeamLogin: React.FC<Props> = ({ onLogin, onJoin, inviteData, onSuperAdminL
 
   // Each team's star, by team id. A star moves its team between the favourites
   // and the other teams, so React draws that row again in the other section and
-  // the focus would fall back to the page. A star pressed while it had the
-  // focus (Space or Enter) hands it to the same team's star in its new place.
+  // the focus would fall back to the page. A star pressed from the keyboard
+  // (Space or Enter, whose click carries no `detail`) hands it to the same
+  // team's star in its new place. A pointer's click does not: Chrome and
+  // Firefox focus the star they press, and focused in its new place it
+  // scrolled the list to the favourites, away from the next team to star.
   const favoriteStars = useRef(new Map<string, HTMLButtonElement>());
   const focusStarOf = useRef<string | null>(null);
 
   const toggleFavorite = (teamId: string, e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
-    if (e.currentTarget === document.activeElement) focusStarOf.current = teamId;
+    if (e.detail === 0 && e.currentTarget === document.activeElement) focusStarOf.current = teamId;
     setFavoriteTeamIds(prev => {
       const next = prev.includes(teamId)
         ? prev.filter(id => id !== teamId)

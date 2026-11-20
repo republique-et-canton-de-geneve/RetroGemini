@@ -120,19 +120,25 @@ describe('where the keyboard goes when a note goes', () => {
     expect(nextFocusableAfter(document.getElementById('note') as HTMLElement)).toBeNull();
   });
 
-  it('moves the keyboard on only when it was in the note, or nowhere', () => {
+  it('moves the keyboard on only when the keyboard pressed the note, never after a pointer', () => {
     const note = page();
-    // The keyboard pressed the note's button: the next control takes it.
-    (document.getElementById('inside') as HTMLElement).focus();
-    expect(nextFocusAfterDismiss(note)?.id).toBe('next');
-    // A click that focuses nothing (Safari) leaves the page's body focused.
-    (document.activeElement as HTMLElement).blur();
+    const inside = document.getElementById('inside') as HTMLElement;
+    // Enter or Space on the focused button: its click carries no count, and
+    // the next control takes the keyboard.
+    inside.focus();
+    expect(nextFocusAfterDismiss(note, { detail: 0 })?.id).toBe('next');
+    // A pointer's click counts. Chrome and Firefox focus the button they
+    // press, and the focus still goes nowhere: moved on after a tap, it
+    // landed in the next field and a phone opened its keyboard.
+    expect(nextFocusAfterDismiss(note, { detail: 1 })).toBeNull();
+    // Safari focuses nothing it clicks: the body keeps the focus, and nothing moves either.
+    inside.blur();
     expect(document.activeElement).toBe(document.body);
-    expect(nextFocusAfterDismiss(note)?.id).toBe('next');
+    expect(nextFocusAfterDismiss(note, { detail: 1 })).toBeNull();
     // Someone typing elsewhere who clicks the note keeps their place.
     (document.getElementById('field') as HTMLElement).focus();
-    expect(nextFocusAfterDismiss(note)).toBeNull();
+    expect(nextFocusAfterDismiss(note, { detail: 1 })).toBeNull();
     // A note already gone moves nothing.
-    expect(nextFocusAfterDismiss(null)).toBeNull();
+    expect(nextFocusAfterDismiss(null, { detail: 0 })).toBeNull();
   });
 });

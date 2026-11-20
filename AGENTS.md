@@ -3443,7 +3443,12 @@ Rules:
   - "Choose my avatar" focuses the opener first, then opens the picker, so
     the picker gives the focus back to the opener once the band has gone;
     "Got it" moves the keyboard to what follows the band only when the
-    keyboard pressed it. Both are named by their words (`exact: true` in
+    keyboard pressed it, which the click says (`nextFocusAfterDismiss`: a
+    key's click carries no `detail`). Where the browser left the focus says
+    nothing: Chrome and Firefox focus the button they press, and moved on
+    after a tap the focus landed in the next field, where a phone opened its
+    keyboard (the facilitator's Icebreaker question). The login screen's star
+    hands the focus on by the same test. Both are named by their words (`exact: true` in
     e2e: "Choose my avatar" is part of every opener's name, and "Got it" of
     What's New's "Got it!").
 

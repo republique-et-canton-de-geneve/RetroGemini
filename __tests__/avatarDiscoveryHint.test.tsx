@@ -288,9 +288,22 @@ describe('the avatar hint', () => {
     render(<Harness />);
     const card = screen.getByRole('textbox', { name: 'Card' });
     card.focus();
-    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }), { detail: 1 });
     expect(screen.queryByRole('note')).toBeNull();
     expect(card).toHaveFocus();
+  });
+
+  it('puts the keyboard nowhere after a pointer, even on a button the browser focused', () => {
+    // Chrome and Firefox focus the button they press. The band moved the
+    // focus on from there to the next control, which in a retrospective's
+    // Icebreaker is the facilitator's question: a phone opened its keyboard.
+    render(<Harness />);
+    const gotIt = screen.getByRole('button', { name: 'Got it' });
+    gotIt.focus();
+    fireEvent.click(gotIt, { detail: 1 });
+    expect(screen.queryByRole('note')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Next control' })).not.toHaveFocus();
+    expect(screen.getByRole('textbox', { name: 'Card' })).not.toHaveFocus();
   });
 
   it("takes the opener's visibility: no band where there is no opener", () => {

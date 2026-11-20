@@ -266,18 +266,18 @@ Stated because a documented gap is honest and silence is not.
    failure, but their look is not measured as the restyled screens' disabled
    states now are, and the helper that measures colours refuses an opacity
    rather than guess it. They are left for the screens' next change.
-10. ~~The team list's favourite star is a switch inside a button.~~ Closed
-    2026-11-20. On the login screen the star was a `span` with `role="switch"`
-    inside the team's button: a nested control that no Tab reached, and whose
-    label the team's button read as part of its name. It is now a button of its
-    own after the team's (still a switch, with the same names): Tab reaches it
-    right after its team, Space or Enter turns it on or off, and the focus
-    follows the team when that moves it between the favourites and the other
-    teams. The rest of the row still opens the team.
-    `__tests__/teamLoginLayout.test.tsx` and `e2e/login-team-picker.spec.ts`
-    pin it. Still open: the star is drawn in amber-500, 2.15:1 on white, under
-    the 3:1 an icon that carries a state needs (1.4.11); its two states differ
-    in shape (filled or outlined), not only in colour.
+10. **The team list's favourite star is drawn under 3:1.** On the login
+    screen the star is amber-500, 2.15:1 on white, under the 3:1 an icon that
+    carries a state needs (1.4.11); its two states differ in shape (filled or
+    outlined), not only in colour. Its keyboard half closed on 2026-11-20: the
+    star was a `span` with `role="switch"` inside the team's button, a nested
+    control that no Tab reached and whose label the team's button read as part
+    of its name. It is now a button of its own after the team's, still a switch
+    with the same names: Tab reaches it right after its team, Space or Enter
+    turns it on or off, and when the keyboard moves the team between the
+    favourites and the other teams the focus follows it. The rest of the row
+    still opens the team. `__tests__/teamLoginLayout.test.tsx` and
+    `e2e/login-team-picker.spec.ts` pin it.
 11. **What a screen reader says for an avatar has not been listened to.** The
     names are measured in tests (the person's name, the opener's "…, choose my
     avatar" with its initials first while it shows them), but no one has heard
