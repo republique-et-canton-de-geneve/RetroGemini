@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { isTopDialog, pushDialog } from './modalDialogStack';
 import { useReturnFocus } from './useReturnFocus';
 import { motionAllowed } from './motion/effects';
+import { FOCUSABLE_SELECTOR, isVisible } from './focusable';
 
 /**
  * The shared modal shell.
@@ -16,35 +17,11 @@ import { motionAllowed } from './motion/effects';
  * the accessible name, Escape, a focus trap, and returning focus to whatever
  * opened it. Call sites keep their own `overlayClassName`/`panelClassName`, so
  * adopting this changes behaviour without touching a single pixel of layout.
+ *
+ * A hidden control stays out of the trap's cycle: `focusable.ts` holds what
+ * can take the focus and the ancestor walk that says whether it is drawn,
+ * shared with the one-time notes.
  */
-
-const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'textarea:not([disabled])',
-  'input:not([disabled]):not([type="hidden"])',
-  'select:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])'
-].join(', ');
-
-/**
- * A hidden control must stay out of the trap's cycle (a collapsed section, a
- * step of a wizard). Deliberately walks the ancestors rather than reading
- * `offsetParent` or `getClientRects()`: those need a layout engine, so in the
- * test environment they report *every* control as hidden and the trap silently
- * does nothing — which is how a focus trap ships broken with a green suite.
- */
-const isVisible = (element: HTMLElement, root: HTMLElement): boolean => {
-  let node: HTMLElement | null = element;
-  while (node) {
-    if (node.hasAttribute('hidden')) return false;
-    const style = window.getComputedStyle(node);
-    if (style.display === 'none' || style.visibility === 'hidden') return false;
-    if (node === root) return true;
-    node = node.parentElement;
-  }
-  return true;
-};
 
 export interface ModalDialogProps {
   /** Accessible name. Use `labelledBy` instead when the content already has a title. */

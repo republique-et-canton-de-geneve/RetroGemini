@@ -7,6 +7,8 @@
  * it.
  */
 
+import { FOCUSABLE_SELECTOR, isVisible } from './focusable';
+
 /**
  * A browser shared by a whole team (a meeting-room laptop) keeps the people who
  * dismissed a note most recently; anyone pushed out simply sees it once more.
@@ -41,29 +43,29 @@ export const rememberSeenUser = (storageKey: string, userId: string): void => {
   }
 };
 
-const FOCUSABLE = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled]):not([type="hidden"])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])'
-].join(', ');
-
 /**
- * The first control after `root` in document order: where the keyboard goes
- * when a note, and the button that dismissed it, disappear.
+ * The first drawn control after `root` in document order: where the keyboard
+ * goes when a note, and the button that dismissed it, disappear. A control
+ * that is not drawn is passed over (`isVisible`, the dialogs' ancestor walk):
+ * `focus()` does nothing on it, and the keyboard fell to the page as the note
+ * went. Below `lg`, the participants panel's collapse toggle (`hidden
+ * lg:flex`) is the first control after the avatar hint in a participant's
+ * Icebreaker.
  */
 export const nextFocusableAfter = (root: HTMLElement): HTMLElement | null =>
-  Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).find(element =>
-    !root.contains(element) && (root.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+  Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).find(element =>
+    !root.contains(element) &&
+    (root.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 &&
+    isVisible(element)
   ) ?? null;
 
 /**
  * Where to put the keyboard once the note `root` is dismissed by `click`: the
- * next control when the keyboard pressed the note's button, or nowhere. The
- * click says which: one a key sends (Enter or Space) carries no `detail`, a
- * pointer's carries its count. Where the browser left the focus says nothing:
+ * next drawn control when the keyboard pressed the note's button, or nowhere
+ * (also when no drawn control follows: the caller may know a place of its
+ * own, as the avatar hint does with its opener). The click says which: one a
+ * key sends (Enter or Space) carries no `detail`, a pointer's carries its
+ * count. Where the browser left the focus says nothing:
  * Chrome and Firefox focus the button they press, Safari does not, and moved
  * on after a tap the focus landed in the next field, where a phone opened its
  * keyboard (the facilitator's Icebreaker question, under the avatar hint).

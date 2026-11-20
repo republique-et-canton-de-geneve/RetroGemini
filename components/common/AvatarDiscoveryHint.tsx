@@ -27,8 +27,8 @@ const SAMPLE_AVATAR_IDS = ['fox', 'rocket', 'moon'] as const;
 interface Props {
   /** The viewer: the samples are drawn in their own tone. */
   user: User;
-  /** What `useAvatarDiscoveryHint` decided, and its two gestures. */
-  hint: Pick<AvatarHint, 'shown' | 'choose' | 'dismiss'>;
+  /** What `useAvatarDiscoveryHint` decided, its two gestures, and the opener. */
+  hint: Pick<AvatarHint, 'shown' | 'choose' | 'dismiss' | 'openerRef'>;
   /** The opener's visibility class (a facilitator's, in a session: from 360px). */
   visibilityClass?: string;
 }
@@ -54,7 +54,12 @@ const AvatarDiscoveryHint: React.FC<Props> = ({ user, hint, visibilityClass = 'f
     // Only when the keyboard pressed it: a pointer leaves the focus where the
     // browser put it, so a tap never lands in a field (a phone would open its
     // keyboard) and someone typing a card who clicks "Got it" keeps their place.
-    const next = nextFocusAfterDismiss(rootRef.current, event);
+    // With no drawn control after the band (a participant's Icebreaker below
+    // lg, where the participants panel is not drawn), the keyboard goes back
+    // to the opener, which is drawn wherever the band was, rather than falling
+    // to the page.
+    const byKey = event.detail === 0;
+    const next = nextFocusAfterDismiss(rootRef.current, event) ?? (byKey ? hint.openerRef.current : null);
     hint.dismiss();
     next?.focus();
   };

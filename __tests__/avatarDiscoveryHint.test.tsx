@@ -42,6 +42,8 @@ interface HarnessProps {
   visibilityClass?: string;
   /** Called when the picker opens, before its state changes. */
   onOpenPicker?: () => void;
+  /** What follows the band, in place of the next control and the card field. */
+  after?: React.ReactNode;
 }
 
 /**
@@ -55,6 +57,7 @@ const Harness: React.FC<HarnessProps> = ({
   blocked = false,
   visibilityClass,
   onOpenPicker,
+  after,
 }) => {
   const [pickerOpen, setPickerOpen] = useState(false);
   const openPicker = useCallback(() => {
@@ -68,8 +71,12 @@ const Harness: React.FC<HarnessProps> = ({
         <ViewerAvatarButton user={user} avatarId={null} onClick={openPicker} marked={hint.shown} ref={hint.openerRef} />
       </header>
       <AvatarDiscoveryHint user={user} hint={hint} visibilityClass={visibilityClass} />
-      <button type="button">Next control</button>
-      <textarea aria-label="Card" />
+      {after ?? (
+        <>
+          <button type="button">Next control</button>
+          <textarea aria-label="Card" />
+        </>
+      )}
       {pickerOpen && (
         <div role="dialog" aria-label="Picker">
           <button type="button" onClick={() => setPickerOpen(false)}>Close the picker</button>
@@ -304,6 +311,55 @@ describe('the avatar hint', () => {
     expect(screen.queryByRole('note')).toBeNull();
     expect(screen.getByRole('button', { name: 'Next control' })).not.toHaveFocus();
     expect(screen.getByRole('textbox', { name: 'Card' })).not.toHaveFocus();
+  });
+
+  // Below lg, the first control after the band in a participant's Icebreaker
+  // is the participants panel's collapse toggle, which is not drawn there
+  // (`hidden lg:flex`): `focus()` does nothing on it, and the keyboard fell to
+  // the page as the band went.
+  const undrawnPanel = (
+    <aside style={{ display: 'none' }}>
+      <button type="button">Collapse the panel</button>
+    </aside>
+  );
+
+  it('gives the keyboard to the next control that is drawn, past one that is not', () => {
+    render(
+      <Harness
+        after={(
+          <>
+            {undrawnPanel}
+            <button type="button">Next control</button>
+          </>
+        )}
+      />
+    );
+    const gotIt = screen.getByRole('button', { name: 'Got it' });
+    gotIt.focus();
+    // A key's click: Enter or Space sends one with no count.
+    fireEvent.click(gotIt, { detail: 0 });
+    expect(screen.queryByRole('note')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Next control' })).toHaveFocus();
+  });
+
+  it('gives the keyboard back to the opener when no drawn control follows the band', () => {
+    render(<Harness after={undrawnPanel} />);
+    const gotIt = screen.getByRole('button', { name: 'Got it' });
+    gotIt.focus();
+    fireEvent.click(gotIt, { detail: 0 });
+    expect(screen.queryByRole('note')).toBeNull();
+    // The opener is drawn wherever the band was: the band takes its visibility.
+    expect(opener()).toHaveFocus();
+  });
+
+  it('leaves a pointer where the browser put it, though no drawn control follows the band', () => {
+    render(<Harness after={undrawnPanel} />);
+    const gotIt = screen.getByRole('button', { name: 'Got it' });
+    gotIt.focus();
+    fireEvent.click(gotIt, { detail: 1 });
+    expect(screen.queryByRole('note')).toBeNull();
+    expect(opener()).not.toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Collapse the panel', hidden: true })).not.toHaveFocus();
   });
 
   it("takes the opener's visibility: no band where there is no opener", () => {

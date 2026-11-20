@@ -120,6 +120,35 @@ describe('where the keyboard goes when a note goes', () => {
     expect(nextFocusableAfter(document.getElementById('note') as HTMLElement)).toBeNull();
   });
 
+  // A control that is not drawn takes no focus: `focus()` does nothing, and
+  // when the note went the keyboard fell to the page. A participant's
+  // Icebreaker below lg met it, the participants panel's collapse toggle
+  // (`hidden lg:flex`) being the first control after the avatar hint.
+  it.each([
+    ['under display: none', '<div style="display: none"><button id="skipped">Collapse the panel</button></div>'],
+    ['with the hidden attribute', '<button id="skipped" hidden>Collapse the panel</button>'],
+    ['under the hidden attribute', '<div hidden><button id="skipped">Collapse the panel</button></div>'],
+    ['under visibility: hidden', '<div style="visibility: hidden"><a href="#panel" id="skipped">Panel</a></div>'],
+  ])('skips a control %s, for the next one that is drawn', (_, undrawn) => {
+    document.body.innerHTML = `
+      <div id="note"><button>Got it</button></div>
+      ${undrawn}
+      <button id="drawn">Next</button>`;
+    const note = document.getElementById('note') as HTMLElement;
+    expect(document.getElementById('skipped')).not.toBeNull();
+    expect(nextFocusableAfter(note)?.id).toBe('drawn');
+    // A key's click hands the keyboard on to the same control.
+    expect(nextFocusAfterDismiss(note, { detail: 0 })?.id).toBe('drawn');
+  });
+
+  it('finds nothing when every control after the note is undrawn', () => {
+    document.body.innerHTML = `
+      <button id="before">Before</button>
+      <div id="note"><button>Got it</button></div>
+      <aside style="display: none"><button>Collapse the panel</button></aside>`;
+    expect(nextFocusableAfter(document.getElementById('note') as HTMLElement)).toBeNull();
+  });
+
   it('moves the keyboard on only when the keyboard pressed the note, never after a pointer', () => {
     const note = page();
     const inside = document.getElementById('inside') as HTMLElement;
