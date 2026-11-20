@@ -18,7 +18,15 @@ import { ICEBREAKER_QUESTIONS } from '../i18n/content/icebreakers';
  *    screen: it scrolled sideways, and at 320px the first mood was cut off
  *    where no scroll reaches;
  *  - the Icebreaker's question field on a phone, which scrolled inside itself
- *    with the default question (by 102px at 414px, 215px at 320px).
+ *    with the default question (by 102px at 414px, 215px at 320px). On a short
+ *    phone it still did once that was fixed: the card kept a fixed 600px and
+ *    shrank into the screen, so the field cut off the French default question
+ *    at 360 × 640 (36px), at 375 × 667 under the avatar band (9px) and at
+ *    320 × 568 (78px). Below `sm` the field is now as tall as the tallest
+ *    built-in question of the retro's language (as its own words when they are
+ *    taller), so that "Random" never moves under the finger, and the screen
+ *    scrolls instead, its top never cut off; a participant's question, shown as
+ *    text, fits the same way.
  *
  * Playwright's Chromium hides scrollbars, so the overflow itself is measured:
  * scrollHeight against clientHeight, scrollWidth against clientWidth. In
@@ -42,6 +50,160 @@ const createTeam = async (page: Page, teamName: string) => {
 const switchToFrench = async (page: Page) => {
   await page.getByTestId('language-option-fr').click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
+};
+
+const inviteLink = async (page: Page) => {
+  await page.locator('button[title="Invite / Join"]').click();
+  await page.getByRole('button', { name: 'CODE & LINK' }).click();
+  const code = page.locator('code').first();
+  await expect(code).toContainText('?join=', { timeout: 10_000 });
+  const url = (await code.textContent()) ?? '';
+  await page.getByRole('button', { name: 'Done' }).click();
+  return url;
+};
+
+/** Joins from an invite link as a new member, in a French browser. */
+const joinInFrench = async (page: Page, url: string, name: string) => {
+  await page.goto(url);
+  await page.waitForLoadState('networkidle');
+  await page.getByText(/^Rejoindre /).first().waitFor({ state: 'visible', timeout: 15_000 });
+  const notInList = page.getByRole('button', { name: '+ Je ne suis pas dans la liste' });
+  if (await notInList.isVisible().catch(() => false)) await notInList.click();
+  await page.getByPlaceholder('p. ex. Jean Dupont').fill(name);
+  await page.getByRole('button', { name: 'Rejoindre la rétrospective' }).click();
+  await expect(page.locator('header [data-viewer-avatar]')).toBeVisible({ timeout: 15_000 });
+};
+
+/** The one-time avatar band (AGENTS.md, *Avatars*), named by its French title. */
+const AVATAR_BAND_FR = 'Nouveau\u00a0: choisissez votre avatar';
+
+/** A built-in French question, found by its first words so a reordered list cannot hide it. */
+const frenchQuestion = (start: string) => {
+  const found = ICEBREAKER_QUESTIONS.fr.find((question) => question.startsWith(start));
+  if (!found) throw new Error(`no built-in French question starts with "${start}"`);
+  return found;
+};
+
+/** The two default questions, and the three longest French ones. */
+const QUESTIONS: ReadonlyArray<readonly [string, string]> = [
+  ['the French default question', ICEBREAKER_QUESTIONS.fr[0]],
+  ['the English default question', ICEBREAKER_QUESTIONS.en[0]],
+  ['the French skill question', frenchQuestion('Si vous pouviez maîtriser')],
+  ['the French historical figure question', frenchQuestion('Si vous pouviez rencontrer')],
+  ['the French pets question', frenchQuestion('Avez-vous des animaux')],
+];
+
+/** Phones short and tall: an iPhone SE (320 × 568, 375 × 667), a small Android, and two common ones. */
+const PHONES = [
+  { width: 320, height: 568 },
+  { width: 360, height: 640 },
+  { width: 375, height: 667 },
+  { width: 390, height: 844 },
+  { width: 414, height: 896 },
+];
+
+/**
+ * How the Icebreaker sits on the screen: how far its question scrolls inside
+ * itself (the facilitator's field) or reaches past its box (a participant's
+ * text), whether anything of the card reaches past the card, and whether the
+ * screen around it shows all of it, scrolled: its top never cut off, its bottom
+ * within reach, nothing sideways.
+ */
+const icebreakerFit = (page: Page) =>
+  page.evaluate(async () => {
+    await document.fonts.ready;
+    const field = document.querySelector<HTMLTextAreaElement>('[data-testid="icebreaker-question-input"]');
+    const text = document.querySelector<HTMLElement>('[data-testid="icebreaker-question-display"]');
+    const question = field ?? text;
+    if (!question) throw new Error('no Icebreaker question on this screen');
+    // The card: the panel that holds the phase's title and the question.
+    const card = [...document.querySelectorAll('h2')].map((title) => title.parentElement).find((panel) => panel?.contains(question));
+    if (!card) throw new Error('no Icebreaker card');
+    // The screen: the nearest box around the card that scrolls vertically.
+    let screen = card.parentElement;
+    while (screen && !['auto', 'scroll'].includes(getComputedStyle(screen).overflowY)) screen = screen.parentElement;
+    if (!screen) throw new Error('no scrolling box around the Icebreaker');
+    screen.scrollTop = 0;
+    const edges = screen.getBoundingClientRect();
+    const panel = card.getBoundingClientRect();
+    // How far a box reaches past the box around it, on any side.
+    const past = (inner: DOMRect, outer: { top: number; bottom: number; left: number; right: number }) =>
+      Math.max(outer.top - inner.top, inner.bottom - outer.bottom, outer.left - inner.left, inner.right - outer.right);
+    let spills = 0;
+    if (text) {
+      // A participant's question inside the padding of its box.
+      const box = text.parentElement!;
+      const style = getComputedStyle(box);
+      const b = box.getBoundingClientRect();
+      spills = past(text.getBoundingClientRect(), {
+        top: b.top + parseFloat(style.paddingTop),
+        bottom: b.bottom - parseFloat(style.paddingBottom),
+        left: b.left + parseFloat(style.paddingLeft),
+        right: b.right - parseFloat(style.paddingRight),
+      });
+    }
+    // What reaches furthest past the card, named for the failure message.
+    let outOfCard = 0;
+    let furthest = '';
+    for (const element of card.querySelectorAll('*')) {
+      if (element.getClientRects().length === 0) continue;
+      const by = past(element.getBoundingClientRect(), panel);
+      if (by > outOfCard) {
+        outOfCard = by;
+        furthest = `<${element.tagName.toLowerCase()}> ${(element.textContent ?? '').trim().slice(0, 40)}`;
+      }
+    }
+    const band = document.querySelector('[data-avatar-hint]');
+    // The facilitator's "Random", found by its icon: where it sits in what the screen scrolls.
+    const random = [...card.querySelectorAll('button')].find((button) => button.textContent?.includes('shuffle'));
+    return {
+      band: !!band && band.getBoundingClientRect().height > 0,
+      randomAt: random ? random.getBoundingClientRect().top - edges.top + screen.scrollTop : null,
+      inField: field ? field.scrollHeight - field.clientHeight : 0,
+      spills: Math.max(0, spills),
+      outOfCard,
+      furthest,
+      topCutOff: edges.top - panel.top,
+      bottomOutOfReach: panel.bottom - edges.top - screen.scrollHeight,
+      sideways: screen.scrollWidth - screen.clientWidth,
+    };
+  });
+
+/**
+ * Every question of `QUESTIONS`, put on the screen by `show`, measured on every
+ * phone of `PHONES`, with the avatar band drawn where `bandAt` says. Where the
+ * facilitator's "Random" is drawn, it stays where it was from one question to
+ * the next (none is taller than the French retro's tallest built-in one):
+ * pressed again, it must still be under the finger.
+ */
+const expectEveryQuestionToFit = async (
+  page: Page,
+  who: string,
+  show: (question: string) => Promise<void>,
+  bandAt: (width: number) => boolean
+) => {
+  const randomAt = new Map<number, { at: number; what: string }>();
+  for (const [what, question] of QUESTIONS) {
+    await show(question);
+    for (const phone of PHONES) {
+      await page.setViewportSize(phone);
+      const fit = await icebreakerFit(page);
+      const band = bandAt(phone.width);
+      const where = `${who}, ${what}, ${band ? 'under' : 'without'} the avatar band, at ${phone.width} × ${phone.height}`;
+      expect(fit.band, `the avatar band drawn, ${where}`).toBe(band);
+      if (fit.randomAt !== null) {
+        const first = randomAt.get(phone.width);
+        if (!first) randomAt.set(phone.width, { at: fit.randomAt, what });
+        else expect(Math.abs(fit.randomAt - first.at), `"Random" moved from where ${first.what} put it, ${where}`).toBeLessThanOrEqual(0.5);
+      }
+      expect(fit.inField, `the question field scrolls inside itself, ${where}`).toBeLessThanOrEqual(0);
+      expect(fit.spills, `the question reaches past its box, ${where}`).toBeLessThanOrEqual(0.5);
+      expect(fit.outOfCard, `${fit.furthest} reaches past the Icebreaker's card, ${where}`).toBeLessThanOrEqual(0.5);
+      expect(fit.topCutOff, `the top of the Icebreaker is cut off, ${where}`).toBeLessThanOrEqual(0.5);
+      expect(fit.bottomOutOfReach, `the bottom of the Icebreaker is out of reach, ${where}`).toBeLessThanOrEqual(0.5);
+      expect(fit.sideways, `the screen scrolls sideways, ${where}`).toBeLessThanOrEqual(0);
+    }
+  }
 };
 
 test.describe('the tab strips', () => {
@@ -127,7 +289,7 @@ test.describe('the tab strips', () => {
 test.describe('a retrospective’s first phases on a phone', () => {
   const PHONE_WIDTHS = [320, 360, 390, 414];
 
-  test('the Icebreaker shows its default question whole, and the five moods fit the screen', async ({ page }) => {
+  test('the Icebreaker shows every built-in question whole, on short phones too, and the five moods fit the screen', async ({ page }) => {
     await createTeam(page, `E2E-Phone-${Date.now()}`);
     await page.getByRole('button', { name: 'New Retrospective' }).click();
     await page.getByTestId('template-language-fr').click();
@@ -137,18 +299,16 @@ test.describe('a retrospective’s first phases on a phone', () => {
     // The screen in French too: its longer buttons wrap, and leave the field less room.
     await switchToFrench(page);
 
-    // The French retro's own default question, then an English retro's.
-    for (const [language, text] of [['French', ICEBREAKER_QUESTIONS.fr[0]], ['English', ICEBREAKER_QUESTIONS.en[0]]]) {
+    const type = async (text: string) => {
       if ((await question.inputValue()) !== text) await question.fill(text);
-      for (const width of PHONE_WIDTHS) {
-        await page.setViewportSize({ width, height: 844 });
-        const scrolls = await question.evaluate(async (field) => {
-          await document.fonts.ready;
-          return field.scrollHeight - field.clientHeight;
-        });
-        expect(scrolls, `the question field scrolls, ${language} default question at ${width}px`).toBeLessThanOrEqual(0);
-      }
-    }
+    };
+    // Under the one-time avatar band first (a facilitator's is drawn from
+    // 360px, with their avatar), then once it is put away.
+    await expectEveryQuestionToFit(page, 'the facilitator', type, (width) => width >= 360);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('note', { name: AVATAR_BAND_FR }).getByRole('button', { name: 'Compris', exact: true }).click();
+    await expect(page.locator('[data-avatar-hint]')).toHaveCount(0);
+    await expectEveryQuestionToFit(page, 'the facilitator', type, () => false);
 
     await page.getByRole('button', { name: 'Démarrer la session' }).click();
     await expect(page.getByRole('heading', { name: "Météo de l'humeur" })).toBeVisible({ timeout: 10_000 });
@@ -173,6 +333,36 @@ test.describe('a retrospective’s first phases on a phone', () => {
       const where = `the Welcome phase at ${width}px`;
       expect(fit.sideways, `scrolls sideways, ${where}`).toBeLessThanOrEqual(0);
       expect(fit.cutOff, `moods past the screen's edge, ${where}`).toBe(0);
+    }
+  });
+
+  test('a participant’s Icebreaker shows every built-in question whole, on short phones too', async ({ page, browser }) => {
+    await createTeam(page, `E2E-Phone-Guest-${Date.now()}`);
+    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    await page.getByTestId('template-language-fr').click();
+    await page.getByTestId('retro-template-start_stop_continue').click();
+    const question = page.getByTestId('icebreaker-question-input');
+    await expect(question).toHaveValue(ICEBREAKER_QUESTIONS.fr[0], { timeout: 10_000 });
+    const url = await inviteLink(page);
+
+    const guestContext = await browser.newContext({ viewport: PHONES[3], locale: 'fr-CH', reducedMotion: 'reduce' });
+    try {
+      const guest = await guestContext.newPage();
+      await joinInFrench(guest, url, 'Lea Telephone');
+      const shown = guest.getByTestId('icebreaker-question-display');
+      // The facilitator writes it, and the participant reads it as text.
+      const write = async (text: string) => {
+        if ((await question.inputValue()) !== text) await question.fill(text);
+        await expect(shown).toHaveText(text, { timeout: 10_000 });
+      };
+      // A participant's band is drawn at every width, with their avatar.
+      await expectEveryQuestionToFit(guest, 'a participant', write, () => true);
+      await guest.setViewportSize(PHONES[3]);
+      await guest.getByRole('note', { name: AVATAR_BAND_FR }).getByRole('button', { name: 'Compris', exact: true }).click();
+      await expect(guest.locator('[data-avatar-hint]')).toHaveCount(0);
+      await expectEveryQuestionToFit(guest, 'a participant', write, () => false);
+    } finally {
+      await guestContext.close();
     }
   });
 });
