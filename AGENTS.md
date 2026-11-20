@@ -343,7 +343,9 @@ another look. Nine rules:
   (Playwright's Chromium hides scrollbars): both strips; on a phone the
   Welcome moods; and the Icebreaker at 320 × 568, 360 × 640, 375 × 667,
   390 × 844 and 414 × 896, under the avatar band and without it, with both
-  default questions and the three longest French ones, as the facilitator's
+  default questions and the three French ones that take the most lines at
+  320px (the skill, historical-figure and pets questions: the pets question
+  wraps to more lines there than several longer ones), as the facilitator's
   field and as a participant's text: nothing scrolls inside the field,
   nothing reaches past the question's box or the card, the card's top is
   never cut off and its bottom is within reach, nothing scrolls sideways, and
@@ -357,11 +359,17 @@ another look. Nine rules:
   retro's template language, or its own words (its placeholder while empty)
   when they are taller: invisible, `aria-hidden` copies set in the field's own
   box (`QUESTION_BOX`) share its grid cell, one `minmax(0, 1fr)` column that
-  no long word widens. It never scrolls inside itself, in every browser
-  (`field-sizing` is not in all of them), and "Random" never moves the buttons
-  from under the finger: sized to its own words, the field moved them by up to
-  about 58px. A participant's question takes the field's type size there and
-  breaks a word longer than its box. From `sm` up nothing changed.
+  no long word widens. It never scrolls inside itself, and it needs no
+  `field-sizing` for that (not every browser has it), only that grid; the
+  spec runs in Chromium alone, so Safari and Firefox are not measured.
+  "Random" never moves the buttons from under the finger from one built-in
+  question to the next (a question the facilitator types taller than every
+  built-in one still grows the field, and the next "Random" shrinks it back):
+  sized to its own words alone, as a first version of the fix was, the field
+  moved them with each question, by 39px at 320 × 568 from the French default
+  question to the English one. A participant's question takes the field's
+  type size there and breaks a word longer than its box. From `sm` up nothing
+  changed.
   `__tests__/icebreakerPhoneLayout.test.tsx` holds what jsdom can, since it
   lays nothing out: the copies' texts, their language and `aria-hidden`, and
   the phone-only classes.
@@ -1993,8 +2001,10 @@ user cannot see it, so it does not belong in the user-facing "What's New".
   files it touches. Bundle several user-visible changes into the same next `X`.
 - Keep `publiccode.yml`'s `softwareVersion` equal to `VERSION` in the same change.
   The release workflow publishes that version when `VERSION` changes on `main`,
-  including internal and documentation changes, so catalogue metadata must
-  describe the version the merge will publish.
+  including internal and documentation changes (unless a release of that
+  version already holds other content, which stops the run: see the next
+  bullet), so catalogue metadata must describe the version the merge will
+  publish.
 - **A release builds its image, and its SBOM, from its own tag, and only from
   a tag that holds the run's content.** `github-release.yml` creates the
   GitHub release, its tag on the commit the run started from (when a tag named
@@ -2028,12 +2038,21 @@ user cannot see it, so it does not belong in the user-facing "What's New".
   already exists, and whose tag holds its tree, is rebuilt from that tag as a
   new build (the base image and its Alpine packages may be newer), and the
   version tag moves to it: deploy a tested image by its digest. `latest`,
-  which `render.yaml` and the README pull, moves only to the newest release:
-  a step lists the releases that are not drafts, counts `VERSION` in, keeps
-  the `X.Y` names, sorts them with `sort -V` (45.10 above 45.9) and passes
-  `push_latest=false`, with a notice, when a higher one exists, so a re-run of
-  an older release's run, or a release of an older line, never moves it. The
-  steps from the release to the dispatch run under `set -euo pipefail`.
+  which `render.yaml` and the README pull, moves only to the release that is
+  the newest when its image is dispatched: a step lists the releases that are
+  not drafts, counts `VERSION` in, keeps the `X.Y` names, sorts them with
+  `sort -V` (45.10 above 45.9) and passes `push_latest=false`, with a notice,
+  when a higher one exists. A re-run of an older release's run, or a release
+  of an older line, therefore leaves `latest` alone when the run's commit
+  carries that step. A re-run replays the workflow of its own commit, and
+  before the step that workflow passed `push_latest=true` on every run: a
+  re-run of a run from before it still moves `latest`, and so does a release
+  of an older line dispatched from a branch whose workflow predates it. Two
+  `VERSION` bumps merged within one build's few minutes can also leave
+  `latest` on the lower one: when the lower run decides before the higher
+  release exists, both pass `push_latest=true`, and the build that finishes
+  last holds the tag (neither workflow has a `concurrency` group). The steps
+  from the release to the dispatch run under `set -euo pipefail`.
   `docker-deploy.yml` dispatched by hand still defaults `push_latest` to
   `true`. `__tests__/deploymentManifestParity.test.ts` → *the release builds
   its image from its own tag*.
@@ -2240,7 +2259,11 @@ the English file does not have. Both files ship in the image (`Dockerfile`,
    `BASELINE` table; a screen joins it at 0, and a card added to a screen the
    audit never walked is audited on its own (`{ scope }`), so it neither
    carries that screen's findings nor hides them — list them in
-   `ACCESSIBILITY.md` instead.
+   `ACCESSIBILITY.md` instead. A state that joins or leaves `BASELINE` changes
+   the count of audited states `ACCESSIBILITY.md` gives (its one "N in all")
+   in the same change: `__tests__/accessibilityStatementCount.test.ts` reads
+   the table's keys with the TypeScript parser and fails until the statement
+   gives their number.
    When a fix removes a finding, **lower the number in the same change** —
    `BUDGET` in `scripts/lint.mjs`, `BASELINE` in the helper. Never raise either to
    make a change pass: a new accessibility violation is a defect like any other.
@@ -3493,9 +3516,10 @@ Rules:
   pictures `hidden lg:flex`): one row of 43px from `sm`, and on a phone its
   buttons under its title where they do not fit beside it (69px at 320 and
   390px). From `sm` the pictures, the sentence and the buttons used to share
-  a row that cannot wrap, which left the sentence about 250px, four or five
-  lines: 117px of band at 640px in French, and a landscape phone (667 × 375)
-  kept 194px of session under the header and the band, 268px now. Its rule
+  a row that cannot wrap, which left the sentence about 250px wide: at 640px
+  it took four lines under its title in French (three in English) and the
+  band 117px (97px in English), and a landscape phone (667 × 375) kept 194px
+  of session under the header and the band in French, 268px now. Its rule
   is `useAvatarDiscoveryHint`, called by the screen that draws the opener:
   - **Decided with the screen**: shown when, at the first render, the viewer
     has no stored choice (`hasOwnAvatarChoice` in a session, through
@@ -3625,18 +3649,20 @@ passed over), `hasOwnAvatarChoice` and `isAnonymousSession` in
 `hasChoice` in `useOwnAvatar.test.tsx`, the hint cases of
 `avatarScreensWiring.test.tsx` (both session types: who sees it, the
 opener's width, the picker opened from the header and from the band, the
-session turning anonymous, "Got it" remembered across a new mount of the
-screen, a choice stamped on the viewer's own entry from their other browser
-taking the band and the dot away in the render that draws it, read at every
-commit through a React `Profiler`, and a refused join, still gone once the
-connection comes back) and `appAvatar.test.tsx` (the dashboard, with the
-picker opened from the top bar's avatar and a revoked session, still gone
-once the revocation is cleared: the case that holds the latch on a real
-screen), `sessionHeaderLook.test.tsx` and `healthCheckLook.test.tsx` (the
-same opener and dot in both headers), `i18nAvatars.test.ts`, the hint block
-of `e2e/avatars.spec.ts` (a French phone's guest and the dashboard, audited
-as `avatar-hint` and `avatar-hint-dashboard`; an anonymous retrospective
-shows none), its band test (on the dashboard in English and French, at 390,
+session turning anonymous, the band still gone when it names its authors
+again (which holds the latch on both session screens), "Got it" remembered
+across a new mount of the screen, a choice stamped on the viewer's own entry
+from their other browser taking the band and the dot away in the render that
+draws it, read at every commit through a React `Profiler`, and a refused
+join, still gone once the connection comes back) and `appAvatar.test.tsx`
+(the dashboard, with the picker opened from the top bar's avatar and a
+revoked session, still gone once the revocation is cleared, which holds the
+latch on the dashboard), `sessionHeaderLook.test.tsx` and
+`healthCheckLook.test.tsx` (the same opener and dot in both headers),
+`i18nAvatars.test.ts`, the hint block of `e2e/avatars.spec.ts` (a French
+phone's guest and the dashboard, audited as `avatar-hint` and
+`avatar-hint-dashboard`; an anonymous retrospective shows none), its band
+test (on the dashboard in English and French, at 390,
 640, 667, 768 and 1023px no picture and no visible sentence and, from 640px,
 one row no taller than its title's line or its buttons with its frame; at
 1024 and 1280px the pictures, and the sentence on two lines at most beside

@@ -27,7 +27,7 @@ the colours of what the audit cannot open (last row).
 | axe-core, the open board | The same rules on the open board (42.0), with cards, a vote and a second person connected: the board's bar with its search, its sort and the facilitator's controls, every column's add field, each card's vote button (named by the total it shows first, 2.5.3), and the participants panel listing the people connected right now, with the line above it naming who is writing a card; and, scoped, the board's settings dialog. The search's result count is a status message (4.1.3). Its keyboard paths are the Group phase's for a card (pick it up, then a card, a group or a column) and Brainstorm's for a group (pick it up, then "Move here"), pinned by `__tests__/sessionOpenBoard.test.tsx` | `e2e/retro-open-board.spec.ts` |
 | axe-core, the console's backup import card | The same rules on the Backups tab's *Import a backup file* card, audited on its own with a file chosen, before it is sent: the labelled file input, its hint, and the import button (since 45.0 the console's secondary button: slate-700 on white, and slate-600 on slate-100 while a file is being sent) | `e2e/admin-team-restore.spec.ts` |
 | axe-core, the avatar picker | The same rules on the avatar picker (45.0), opened from the viewer's own avatar over a session and audited on its own: the large current avatar with the person's name, the family tabs (one in the Tab order, arrows between them), and the grid of pictures, each a button named by its picture's name with `aria-pressed`, "My initials" first | `e2e/avatars.spec.ts` |
-| axe-core, the avatar hint | The same rules on the one-time band under the header that tells each person once that the avatar can be changed (45.3), audited on its own in two states: a guest's on a French phone (390 × 844) in a named retrospective, where it shows its title and its two buttons and its sentence is read but not shown, and the facilitator's on the dashboard at 1280px, where its three sample pictures, hidden from assistive technology, and its sentence sit beside the buttons. A note named by its title, "Choose my avatar" with `aria-haspopup="dialog"`, and "Got it" described by the title. The same tests measure that the band starts where the header ends and that each of its buttons is in view and at least 24px tall | `e2e/avatars.spec.ts` |
+| axe-core, the avatar hint | The same rules on the band under the header that tells each person that the avatar can be changed, until they choose an avatar, open the picker or put the band away (45.3), audited on its own in two states: a guest's on a French phone (390 × 844) in a named retrospective, where it shows its title and its two buttons and its sentence is read but not shown, and the facilitator's on the dashboard at 1280px, where its three sample pictures, hidden from assistive technology, and its sentence sit beside the buttons. A note named by its title, "Choose my avatar" with `aria-haspopup="dialog"`, and "Got it" described by the title. The same tests measure that the band starts where the header ends and that each of its buttons is in view and at least 24px tall | `e2e/avatars.spec.ts` |
 | axe-core, the login screen's team list | The same rules on the login screen's team list as tiles (45.3), the whole page, in French at 1280 × 800: fourteen teams with long names, found by a search, two of them favourites listed first, each team a button holding its name and its meta line, followed by its star, a switch with `aria-checked` named "Ajouter … aux favoris" or "Retirer … des favoris". The main flows' audit of the login screen reads whatever list the server holds, which may be short | `e2e/login-team-picker.spec.ts` |
 | `eslint-plugin-jsx-a11y` | Accessibility rules across the whole React tree, inside the repository's two-way lint budget | `eslint.config.js`, `scripts/lint.mjs` |
 | Measured colour pairs, in the unit suites | What a screen paints, measured with axe-core's own colour engine against the colours the build actually ships: Tailwind's palette and then the application's own theme tokens (`index.css`), a translucent background blended over the one behind it, and a colour the helper cannot name (an arbitrary value, a gradient, an opacity) refused rather than guessed. Each token's job is stated as a pair (muted text, a control's edge, the brand on its tints, the initials of each person's tone); a card's colours are measured for hundreds of column colours, the facilitator's and random ones; every field's edge in `components/` is read from the source and measured against its fill. This is the layer that reaches what the e2e audit never opens: a hover, a tooltip, a state only one kind of link shows | `__tests__/helpers/tailwindTheme.ts`, `__tests__/lookTokens.test.ts`, `__tests__/cardTones.test.ts`, `__tests__/fieldEdgeContrast.test.ts`, `__tests__/participantColors.test.ts` and the `*Look.test.tsx` suites |
@@ -36,8 +36,8 @@ the colours of what the audit cannot open (last row).
 on every audited state — 41 in all: sixteen in the main flows, eight console
 states and three console dialogs, seven Jira screens, the backup import card,
 the open board and its settings dialog, the avatar picker, the avatar hint in
-its two states, and the login screen's team list as tiles.** The ten main
-screens have been at zero since 2026-08-26,
+its two states, and the login screen's team list as tiles.** The main
+screens have been at zero since 2026-08-25 (nine then, ten now),
 the Jira screens since 2026-10-20 (five, seven since 41.0), the import card
 since 41.0, the four multi-participant states and the console since
 2026-10-22, the open board since it joined (42.0), its settings dialog
@@ -117,7 +117,7 @@ where a light-screen contrast sweep had made things worse.
 | **The edges of fields and switches** — a text field, select or textarea drawn with a slate-300 border (1.59:1 on white), often the only thing that shows where the control is, and a switch's off track in the same grey | 1.4.11 Non-text Contrast | **Fixed 2026-11-19** (45.0): slate-400, 3.41:1 on white. `__tests__/fieldEdgeContrast.test.ts` reads every field of the interface from its source and measures each border against each fill it can take |
 | **A chosen option said by its colour alone** — the Welcome phase's moods, the ROTI scores of both session types, the health check's survey scores, *Move On* in Discuss, the invite dialog's tabs and its member rows | 4.1.2 Name, Role, Value | **Fixed 2026-11-19** (45.0): each is a button with `aria-pressed`, and so is every picture of the new avatar picker |
 | **Icons read as part of a button's name, and two icon names read as words** — on a phone "What's New" was announced as "auto_awesome"; the login screens' "Back" as "arrow_back Back"; each member row of the invite dialog ended in "toggle_on". Two names no cut of the icon font draws, `groups_off` and `clarity`, showed and were read as the raw words | 1.1.1 Non-text Content, 2.5.3 Label in Name | **Fixed 2026-11-19** (45.0). Icons beside a label are hidden from assistive technology: 51 buttons announced an icon beside their label, and none does any more (`__tests__/iconButtonNames.test.tsx` fails on the next one). The last six needed more than hiding. A card's comments button and a proposal's three vote buttons hold only an icon and a count, so the icon *was* their name ("comment 2", "thumb_up 1", and "remove" for a neutral vote): they are named in words, the count they show first ("2 comments", "1 vote for", "Vote neutral"). *Suggest groups with AI* says with `aria-busy` what only its spinner said, and the release analysis' copy button already said its outcome in words. The two names are drawn with glyphs the font has, a stored `clarity` read as `light_mode`, and `e2e-prod/icon-ligatures.spec.ts` measures every icon name the application can draw as one glyph in the built app |
-| **The Icebreaker cut its question off on short phones.** Its card had a fixed 600px, which a short phone squeezed, so the facilitator's field scrolled inside itself and hid part of the French default question (78px at 320 × 568, 36px at 360 × 640, and 9px at 375 × 667 under the avatar hint), and a participant's card, centred in a screen too short for it, lost its top where no scroll reaches (60px at 320 × 568) | 1.4.10 Reflow | **Fixed 2026-11-20** (45.3). Below 640px the card is as tall as what it holds and the screen scrolls instead, the card's top never cut off; the facilitator's field is as tall as the tallest built-in question of the retro's language, so it never scrolls inside itself and "Random" stays under the finger from one question to the next; a participant's question breaks a word longer than its box. `e2e/no-stray-scrollbars.spec.ts` measures it on five phones from 320 × 568 to 414 × 896, under the avatar hint and without it. A phone held sideways is not covered (gap 12) |
+| **The Icebreaker cut its question off on short phones.** Its card had a fixed 600px, which a short phone squeezed, so the facilitator's field scrolled inside itself and hid part of the French default question (78px at 320 × 568, 36px at 360 × 640, and 9px at 375 × 667 under the avatar hint), and a participant's card, centred in a screen too short for it, lost its top where no scroll reaches (60px at 320 × 568) | 1.4.10 Reflow | **Fixed 2026-11-20** (45.3). Below 640px the card is as tall as what it holds and the screen scrolls instead, the card's top never cut off; the facilitator's field is as tall as the tallest built-in question of the retro's language, so it never scrolls inside itself and "Random" stays under the finger from one built-in question to the next; a participant's question breaks a word longer than its box. `e2e/no-stray-scrollbars.spec.ts` measures it on five phones from 320 × 568 to 414 × 896, under the avatar hint and without it. A phone held sideways is not covered (gap 12) |
 
 **What 45.0 adds, and how it stays accessible.** *Motion*: a guest who
 arrives, a card that lands, a vote cast, hidden cards shown and a dialog
@@ -134,12 +134,14 @@ while it shows them, since what is seen must be in the name, 2.5.3). The picker
 is a dialog like every other, reached by Tab, with arrow keys between its
 families, and it says "Avatar saved." or why it could not save. An anonymous
 session shows no chosen avatar anywhere: a picture beside a card would say who
-wrote it. Each person is told once, by a band under the header, that the
-avatar can be changed: a note named by its title and met in reading order,
-never a live region and never taking the focus. Its "Got it", pressed from
-the keyboard, hands the keyboard to the next control drawn after the band,
-or, when none is drawn, to the person's own avatar in the header, the button
-that opens the picker: never to the page.
+wrote it. Since 45.3 a band under the header says that the avatar can be
+changed: a note named by its title and met in reading order, never a live
+region and never taking the focus. Each person is shown it until they choose
+an avatar and, in each browser, until they open the picker there or put the
+band away. Its "Got it", pressed from the keyboard, hands the keyboard to the
+next control drawn after the band, or, when none is drawn, to the person's
+own avatar in the header, the button that opens the picker: never to the
+page.
 
 ## Languages
 
@@ -211,7 +213,8 @@ Stated because a documented gap is honest and silence is not.
    Discuss phases, its Vote phase outside the participants panel, its Review
    step outside the Jira scope, and the health
    check's Discuss and Review phases are checked by the lint rules but have no
-   axe run. (The open board, its settings dialog and the avatar picker are
+   axe run. (The open board, its settings dialog, the avatar picker, the
+   avatar hint in its two states and the login screen's team list as tiles are
    audited by their own specs.) The 45.0 restyle measured the colours of most of
    those screens in the unit suites instead (*How it is tested*, last row), which
    covers contrast and nothing else axe checks. **This gap has now cost something measurable:** the nameless switch
@@ -298,9 +301,10 @@ Stated because a documented gap is honest and silence is not.
     640px the Icebreaker keeps its larger layout, its card centred in what
     the screen leaves under the header, and nothing scrolls up to a card
     taller than that: at 667 × 375, with 268px of session under the header
-    and the avatar hint, the card loses its top 120px (its icon and most of
-    its title) where no scroll reaches, measured on 2026-11-20. Closing it
-    needs a change from 640px up, which the fix left alone on purpose.
+    and the avatar hint, the card loses its top 120px (its icon, down to the
+    top of its title) where no scroll reaches, measured on 2026-11-20.
+    Closing it needs a change from 640px up, which the fix left alone on
+    purpose.
 
 ## Feedback
 
@@ -317,6 +321,10 @@ and what assistive technology you use, if any.
   `e2e/helpers/axe.ts` and `BUDGET` in `scripts/lint.mjs` in the
   same change that removes a finding. A screen joins the audit at zero. A new accessibility violation is a defect
   like any other.
+- A state that joins or leaves `BASELINE` changes the count of audited states
+  this statement gives (under *How it is tested*) in the same change:
+  `__tests__/accessibilityStatementCount.test.ts` counts the table's keys and
+  fails until the two agree.
 - When adding a modal, use `components/common/ModalDialog.tsx`. Rebuilding the
   overlay by hand is how the product ended up with thirteen of them and one
   `role="dialog"`.
