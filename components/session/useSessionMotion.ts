@@ -138,13 +138,17 @@ const reactionCount = (session: RetroSession, ticketId: string, emoji: string): 
 };
 
 /**
- * Whose vote totals may be marked. The guided Vote phase keeps everyone's
- * votes to itself, and so does a board whose counts are hidden: a ring there
- * on a teammate's vote would say where it went. Only the viewer's own votes
- * move then.
+ * Whose vote totals may be marked. Only the open board and the guided Vote
+ * phase draw a vote on a card or a group: every other phase draws none, and a
+ * ring there (a regrouping in the Group phase carries a card's votes into its
+ * group) would say that an item holds votes the screen keeps hidden. The
+ * guided Vote phase keeps everyone's votes to itself, and so does a board
+ * whose counts are hidden: a ring there on a teammate's vote would say where
+ * it went. Only the viewer's own votes move then.
  */
 const visibleVoteChanges = (motion: SessionMotion, prev: RetroSession, next: RetroSession, viewerId: string): string[] => {
-  const totalsHidden = next.phase === 'VOTE' || (next.phase === 'OPEN_BOARD' && !!next.settings?.voteCountHidden);
+  if (next.phase !== 'VOTE' && next.phase !== 'OPEN_BOARD') return [];
+  const totalsHidden = next.phase === 'VOTE' || !!next.settings?.voteCountHidden;
   if (!totalsHidden) return motion.voteTotals;
   const itemsOf = (session: RetroSession) =>
     new Map<string, unknown>([

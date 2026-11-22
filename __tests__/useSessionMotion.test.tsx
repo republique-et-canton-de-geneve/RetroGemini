@@ -208,6 +208,24 @@ describe('useSessionMotion', () => {
     expect(card('t2').classList.contains('fx-ring')).toBe(true);
   });
 
+  // Only the open board and the guided Vote phase draw a vote on a card or a
+  // group. A regrouping carries a card's votes into its group (combineVotes),
+  // in the Group phase too, which draws none: a ring and a bump there said that
+  // the group held votes the screen keeps hidden.
+  it.each(['GROUP', 'BRAINSTORM'])('marks no vote total in the %s phase, which draws no vote', (phase) => {
+    const group = (votes: string[]) => ({ id: 'g1', title: 'G', colId: 'start', votes, anchorTicketId: 'ga' }) as unknown as Group;
+    const anchor = ticket('ga', { groupId: 'g1' });
+    const { show } = mount(session({ phase, tickets: [anchor, ticket('t1', { votes: ['bob', 'me'] })], groups: [group([])] }));
+    // t1 joins the group, and its votes go with it.
+    show(session({ phase, tickets: [anchor, ticket('t1', { groupId: 'g1' })], groups: [group(['bob', 'me'])] }));
+    expect(document.querySelector(`[${MOTION_HOOKS.group}="g1"]`)!.classList.contains('fx-ring')).toBe(false);
+    expect(document.querySelector('[data-testid="group-count-g1"]')!.classList.contains('fx-bump')).toBe(false);
+    expect(card('t1').classList.contains('fx-ring')).toBe(false);
+    expect(card('t1').querySelector(`[${MOTION_HOOKS.voteCount}]`)!.classList.contains('fx-bump')).toBe(false);
+    // What the screen does draw still moves: the column holds one entry less.
+    expect(document.querySelector(`[${MOTION_HOOKS.columnCount}="start"]`)!.classList.contains('fx-bump')).toBe(true);
+  });
+
   it('leaves a vote a flight carries to the screen, which plays it where the token lands', () => {
     const held = new Set(['t2']);
     const view = render(<Board session={session({ phase: 'VOTE', tickets: [ticket('t1'), ticket('t2')] })} isLive pending={new Set()} held={held} />);
@@ -291,10 +309,11 @@ describe('useSessionMotion', () => {
     expect(card('t4').classList.contains('fx-card-in')).toBe(false);
   });
 
+  // On an open board, where a vote total and a column's count would both move.
   it('decorates nothing at all when more than six cards arrive at once', () => {
-    const { show } = mount(session());
+    const { show } = mount(session({ phase: 'OPEN_BOARD' }));
     const many = Array.from({ length: 7 }, (_, i) => ticket(`n${i}`));
-    show(session({ tickets: [ticket('t1', { votes: ['bob'] }), ...many], phase: 'BRAINSTORM' }));
+    show(session({ tickets: [ticket('t1', { votes: ['bob'] }), ...many], phase: 'OPEN_BOARD' }));
     expect(decorated()).toEqual([]);
   });
 
