@@ -53,10 +53,11 @@ const SAFETY_MARGIN_MS = 250;
 const DEFAULT_LENGTH_MS = 1000;
 
 export interface EffectOptions {
-  /** CSS custom properties set while the effect plays (`--fx-ring`, `--fx-delay`), removed after. */
+  /**
+   * CSS custom properties set while the effect plays (`--fx-ring`, `--fx-delay`),
+   * removed after; the delay in `--fx-delay` is added to the length the net waits for.
+   */
   properties?: Readonly<Record<string, string>>;
-  /** Overrides the length the timeout waits for (ms); the delay in `--fx-delay` is added to it. */
-  lengthMs?: number;
 }
 
 /**
@@ -129,7 +130,7 @@ export function playEffect(element: Element | null | undefined, className: strin
 
     element.addEventListener('animationend', onEnd);
     element.classList.add(className);
-    const length = options.lengthMs ?? EFFECT_LENGTH_MS[className] ?? DEFAULT_LENGTH_MS;
+    const length = EFFECT_LENGTH_MS[className] ?? DEFAULT_LENGTH_MS;
     const timer = setTimeout(stop, length + delayOf(properties) + SAFETY_MARGIN_MS);
     return true;
   } catch {

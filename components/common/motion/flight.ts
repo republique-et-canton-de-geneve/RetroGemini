@@ -16,8 +16,6 @@ import { motionAllowed } from './effects';
 export const FLIGHT_OUT_MS = 500;
 /** A vote taken back, on its way home (ms). */
 export const FLIGHT_BACK_MS = 340;
-/** How high the middle of the trip is lifted (px). */
-export const FLIGHT_ARC_PX = 40;
 
 const LAYER_CLASS = 'fx-layer';
 const TOKEN_CLASS = 'fx-token';
@@ -25,7 +23,6 @@ const SAFETY_MARGIN_MS = 250;
 
 export interface FlightOptions {
   duration?: number;
-  arc?: number;
   /** Called once the token has arrived, or at once when nothing flies. */
   onArrive?: () => void;
 }
@@ -102,7 +99,8 @@ export function fly(from: End, to: End, options: FlightOptions = {}): void {
       arrive();
       return;
     }
-    const path = flightPath(boxOf(from), boxOf(to), { width: window.innerWidth, height: window.innerHeight }, options.arc ?? FLIGHT_ARC_PX);
+    // Lifted by flightPath's own arc.
+    const path = flightPath(boxOf(from), boxOf(to), { width: window.innerWidth, height: window.innerHeight });
     if (!path) {
       arrive();
       return;
