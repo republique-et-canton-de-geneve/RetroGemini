@@ -17,8 +17,11 @@ const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: n
 
   return {
     // Soft bands (the 45.0 look keeps colour for content, and calm): every
-    // text of the row sits on a pale wash of green, grey or red.
-    background: `linear-gradient(to right, rgba(16, 185, 129, ${0.08 + upPct * 0.14}) 0%, rgba(16, 185, 129, ${0.08 + upPct * 0.14}) ${upEnd}%, rgba(148, 163, 184, ${0.08 + neutralPct * 0.12}) ${upEnd}%, rgba(148, 163, 184, ${0.08 + neutralPct * 0.12}) ${neutralEnd}%, rgba(239, 68, 68, ${0.07 + downPct * 0.13}) ${neutralEnd}%, rgba(239, 68, 68, ${0.07 + downPct * 0.13}) 100%)`
+    // text of the row sits on a pale wash of green, grey or red. An image
+    // over the row's own fill (white on a light surface, none on a dark one):
+    // the `background` shorthand set the colour too, to transparent, and a
+    // row holding votes lost its white.
+    backgroundImage: `linear-gradient(to right, rgba(16, 185, 129, ${0.08 + upPct * 0.14}) 0%, rgba(16, 185, 129, ${0.08 + upPct * 0.14}) ${upEnd}%, rgba(148, 163, 184, ${0.08 + neutralPct * 0.12}) ${upEnd}%, rgba(148, 163, 184, ${0.08 + neutralPct * 0.12}) ${neutralEnd}%, rgba(239, 68, 68, ${0.07 + downPct * 0.13}) ${neutralEnd}%, rgba(239, 68, 68, ${0.07 + downPct * 0.13}) 100%)`
   };
 };
 

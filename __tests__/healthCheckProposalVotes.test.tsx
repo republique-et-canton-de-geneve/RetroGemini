@@ -225,9 +225,10 @@ describe('Health check proposal votes', () => {
       expect(screen.getByText('Document meeting decisions')).toBeTruthy();
     });
 
+    // The gradient is the row's background image, over the row's own fill.
     const proposalRows = container.querySelectorAll('[style]');
     const rowWithGradient = Array.from(proposalRows).find((element) =>
-      (element as HTMLElement).style.background?.includes('linear-gradient')
+      (element as HTMLElement).style.backgroundImage?.includes('linear-gradient')
     );
 
     expect(rowWithGradient).toBeTruthy();

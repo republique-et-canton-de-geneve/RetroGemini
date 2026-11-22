@@ -480,6 +480,28 @@ describe('Discuss', () => {
     expectGraphic(screen.getByRole('button', { name: 'Save the action' }), 'save');
     expectGraphic(screen.getByRole('button', { name: 'Cancel the edit' }), 'cancel');
   });
+
+  // The votes' wash is the row's background image, over the row's own white.
+  // Written as the `background` shorthand it also set the background colour,
+  // to transparent, over `bg-white`: a row holding votes was painted on the
+  // panel's slate-50 and a row with none on white.
+  it('lays the votes’ wash over the proposal row’s white, with votes or without', () => {
+    const session = baseSession({
+      actions: [
+        action('a1', 'Freeze merges', { type: 'proposal', linkedTicketId: 't1', proposalVotes: { 'p-1': 'up', 'p-2': 'down' } }),
+        action('a2', 'Pair on reviews', { type: 'proposal', linkedTicketId: 't1', proposalVotes: {} })
+      ]
+    });
+    const { container } = renderDiscuss(session, 't1');
+    const voted = container.querySelector('[data-proposal-row="a1"]') as HTMLElement;
+    const unvoted = container.querySelector('[data-proposal-row="a2"]') as HTMLElement;
+    for (const row of [voted, unvoted]) {
+      expect(row).toHaveClass('bg-white');
+      expect(row.style.backgroundColor, 'the inline style leaves the row’s white alone').toBe('');
+    }
+    expect(voted.style.backgroundImage).toMatch(/^linear-gradient\(/);
+    expect(unvoted.style.backgroundImage).toBe('');
+  });
 });
 
 describe('Review', () => {
@@ -616,6 +638,19 @@ describe('Close and its ROTI follow-up (a dark screen)', () => {
     expect(screen.getByRole('textbox').className).toMatch(/placeholder:text-slate-400/);
     expect(tokenContrast('slate-400', 'slate-900')).toBeGreaterThanOrEqual(4.5);
     expectText(screen.getByRole('button', { name: 'Return to Dashboard' }), 'Return');
+  });
+
+  // The dark row has no fill of its own: the votes' wash lies on its card's
+  // dark surface, as it did when it was the `background` shorthand.
+  it('lays the votes’ wash of a dark proposal row on its card, with no fill of its own', () => {
+    const { container } = renderClose(facilitator, {
+      settings: { ...baseSession().settings, revealRoti: true },
+      actions: [action('r1', 'Shorter retros', { type: 'proposal', linkedTicketId: ROTI_FOLLOW_UP_LINK_ID, proposalVotes: { 'p-1': 'up' } })]
+    });
+    const row = container.querySelector('[data-proposal-row="r1"]') as HTMLElement;
+    expect(row.className).not.toMatch(/(^|\s)bg-/);
+    expect(['', 'transparent']).toContain(row.style.backgroundColor);
+    expect(row.style.backgroundImage).toMatch(/^linear-gradient\(/);
   });
 
   it('reads a participant’s view of an accepted follow-up action', () => {
