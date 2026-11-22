@@ -543,6 +543,63 @@ describe('Session — the vote’s flight', () => {
       expect(within(card('t1')).getByText('You gave it 3 votes')).toBeTruthy();
       expect(ring()).toBe(true);
     });
+
+    // A vote added, then taken back before its token lands: the take-back
+    // takes back the vote that token carries, whose dot it removes. That token
+    // lands on nothing, and nothing marks it — a vote taken back flies home,
+    // and nothing rings for it. Read as landed, the add's token (500 ms, the
+    // other one home in 340) rang the card for a vote that was gone.
+    it('plays no landing marks for a vote taken back before its token lands, and holds the card until both tokens are in', async () => {
+      allowMotion();
+      const fromServer = captureServerStates();
+      await renderSession(createSession({}, { maxVotes: 6 }));
+      pastTheQuietSeconds();
+      await userEvent.click(within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' }));
+      await userEvent.click(within(card('t1')).getByRole('button', { name: 'Remove a vote from this ticket' }));
+      expect(lastWrite()?.tickets.find((t) => t.id === 't1')?.votes).toEqual([]);
+      expect(animations).toHaveLength(2);
+      const [out, home] = animations.splice(0);
+
+      // Home first, as in a browser. The token of the vote added still flies:
+      // the card stays held, and a vote the viewer casts from their other
+      // browser is not marked by the board meanwhile.
+      act(() => { home.onfinish?.(); });
+      serverSays(fromServer, 5, 0);
+      serverSays(fromServer, 6, 1);
+      expect(ring()).toBe(false);
+
+      // It lands on nothing: no ring, no bump.
+      act(() => { out.onfinish?.(); });
+      expect(document.querySelector('.fx-layer')).toBeNull();
+      expect(ring()).toBe(false);
+      expect(within(card('t1')).getByTestId('my-guided-votes').classList.contains('fx-bump')).toBe(false);
+
+      // Both tokens are in: the card is let go, and the next news is marked.
+      serverSays(fromServer, 7, 2);
+      expect(within(card('t1')).getByText('You gave it 2 votes')).toBeTruthy();
+      expect(ring()).toBe(true);
+    });
+
+    // The cell beside it: a vote taken back, then added again before the
+    // first token is home. The add's own token carries a vote that stays, and
+    // lands with its marks.
+    it('marks the vote added again while the one taken back flies home, where its own token lands', async () => {
+      allowMotion();
+      await renderSession(createSession({
+        tickets: [{ id: 't1', colId: 'col-1', text: 'Great teamwork', authorId: 'p1', groupId: null, votes: ['facilitator-1'] }],
+        groups: [],
+      }, { maxVotes: 6 }));
+      pastTheQuietSeconds();
+      await userEvent.click(within(card('t1')).getByRole('button', { name: 'Remove a vote from this ticket' }));
+      await userEvent.click(within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' }));
+      expect(lastWrite()?.tickets.find((t) => t.id === 't1')?.votes).toEqual(['facilitator-1']);
+      expect(animations).toHaveLength(2);
+      const [home, out] = animations.splice(0);
+      act(() => { home.onfinish?.(); });
+      expect(ring()).toBe(false);
+      act(() => { out.onfinish?.(); });
+      expect(ring()).toBe(true);
+    });
   });
 
   it('shakes the budget when a vote is refused for lack of votes, and sends nothing flying', async () => {
@@ -573,6 +630,32 @@ describe('Session — the vote’s flight', () => {
     pastTheQuietSeconds();
     await userEvent.click(within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' }));
     expect(document.querySelector('[data-vote-budget]')!.classList.contains('fx-nope')).toBe(false);
+  });
+
+  // Past three dots the pill draws one dot and the number, and the token
+  // lands on the number: it bumps there, once, with the ring. Its control
+  // bumped it in the vote's own commit too, as the token left, and the landing
+  // bumped it again; the dot's own spring always waited for the token.
+  it('bumps the count once, where the token lands, past three dots', async () => {
+    allowMotion();
+    await renderSession(createSession({
+      tickets: [{ id: 't1', colId: 'col-1', text: 'Great teamwork', authorId: 'p1', groupId: null, votes: ['facilitator-1', 'facilitator-1', 'facilitator-1'] }],
+      groups: [],
+    }, { maxVotes: 6 }));
+    pastTheQuietSeconds();
+    const count = () => within(card('t1')).getByTestId('my-guided-votes');
+    await userEvent.click(within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' }));
+    expect(within(card('t1')).getByText('You gave it 4 votes')).toBeTruthy();
+    expect(count().textContent).toBe('4');
+    expect(animations).toHaveLength(1);
+    // Nothing plays before the landing.
+    expect(count().classList.contains('fx-bump')).toBe(false);
+    expect(card('t1').classList.contains('fx-ring')).toBe(false);
+
+    land();
+    expect(document.querySelector('.fx-layer')).toBeNull();
+    expect(count().classList.contains('fx-bump')).toBe(true);
+    expect(card('t1').classList.contains('fx-ring')).toBe(true);
   });
 
   it('flies nothing past ten votes a person: the dot springs in place', async () => {

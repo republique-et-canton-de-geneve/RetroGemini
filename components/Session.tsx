@@ -613,6 +613,31 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (left > 0) flyingVotesRef.current.set(itemId, left);
       else flyingVotesRef.current.delete(itemId);
   };
+  // The votes added whose token is still on its way to each card or group,
+  // oldest first. A vote taken back meanwhile takes back the last of them —
+  // the dot it removes is the one that token flies to — so that token lands
+  // on nothing and plays no mark: a vote taken back flies home, and nothing
+  // rings for it. (The hold above is counted per item in both directions.)
+  const carriedVotesRef = useRef<Map<string, symbol[]>>(new Map());
+  const carryVote = (itemId: string): symbol => {
+      const vote = Symbol(itemId);
+      carriedVotesRef.current.set(itemId, [...(carriedVotesRef.current.get(itemId) ?? []), vote]);
+      return vote;
+  };
+  const takeBackCarriedVote = (itemId: string) => {
+      const left = (carriedVotesRef.current.get(itemId) ?? []).slice(0, -1);
+      if (left.length) carriedVotesRef.current.set(itemId, left);
+      else carriedVotesRef.current.delete(itemId);
+  };
+  /** A token has landed: whether the vote it carried still stands. */
+  const landCarriedVote = (itemId: string, vote: symbol): boolean => {
+      const carried = carriedVotesRef.current.get(itemId) ?? [];
+      if (!carried.includes(vote)) return false;
+      const left = carried.filter(other => other !== vote);
+      if (left.length) carriedVotesRef.current.set(itemId, left);
+      else carriedVotesRef.current.delete(itemId);
+      return true;
+  };
   // Decoration a click asked for, played once its write is drawn and before
   // it is painted: an effect class put on during the click would be wiped by
   // the class React writes in that commit, and the dot a vote adds can only be
@@ -621,24 +646,29 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   useLayoutEffect(() => {
       for (const play of afterDrawRef.current.splice(0)) play();
   }, [session]);
-  const flyVote = (itemId: string, out: boolean, from: DOMRect | null) => {
-      if (!out) {
+  // `vote` is the vote an out token carries (carryVote); a token home carries none.
+  const flyVote = (itemId: string, from: DOMRect | null, vote: symbol | null) => {
+      if (!vote) {
           fly(from, voteFlightHome(), { duration: FLIGHT_BACK_MS, onArrive: () => releaseVote(itemId) });
           return;
       }
       const target = voteTargetOf(document, itemId);
       const dot = target?.dot as HTMLElement | null | undefined;
+      // Its control marks the vote at once: it springs the dot in from no
+      // size at all, or past the dots it draws bumps the count. Both wait for
+      // the token and play where it lands (playLandedVote), once, and the dot
+      // is measured at its place.
       if (dot) {
-          // Its control springs it in at once, from no size at all: that waits
-          // for the token, and the dot is measured at its place.
           dot.classList.remove('fx-pop');
           dot.style.visibility = 'hidden';
+      } else {
+          target?.count?.classList.remove('fx-bump');
       }
       fly(from, dot ?? target?.count, {
           onArrive: () => {
               if (dot) dot.style.removeProperty('visibility');
               releaseVote(itemId);
-              playLandedVote(document, itemId);
+              if (landCarriedVote(itemId, vote)) playLandedVote(document, itemId);
           },
       });
   };
@@ -1623,9 +1653,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       if (!written) return;
       const after = mine(written);
       if (add ? after > before : after < before) {
+          // Taken back, flying home or not: the token of the vote it takes
+          // back, if one is still on its way, lands on nothing.
+          if (!add) takeBackCarriedVote(itemId);
           if (!flies) return;
           holdVote(itemId);
-          afterDrawRef.current.push(() => flyVote(itemId, add, from));
+          const vote = add ? carryVote(itemId) : null;
+          afterDrawRef.current.push(() => flyVote(itemId, from, vote));
       } else if (add && voteBudget(written.settings) - (votesCastByVoter(written).get(currentUser.id) ?? 0) <= 0) {
           shakeVoteBudget();
       }
