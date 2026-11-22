@@ -29,6 +29,30 @@ export interface RosterEntry {
 const nameKey = (name: string) => name.trim().toLowerCase();
 
 /**
+ * The people a session screen lists: the session's participants, the viewer
+ * added when the session does not list them yet, each id once and each name
+ * once (matched as above; the first one listed wins). It is the list the two
+ * session screens build (`getParticipants` in Session.tsx and
+ * HealthCheckSession.tsx). The board finds a card's author in it, and so does
+ * the Discuss topic the card becomes (`utils/cardHue.ts`), so both paint the
+ * card alike. Never mutates what it was given.
+ */
+export const sessionParticipants = (participants: readonly User[] | undefined, viewer: User): User[] => {
+  const roster = participants?.some(p => p.id === viewer.id) ? participants : [...(participants ?? []), viewer];
+  const listed: User[] = [];
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  for (const person of roster) {
+    const key = nameKey(person.name);
+    if (ids.has(person.id) || names.has(key)) continue;
+    ids.add(person.id);
+    names.add(key);
+    listed.push(person);
+  }
+  return listed;
+};
+
+/**
  * The participant list with the roster folded in, or `null` when the roster
  * changes nothing — the caller then must not write.
  *

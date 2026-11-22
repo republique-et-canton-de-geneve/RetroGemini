@@ -2,12 +2,14 @@ import React from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
 import { RetroSession, User } from '../../types';
 import { getTicketOriginColumn } from '../../utils/retroGrouping';
+import { cardHue } from '../../utils/cardHue';
 import { cardTones } from '../../utils/cardTones';
 import { columnHue } from '../../utils/columnHue';
 import { columnIconName } from '../iconPickerIcons';
 import ProposalActionRow from './ProposalActionRow';
 import ProposalNumber from './ProposalNumber';
 import { numberTopicProposals } from './proposalNumbering';
+import { sessionParticipants } from './sessionRoster';
 import TicketOriginBadge from './TicketOriginBadge';
 
 interface DiscussItem {
@@ -95,6 +97,8 @@ const DiscussPhase: React.FC<Props> = ({
   // Participants marked as having left are excluded from every counter:
   // they are no longer expected to vote or to weigh in "move on" totals.
   const leftSet = new Set(session.leftUsers ?? []);
+  // The people the board lists, where it finds a card's author.
+  const people = sessionParticipants(session.participants, currentUser);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-50">
@@ -141,12 +145,22 @@ const DiscussPhase: React.FC<Props> = ({
           // the card already renders, so nothing is added to the session state:
           // nothing to sync, nothing to restore after a reconnect.
           const myVotes = ((item.ref?.votes ?? []) as string[]).filter((voterId) => voterId === currentUser.id).length;
-          // The topic is a card of the board, and is painted the way the board
-          // paints one: a soft tint of its column's hue, the words in the dark
-          // ink (utils/cardTones.ts). The hue is the column's stored colour, or
-          // the one its classes name (utils/columnHue.ts); none gives the white
+          // The topic is a card of the board, painted as the board paints it:
+          // a soft tint of its hue, the words in the dark ink
+          // (utils/cardTones.ts). A card takes the board's hue
+          // (utils/cardHue.ts): the column it was written in first, or its
+          // author's tone on a board coloured by author, never in an anonymous
+          // session; every topic is read here. A group has many authors and no
+          // column of origin: it takes its column's hue. None gives the white
           // card.
-          const tones = cardTones(columnHue(itemColumn));
+          const tones = cardTones(item.type === 'ticket'
+            ? cardHue(item.ref, {
+              columns: session.columns,
+              settings: session.settings,
+              author: people.find((person) => person.id === item.ref.authorId),
+              readable: true
+            })
+            : columnHue(itemColumn));
           const isActive = activeDiscussTicket === item.id;
 
           return (

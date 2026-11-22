@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { memberJoinedChange, mergeRosterIntoParticipants, PARTICIPANT_COLOR_POOL } from '../components/session/sessionRoster';
+import { memberJoinedChange, mergeRosterIntoParticipants, PARTICIPANT_COLOR_POOL, sessionParticipants } from '../components/session/sessionRoster';
 import type { User } from '../types';
 
 /**
@@ -182,5 +182,46 @@ describe('memberJoinedChange', () => {
     expect(memberJoinedChange(undefined, { id: 'u-alice', name: 'Alice' }, [alice])?.participants).toEqual([
       { id: 'u-alice', name: 'Alice', color: 'bg-rose-500', role: 'participant' },
     ]);
+  });
+});
+
+// The list the session screens draw people from, and where the board and the
+// Discuss topic find a card's author (utils/cardHue.ts): one person per id and
+// per name, as `getParticipants` in Session.tsx and HealthCheckSession.tsx.
+describe('sessionParticipants', () => {
+  const claire: User = { id: 'u-claire', name: 'Claire', color: 'bg-indigo-500', role: 'participant' };
+
+  it('lists the session’s participants in their order, and the viewer last when it does not list them yet', () => {
+    expect(sessionParticipants([alice, bob], claire)).toEqual([alice, bob, claire]);
+  });
+
+  it('lists the viewer once, as the session holds them, when it does', () => {
+    const listedClaire = { ...claire, color: 'bg-lime-500' };
+    expect(sessionParticipants([listedClaire, alice], claire)).toEqual([listedClaire, alice]);
+  });
+
+  it('lists the viewer alone for a session with nobody yet', () => {
+    expect(sessionParticipants(undefined, claire)).toEqual([claire]);
+    expect(sessionParticipants([], claire)).toEqual([claire]);
+  });
+
+  it('lists each id once, the first entry kept', () => {
+    expect(sessionParticipants([alice, { ...alice, color: 'bg-lime-500' }, bob], bob)).toEqual([alice, bob]);
+  });
+
+  // The stated residual (AGENTS.md → *The presence panel merges participants
+  // by name*): two people whose names differ only in case are listed once.
+  it('lists each name once, matched trimmed and in any case, the first one listed kept', () => {
+    const alexUpper: User = { id: 'u-alex-1', name: 'Alex', color: 'bg-rose-500', role: 'participant' };
+    const alexLower: User = { id: 'u-alex-2', name: ' alex ', color: 'bg-cyan-500', role: 'participant' };
+    expect(sessionParticipants([alexUpper, alexLower, bob], bob)).toEqual([alexUpper, bob]);
+    // The viewer too, when someone listed before them has their name.
+    expect(sessionParticipants([alexUpper], alexLower)).toEqual([alexUpper]);
+  });
+
+  it('never mutates the participants it was given (they belong to the rendered state)', () => {
+    const participants = deepFreeze([alice, bob]);
+    expect(() => sessionParticipants(participants, claire)).not.toThrow();
+    expect(participants).toEqual([alice, bob]);
   });
 });

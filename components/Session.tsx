@@ -8,6 +8,7 @@ import { noteRevokedResponse } from '../services/sessionRevocation';
 import { syncService } from '../services/syncService';
 import InviteModal from './InviteModal';
 import { cardTones } from '../utils/cardTones';
+import { cardHue } from '../utils/cardHue';
 import { columnHue } from '../utils/columnHue';
 import { columnIconName } from './iconPickerIcons';
 import { randomId } from '../utils/randomId';
@@ -133,7 +134,7 @@ import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessi
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import SyncStalledBanner from './session/SyncStalledBanner';
 import { jiraLinkFields, sameJiraLink, withJiraLinkFrom } from './jira/jiraLinkMerge';
-import { avatarColorClasses, participantToneHex } from '../utils/participantColors';
+import { avatarColorClasses } from '../utils/participantColors';
 import Avatar from './common/Avatar';
 import AvatarPicker from './common/AvatarPicker';
 import AvatarDiscoveryHint from './common/AvatarDiscoveryHint';
@@ -3114,24 +3115,18 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           });
       };
 
-      // Color by author or topic. Never by author while the session is
-      // anonymous: each participant keeps one colour (the panel's avatars), so
-      // a card painted in its author's colour names its author.
-      const colorBy = session.settings.isAnonymous ? 'topic' : (session.settings.colorBy || 'topic');
-      const column = session.columns.find(c => c.id === t.colId);
       // Cross-column grouping keeps the ticket's origin visible: like a
       // physical post-it moved on a board, the card keeps the colour of the
       // column it was written in, and an explicit "from ..." chip names it.
       const originColumn = getTicketOriginColumn(t, session.columns);
-      const topicColumn = originColumn ?? column;
       // The card takes a soft tint of its hue and keeps the look's ink for
       // its words (utils/cardTones.ts: measured for any hex); its controls
-      // take the hue's own ink, which reads on the tint. A card hidden from
-      // its reader is tinted by its topic only: its author's tone would name
-      // who wrote it. No hue at all gives the white card.
-      const cardTonesOf = colorBy === 'author' && visible
-        ? (author ? cardTones(participantToneHex(author.color).pop) : null)
-        : cardTones(columnHue(topicColumn));
+      // take the hue's own ink, which reads on the tint. The hue is its
+      // topic's, or its author's tone on a board coloured by author: never in
+      // an anonymous session, nor on a card hidden from its reader, where the
+      // tone would name who wrote it (utils/cardHue.ts, which its Discuss
+      // topic and its comments follow too). No hue gives the white card.
+      const cardTonesOf = cardTones(cardHue(t, { columns: session.columns, settings: session.settings, author, readable: visible }));
       // What a control on the card is painted in: the hue's ink, inline, on a
       // tinted card; on the white card, its own classes.
       const controlInk = cardTonesOf ? { color: cardTonesOf.ink } : undefined;
@@ -4930,15 +4925,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         {focusedTicketId && (() => {
             const focusedTicket = session.tickets.find(t => t.id === focusedTicketId);
             if (!focusedTicket) return null;
-            // As on the card: never the author's colour in an anonymous session.
-            const colorBy = session.settings.isAnonymous ? 'topic' : (session.settings.colorBy || 'topic');
+            // The card as the board draws it (utils/cardHue.ts): its tint,
+            // under the look's ink. Its reader can read it: the dialog closes
+            // when its card is hidden.
             const focusedAuthor = participants.find(m => m.id === focusedTicket.authorId);
-            const focusedCol = getTicketOriginColumn(focusedTicket, session.columns)
-                ?? session.columns.find(c => c.id === focusedTicket.colId);
-            // The card as the board draws it: its tint, under the look's ink.
-            const modalTones = colorBy === 'author'
-                ? (focusedAuthor ? cardTones(participantToneHex(focusedAuthor.color).pop) : null)
-                : cardTones(columnHue(focusedCol));
+            const modalTones = cardTones(cardHue(focusedTicket, { columns: session.columns, settings: session.settings, author: focusedAuthor, readable: true }));
             const modalBgHex = modalTones?.tint ?? null;
             const modalTextColor = 'text-slate-900';
             return (
