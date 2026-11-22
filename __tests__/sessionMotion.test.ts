@@ -74,21 +74,24 @@ describe('diffSessionMotion', () => {
     });
 
     // A healed state, a restore or a reconnection after minutes away brings many
-    // cards in one write: a board that lights up everywhere says nothing.
-    it('animates no arrival when more cards than a burst come at once', () => {
+    // cards in one write: a board that lights up everywhere says nothing, and
+    // nothing that came with them moves either.
+    it('finds nothing at all when more cards than a burst come at once', () => {
       const many = Array.from({ length: MAX_CARD_BURST + 1 }, (_, i) => ticket(`n${i}`));
-      expect(diffSessionMotion(session(), session({ tickets: many }), me).arrivedCards).toEqual([]);
+      const voted = session({ tickets: [ticket('a')] });
+      expect(diffSessionMotion(voted, session({ tickets: [ticket('a', { votes: ['bo'] }), ...many] }), me)).toBe(NO_MOTION);
       expect(diffSessionMotion(session(), session({ tickets: many.slice(0, MAX_CARD_BURST) }), me).arrivedCards).toHaveLength(MAX_CARD_BURST);
     });
 
-    it('still flies my own card when a burst of others arrives with it', () => {
-      const many = Array.from({ length: MAX_CARD_BURST + 1 }, (_, i) => ticket(`n${i}`));
-      const motion = diffSessionMotion(session(), session({ tickets: [...many, ticket('mine', { authorId: 'me' })] }), {
-        viewerId: 'me',
-        ownPendingIds: new Set(['mine']),
-      });
+    // One rule, in one place: the cards this client just created count too.
+    it('counts my own new cards in a burst, and moves none of them then', () => {
+      const others = Array.from({ length: MAX_CARD_BURST }, (_, i) => ticket(`n${i}`));
+      const mine = { viewerId: 'me', ownPendingIds: new Set(['mine']) };
+      const myCard = ticket('mine', { authorId: 'me' });
+      expect(diffSessionMotion(session(), session({ tickets: [...others, myCard] }), mine)).toBe(NO_MOTION);
+      const motion = diffSessionMotion(session(), session({ tickets: [...others.slice(1), myCard] }), mine);
       expect(motion.ownCards).toEqual(['mine']);
-      expect(motion.arrivedCards).toEqual([]);
+      expect(motion.arrivedCards).toHaveLength(MAX_CARD_BURST - 1);
     });
   });
 

@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 import type { RetroSession } from '../../types';
 import { motionAllowed, playEffect } from '../common/motion/effects';
-import { MAX_CARD_BURST, NO_MOTION, diffSessionMotion, staggerDelays, type SessionMotion } from '../../utils/sessionMotion';
+import { NO_MOTION, diffSessionMotion, staggerDelays, type SessionMotion } from '../../utils/sessionMotion';
 
 /**
  * Plays the board's effects for what just happened in a session: a card that
@@ -254,17 +254,6 @@ export function playSessionMotion(
   }
 }
 
-/**
- * More new cards at once than a burst is not people writing (a healed state, a
- * restore, a return after minutes away): the diff already keeps those cards
- * still, and nothing else that came with them moves either.
- */
-const isBurst = (prev: RetroSession, next: RetroSession): boolean => {
-  if (!Array.isArray(next.tickets)) return false;
-  const known = new Set((Array.isArray(prev.tickets) ? prev.tickets : []).map((ticket) => ticket.id));
-  return next.tickets.filter((ticket) => !known.has(ticket.id)).length > MAX_CARD_BURST;
-};
-
 interface Shown {
   session: RetroSession | null;
   wasLive: boolean;
@@ -291,8 +280,10 @@ export function useSessionMotion({ session, viewerId, ownPendingIds, isLive, rea
     // Read before the comparison: a reader who wants no motion costs nothing.
     if (!motionAllowed()) return;
     try {
+      // A burst of new cards is no motion either (MAX_CARD_BURST, in the
+      // diff): a healed state, a restore, a return after minutes away.
       const motion = diffSessionMotion(prev, next, { viewerId, ownPendingIds: toSet(ownPendingIds()) });
-      if (motion === NO_MOTION || isBurst(prev, next)) return;
+      if (motion === NO_MOTION) return;
       playSessionMotion(root?.current ?? document, motion, prev, next, viewerId, heldVotes?.());
     } catch {
       // Decoration: a malformed state never breaks the screen.

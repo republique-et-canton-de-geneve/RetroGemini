@@ -19,8 +19,10 @@ import type { Group, RetroSession, Ticket } from '../types';
 const HIDING_PHASES: ReadonlySet<string> = new Set(['BRAINSTORM', 'OPEN_BOARD']);
 
 /**
- * More cards than this in one write is not people writing: a healed state, a
- * restore, a reconnection after minutes away. Nothing arrives then.
+ * More new cards than this in one write, one's own included, is not people
+ * writing: a healed state, a restore, a reconnection after minutes away.
+ * Nothing moves then — no card arrives, and nothing that came with them moves
+ * either.
  */
 export const MAX_CARD_BURST = 6;
 
@@ -94,9 +96,9 @@ export function diffSessionMotion(
   const before = new Map(prevTickets.map((ticket) => [ticket.id, ticket]));
 
   const fresh = nextTickets.filter((ticket) => !before.has(ticket.id));
+  if (fresh.length > MAX_CARD_BURST) return NO_MOTION;
   const ownCards = fresh.filter((ticket) => context.ownPendingIds.has(ticket.id)).map((ticket) => ticket.id);
-  const others = fresh.filter((ticket) => !context.ownPendingIds.has(ticket.id)).map((ticket) => ticket.id);
-  const arrivedCards = others.length > MAX_CARD_BURST ? [] : others;
+  const arrivedCards = fresh.filter((ticket) => !context.ownPendingIds.has(ticket.id)).map((ticket) => ticket.id);
 
   const wasHidden = !prev.settings?.revealBrainstorm;
   const isShown = !!next.settings?.revealBrainstorm;
