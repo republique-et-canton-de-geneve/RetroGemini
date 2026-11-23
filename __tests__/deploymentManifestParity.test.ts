@@ -718,11 +718,24 @@ describe('base deployment manifest (audit H7.1)', () => {
  *
  * The builder stage copies the whole context (`COPY . .`) and builds the
  * bundle there, and Tailwind's source scan reads every file of it that no
- * `.gitignore` names — the context has none, since `.dockerignore` drops it.
- * An agent's checkout under `.claude/worktrees/` (a whole copy of the
+ * `.gitignore` names. The root `.gitignore`, the one that names
+ * `.claude/worktrees/`, is not in the context (`.dockerignore` drops it, at
+ * the root only), and a worktree's own copy of it does not name the
+ * worktree's components. An agent's checkout there (a whole copy of the
  * repository, often an older one) therefore put its components' classes into
  * the bundle's CSS, and every checkout made the context larger (113 MB in the
- * checkout where it was found). CI builds from a clean checkout and never saw it.
+ * checkout where it was found). CI builds from a clean checkout and never saw
+ * it.
+ *
+ * `.gstack/` is left out for what it holds: gstack's state, with its
+ * browser's access token (`browse.json`), its cookies and storage when it
+ * keeps them (`session-state.json`), the logs of the pages and requests it
+ * made, and the probes and reports of `/qa` and `/review`. `COPY . .` put all
+ * of it in the builder stage's layer. Tailwind's scan skips the directory
+ * when it holds gstack's own `.gitignore` (`*`), which only the browser
+ * writes: the review tools keep `.gstack/tmp/` out of git through
+ * `.git/info/exclude`, which the context does not carry, so where only they
+ * ran, the classes their probes name reached the bundle's CSS too.
  */
 describe('Docker build context (.dockerignore)', () => {
   const leftOut = dockerContextExcludes(read('.dockerignore'));
@@ -770,6 +783,7 @@ describe('Docker build context (.dockerignore)', () => {
     ['node_modules', 'server/node_modules/x.js', false],
     ['.claude/', '.claude/worktrees/agent/components/Session.tsx', true], // a directory takes what it holds
     ['.claude/\n!.claude/settings.json', '.claude/settings.json', false],
+    ['.gitignore', '.gstack/.gitignore', false], // the root's alone: a directory's own copy stays
     ['**/*.test.*', '__tests__/x.test.ts', true],
     ['/dist/', 'dist/index.html', true],
   ])('reads %j as Docker does for %s (left out: %s)', (dockerignore, path, expected) => {
@@ -777,15 +791,31 @@ describe('Docker build context (.dockerignore)', () => {
   });
 
   it("leaves the agents' working directories out of it", () => {
-    const agentFiles = [
+    // Claude Code's settings and agents' checkouts of the repository, often
+    // older ones, whose components Tailwind's scan reads.
+    const claudeFiles = [
       '.claude/worktrees/agent-a1b2c3/components/Session.tsx',
       '.claude/worktrees/agent-a1b2c3/index.css',
       '.claude/settings.json',
-      '.gstack/qa/probe.spec.ts',
+    ];
+    // gstack's state, every file of it and not only its probes: its browser's
+    // access token, cookies and storage, the logs of the pages and requests it
+    // made, and the probes and reports of /qa and /review.
+    const gstackFiles = [
+      '.gstack/browse.json',
+      '.gstack/session-state.json',
+      '.gstack/browse-network.log',
+      '.gstack/browse-audit.jsonl',
+      '.gstack/qa-reports/qa-report-localhost-2026-11-23.md',
+      '.gstack/tmp/qa-reports/run-20261123T000000Z/probe.mjs',
     ];
     expect(
-      agentFiles.filter((path) => !leftOut(path)),
-      "these reach the builder's COPY . ., where Tailwind's scan reads them: an agent's stale components would put their classes into the bundle",
+      claudeFiles.filter((path) => !leftOut(path)),
+      "these reach the builder's COPY . ., where Tailwind's scan reads a stale checkout's components and puts their classes into the bundle",
+    ).toEqual([]);
+    expect(
+      gstackFiles.filter((path) => !leftOut(path)),
+      "these reach the builder's COPY . ., which keeps gstack's browser credentials, its logs and its probes in that stage's layer",
     ).toEqual([]);
   });
 

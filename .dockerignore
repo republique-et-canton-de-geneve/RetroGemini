@@ -16,11 +16,16 @@ build
 !CHANGELOG.md
 !CHANGELOG.fr.md
 
-# AI agents' working directories: .claude/worktrees/ holds whole checkouts of
-# the repository, .gstack/ the probe scripts of /qa and /review, and the image
-# needs neither. The builder copies the whole context (COPY . .) and Tailwind's
-# scan reads every file there (this file drops .gitignore), so a stale checkout
-# would put its components' classes into the bundle.
+# AI agents' working directories, which the image needs none of. The builder
+# copies the whole context (COPY . .):
+# - .claude/worktrees/ holds whole checkouts of the repository, often older
+#   ones, and Tailwind's scan there would read their components: this file
+#   drops the .gitignore that names them, at the root only, and a checkout's
+#   own copy of it does not name its own components.
+# - .gstack/ is gstack's state: its browser's access token, cookies and
+#   storage, the logs of the pages and requests it made, and the probes of /qa
+#   and /review. Left out, none of it is sent to the builder or kept in the
+#   builder stage's layer.
 .claude/
 .gstack/
 
