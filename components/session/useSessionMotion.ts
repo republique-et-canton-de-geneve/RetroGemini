@@ -38,13 +38,13 @@ export const MOTION_HOOKS = Object.freeze({
   voteCount: 'data-vote-count',
 });
 
-/** A card's words, inside its root (kept on that element: tests and the reveal read it). */
-export const CARD_TEXT_SELECTOR = '.whitespace-pre-wrap';
+/** A card's words, inside its root (the class is kept on that element: the reveal and the tests read it). */
+const CARD_TEXT_SELECTOR = '.whitespace-pre-wrap';
 
 /** How long the board stays quiet after the viewer's connection comes back (ms): the panel's seconds too. */
 export const RECONNECT_QUIET_MS = QUIET_AFTER_LIVE_MS;
 /** Hidden cards being shown start this far apart (ms)... */
-export const REVEAL_STEP_MS = 80;
+const REVEAL_STEP_MS = 80;
 /** ...and the last one starts within this (ms). */
 export const REVEAL_CAP_MS = 600;
 /**
@@ -215,8 +215,8 @@ export function voteTargetOf(root: Document | Element, itemId: string): { item: 
   return { item, count, dot: last && !last.textContent ? last : null };
 }
 
-/** Puts each effect of `motion` on its element under `root`. Exported for the tests. */
-export function playSessionMotion(
+/** Puts each effect of `motion` on its element under `root`. */
+function playSessionMotion(
   root: Document | Element,
   motion: SessionMotion,
   prev: RetroSession,
