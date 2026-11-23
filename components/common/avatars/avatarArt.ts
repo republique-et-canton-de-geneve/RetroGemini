@@ -8,7 +8,8 @@
 // This file was first written by a script from the designer's SVG files and is
 // now the source. To add or change a picture, edit its shapes here, with the
 // closed vocabulary __tests__/avatarArt.test.tsx checks (tags, classes,
-// attributes). A new picture also needs its id in utils/avatars.js (the list
+// attributes). A new picture also needs its id in its family below (the
+// families are this file's one list of ids), in utils/avatars.js (the list
 // the server accepts: a new id ships in two releases, see AGENTS.md) and its
 // name in i18n/locales/{en,fr}/avatars.ts.
 
@@ -41,137 +42,7 @@ export interface AvatarShape {
   readonly children?: readonly AvatarShape[];
 }
 
-export const AVATAR_ART_IDS = [
-  // animals
-  'fox',
-  'owl',
-  'cat',
-  'whale',
-  'frog',
-  'bee',
-  'bear',
-  'penguin',
-  'rabbit',
-  'turtle',
-  'octopus',
-  'hedgehog',
-  'koala',
-  'snail',
-  'ladybug',
-  'fish',
-  'duck',
-  'crab',
-  'butterfly',
-  'bat',
-  // monsters
-  'bubble',
-  'cobble',
-  'pointy',
-  'spinner',
-  'eureka',
-  'puddle',
-  'quirky',
-  'zigzag',
-  'gizmo',
-  'periscope',
-  'long-ears',
-  'comma',
-  'tickles',
-  'tandem',
-  'wide-angle',
-  'pompom',
-  'tuft',
-  'leggy',
-  'toffee',
-  'little-bridge',
-  // objects
-  'sticky-note',
-  'mug',
-  'light-bulb',
-  'rocket',
-  'cactus',
-  'pencil',
-  'cloud',
-  'star',
-  'book',
-  'alarm-clock',
-  'seedling',
-  'paper-plane',
-  'magnet',
-  'key',
-  'umbrella',
-  'balloon',
-  'flask',
-  'kite',
-  'puzzle-piece',
-  'lightning',
-  // shapes
-  'sun',
-  'arch',
-  'waves',
-  'grid',
-  'spiral',
-  'peaks',
-  'petals',
-  'cube',
-  'drop',
-  'hourglass',
-  'orbit',
-  'stairs',
-  'leaf',
-  'diamond',
-  'loop',
-  'cairn',
-  'fan',
-  'overlap',
-  'seesaw',
-  'lifebuoy',
-  // nature
-  'moon',
-  'comet',
-  'snowflake',
-  'tornado',
-  'snowman',
-  'thermometer',
-  'volcano',
-  'campfire',
-  'crystal',
-  'fir-tree',
-  'mushroom',
-  'acorn',
-  'log',
-  'tulip',
-  'water-lily',
-  'cherries',
-  'island',
-  'seashell',
-  'sailboat',
-  'lighthouse',
-  // games
-  'dice',
-  'pawn',
-  'domino',
-  'knight',
-  'rook',
-  'brick',
-  'gamepad',
-  'joystick',
-  'bowling-pin',
-  'paddle',
-  'shuttlecock',
-  'boomerang',
-  'basketball-hoop',
-  'curling-stone',
-  'whistle',
-  'medal',
-  'trophy',
-  'jersey',
-  'jack-in-the-box',
-  'roller-skate',
-] as const;
-
-export type AvatarArtId = (typeof AVATAR_ART_IDS)[number];
-
+/** The six families in the order the picker shows them: the one list of ids of this file. */
 export const AVATAR_FAMILIES = [
   { id: 'animals', avatars: ['fox', 'owl', 'cat', 'whale', 'frog', 'bee', 'bear', 'penguin', 'rabbit', 'turtle', 'octopus', 'hedgehog', 'koala', 'snail', 'ladybug', 'fish', 'duck', 'crab', 'butterfly', 'bat'] },
   { id: 'monsters', avatars: ['bubble', 'cobble', 'pointy', 'spinner', 'eureka', 'puddle', 'quirky', 'zigzag', 'gizmo', 'periscope', 'long-ears', 'comma', 'tickles', 'tandem', 'wide-angle', 'pompom', 'tuft', 'leggy', 'toffee', 'little-bridge'] },
@@ -179,9 +50,19 @@ export const AVATAR_FAMILIES = [
   { id: 'shapes', avatars: ['sun', 'arch', 'waves', 'grid', 'spiral', 'peaks', 'petals', 'cube', 'drop', 'hourglass', 'orbit', 'stairs', 'leaf', 'diamond', 'loop', 'cairn', 'fan', 'overlap', 'seesaw', 'lifebuoy'] },
   { id: 'nature', avatars: ['moon', 'comet', 'snowflake', 'tornado', 'snowman', 'thermometer', 'volcano', 'campfire', 'crystal', 'fir-tree', 'mushroom', 'acorn', 'log', 'tulip', 'water-lily', 'cherries', 'island', 'seashell', 'sailboat', 'lighthouse'] },
   { id: 'games', avatars: ['dice', 'pawn', 'domino', 'knight', 'rook', 'brick', 'gamepad', 'joystick', 'bowling-pin', 'paddle', 'shuttlecock', 'boomerang', 'basketball-hoop', 'curling-stone', 'whistle', 'medal', 'trophy', 'jersey', 'jack-in-the-box', 'roller-skate'] },
-] as const satisfies readonly { id: string; avatars: readonly AvatarArtId[] }[];
+] as const satisfies readonly { id: string; avatars: readonly string[] }[];
 
 export type AvatarFamilyId = (typeof AVATAR_FAMILIES)[number]['id'];
+
+/**
+ * An avatar id, read from the families. AVATAR_NAME_KEYS and AVATAR_ART are
+ * keyed by it, so tsc refuses a family's id that has no name or no picture,
+ * and a name or picture whose id no family holds.
+ */
+export type AvatarArtId = (typeof AVATAR_FAMILIES)[number]['avatars'][number];
+
+/** Every avatar id, family by family. */
+export const AVATAR_ART_IDS: readonly AvatarArtId[] = AVATAR_FAMILIES.flatMap((family) => family.avatars);
 
 /** The message key of each avatar's name: literal keys, so t() never receives a string built from data. */
 export const AVATAR_NAME_KEYS = {

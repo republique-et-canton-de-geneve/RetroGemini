@@ -1,6 +1,7 @@
 import React from 'react';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
+import ts from 'typescript';
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import AvatarArt from '../components/common/avatars/AvatarArt';
@@ -61,7 +62,27 @@ describe('avatar art data', () => {
     expect(new Set(AVATAR_ART_IDS).size).toBe(120);
     expect(AVATAR_FAMILIES.map(f => f.id)).toEqual(['animals', 'monsters', 'objects', 'shapes', 'nature', 'games']);
     for (const family of AVATAR_FAMILIES) expect(family.avatars, family.id).toHaveLength(20);
-    expect(AVATAR_FAMILIES.flatMap(f => f.avatars)).toEqual([...AVATAR_ART_IDS]);
+  });
+
+  // The families are the one list of ids: the id list and its type are read
+  // from them. A second list written out beside them is a second source that
+  // the next edit of a family has to repeat, and tsc then reports a missing
+  // key far from the cause. Read with the TypeScript parser: every array
+  // literal of the file made of ids only is a family's own list.
+  it('writes the ids once, in their families', () => {
+    const path = resolve(__dirname, '../components/common/avatars/avatarArt.ts');
+    const file = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const known = new Set<string>(AVATAR_ART_IDS);
+    const lists: string[][] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isArrayLiteralExpression(node) && node.elements.length > 0) {
+        const ids = node.elements.filter(ts.isStringLiteral).map((element) => element.text);
+        if (ids.length === node.elements.length && ids.every((id) => known.has(id))) lists.push(ids);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+    expect(lists).toEqual(AVATAR_FAMILIES.map((family) => [...family.avatars]));
   });
 
   it('draws every id, and no id it does not list', () => {
