@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
+import { dockerContextExcludes } from './helpers/dockerignore';
 
 /**
  * Audit H7 / H16 — the deployment surfaces must agree with each other and with
@@ -699,6 +700,102 @@ describe('base deployment manifest (audit H7.1)', () => {
   // real guaranteed share. The cluster's OpenShift administrators specify 1m and
   // report that it works, so the manifest keeps 1m and the theory loses — a test
   // must not encode an opinion the people running the cluster have overruled.
+});
+
+/**
+ * What `docker build .` sends, read from `.dockerignore` the way Docker reads
+ * it (`helpers/dockerignore.ts`): every pattern is anchored at the root and the
+ * last one that matches decides, so the file's text alone misleads.
+ *
+ * The builder stage copies the whole context (`COPY . .`) and builds the
+ * bundle there, and Tailwind's source scan reads every file of it that no
+ * `.gitignore` names — the context has none, since `.dockerignore` drops it.
+ * An agent's checkout under `.claude/worktrees/` (a whole copy of the
+ * repository, often an older one) therefore put its components' classes into
+ * the bundle's CSS, and every checkout made the context larger (113 MB in the
+ * checkout where it was found). CI builds from a clean checkout and never saw it.
+ */
+describe('Docker build context (.dockerignore)', () => {
+  const leftOut = dockerContextExcludes(read('.dockerignore'));
+  const dockerfile = read('Dockerfile');
+
+  /**
+   * The paths the Dockerfile's `COPY`s read from the context: every operand but
+   * the last (the destination) of every `COPY` without `--from`, which reads a
+   * stage instead. `.` is the builder's whole context.
+   */
+  const contextSources = dockerfile
+    .split('\n')
+    .filter((line) => /^COPY\s/.test(line))
+    .map((line) => line.trim().split(/\s+/).slice(1))
+    .filter((args) => !args.some((arg) => arg.startsWith('--from=')))
+    .flatMap((args) => args.filter((arg) => !arg.startsWith('--')).slice(0, -1));
+
+  /** A source's files: a glob at the root expanded, a directory walked, none when it is missing. */
+  const filesOf = (source: string): string[] => {
+    if (/[*?]/.test(source)) {
+      expect(source, 'a COPY glob below the root, which this reader does not expand').not.toContain('/');
+      const pattern = source
+        .replace(/[.+^$(){}|\\]/g, (char) => `\\${char}`)
+        .replace(/\*/g, '[^/]*')
+        .replace(/\?/g, '[^/]');
+      const glob = new RegExp(`^${pattern}$`);
+      return readdirSync(repoRoot).filter((entry) => glob.test(entry));
+    }
+    const absolute = join(repoRoot, source);
+    if (!existsSync(absolute)) return [];
+    if (!statSync(absolute).isDirectory()) return [source];
+    return (readdirSync(absolute, { recursive: true }) as string[])
+      .map((entry) => `${source}/${entry}`)
+      .filter((path) => statSync(join(repoRoot, path)).isFile());
+  };
+
+  // Each answer was checked against Docker's own matcher
+  // (github.com/moby/patternmatcher v0.6.0) when this table was written: it
+  // holds the helper to the rules the assertions below rely on.
+  it.each([
+    ['*.md\n!CHANGELOG.md', 'CHANGELOG.md', false],
+    ['*.md\n!CHANGELOG.md', 'AGENTS.md', true],
+    ['!CHANGELOG.md\n*.md', 'CHANGELOG.md', true], // the last pattern that matches decides
+    ['*.md', 'docs/guide.md', false], // anchored at the root
+    ['node_modules', 'server/node_modules/x.js', false],
+    ['.claude/', '.claude/worktrees/agent/components/Session.tsx', true], // a directory takes what it holds
+    ['.claude/\n!.claude/settings.json', '.claude/settings.json', false],
+    ['**/*.test.*', '__tests__/x.test.ts', true],
+    ['/dist/', 'dist/index.html', true],
+  ])('reads %j as Docker does for %s (left out: %s)', (dockerignore, path, expected) => {
+    expect(dockerContextExcludes(dockerignore)(path)).toBe(expected);
+  });
+
+  it("leaves the agents' working directories out of it", () => {
+    const agentFiles = [
+      '.claude/worktrees/agent-a1b2c3/components/Session.tsx',
+      '.claude/worktrees/agent-a1b2c3/index.css',
+      '.claude/settings.json',
+      '.gstack/qa/probe.spec.ts',
+    ];
+    expect(
+      agentFiles.filter((path) => !leftOut(path)),
+      "these reach the builder's COPY . ., where Tailwind's scan reads them: an agent's stale components would put their classes into the bundle",
+    ).toEqual([]);
+  });
+
+  it('keeps every file the image copies from it', () => {
+    const sources = contextSources.filter((source) => source !== '.');
+    // AGENTS.md → *Files to Include in Docker*: the version API, both "What's
+    // New" files and the server, beside everything else the stages copy.
+    expect(sources).toEqual(expect.arrayContaining(['VERSION', 'CHANGELOG.md', 'CHANGELOG.fr.md', 'server.js']));
+    const files = sources.flatMap((source) => {
+      const found = filesOf(source);
+      expect(found, `COPY ${source} finds nothing in the repository, and fails the build`).not.toEqual([]);
+      return found;
+    });
+    expect(files.filter(leftOut), 'files the image copies but .dockerignore leaves out of the context').toEqual([]);
+    // dist/ never comes from the context: the builder builds it, with its
+    // precompressed files and its manifest, and the runtime stage takes it there.
+    expect(dockerfile).toMatch(/^RUN npm run build$/m);
+    expect(dockerfile).toMatch(/^COPY --from=builder \/app\/dist \.\/dist$/m);
+  });
 });
 
 describe('opt-in OpenShift trusted CA configuration', () => {
