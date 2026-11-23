@@ -103,7 +103,6 @@ describe('ticket comments dialog', () => {
         onDeleteComment={vi.fn()}
         onClose={vi.fn()}
         cardBgHex={null}
-        cardTextColor="text-slate-900"
         isAnonymous={false}
         {...props}
       />,
@@ -164,13 +163,13 @@ describe('ticket comments dialog', () => {
     expect(field.className).toMatch(/focus:ring-4/);
   });
 
-  it('the card on top reads in the colours the board passes, a tint of any column colour', () => {
+  it('the card on top reads on the tint the board passes, of any column colour', () => {
     const ink = parsedColor('slate-900').toHexString();
     expect(ink.toLowerCase()).toBe(CARD_INK);
     for (const hex of ['#16a34a', '#dc2626', '#2563eb', '#facc15', '#7c3aed', '#64748b']) {
       const tones = cardTones(hex);
       expect(tones).not.toBeNull();
-      const { unmount } = renderModal({ cardBgHex: tones!.tint, cardTextColor: 'text-slate-900' });
+      const { unmount } = renderModal({ cardBgHex: tones!.tint });
       const text = screen.getByText('Deploys are scary');
       expect(text.className).toContain('text-slate-900');
       const header = text.closest('[style]') as HTMLElement;

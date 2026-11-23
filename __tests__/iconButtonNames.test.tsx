@@ -313,7 +313,6 @@ describe('H52 — the computed accessible name, in a rendered component', () => 
         onDeleteComment={vi.fn()}
         onClose={vi.fn()}
         cardBgHex={null}
-        cardTextColor="#0f172a"
         isAnonymous={false}
       />,
     );

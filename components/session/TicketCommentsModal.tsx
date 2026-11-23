@@ -15,8 +15,8 @@ interface Props {
   onEditComment: (ticketId: string, commentId: string, text: string) => void;
   onDeleteComment: (ticketId: string, commentId: string) => void;
   onClose: () => void;
+  /** The card's tint as the board paints it (`cardTones(...).tint`), or null for a card with no hue. */
   cardBgHex: string | null;
-  cardTextColor: string;
   isAnonymous: boolean;
   /** The picture to draw for a person (`sessionAvatarOf`: none in an anonymous session). */
   avatarIdOf?: (memberId: string) => string | null;
@@ -34,7 +34,6 @@ const TicketCommentsModal: React.FC<Props> = ({
   onDeleteComment,
   onClose,
   cardBgHex,
-  cardTextColor,
   isAnonymous,
   avatarIdOf = NO_AVATAR,
 }) => {
@@ -94,21 +93,21 @@ const TicketCommentsModal: React.FC<Props> = ({
       panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden"
     >
       <>
-        {/* The card the comments are about, in its own colours: the board
-            passes its background and the class of its words, whatever the
-            card looks like (a light tint today), so nothing here assumes a
-            saturated or a light background. */}
+        {/* The card the comments are about, as the board paints it: its tint
+            under the card's ink (slate-900, `CARD_INK`), or the panel's grey
+            for a card with no hue. On the tint, the close button and the
+            author's name take the card's ink too. */}
         <div
           className={`px-5 pt-4 pb-3 border-b border-slate-200 ${!cardBgHex ? 'bg-slate-50' : ''}`}
           style={cardBgHex ? { backgroundColor: cardBgHex } : undefined}
         >
           <div className="flex items-start justify-between gap-3">
-            <div className={`text-sm leading-relaxed font-medium whitespace-pre-wrap wrap-break-word flex-1 min-w-0 pt-1 ${cardBgHex ? cardTextColor : 'text-slate-900'}`}>
+            <div className="text-sm leading-relaxed font-medium whitespace-pre-wrap wrap-break-word flex-1 min-w-0 pt-1 text-slate-900">
               {ticket.text}
             </div>
             <button
               onClick={onClose}
-              className={`-mr-1.5 w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-900/5 transition shrink-0 ${cardBgHex ? cardTextColor : 'text-slate-600'}`}
+              className={`-mr-1.5 w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-900/5 transition shrink-0 ${cardBgHex ? 'text-slate-900' : 'text-slate-600'}`}
               title={t('session.comments.closeTitle')}
               aria-label={t('session.comments.closeAria')}
             >
@@ -122,7 +121,7 @@ const TicketCommentsModal: React.FC<Props> = ({
               <span className="flex shrink-0">
                 <Avatar colorClasses={avatarColorClasses(author.color)} initials={author.name.substring(0, 2).toUpperCase()} size={24} avatarId={avatarIdOf(author.id)} />
               </span>
-              <span className={cardBgHex ? cardTextColor : 'text-slate-600'}>{author.name}</span>
+              <span className={cardBgHex ? 'text-slate-900' : 'text-slate-600'}>{author.name}</span>
             </div>
           )}
         </div>

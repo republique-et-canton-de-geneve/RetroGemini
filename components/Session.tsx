@@ -4950,7 +4950,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             const focusedAuthor = participants.find(m => m.id === focusedTicket.authorId);
             const modalTones = cardTones(cardHue(focusedTicket, { columns: session.columns, settings: session.settings, author: focusedAuthor, readable: true }));
             const modalBgHex = modalTones?.tint ?? null;
-            const modalTextColor = 'text-slate-900';
             return (
                 <TicketCommentsModal
                     ticket={focusedTicket}
@@ -4962,7 +4961,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                     onDeleteComment={handleDeleteComment}
                     onClose={() => setFocusedTicketId(null)}
                     cardBgHex={modalBgHex}
-                    cardTextColor={modalTextColor}
                     isAnonymous={session.settings.isAnonymous}
                     avatarIdOf={ownAvatar.avatarIdOf}
                 />

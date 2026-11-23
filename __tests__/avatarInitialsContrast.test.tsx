@@ -341,7 +341,6 @@ describe('ticket comments dialog avatars', () => {
         onDeleteComment={vi.fn()}
         onClose={vi.fn()}
         cardBgHex={null}
-        cardTextColor="text-slate-900"
         isAnonymous={false}
       />,
     );
