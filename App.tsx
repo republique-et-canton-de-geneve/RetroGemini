@@ -12,7 +12,7 @@ import AppHeader from './components/AppHeader';
 import DashboardRevokedBanner from './components/dashboard/DashboardRevokedBanner';
 import { useTranslation } from './i18n/I18nContext';
 import { isSessionInProgress } from './utils/sessionStatus';
-import { memberAvatar, memberAvatarId } from './utils/avatars.js';
+import { memberAvatar, memberAvatarId, mergeMemberAvatars } from './utils/avatars.js';
 import { isSessionRevoked, newerToken, onSessionRevokedChange, onSessionTokenChanged } from './services/sessionRevocation';
 import type { Notice } from './i18n/notice';
 
@@ -476,12 +476,14 @@ const App: React.FC = () => {
     setCurrentTeam((open) => (open?.id === copy.id ? copy : open));
   }, []);
 
-  // The avatar map the server answered after a pick, on a new team object so
-  // every screen holding the team draws it (the header, the Members tab, a
-  // session). Only onto the team still open: an answer arriving after a
-  // sign-out opens nothing.
+  // The avatar map a pick answered, merged member by member into the open
+  // team's (the newer entry of each: the team on screen may have been read
+  // after that pick's write, by a refresh answered first), on a new team
+  // object so every screen holding the team draws it (the header, the
+  // Members tab, a session). Only onto the team still open: an answer
+  // arriving after a sign-out opens nothing.
   const showTeamAvatars = useCallback((teamId: string, memberAvatars: Record<string, MemberAvatarChoice>) => {
-    setCurrentTeam((open) => (open?.id === teamId ? { ...open, memberAvatars } : open));
+    setCurrentTeam((open) => (open?.id === teamId ? { ...open, memberAvatars: mergeMemberAvatars(open, memberAvatars) } : open));
   }, []);
 
   // Decision D3b: the team's password was changed and this client's token is

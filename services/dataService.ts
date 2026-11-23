@@ -5,7 +5,7 @@ import { randomId } from '../utils/randomId';
 import { BOARD_START_SETTINGS, CARD_AND_VOTE_START_SETTINGS, OPEN_BOARD_PHASE } from '../utils/openBoard';
 import { PARTICIPANT_PALETTE } from '../utils/participantColors';
 import { isJiraIssueKey, isJiraIssueTypeId, isJiraLinked, isJiraParentScope, isJiraUncertain } from '../utils/jira.js';
-import { isAvatarId } from '../utils/avatars.js';
+import { isAvatarId, mergeMemberAvatars } from '../utils/avatars.js';
 import {
   DEFAULT_TIMER_SECONDS,
   createTimerSettings,
@@ -2593,10 +2593,14 @@ export const dataService = {
    * while the route's own refusals are final (`AVATAR_FINAL_REFUSALS`).
    * Not queued behind the session saves: it writes a key nothing else writes.
    *
-   * The cached team's `memberAvatars` is then replaced by the answer, as a new
-   * object. Nothing is written onto a cached member row, and the roster is
-   * never posted: `/members` replaces the rows wholesale, so a field there
-   * would ride, and be lost by, every roster post.
+   * The answer is then merged into the cached team's `memberAvatars`, member
+   * by member (`mergeMemberAvatars`: the newer entry of each), as a new
+   * object, and that merged map is what it resolves with: the answer is the
+   * map as the route stored it at this pick's write, and a refresh answered
+   * before it may hold a later choice of another member. Nothing is written
+   * onto a cached member row, and the roster is never posted: `/members`
+   * replaces the rows wholesale, so a field there would ride, and be lost by,
+   * every roster post.
    */
   setMemberAvatar: async (
     memberId: string,
@@ -2625,10 +2629,11 @@ export const dataService = {
     if (!answered || typeof answered !== 'object' || Array.isArray(answered)) {
       return { ...(current?.memberAvatars ?? {}) };
     }
-    const map = { ...(answered as Record<string, MemberAvatarChoice>) };
     // Signed out, or another team logged in, while the write ran: the answer
-    // is not this cache's.
-    if (current && current.id === teamId) current.memberAvatars = map;
+    // is not this cache's, and goes back as it came.
+    if (!current || current.id !== teamId) return { ...(answered as Record<string, MemberAvatarChoice>) };
+    const map = mergeMemberAvatars(current, answered);
+    current.memberAvatars = map;
     return { ...map };
   },
 

@@ -177,6 +177,35 @@ export const memberAvatarEntries = (team) => {
   return entries;
 };
 
+// A choice's date when two copies of one member's choice are compared: the
+// date itself, but the largest a number counts exactly ranks below every
+// other. It has no next one, so the route dates the pick that replaces it by
+// its clock alone, and the copy that carries that pick is the newer word.
+const choiceRank = (at) => (isAvatarTime(at + 1) ? at : -1);
+
+/**
+ * The team's map with `answered`, a map the avatar route answered, merged
+ * into it member by member: for each member the newer of the two valid
+ * entries (`memberAvatarEntries`), the answered one on a tie, and a member
+ * only one side holds is kept. The answer is the map as the route stored it
+ * at that pick's write, while the team may have been read later (a refresh
+ * answered first) and hold a later choice of another member: taken whole,
+ * the answer put that member back to their older choice until the next
+ * refresh. A new object; the team and its map are left as they were.
+ *
+ * @param {unknown} team
+ * @param {unknown} answered
+ * @returns {Record<string, { id: string | null, at: number }>}
+ */
+export const mergeMemberAvatars = (team, answered) => {
+  const merged = new Map(memberAvatarEntries(team));
+  for (const [memberId, entry] of memberAvatarEntries({ memberAvatars: answered })) {
+    const kept = merged.get(memberId);
+    if (!kept || choiceRank(entry.at) >= choiceRank(kept.at)) merged.set(memberId, entry);
+  }
+  return Object.fromEntries(merged);
+};
+
 /**
  * The ids on the team's two roster lists, `members` and `archivedMembers`: an
  * id held by a row that is an object (not an array) with a string `id`. What

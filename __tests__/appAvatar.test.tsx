@@ -147,6 +147,24 @@ describe('App — an avatar picked from the dashboard', () => {
     expect(team).not.toHaveProperty('memberAvatars');
   });
 
+  // The answer is the map as the route stored it at this pick's write. The
+  // team on screen may hold a later choice of another member (a refresh
+  // answered first): App merges the answer into it, member by member, the
+  // newer entry of each, rather than taking it whole.
+  it("keeps another member's newer choice the open team holds when the pick's answer is older", async () => {
+    vi.mocked(dataService.getTeam).mockReturnValue({ ...team, memberAvatars: { 'fac-1': { id: 'owl', at: 100 }, m2: { id: 'moon', at: 2000 } } });
+    vi.mocked(dataService.setMemberAvatar).mockResolvedValue({ 'fac-1': { id: 'cat', at: 500 }, m2: { id: 'bee', at: 50 } });
+    await openDashboard();
+
+    pickCat();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Fran, choose my avatar' }).querySelector('[data-avatar-art="cat"]')).not.toBeNull());
+    expect(JSON.parse(screen.getByTestId('dashboard-stub').getAttribute('data-avatars')!)).toEqual({
+      'fac-1': { id: 'cat', at: 500 },
+      m2: { id: 'moon', at: 2000 }
+    });
+  });
+
   it('opens nothing when the answer arrives after a sign-out', async () => {
     let answer: (map: Record<string, MemberAvatarChoice>) => void = () => {};
     vi.mocked(dataService.setMemberAvatar).mockImplementationOnce(

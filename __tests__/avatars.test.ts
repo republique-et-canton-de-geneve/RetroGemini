@@ -10,6 +10,7 @@ import {
   memberAvatar,
   memberAvatarEntries,
   memberAvatarId,
+  mergeMemberAvatars,
   rosterIds,
   toAvatarId
 } from '../utils/avatars.js';
@@ -269,5 +270,51 @@ describe('rosterIds', () => {
     expect(rosterIds(null).size).toBe(0);
     expect(rosterIds('team').size).toBe(0);
     expect(rosterIds({ id: 't1' }).size).toBe(0);
+  });
+});
+
+// A pick's answer is the map as the route stored it at that pick's write. A
+// copy of the team read later (a refresh answered first) can hold a later
+// choice of another member: taken whole, the answer put that member back to
+// their older choice on that browser until its next refresh.
+describe('mergeMemberAvatars', () => {
+  const team = (memberAvatars: unknown) => ({ id: 't1', memberAvatars });
+
+  it("keeps each member's newer entry, the answered one on a tie, and a member only one side holds", () => {
+    const cached = team({ ada: { id: 'owl', at: 2000 }, bob: { id: 'fox', at: 100 }, cy: { id: 'cat', at: 10 } });
+    const answered = { ada: { id: 'cat', at: 500 }, bob: { id: 'bee', at: 900 }, cy: { id: 'moon', at: 10 }, dee: { id: null, at: 40 } };
+    expect(mergeMemberAvatars(cached, answered)).toEqual({
+      ada: { id: 'owl', at: 2000 },
+      bob: { id: 'bee', at: 900 },
+      cy: { id: 'moon', at: 10 },
+      dee: { id: null, at: 40 }
+    });
+  });
+
+  // The route dates a pick by its clock alone after the largest date, which
+  // has no next one: the answer that carries that pick is the newer word,
+  // though its date is the smaller.
+  it('ranks the largest date below every other, as the route replaces it', () => {
+    expect(mergeMemberAvatars(team({ ada: { id: 'owl', at: Number.MAX_SAFE_INTEGER } }), { ada: { id: 'fox', at: 1234 } }))
+      .toEqual({ ada: { id: 'fox', at: 1234 } });
+    expect(mergeMemberAvatars(team({ ada: { id: 'fox', at: 1234 } }), { ada: { id: 'owl', at: Number.MAX_SAFE_INTEGER } }))
+      .toEqual({ ada: { id: 'fox', at: 1234 } });
+  });
+
+  it('leaves out what is no stored choice on either side, and answers a new object', () => {
+    const map = { ada: { id: 'fox', at: 1 }, junk: 'fox', 'with space': { id: 'owl', at: 1 } };
+    const cached = team(map);
+    const merged = mergeMemberAvatars(cached, { bob: { id: 'owl' }, cy: { id: 'cat', at: 1e300 }, dee: { id: 'bee', at: 3 } });
+    expect(merged).toEqual({ ada: { id: 'fox', at: 1 }, dee: { id: 'bee', at: 3 } });
+    expect(merged).not.toBe(map);
+    expect(cached.memberAvatars).toBe(map);
+    expect(map).toEqual({ ada: { id: 'fox', at: 1 }, junk: 'fox', 'with space': { id: 'owl', at: 1 } });
+  });
+
+  it('reads a missing team or map, or an answer that is no map, as empty', () => {
+    expect(mergeMemberAvatars(null, { ada: { id: 'fox', at: 1 } })).toEqual({ ada: { id: 'fox', at: 1 } });
+    expect(mergeMemberAvatars(team(undefined), { ada: { id: 'fox', at: 1 } })).toEqual({ ada: { id: 'fox', at: 1 } });
+    expect(mergeMemberAvatars(team({ ada: { id: 'fox', at: 1 } }), ['fox'])).toEqual({ ada: { id: 'fox', at: 1 } });
+    expect(mergeMemberAvatars(team({ ada: { id: 'fox', at: 1 } }), null)).toEqual({ ada: { id: 'fox', at: 1 } });
   });
 });

@@ -5,10 +5,11 @@ import { createTranslator } from '../i18n/translate';
 
 /**
  * `dataService.setMemberAvatar` (AGENTS.md, *Avatars*): one awaited write
- * through the avatar route, then the cached team's map replaced by the one
- * the server answered. It never posts the roster, and never writes onto a
- * cached member row: those rows are replaced wholesale by roster posts, and a
- * field there would ride every one of them.
+ * through the avatar route, then the map the server answered merged into the
+ * cached team's, member by member (the newer entry of each). It never posts
+ * the roster, and never writes onto a cached member row: those rows are
+ * replaced wholesale by roster posts, and a field there would ride every one
+ * of them.
  */
 
 let sequence = 0;
@@ -98,7 +99,7 @@ describe('dataService.setMemberAvatar', () => {
     expect(avatarCalls()[0].body).not.toHaveProperty('sessionId');
   });
 
-  it('replaces the cached map with the answer, as a new object, and never touches a member row', async () => {
+  it('puts the answered map on the cache, as a new object, and never touches a member row', async () => {
     const team = await createTeam();
     const cached = dataService.getTeam(team.id)!;
     const rowsBefore = structuredClone(cached.members);
@@ -112,6 +113,54 @@ describe('dataService.setMemberAvatar', () => {
     expect(after.memberAvatars).not.toBe(mapBefore);
     expect(after.members).toEqual(rowsBefore);
     expect(after.members.every(member => !('avatar' in member))).toBe(true);
+  });
+
+  // The answer is the map as the route stored it at this pick's write. A
+  // refresh that read the team later, and was answered first, holds a choice
+  // another member made in between: the late answer must not take it back.
+  it("keeps a newer choice that a refresh brought in while the pick's answer was on its way", async () => {
+    const team = await createTeam();
+    // The server at the pick's write: another member chose a cat before.
+    mockTeam.memberAvatars = { m2: { id: 'cat', at: 500 } };
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const answer = global.fetch as unknown as (url: string, options?: { body?: string }) => Promise<unknown>;
+    global.fetch = vi.fn(async (url: string, options?: { body?: string }) => {
+      // Built at the write, delivered late.
+      const response = await answer(url, options);
+      if (/\/member\/avatar$/.test(url.toString())) await gate;
+      return response;
+    }) as unknown as typeof fetch;
+
+    const pending = dataService.setMemberAvatar('admin-1', 'fox');
+    await flush();
+    // That member picks an owl after this pick's write, and a refresh reads it.
+    mockTeam.memberAvatars = { ...mockTeam.memberAvatars, m2: { id: 'owl', at: 2000 } };
+    respond = (url) => url === `/api/team/${team.id}` ? { ok: true, status: 200, body: { team: structuredClone(mockTeam) } } : null;
+    await dataService.refreshFromServer();
+    const refreshed = { m2: { id: 'owl', at: 2000 }, 'admin-1': { id: 'fox', at: 1234 } };
+    expect(dataService.getTeam(team.id)!.memberAvatars).toEqual(refreshed);
+
+    release();
+    const answered = await pending;
+
+    expect(dataService.getTeam(team.id)!.memberAvatars).toEqual(refreshed);
+    // What the screens are handed, and App puts on the team it shows.
+    expect(answered).toEqual(refreshed);
+  });
+
+  // The route dates a pick by its clock alone after the largest date, which
+  // has no next one: its answer is the newer word there, though its date is
+  // the smaller. Kept as the newer, the cached date hid the pick for good,
+  // and a session entered next got the older picture written over it.
+  it("shows the pick over a cached choice dated the largest date, which the route's clock replaced", async () => {
+    const team = await createTeam();
+    dataService.getTeam(team.id)!.memberAvatars = { 'admin-1': { id: 'owl', at: Number.MAX_SAFE_INTEGER } };
+
+    const answered = await dataService.setMemberAvatar('admin-1', 'fox');
+
+    expect(dataService.getTeam(team.id)!.memberAvatars).toEqual({ 'admin-1': { id: 'fox', at: 1234 } });
+    expect(answered).toEqual({ 'admin-1': { id: 'fox', at: 1234 } });
   });
 
   // The write is awaited, so the screen can go while it runs. Its answer is
