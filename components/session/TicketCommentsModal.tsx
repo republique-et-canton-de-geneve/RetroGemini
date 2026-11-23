@@ -93,10 +93,12 @@ const TicketCommentsModal: React.FC<Props> = ({
       panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden"
     >
       <>
-        {/* The card the comments are about, as the board paints it: its tint
-            under the card's ink (slate-900, `CARD_INK`), or the panel's grey
-            for a card with no hue. On the tint, the close button and the
-            author's name take the card's ink too. */}
+        {/* The card the comments are about, on the tint the board paints it
+            (`cardBgHex`), under the card's ink (slate-900, `CARD_INK`). A card
+            with no hue, which the board paints white, stands here on the
+            dialog's own grey (slate-50) instead. On the tint, the close button
+            and the author's name take the card's ink too; on the grey, they
+            are slate-600. */}
         <div
           className={`px-5 pt-4 pb-3 border-b border-slate-200 ${!cardBgHex ? 'bg-slate-50' : ''}`}
           style={cardBgHex ? { backgroundColor: cardBgHex } : undefined}

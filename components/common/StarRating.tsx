@@ -26,8 +26,12 @@ import React, { useId } from 'react';
  * A filled star is solid; an empty one is an outline. That keeps the two states
  * distinguishable without relying on colour (WCAG 1.4.1), which matters here
  * because no amber dark enough to read as gold clears 3:1 against the pale grey
- * a "not filled" star wants to be. Callers pair the stars with the score or the
- * label in text as well. The outline itself is slate-400, the lightest grey
+ * a "not filled" star wants to be. Where the stars give a score or a scale,
+ * callers say it in text as well: the score beside a rollup's stars, the
+ * scale's word under the rating's choices, "Favourites" beside the heading's
+ * star. The login screen's favourite toggle draws its star alone, so its shape
+ * is the only drawing of the state, which assistive technology reads from the
+ * switch's `aria-checked`. The outline itself is slate-400, the lightest grey
  * that draws an edge at 3:1 on white and on the results' amber chip
  * (`__tests__/phaseScreensLook.test.tsx`).
  */
