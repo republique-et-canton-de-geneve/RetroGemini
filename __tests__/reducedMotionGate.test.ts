@@ -35,18 +35,25 @@ const walk = (dir: string, out: string[] = []): string[] => {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) walk(path, out);
-    else if (/\.tsx?$/.test(name)) out.push(path);
+    else if (/\.(?:tsx?|js)$/.test(name)) out.push(path);
   }
   return out;
 };
 
 const SOURCES = [...walk(join(ROOT, 'components')), join(ROOT, 'App.tsx')];
-/** Every file of the application that could scroll a page: the components, and the code they call. */
+/**
+ * Every file of the application that could scroll a page: the components, and
+ * the code they call, the `.js` rules of `utils/` (shared with the server)
+ * included.
+ */
 const APP_SOURCES = [...SOURCES, join(ROOT, 'index.tsx'), ...walk(join(ROOT, 'utils')), ...walk(join(ROOT, 'services'))];
 const CSS = readFileSync(join(ROOT, 'index.css'), 'utf8');
 
+const scriptKind = (file: string): ts.ScriptKind =>
+  file.endsWith('.tsx') ? ts.ScriptKind.TSX : file.endsWith('.js') ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+
 const parse = (file: string, text: string) =>
-  ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file));
 
 const isText = (node: ts.Node): node is ts.StringLiteral | ts.NoSubstitutionTemplateLiteral =>
   ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node);
@@ -167,11 +174,19 @@ const unaskedSmoothScrolls = (file: string, text: string): number[] => {
   return lines;
 };
 
-/** Tailwind's `scroll-smooth` (`scroll-behavior: smooth`), when no reader's setting stops it. */
+/**
+ * The classes that set `scroll-behavior: smooth`: Tailwind's utility, and the
+ * same property written as an arbitrary one. Named from parts, as the probes
+ * below are: Tailwind scans this file, and a class written whole here would
+ * add a rule to the build.
+ */
+const SMOOTH_SCROLL_UTILITIES = [['scroll', 'smooth'].join('-'), `[${['scroll-behavior', 'smooth'].join(':')}]`];
+
+/** The classes of a list that scroll smoothly when no reader's setting stops them. */
 const ungatedSmoothScrollClasses = (text: string): string[] =>
   tokens(text).filter((token) => {
     const { variants, utility } = parts(token);
-    return utility === 'scroll-smooth' && !gated(variants);
+    return SMOOTH_SCROLL_UTILITIES.includes(utility) && !gated(variants);
   });
 
 // Tailwind 4's property lists (node_modules/tailwindcss/dist/lib.js).
@@ -402,6 +417,19 @@ describe('nothing animates for a reader who asked for less motion', () => {
     expect(smoothScrollRules(CSS)).toEqual([]);
   });
 
+  it('reads every module of the screens and of the code they call, the .js rules included', () => {
+    const everyFile = (dir: string): string[] =>
+      readdirSync(dir).flatMap((name) => {
+        const path = join(dir, name);
+        return statSync(path).isDirectory() ? everyFile(path) : [path];
+      });
+    const modules = ['components', 'utils', 'services']
+      .flatMap((dir) => everyFile(join(ROOT, dir)))
+      .filter((file) => /\.[cm]?[jt]sx?$/.test(file));
+    expect(modules.some((file) => file.endsWith('.js'))).toBe(true);
+    expect(modules.filter((file) => !APP_SOURCES.includes(file)).map((file) => relative(ROOT, file))).toEqual([]);
+  });
+
   it('reads a smooth scroll that does not ask the reader, whatever it is given to, and leaves one that does', () => {
     const asking = [
       "el.scrollIntoView({ behavior: motionAllowed() ? 'smooth' : 'auto', block: 'center' });",
@@ -419,8 +447,13 @@ describe('nothing animates for a reader who asked for less motion', () => {
       "// 'smooth', in a comment",
     ].join('\n');
     expect(unaskedSmoothScrolls('Probe.tsx', unasked)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-    expect(ungatedSmoothScrollClasses('overflow-y-auto scroll-smooth md:scroll-smooth')).toEqual(['scroll-smooth', 'md:scroll-smooth']);
-    expect(ungatedSmoothScrollClasses('motion-safe:scroll-smooth scroll-auto')).toEqual([]);
+    // Built from parts: Tailwind scans this file, and a class written whole
+    // here would add a rule to the build.
+    const smooth = ['scroll', 'smooth'].join('-');
+    const instant = ['scroll', 'auto'].join('-');
+    const arbitrary = `[${['scroll-behavior', 'smooth'].join(':')}]`;
+    expect(ungatedSmoothScrollClasses(`overflow-y-auto ${smooth} md:${smooth} md:${arbitrary}`)).toEqual([smooth, `md:${smooth}`, `md:${arbitrary}`]);
+    expect(ungatedSmoothScrollClasses(`motion-safe:${smooth} motion-safe:${arbitrary} ${instant}`)).toEqual([]);
     const css = [
       'html { scroll-behavior: smooth; }',
       '@media (prefers-reduced-motion: no-preference) { .list { scroll-behavior: smooth; } }',
