@@ -724,6 +724,17 @@ describe('nextMemberAvatars', () => {
     expect(nextMemberAvatars(team, 'b', 'owl', 10, { max: 2 })).toEqual({ a: { id: 'fox', at: 3 }, b: { id: 'owl', at: 10 } });
   });
 
+  // The member just written can be off both roster lists (a stale roster
+  // post dropped their row for a while): off-roster entries go first, but
+  // never the one this pick wrote.
+  it('past the cap never drops the entry just written, a member off the roster included', () => {
+    const team = {
+      members: [{ id: 'r1' }, { id: 'r2' }],
+      memberAvatars: { r1: { id: 'fox', at: 1 }, r2: { id: 'owl', at: 2 } }
+    };
+    expect(nextMemberAvatars(team, 'gone', 'cat', 10, { max: 2 })).toEqual({ r2: { id: 'owl', at: 2 }, gone: { id: 'cat', at: 10 } });
+  });
+
   it('counts the archived roster as roster', () => {
     const team = {
       members: [{ id: 'a' }],
