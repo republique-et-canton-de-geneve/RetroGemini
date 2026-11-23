@@ -19,11 +19,11 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * The number of warnings this repository currently tolerates. Lower it whenever
  * the count drops — never raise it without saying why in the pull request.
  *
- * Current composition (2026-11-20): **77 pre-existing** — 11 no-explicit-any,
+ * Current composition (2026-11-23): **77 pre-existing** — 11 no-explicit-any,
  * 16 no-unused-vars, 14 no-non-null-assertion, 14 react-hooks/exhaustive-deps,
- * 14 no-console, 7 no-alert, 1 unattributed — plus **15 accessibility**
- * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 7
- * click-events-have-key-events, 7 no-static-element-interactions, 1
+ * 14 no-console, 7 no-alert, 1 unattributed — plus **11 accessibility**
+ * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 5
+ * click-events-have-key-events, 5 no-static-element-interactions, 1
  * media-has-caption.
  *
  * Lot L23 took 46 out of this budget, and the two halves left different
@@ -72,7 +72,10 @@ import { evaluateLintBudget } from './lintBudget.mjs';
 // 94 -> 92: the login screen's favourite star was a `span role="switch"`
 // inside the team's button, which no Tab reached (click-events-have-key-events
 // and interactive-supports-focus); it is a button of its own beside it.
-const BUDGET = 92;
+// 92 -> 88: the participants count in both session headers was a clickable
+// `<div>` (click-events-have-key-events and no-static-element-interactions
+// each); it is a status now, and the panel's rail opens the panel.
+const BUDGET = 88;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);
