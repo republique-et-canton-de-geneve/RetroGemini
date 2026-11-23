@@ -3410,6 +3410,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                             key={emoji}
                             data-testid="ticket-reaction"
                             data-reaction={emoji}
+                            // It toggles the viewer's own reaction: pressed is
+                            // said as a state, not by the brand tint alone.
+                            aria-pressed={users.includes(currentUser.id)}
                             onClick={(e) => {
                                 e.stopPropagation();
                                 updateSession(s => {
