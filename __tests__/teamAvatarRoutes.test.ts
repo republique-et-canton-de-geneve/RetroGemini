@@ -186,19 +186,54 @@ describe('POST /api/team/:teamId/member/avatar', () => {
     expect(stored().memberAvatars!.p1.at).toBeGreaterThan(first);
   });
 
-  it('writes nothing when the choice is the stored one, or a clear of nothing', async () => {
+  it('writes nothing when the choice is the stored one, a clear of a cleared choice included', async () => {
     await pick({ memberId: 'p1', avatar: 'fox' });
     const writes = dataStore.control.writes;
     const map = structuredClone(stored().memberAvatars);
 
     const same = await pick({ memberId: 'p1', avatar: 'fox' });
-    const clearNothing = await pick({ memberId: facilitatorId, avatar: null });
-
     expect(same.status).toBe(200);
     expect(await same.json()).toEqual({ success: true, memberAvatars: map });
-    expect(clearNothing.status).toBe(200);
     expect(dataStore.control.writes).toBe(writes);
     expect(stored().memberAvatars).toEqual(map);
+
+    expect((await pick({ memberId: 'p1', avatar: null })).status).toBe(200);
+    const cleared = structuredClone(stored().memberAvatars);
+    const clearAgain = await pick({ memberId: 'p1', avatar: null });
+    expect(clearAgain.status).toBe(200);
+    expect(await clearAgain.json()).toEqual({ success: true, memberAvatars: cleared });
+    expect(dataStore.control.writes).toBe(writes + 1);
+    expect(stored().memberAvatars).toEqual(cleared);
+  });
+
+  // "My initials" picked by someone who never chose is a choice like any
+  // other (SECURITY.md: a later choice of the person replaces a picture
+  // another client planted on their session entry, any choice). Read as
+  // "nothing to change", it wrote nothing and stamped no session: the planted
+  // picture kept showing while the picker said Saved.
+  it('stores a first clear as a dated entry, like any choice, and stamps it into the session', async () => {
+    const before = Date.now();
+    const writes = dataStore.control.writes;
+
+    const res = await pick({ memberId: facilitatorId, avatar: null, sessionId: 'retro-1' });
+
+    expect(res.status).toBe(200);
+    expect(dataStore.control.writes).toBe(writes + 1);
+    const entry = stored().memberAvatars![facilitatorId];
+    expect(entry).toEqual({ id: null, at: expect.any(Number) });
+    expect(entry.at).toBeGreaterThanOrEqual(before);
+    const body = await res.json();
+    expect(body).toEqual({ success: true, memberAvatars: { [facilitatorId]: entry } });
+    // What every browser of the team reads as a choice made (App's
+    // hasAvatarChoice, hasOwnAvatarChoice): the one-time hint stops in all of them.
+    expect(memberAvatar({ memberAvatars: body.memberAvatars }, facilitatorId)).toEqual(entry);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(liveSessionPatch).toHaveBeenCalledTimes(1);
+    const [{ sessionId, mutate }] = liveSessionPatch.mock.calls[0];
+    expect(sessionId).toBe('retro-1');
+    const planted = { id: 'retro-1', teamId, participants: [{ id: facilitatorId, name: 'Fac', avatar: 'owl', avatarAt: 1 }] };
+    expect(mutate(planted).participants[0]).toEqual({ id: facilitatorId, name: 'Fac', avatar: null, avatarAt: entry.at });
   });
 
   it.each([
@@ -568,8 +603,9 @@ describe('nextMemberAvatars', () => {
     const now = 1_795_000_000_000;
     const team = { memberAvatars: { p1: { id: 'owl', at: 1e300 }, p2: { id: 'cat', at: 2 ** 53 }, p3: { id: 'bee', at: 7 } } };
     expect(nextMemberAvatars(team, 'p1', 'fox', now)).toEqual({ p3: { id: 'bee', at: 7 }, p1: { id: 'fox', at: now } });
-    // The junk entry is no choice: choosing "none" over it changes nothing.
-    expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'owl', at: 1e300 } } }, 'p1', null, now)).toBeNull();
+    // The junk entry is no choice: "none" over it is a first clear, stored
+    // dated by the clock, and the junk goes with the write.
+    expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'owl', at: 1e300 } } }, 'p1', null, now)).toEqual({ p1: { id: null, at: now } });
   });
 
   it('dates a pick by the clock when the stored date is the largest one, which has no next', () => {
@@ -589,10 +625,25 @@ describe('nextMemberAvatars', () => {
     expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'owl', at: ahead } } }, 'p1', 'fox', now)).toEqual({ p1: { id: 'fox', at: ahead + 1 } });
   });
 
-  it('answers null when nothing changes', () => {
+  it('answers null when nothing changes: a repeat of the stored choice, a clear of a cleared one', () => {
     expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'fox', at: 1 } } }, 'p1', 'fox', 10)).toBeNull();
-    expect(nextMemberAvatars({}, 'p1', null, 10)).toBeNull();
     expect(nextMemberAvatars({ memberAvatars: { p1: { id: null, at: 1 } } }, 'p1', null, 10)).toBeNull();
+  });
+
+  it('stores a first clear, with nothing stored before it, dated like any choice', () => {
+    expect(nextMemberAvatars({}, 'p1', null, 10)).toEqual({ p1: { id: null, at: 10 } });
+    expect(nextMemberAvatars({ memberAvatars: { p2: { id: 'owl', at: 1 } } }, 'p1', null, 10))
+      .toEqual({ p2: { id: 'owl', at: 1 }, p1: { id: null, at: 10 } });
+  });
+
+  // A first clear now takes a place in the map, so it counts toward the bound
+  // like any choice: past it, an off-roster entry goes, never the clear.
+  it('counts a first clear toward the cap: past it, the oldest off-roster entry goes, never the clear', () => {
+    const team = {
+      members: [{ id: 'a' }, { id: 'b' }],
+      memberAvatars: { gone: { id: 'fox', at: 5 }, b: { id: 'fox', at: 1 } }
+    };
+    expect(nextMemberAvatars(team, 'a', null, 10, { max: 2 })).toEqual({ b: { id: 'fox', at: 1 }, a: { id: null, at: 10 } });
   });
 
   it('answers a new map, never the stored object', () => {

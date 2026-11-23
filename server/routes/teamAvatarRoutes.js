@@ -17,7 +17,10 @@ import { NO_OP_LIVE_SESSION_PATCH } from '../services/liveSessionRename.js';
  * holding an old copy of the team never pushes an old choice back, and two
  * browsers of one person write the same value, so the session copies need no
  * own-change ledger slice. A clear is stored as `{ id: null, at }` rather than
- * removed, so it too is newer than every copy of the choice it replaces.
+ * removed, so it too is newer than every copy of the choice it replaces. So
+ * is a first clear, with nothing stored before it: a session entry is data
+ * any client writes, and may show a picture the person never chose, which
+ * "my initials" must replace there like any choice (SECURITY.md).
  */
 
 // Far more people than any team has: a bound on what one credential can make
@@ -54,8 +57,10 @@ const validEntriesOf = (team) => {
 
 /**
  * The map after `memberId` chose `avatar` (an id, or `null` for none) at
- * `now`, or `null` when that is the stored choice already. Pure: it runs
- * inside the team's update, under the row lock.
+ * `now`, or `null` when that is the stored choice already: a repeat of the
+ * stored picture, or a clear of a cleared one. A first clear (nothing stored,
+ * or an entry that is not one) is a choice like any other, written dated.
+ * Pure: it runs inside the team's update, under the row lock.
  *
  * Bounded by `max`: past it, entries for ids on neither roster list go first,
  * then the oldest of the rest, never the one just written. An off-roster
@@ -64,7 +69,7 @@ const validEntriesOf = (team) => {
  */
 const nextMemberAvatars = (team, memberId, avatar, now, { max = MEMBER_AVATARS_MAX } = {}) => {
   const current = memberAvatar(team, memberId);
-  if (current ? current.id === avatar : avatar === null) return null;
+  if (current && current.id === avatar) return null;
 
   const entries = validEntriesOf(team);
   entries.delete(memberId);

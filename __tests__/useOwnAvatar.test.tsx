@@ -2,7 +2,8 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { dataService } from '../services/dataService';
 import { SERVER_STAMP_WAIT_MS, useOwnAvatar } from '../components/session/useOwnAvatar';
-import type { Team, User } from '../types';
+import { nextMemberAvatars } from '../server/routes/teamAvatarRoutes.js';
+import type { MemberAvatarChoice, Team, User } from '../types';
 
 /**
  * The own entry the viewer's client writes on entering a session (AGENTS.md, *Avatars*):
@@ -23,17 +24,27 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// A pick answered by the route's own rule (server/routes/teamAvatarRoutes.js):
+// the map it stores at `at`, or the stored one when it writes nothing.
+const answerAsTheRoute = (stored: Team, at: number) =>
+  async (memberId: string, avatar: string | null): Promise<Record<string, MemberAvatarChoice>> =>
+    nextMemberAvatars(stored, memberId, avatar, at) ?? { ...(stored.memberAvatars ?? {}) };
+
 // Whether the viewer has ever used the picker, for the one-time avatar hint
 // (hasOwnAvatarChoice): the screens read it here, never off an entry.
 describe('useOwnAvatar, whether the viewer has a choice', () => {
   const none = { ...team, memberAvatars: {} } as unknown as Team;
   const plain = { id: 's1', participants: [{ ...me }] };
 
-  it("turns true once a pick's answered map reaches the team, a cleared choice included", async () => {
-    const answered = { ada: { id: null, at: 300 } };
-    vi.spyOn(dataService, 'setMemberAvatar').mockResolvedValue(answered);
+  // "My initials" picked by someone who never chose is stored like any
+  // choice, so every browser of the person reads it, and none shows the hint
+  // again: it is decided at the screen's first render.
+  it("turns true once a pick's answered map reaches the team, a first clear included, and is true in another browser", async () => {
+    vi.spyOn(dataService, 'setMemberAvatar').mockImplementation(answerAsTheRoute(none, 300));
+    let answered: Record<string, MemberAvatarChoice> = {};
     const view = renderHook((props: { team: Team }) => useOwnAvatar({
       session: plain, team: props.team, currentUser: me, updateSession: vi.fn(), canWrite: true,
+      onTeamAvatars: (_teamId, map) => { answered = map; },
     }), { initialProps: { team: none } });
     expect(view.result.current.hasChoice).toBe(false);
     await act(async () => { await view.result.current.pick(null); });
@@ -41,6 +52,12 @@ describe('useOwnAvatar, whether the viewer has a choice', () => {
     view.rerender({ team: { ...none, memberAvatars: answered } as unknown as Team });
     expect(view.result.current.hasChoice).toBe(true);
     view.unmount();
+
+    const elsewhere = renderHook(() => useOwnAvatar({
+      session: plain, team: { ...none, memberAvatars: answered } as unknown as Team, currentUser: me, updateSession: vi.fn(), canWrite: true,
+    }));
+    expect(elsewhere.result.current.hasChoice).toBe(true);
+    elsewhere.unmount();
   });
 
   it("is true for a pick made in another browser that reached the session's entry first", () => {
@@ -229,6 +246,47 @@ describe('useOwnAvatar, the own entry', () => {
       act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS * 3); });
       expect(updateSession).not.toHaveBeenCalled();
       expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
+  // A participant entry is data every client of the session writes: another
+  // client can plant a picture on the viewer's own entry before the viewer
+  // ever chose. "My initials" then has to replace it like any choice, here
+  // at once (drawn, and marked in the picker) and for the room through the
+  // server's stamp, which is waited for. Read by the route as "nothing to
+  // change", the clear stored nothing: the planted picture stayed drawn and
+  // marked, and nothing was ever written over it.
+  describe('after a first clear made in the session', () => {
+    it('draws and marks the initials over a picture planted on the entry, and writes the entry once the wait is over', async () => {
+      vi.useFakeTimers();
+      const none = { ...team, memberAvatars: {} } as unknown as Team;
+      const planted = { id: 's1', participants: [{ ...me, avatar: 'owl', avatarAt: 50 }] };
+      vi.spyOn(dataService, 'setMemberAvatar').mockImplementation(answerAsTheRoute(none, 300));
+      const updateSession = vi.fn<(updater: (s: typeof planted) => void) => unknown>(() => planted);
+      let answered: Record<string, MemberAvatarChoice> = {};
+      const view = renderHook((props: { team: Team }) => useOwnAvatar({
+        session: planted, team: props.team, currentUser: me, updateSession, canWrite: true,
+        onTeamAvatars: (_teamId, map) => { answered = map; },
+      }), { initialProps: { team: none } });
+      expect(view.result.current.avatarIdOf('ada')).toBe('owl');
+      expect(view.result.current.currentChoice).toBe('owl');
+
+      await act(async () => { await view.result.current.pick(null); });
+      expect(dataService.setMemberAvatar).toHaveBeenCalledWith('ada', null, 's1');
+      view.rerender({ team: { ...none, memberAvatars: answered } as unknown as Team });
+
+      expect(view.result.current.avatarIdOf('ada')).toBeNull();
+      expect(view.result.current.currentChoice).toBeNull();
+      // The server stamps the session the clear was made in: its stamp is waited for.
+      expect(updateSession).not.toHaveBeenCalled();
+      act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS); });
+      expect(updateSession).toHaveBeenCalledTimes(1);
+      const draft = structuredClone(planted);
+      updateSession.mock.calls[0][0](draft);
+      expect(draft.participants[0]).toMatchObject({ id: 'ada', avatar: null, avatarAt: 300 });
+
+      view.unmount();
+      act(() => { vi.runOnlyPendingTimers(); });
     });
   });
 });
