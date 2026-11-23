@@ -2062,9 +2062,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 getFilteredFeedbacks().map((feedback) => (
                   <div
                     key={feedback.id}
-                    className={`${CARD} p-5 sm:p-6 ${
-                      !feedback.isRead ? 'border-l-4 border-l-indigo-600' : ''
-                    }`}
+                    className={`${CARD} p-5 sm:p-6`}
                   >
                     <div className="flex justify-between items-start mb-3">
                       <div className="flex flex-wrap items-center gap-2">

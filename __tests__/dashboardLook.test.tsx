@@ -439,6 +439,19 @@ describe('the Feedback Hub, measured', () => {
     for (const chip of screen.getAllByText('My Team', { selector: 'span' })) measured(chip);
   });
 
+  // The chip says it in words. The left stripe beside it was decoration: it
+  // curved at both corners of the look's card and pushed that card's content
+  // right of its neighbours'.
+  it("marks the viewer's own team's feedback with its chip alone, no stripe", async () => {
+    renderHub();
+    const card = async (title: string) => (await screen.findByText(title)).closest('[data-feedback-id]') as HTMLElement;
+    const own = await card('Pending bug');
+    expect(within(own).getByText('My Team', { selector: 'span' })).toBeInTheDocument();
+    for (const each of [own, await card('Started feature')]) {
+      expect(each.className.split(/\s+/).filter((token) => /^border-l-/.test(token))).toEqual([]);
+    }
+  });
+
   it('reads a comment on its grey and an administrator’s on its amber', async () => {
     renderHub();
     const card = (await screen.findByText('Rejected bug')).closest('div[class*="bg-white"]') as HTMLElement;

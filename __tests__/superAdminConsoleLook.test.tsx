@@ -261,6 +261,19 @@ describe('the console in the dashboard vocabulary', () => {
     }
   });
 
+  // As on the Feedback Hub: the "New" chip says it in words, and no left
+  // stripe draws it a second time on the card's curved edge.
+  it('marks an unread feedback with its chip alone, no stripe', async () => {
+    await renderConsole();
+    await openTab(/^Feedback \(4\)/);
+    const unread = (await screen.findByRole('heading', { name: 'Feedback f1' })).parentElement!;
+    expect(within(unread).getByText('New')).toBeInTheDocument();
+    for (const id of ['f1', 'f2', 'f3', 'f4']) {
+      const card = screen.getByRole('heading', { name: `Feedback ${id}` }).parentElement!;
+      expect(card.className.split(/\s+/).filter((token) => /^border-l-/.test(token)), id).toEqual([]);
+    }
+  });
+
   it('measures the live sessions', async () => {
     await renderConsole();
     await openTab(/^Live Sessions/);

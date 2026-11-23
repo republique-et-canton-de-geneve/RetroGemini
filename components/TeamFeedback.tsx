@@ -760,9 +760,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
             </div>
           ) : (
             filteredFeedbacks.map((feedback) => (
-              <div key={feedback.id} data-feedback-id={feedback.id} className={`${CARD} p-5 sm:p-6 ${
-                feedback.teamId === teamId ? 'border-l-4 border-l-indigo-600' : ''
-              }`}>
+              <div key={feedback.id} data-feedback-id={feedback.id} className={`${CARD} p-5 sm:p-6`}>
                 <div className="flex flex-wrap justify-between items-start gap-x-4 gap-y-2 mb-3">
                   <div className="flex items-center gap-2 flex-wrap">
                     {getTypeBadge(feedback.type)}
