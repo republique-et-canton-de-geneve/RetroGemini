@@ -104,7 +104,7 @@ const KNOWN_TOKENS = [...themeColors().keys()].sort((a, b) => b.length - a.lengt
 
 /**
  * A text or background *colour* class with no variant and no opacity modifier:
- * `text-white`, `bg-lime-500`, `bg-retro-primary`. Sizes (`text-xs`,
+ * `text-white`, `bg-lime-500`, `bg-person-indigo`. Sizes (`text-xs`,
  * `text-[9px]`), alignment (`text-center`), gradients and arbitrary values are
  * not colours it can name, and a `hover:` or `/50` token is not what is painted
  * at rest — so none of them is matched. `__tests__/avatarColorSource.test.ts`

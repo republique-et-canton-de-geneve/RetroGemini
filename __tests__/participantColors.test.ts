@@ -71,7 +71,7 @@ describe('the measuring helper', () => {
   });
 
   it('knows the application\'s own tokens, not only Tailwind\'s', () => {
-    expect(classColor('bg-retro-primary text-white', 'bg')).toBe('retro-primary');
+    expect(classColor('bg-person-indigo text-white', 'bg')).toBe('person-indigo');
   });
 
   // Until 45.0 the helper read Tailwind's file alone: a colour the application

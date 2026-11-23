@@ -134,6 +134,15 @@ describe('one source for a colour', () => {
     expect(written.filter((colour) => !pure(colour))).toEqual([]);
   });
 
+  // The test above cannot see inside @theme: 45.0 kept five `retro-*` aliases
+  // there as hex copies of slate and indigo, four painted by nothing and the
+  // fifth by the body alone, so a retune of slate-50 would have left the body
+  // (what shows before React draws, and past an overscroll) on the old page.
+  it('paints the page from slate-50 itself, and keeps no retro-* copy of the palette', () => {
+    expect(CSS).toMatch(/\bbody\s*\{[^}]*\bbackground-color:\s*var\(--color-slate-50\);/);
+    expect(themeBlocks(CSS).join('\n')).not.toMatch(/--color-retro-/);
+  });
+
   it('serves every font from this deployment', () => {
     const sources = [...CSS.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)].map((match) => match[1]);
     expect(sources.length).toBeGreaterThan(0);

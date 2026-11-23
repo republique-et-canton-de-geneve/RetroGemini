@@ -41,12 +41,6 @@
   --color-indigo-900: #2c2388;
   --color-indigo-950: #1a1450;
 
-  --color-retro-bg: #f5f6fa;
-  --color-retro-primary: #4f3ff0;
-  --color-retro-primaryHover: #3f30d6;
-  --color-retro-secondary: #c9cddb;
-  --color-retro-dark: #171a2b;
-
   /* A person's colours. `User.color` stays the stored class (`bg-indigo-500`…);
      `utils/participantColors.ts` maps it to one of these tones: a pastel body,
      an ink of the same hue for initials, dots and outlines, a brighter accent
@@ -204,7 +198,7 @@
 /* Base styles */
 body {
   font-family: var(--font-sans);
-  background-color: var(--color-retro-bg);
+  background-color: var(--color-slate-50);
   color: var(--color-slate-900);
   margin: 0;
   padding: 0;
