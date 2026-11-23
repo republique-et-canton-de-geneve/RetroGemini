@@ -209,9 +209,10 @@ describe('useSessionMotion', () => {
   });
 
   // Only the open board and the guided Vote phase draw a vote on a card or a
-  // group. A regrouping carries a card's votes into its group (combineVotes),
-  // in the Group phase too, which draws none: a ring and a bump there said that
-  // the group held votes the screen keeps hidden.
+  // group, and neither draws one on a card inside a group (see below). A
+  // regrouping carries a card's votes into its group (combineVotes), in the
+  // Group phase too, which draws none: a ring and a bump there said that the
+  // group held votes the screen keeps hidden.
   it.each(['GROUP', 'BRAINSTORM'])('marks no vote total in the %s phase, which draws no vote', (phase) => {
     const group = (votes: string[]) => ({ id: 'g1', title: 'G', colId: 'start', votes, anchorTicketId: 'ga' }) as unknown as Group;
     const anchor = ticket('ga', { groupId: 'g1' });
@@ -256,6 +257,37 @@ describe('useSessionMotion', () => {
     regroupOnBoard({ votingDisabled: true });
     expect(document.querySelector(`[${MOTION_HOOKS.group}="g1"]`)!.classList.contains('fx-ring')).toBe(true);
     expect(document.querySelector('[data-testid="group-count-g1"]')!.classList.contains('fx-bump')).toBe(true);
+  });
+
+  // A card inside a group draws no vote control, on a board as in the guided
+  // Vote phase (every vote control of Session.tsx's card is drawn only when it
+  // is not grouped): its votes are its group's. A card that joins a group hands
+  // them over (combineVotes), so its own total drops, and a ring on it said
+  // that a card with no vote on screen had just lost some.
+  it.each([
+    ['its counts shown', {}, 'bob'],
+    ['its counts hidden, for the viewer’s own vote', { voteCountHidden: true }, 'me'],
+  ])('rings the group a voted card joins on a board with %s, never the card', (_case, voteSettings, voter) => {
+    const settings = { revealBrainstorm: true, ...voteSettings } as RetroSession['settings'];
+    const group = (votes: string[]) => ({ id: 'g1', title: 'G', colId: 'start', votes, anchorTicketId: 'ga' }) as unknown as Group;
+    const anchor = ticket('ga', { groupId: 'g1' });
+    const { show } = mount(session({ phase: 'OPEN_BOARD', settings, tickets: [anchor, ticket('t1', { votes: [voter] })], groups: [group([])] }));
+    show(session({ phase: 'OPEN_BOARD', settings, tickets: [anchor, ticket('t1', { groupId: 'g1' })], groups: [group([voter])] }));
+    expect(document.querySelector(`[${MOTION_HOOKS.group}="g1"]`)!.classList.contains('fx-ring')).toBe(true);
+    expect(document.querySelector('[data-testid="group-count-g1"]')!.classList.contains('fx-bump')).toBe(true);
+    expect(card('t1').classList.contains('fx-ring')).toBe(false);
+    expect(card('t1').querySelector(`[${MOTION_HOOKS.voteCount}]`)!.classList.contains('fx-bump')).toBe(false);
+  });
+
+  it('rings neither of two voted cards that make a new group on a board', () => {
+    const settings = { revealBrainstorm: true } as RetroSession['settings'];
+    const { show } = mount(session({ phase: 'OPEN_BOARD', settings, tickets: [ticket('t1', { votes: ['bob'] }), ticket('t2', { votes: ['ana'] })] }));
+    const group = { id: 'g1', title: 'G', colId: 'start', votes: ['bob', 'ana'], anchorTicketId: 't2' } as unknown as Group;
+    show(session({ phase: 'OPEN_BOARD', settings, tickets: [ticket('t1', { groupId: 'g1' }), ticket('t2', { groupId: 'g1' })], groups: [group] }));
+    for (const id of ['t1', 't2']) {
+      expect(card(id).classList.contains('fx-ring')).toBe(false);
+      expect(card(id).querySelector(`[${MOTION_HOOKS.voteCount}]`)!.classList.contains('fx-bump')).toBe(false);
+    }
   });
 
   it('marks no vote a lowered number takes back on a board with voting off and the counts hidden', () => {

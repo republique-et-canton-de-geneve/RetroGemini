@@ -148,13 +148,22 @@ const reactionCount = (session: RetroSession, ticketId: string, emoji: string): 
  * number takes some back (capVotes). The guided Vote phase keeps everyone's
  * votes to itself, and so does a board whose counts are hidden: a ring there
  * on a teammate's vote would say where it went. Only the viewer's own votes
- * move then.
+ * move then. Neither screen draws a vote on a card inside a group (every vote
+ * control of the card is drawn only when it is not grouped): its votes are its
+ * group's, and a card that joins one hands them over, so its own total drops
+ * while nothing on it shows a vote.
  */
 const visibleVoteChanges = (motion: SessionMotion, prev: RetroSession, next: RetroSession, viewerId: string): string[] => {
   if (next.phase !== 'VOTE' && next.phase !== 'OPEN_BOARD') return [];
   if (next.phase === 'OPEN_BOARD' && !!next.settings?.votingDisabled && !!next.settings?.voteCountHidden) return [];
+  const grouped = new Set(
+    (Array.isArray(next.tickets) ? next.tickets : [])
+      .filter((ticket) => !!ticket && typeof ticket === 'object' && !!ticket.groupId)
+      .map((ticket) => ticket.id),
+  );
+  const drawn = motion.voteTotals.filter((id) => !grouped.has(id));
   const totalsHidden = next.phase === 'VOTE' || !!next.settings?.voteCountHidden;
-  if (!totalsHidden) return motion.voteTotals;
+  if (!totalsHidden) return drawn;
   const itemsOf = (session: RetroSession) =>
     new Map<string, unknown>([
       ...(Array.isArray(session.tickets) ? session.tickets : []).map((ticket) => [ticket.id, ticket.votes] as [string, unknown]),
@@ -162,7 +171,7 @@ const visibleVoteChanges = (motion: SessionMotion, prev: RetroSession, next: Ret
     ]);
   const before = itemsOf(prev);
   const after = itemsOf(next);
-  return motion.voteTotals.filter((id) => votesOf(before.get(id), viewerId) !== votesOf(after.get(id), viewerId));
+  return drawn.filter((id) => votesOf(before.get(id), viewerId) !== votesOf(after.get(id), viewerId));
 };
 
 /** The card or group of this id under `root` (ids are compared, never put in a selector). */
