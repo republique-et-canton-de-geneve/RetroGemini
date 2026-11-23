@@ -114,6 +114,7 @@ import ColumnMoveButtons from './common/ColumnMoveButtons';
 import { moveColumn } from '../utils/columnOrder';
 import { useBoardColumnsInView } from './session/useBoardColumnsInView';
 import { useTranslation } from '../i18n/I18nContext';
+import { NoticeError, noticeText, type Notice } from '../i18n/notice';
 import { createTranslator } from '../i18n/translate';
 import { toLanguage } from '../i18n/languages';
 import {
@@ -566,7 +567,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // AI ticket-group suggestions (facilitator-driven, requires validation)
   const [aiGroupSuggestionsOpen, setAiGroupSuggestionsOpen] = useState(false);
   const [aiGroupSuggestionsLoading, setAiGroupSuggestionsLoading] = useState(false);
-  const [aiGroupSuggestionsError, setAiGroupSuggestionsError] = useState<string | null>(null);
+  // What to say, worded at each render: the assistant's dialog is modal, so a
+  // language chosen in another tab of the app reaches it while it shows.
+  const [aiGroupSuggestionsError, setAiGroupSuggestionsError] = useState<Notice>(null);
   const [aiGroupSuggestions, setAiGroupSuggestions] = useState<AiSuggestedGroup[] | null>(null);
 
 
@@ -2364,11 +2367,12 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-      .then(async r => {
+      .then(r => {
         if (!r.ok) {
           void noteRevokedResponse(r, payload.sessionToken);
-          const detail = await r.json().catch(() => null);
-          throw new Error(detail?.message || tr('session.aiGroups.analyzeFailed'));
+          // Said in the reader's words. The route sends no detail (audit
+          // H21), and one read here would be the server's English sentence.
+          throw new NoticeError({ key: 'session.aiGroups.analyzeFailed' });
         }
         return r.json();
       })
@@ -2376,7 +2380,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         setAiGroupSuggestions(Array.isArray(data?.groups) ? data.groups : []);
       })
       .catch(err => {
-        setAiGroupSuggestionsError(err?.message || tr('session.aiGroups.requestFailed'));
+        // Anything else is the browser's own words ("Failed to fetch", a
+        // parse error): the request failed, which the reader is told.
+        setAiGroupSuggestionsError(err instanceof NoticeError ? err.notice : { key: 'session.aiGroups.requestFailed' });
         setAiGroupSuggestions([]);
       })
       .finally(() => setAiGroupSuggestionsLoading(false));
@@ -4777,7 +4783,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
         <AiGroupSuggestionsModal
           isOpen={aiGroupSuggestionsOpen}
           loading={aiGroupSuggestionsLoading}
-          error={aiGroupSuggestionsError}
+          error={aiGroupSuggestionsError ? noticeText(aiGroupSuggestionsError, tr) : null}
           suggestions={aiGroupSuggestions}
           tickets={session.tickets}
           columns={session.columns}

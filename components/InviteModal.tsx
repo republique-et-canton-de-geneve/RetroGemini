@@ -7,8 +7,8 @@ import { parseInviteEmails } from '../utils/parseInviteEmails';
 import { parseEmailInput } from '../utils/emailAddress.js';
 import ModalDialog from './common/ModalDialog';
 import { useTranslation } from '../i18n/I18nContext';
-import { translateErrorMessage } from '../i18n/errorMessages';
-import type { MessageKey } from '../i18n/translate';
+import { noticeText, type Notice } from '../i18n/notice';
+import type { MessageKey, PluralTranslator, Translator } from '../i18n/translate';
 
 interface Props {
   team: Team;
@@ -27,6 +27,35 @@ interface Props {
 type StatusState = 'idle' | 'sending' | 'sent' | 'error';
 type TabType = 'email' | 'link' | 'wifi';
 
+/**
+ * What the email tab's status line says, kept as what to say and worded at
+ * each render (AGENTS.md, *Internationalisation*): the dialog is modal, so a
+ * language chosen in another tab of the app reaches it while the line shows,
+ * and a sentence kept here stayed in the old language.
+ */
+type StatusLine =
+  | { kind: 'sending' }
+  | { kind: 'ready'; count: number }
+  | { kind: 'noneCreated' }
+  | { kind: 'errors'; lines: { email: string; message: Exclude<Notice, null> }[] };
+
+const statusLineText = (line: StatusLine | null, t: Translator, tp: PluralTranslator): string => {
+  if (!line) return '';
+  switch (line.kind) {
+    case 'sending':
+      return t('invite.email.sendingStatus');
+    case 'ready':
+      // Always at least one here, where "only 1 is singular" is the old English rule.
+      return tp('invite.email.readyCount', line.count);
+    case 'noneCreated':
+      return t('invite.email.noneCreated');
+    case 'errors':
+      return line.lines
+        .map(({ email, message }) => t('invite.email.errorLine', { email, message: noticeText(message, t) }))
+        .join(' | ');
+  }
+};
+
 // Server error codes a facilitator can actually act on. Anything else
 // (`send_failed`, …) falls back to the generic message. There is no send
 // quota, so no quota message.
@@ -41,7 +70,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
   const [activeTab, setActiveTab] = useState<TabType>('email');
   const [emailsInput, setEmailsInput] = useState('');
   const [status, setStatus] = useState<StatusState>('idle');
-  const [statusMessage, setStatusMessage] = useState('');
+  const [statusLine, setStatusLine] = useState<StatusLine | null>(null);
   const [generatedLinks, setGeneratedLinks] = useState<{ email: string; link: string }[]>([]);
   const membersWithEmail = useMemo(() => team.members.filter(m => !!m.email), [team.members]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>(
@@ -123,11 +152,11 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     if (emailsToInvite.length === 0) return;
 
     setStatus('sending');
-    setStatusMessage(t('invite.email.sendingStatus'));
+    setStatusLine({ kind: 'sending' });
 
     const successes: { email: string; link: string }[] = [];
     const invitedMembers: { id: string; name: string; email: string }[] = [];
-    const errors: string[] = [];
+    const errors: { email: string; message: Exclude<Notice, null> }[] = [];
 
     for (const email of emailsToInvite) {
       // The shared rule the server mails by (`utils/emailAddress.js`): an
@@ -135,7 +164,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
       // paste the field's pattern let through — gets no member and no link.
       const parsedAddress = parseEmailInput(email);
       if (!parsedAddress.ok || !parsedAddress.email) {
-        errors.push(t('invite.email.errorLine', { email, message: t('errors.invalidEmail') }));
+        errors.push({ email, message: { key: 'errors.invalidEmail' } });
         continue;
       }
       try {
@@ -163,19 +192,18 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
           });
         } catch (err: any) {
           const sendErrorKey = INVITE_SEND_ERRORS[err?.message] ?? 'invite.email.sendFailed';
-          errors.push(t('invite.email.errorLine', { email, message: t(sendErrorKey) }));
+          errors.push({ email, message: { key: sendErrorKey } });
         }
       } catch (err: any) {
-        const message = err.message ? translateErrorMessage(err.message, t) : t('invite.email.generateFailed');
-        errors.push(t('invite.email.errorLine', { email, message }));
+        // A data-layer sentence, translated where it is shown.
+        errors.push({ email, message: err.message ? { raw: err.message } : { key: 'invite.email.generateFailed' } });
       }
     }
 
     if (successes.length) {
       setGeneratedLinks(successes);
       setStatus('sent');
-      // Always at least one here, where "only 1 is singular" is the old English rule.
-      setStatusMessage(tp('invite.email.readyCount', successes.length));
+      setStatusLine({ kind: 'ready', count: successes.length });
       setEmailsInput('');
       // Even when the email itself could not be sent, the invite exists and
       // its link can be shared, so the person is genuinely expected to join.
@@ -185,12 +213,12 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
     } else {
       setGeneratedLinks([]);
       setStatus('error');
-      setStatusMessage(t('invite.email.noneCreated'));
+      setStatusLine({ kind: 'noneCreated' });
     }
 
     if (errors.length) {
       setStatus('error');
-      setStatusMessage(errors.join(' | '));
+      setStatusLine({ kind: 'errors', lines: errors });
     }
   };
 
@@ -203,7 +231,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
         </div>
         {status !== 'idle' && (
           <span className={`text-xs font-semibold ${status === 'sent' ? 'text-emerald-700' : status === 'sending' ? 'text-slate-500' : 'text-amber-700'}`}>
-            {statusMessage}
+            {statusLineText(statusLine, t, tp)}
           </span>
         )}
       </div>

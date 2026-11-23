@@ -6,6 +6,7 @@ import { noteRevokedResponse } from '../../services/sessionRevocation';
 import MarkdownContent from '../common/MarkdownContent';
 import ModalDialog from '../common/ModalDialog';
 import { useTranslation } from '../../i18n/I18nContext';
+import { noticeText, type Notice } from '../../i18n/notice';
 import {
   DIALOG_OVERLAY,
   DIALOG_PANEL,
@@ -47,7 +48,10 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
   const [customPrompt, setCustomPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [analysis, setAnalysis] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Kept as what to say and worded at each render (AGENTS.md,
+  // *Internationalisation*): the dialog is modal, so a language chosen in
+  // another tab of the app reaches it while the error shows.
+  const [error, setError] = useState<Notice>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [highlightResult, setHighlightResult] = useState(false);
   const resultRef = useRef<HTMLDivElement | null>(null);
@@ -177,14 +181,14 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
         // App then says why above the Dashboard, with "Log in again".
         await noteRevokedResponse(response, body.sessionToken as string | null);
         if (response.status === 404) {
-          setError(t('dashboard.releaseAnalysis.errorNotEnabled'));
+          setError({ key: 'dashboard.releaseAnalysis.errorNotEnabled' });
         } else {
           // Audit H21: this used to render the server's `message` verbatim,
           // which on an upstream failure named the internal LLM's host, IP and
           // port, or echoed the gateway's own error body. The route no longer
           // sends it; not reading it keeps the leak closed even if some future
           // change puts a detail field back in the response.
-          setError(t('dashboard.releaseAnalysis.errorFailed'));
+          setError({ key: 'dashboard.releaseAnalysis.errorFailed' });
         }
         return;
       }
@@ -193,11 +197,11 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
       if (typeof data.analysis === 'string' && data.analysis.trim()) {
         setAnalysis(data.analysis);
       } else {
-        setError(t('dashboard.releaseAnalysis.errorEmpty'));
+        setError({ key: 'dashboard.releaseAnalysis.errorEmpty' });
       }
     } catch (err) {
       console.error('Failed to generate release analysis', err);
-      setError(t('dashboard.releaseAnalysis.errorUnreachable'));
+      setError({ key: 'dashboard.releaseAnalysis.errorUnreachable' });
     } finally {
       setIsGenerating(false);
     }
@@ -430,7 +434,7 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
 
           {error && (
             <div className="text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-lg p-3">
-              {error}
+              {noticeText(error, t)}
             </div>
           )}
 
