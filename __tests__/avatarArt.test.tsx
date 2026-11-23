@@ -1,5 +1,5 @@
 import React from 'react';
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import ts from 'typescript';
 import { render } from '@testing-library/react';
@@ -16,6 +16,7 @@ import {
   type AvatarArtId,
   type AvatarShape,
 } from '../components/common/avatars/avatarArt';
+import { AVATAR_IDS, AVATAR_FAMILIES as SERVER_FAMILIES } from '../utils/avatars.js';
 import { avatarColorClasses } from '../utils/participantColors';
 import { en, fr } from '../i18n/messages';
 
@@ -220,21 +221,11 @@ describe('AvatarArt', () => {
 });
 
 describe('avatar art and the id list of utils/avatars.js', () => {
-  // utils/avatars.js (package A1) is the list the server validates against; the
-  // art must draw exactly those ids, family by family. Loaded by path so this
-  // suite says plainly when the module has not landed yet.
-  const modulePath = resolve(__dirname, '../utils/avatars.js');
-
-  it('draws exactly the ids the server accepts, in the same families', async () => {
-    expect(existsSync(modulePath), 'utils/avatars.js is not there yet (package A1): this comparison cannot run').toBe(true);
-    const avatars = (await import(/* @vite-ignore */ modulePath)) as {
-      AVATAR_IDS?: readonly string[];
-      AVATAR_FAMILIES?: readonly { id: string; avatars: readonly string[] }[];
-    };
-    expect(avatars.AVATAR_IDS, 'utils/avatars.js exports AVATAR_IDS').toBeDefined();
-    expect([...(avatars.AVATAR_IDS ?? [])]).toEqual([...AVATAR_ART_IDS]);
-    expect(avatars.AVATAR_FAMILIES, 'utils/avatars.js exports AVATAR_FAMILIES').toBeDefined();
-    expect((avatars.AVATAR_FAMILIES ?? []).map(f => ({ id: f.id, avatars: [...f.avatars] }))).toEqual(
+  // utils/avatars.js is the list the server validates against; the art must
+  // draw exactly those ids, family by family.
+  it('draws exactly the ids the server accepts, in the same families', () => {
+    expect([...AVATAR_IDS]).toEqual([...AVATAR_ART_IDS]);
+    expect(SERVER_FAMILIES.map(f => ({ id: f.id, avatars: [...f.avatars] }))).toEqual(
       AVATAR_FAMILIES.map(f => ({ id: f.id, avatars: [...f.avatars] })),
     );
   });
