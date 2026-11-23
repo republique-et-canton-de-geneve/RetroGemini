@@ -1,11 +1,12 @@
 import React from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within, type RenderOptions } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Session from '../components/Session';
 import HealthCheckSession from '../components/HealthCheckSession';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
+import { clearSessionRevoked, markSessionRevoked } from '../services/sessionRevocation';
 import { SERVER_STAMP_WAIT_MS } from '../components/session/useOwnAvatar';
 import type { HealthCheckSession as HealthCheckSessionType, MemberAvatarChoice, RetroSession, Team, User } from '../types';
 
@@ -613,6 +614,63 @@ describe.each<Kind>(['retro', 'health check'])('avatars on the %s screen', (kind
       expect(screen.queryByRole('note', { name: HINT })).toBeNull();
       expect(dot()).toBeNull();
       expect(localStorage.getItem(HINT_KEY)).toBeNull();
+    });
+
+    // The team's password was changed under the session: the picker could
+    // not save a choice, so the band goes. Another tab's new token clears the
+    // revocation, the session is live again, and the band stays gone: nothing
+    // brings it back while the screen lasts. It was never dismissed, so it is
+    // not remembered.
+    it("goes when the credential is revoked, unwritten, and stays gone once another tab's token clears the revocation", () => {
+      onTestFinished(clearSessionRevoked);
+      renderScreen(kind, team(undefined), sessionOf(kind));
+      expect(screen.getByRole('note', { name: HINT })).toBeInTheDocument();
+      expect(dot()).not.toBeNull();
+
+      act(() => { markSessionRevoked(); });
+      // The connection banner says why, with the way out.
+      expect(screen.getByRole('button', { name: 'Log in again' })).toBeInTheDocument();
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
+
+      act(() => { clearSessionRevoked(); });
+      expect(screen.queryByRole('button', { name: 'Log in again' })).toBeNull();
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
+      expect(localStorage.getItem(HINT_KEY)).toBeNull();
+    });
+
+    // A key's "Got it" hands the keyboard on to the first drawn control after
+    // the band. jsdom applies no stylesheet, so that is the phase's own first
+    // control: the Brainstorm bar's "I'm Finished" in a retrospective, the
+    // survey's first score in a health check.
+    it('hands the keyboard to the first control after the band when a key presses "Got it", and is remembered', () => {
+      renderScreen(kind, team(undefined), sessionOf(kind));
+      const note = screen.getByRole('note', { name: HINT });
+      const gotIt = within(note).getByRole('button', { name: 'Got it' });
+      act(() => { gotIt.focus(); });
+      // A key's click: Enter or Space sends one with no count.
+      fireEvent.click(gotIt, { detail: 0 });
+      expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+      expect(dot()).toBeNull();
+      expect(JSON.parse(localStorage.getItem(HINT_KEY) ?? 'null')).toEqual(['me']);
+      const firstAfterTheBand = kind === 'retro'
+        ? screen.getByRole('button', { name: "I'm Finished" })
+        : within(screen.getByRole('heading', { name: 'Communication' }).parentElement as HTMLElement).getByRole('button', { name: '1' });
+      expect(firstAfterTheBand).toHaveFocus();
+    });
+
+    // Left with neither of its buttons pressed nor the picker opened, the band
+    // is not remembered: the next screen the person opens shows it again.
+    it('is shown again at the next mount when the screen is left without a gesture', () => {
+      const first = renderScreen(kind, team(undefined), sessionOf(kind));
+      expect(screen.getByRole('note', { name: HINT })).toBeInTheDocument();
+      first.unmount();
+      expect(localStorage.getItem(HINT_KEY)).toBeNull();
+
+      renderScreen(kind, team(undefined), sessionOf(kind));
+      expect(screen.getByRole('note', { name: HINT })).toBeInTheDocument();
+      expect(dot()).not.toBeNull();
     });
   });
 });
