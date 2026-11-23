@@ -13,7 +13,6 @@ const phases: Record<keyof typeof en, string> = {
   'phases.header.showTips': 'Afficher les conseils de rétro',
   'phases.header.hideTips': 'Masquer les conseils de rétro',
   'phases.header.tips': 'Conseils',
-  'phases.header.expandParticipants': 'Cliquer pour déployer le panneau des participants',
   'phases.header.progressFinished': 'ont terminé',
   'phases.header.progressVoted': 'ont voté',
   'phases.header.progressConnected': 'connectés',

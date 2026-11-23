@@ -61,7 +61,6 @@ const renderHeader = (viewer: User, extra: Partial<React.ComponentProps<typeof S
       setPhase={vi.fn()}
       updateSession={vi.fn()}
       localParticipantsPanelCollapsed={false}
-      setLocalParticipantsPanelCollapsed={vi.fn()}
       participantsCount={2}
       currentUser={viewer}
       onInvite={vi.fn()}
@@ -235,5 +234,34 @@ describe("the viewer's own avatar", () => {
     const viewerAvatarRef = React.createRef<HTMLButtonElement>();
     renderHeader(alice, { viewerAvatarRef });
     expect(viewerAvatarRef.current).toBe(screen.getByRole('button', { name: /choose my avatar/ }));
+  });
+});
+
+describe("the participants' count", () => {
+  // A status, never a control (review finding F24). Below lg the panel it
+  // claimed to expand is not drawn (`hidden lg:flex`), so its click did
+  // nothing; from lg, collapsed, the panel's rail has its own button, which
+  // the keyboard reaches and which keeps the focus as it toggles. The count
+  // is drawn like a chip, with no pointer, no hover and no "click" title.
+  const chip = () =>
+    [...document.querySelectorAll('header span.material-symbols-outlined')].find((icon) => icon.textContent === 'groups')!
+      .parentElement as HTMLElement;
+  const atWidth = (width: number) => Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+  const initialWidth = window.innerWidth;
+  afterEach(() => atWidth(initialWidth));
+
+  it.each([
+    ['below lg, where the panel is not drawn', 800, false],
+    ['from lg, while the panel is collapsed', 1280, true],
+  ])('is a plain count %s', (_where, width, collapsed) => {
+    atWidth(width);
+    renderHeader(facilitator, { localParticipantsPanelCollapsed: collapsed });
+    const count = chip();
+    expect(count.tagName).toBe('DIV');
+    expect(count).not.toHaveAttribute('role');
+    expect(count).not.toHaveAttribute('tabindex');
+    expect(count).not.toHaveAttribute('title');
+    expect(tokens(count).filter((token) => token === 'cursor-pointer' || token.startsWith('hover:'))).toEqual([]);
+    expect(within(count).getByText('0/2')).toBeInTheDocument();
   });
 });

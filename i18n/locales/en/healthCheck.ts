@@ -13,7 +13,6 @@ const healthCheck = {
   'healthCheck.comment.ownName': '{name} (you)',
 
   'healthCheck.header.leave': 'Leave the health check',
-  'healthCheck.header.expandParticipants': 'Click to expand participants panel',
   'healthCheck.header.finishedLabel': 'finished',
   'healthCheck.header.votedLabel': 'voted',
   'healthCheck.header.participantsLabel': 'participants',

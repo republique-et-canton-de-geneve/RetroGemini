@@ -163,7 +163,6 @@ describe('the header is the retrospective header', () => {
         setPhase={vi.fn()}
         updateSession={vi.fn()}
         localParticipantsPanelCollapsed
-        setLocalParticipantsPanelCollapsed={vi.fn()}
         participantsCount={2}
         currentUser={user}
         onInvite={vi.fn()}
@@ -178,7 +177,11 @@ describe('the header is the retrospective header', () => {
   const shape = (header: HTMLElement) => {
     const bar = header.querySelector('.phase-nav-btn')?.parentElement as HTMLElement;
     const invite = iconButton(header, 'qr_code_2');
-    const chip = header.querySelector('[title]:not(button)') as HTMLElement | null;
+    // The sync chip: the first element with a title that is not a button.
+    const sync = header.querySelector('[title]:not(button)') as HTMLElement | null;
+    // The participants' count, found by its icon (it has no title).
+    const chip = ([...header.querySelectorAll('span.material-symbols-outlined')].find((icon) => icon.textContent === 'groups')
+      ?.parentElement ?? null) as HTMLElement | null;
     return {
       header: header.className,
       back: iconButton(header, 'arrow_back').className,
@@ -189,6 +192,8 @@ describe('the header is the retrospective header', () => {
       label: header.querySelector('.phase-nav-btn span')?.className,
       cluster: (invite ?? header.querySelector('[data-viewer-avatar]'))?.parentElement?.className,
       invite: invite?.className,
+      sync: sync?.className,
+      syncChildren: sync ? [...sync.children].map((child) => child.className) : null,
       chip: chip?.className,
       chipChildren: chip ? [...chip.children].map((child) => child.className) : null,
       name: header.querySelector('[data-viewer-avatar]')?.previousElementSibling?.className,
@@ -202,10 +207,17 @@ describe('the header is the retrospective header', () => {
     const expected = shape(retroHeader(user));
     cleanup();
     renderSession(createSession(), user);
+    // The retrospective's header above is drawn with its panel collapsed,
+    // which draws the participants' count; a facilitator's health check
+    // opens with its panel expanded.
+    const collapse = screen.queryByRole('button', { name: 'Collapse panel' });
+    if (collapse) fireEvent.click(collapse);
     const actual = shape(document.querySelector('header') as HTMLElement);
     expect(actual).toEqual(expected);
     // Compared, not absent from both: the hint shows here, and marks the opener.
     expect(actual.dot).not.toBeNull();
+    expect(actual.sync).toBeDefined();
+    expect(actual.chip).toBeDefined();
   });
 
   it("shows the viewer's avatar at every width for a participant, from 360px for a facilitator", () => {
@@ -487,5 +499,31 @@ describe('the source', () => {
     expect(source).not.toMatch(/(?<![\w-])(?:disabled:)?opacity-\d+/);
     expect(source).not.toMatch(/text-\[(9|10|11)px\]/);
     expect(source).not.toMatch(/border-slate-(200|300) rounded-(sm|lg) p-[123]? ?[^"]*focus:/);
+  });
+});
+
+describe("the participants' count in the header", () => {
+  // As in the retrospective's header (sessionHeaderLook.test.tsx): a status,
+  // never a control. The panel's rail expands the panel with its own button.
+  const chip = () =>
+    [...document.querySelectorAll('header span.material-symbols-outlined')].find((icon) => icon.textContent === 'groups')!
+      .parentElement as HTMLElement;
+  const atWidth = (width: number) => Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+  const initialWidth = window.innerWidth;
+  afterEach(() => atWidth(initialWidth));
+
+  it.each([800, 1280])('is a plain count at %ipx, and a click on it expands nothing', (width) => {
+    atWidth(width);
+    // A participant's panel starts collapsed: the count shows at every width.
+    renderSession(createSession(), alice);
+    const count = chip();
+    expect(count.tagName).toBe('DIV');
+    expect(count).not.toHaveAttribute('role');
+    expect(count).not.toHaveAttribute('tabindex');
+    expect(count).not.toHaveAttribute('title');
+    expect(count.className.split(/\s+/).filter((token) => token === 'cursor-pointer' || token.startsWith('hover:'))).toEqual([]);
+    fireEvent.click(count);
+    expect(screen.getByRole('button', { name: 'Expand panel' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Collapse panel' })).toBeNull();
   });
 });

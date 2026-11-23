@@ -4703,7 +4703,6 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           setPhase={setPhase}
           updateSession={updateSession}
           localParticipantsPanelCollapsed={localParticipantsPanelCollapsed}
-          setLocalParticipantsPanelCollapsed={setLocalParticipantsPanelCollapsed}
           // A board counts the people on it right now; a guided retro, the
           // people it is waiting for.
           participantsCount={isOpenBoard(session) ? connectedParticipants.length : activeParticipants.length}

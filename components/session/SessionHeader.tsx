@@ -19,7 +19,6 @@ interface Props {
   // Used by the timer alone: its changes go through the session's own write.
   updateSession: (updater: (session: RetroSession) => void) => void;
   localParticipantsPanelCollapsed: boolean;
-  setLocalParticipantsPanelCollapsed: (collapsed: boolean) => void;
   participantsCount: number;
   currentUser: User;
   onInvite: () => void;
@@ -47,7 +46,6 @@ const SessionHeader: React.FC<Props> = ({
   setPhase,
   updateSession,
   localParticipantsPanelCollapsed,
-  setLocalParticipantsPanelCollapsed,
   participantsCount,
   currentUser,
   onInvite,
@@ -180,12 +178,13 @@ const SessionHeader: React.FC<Props> = ({
           decides that itself, since only it knows the sync health. */}
       <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
 
+      {/* A count, never a control: below lg the panel is not drawn, and from
+          lg the collapsed panel's rail has its own button, which the keyboard
+          reaches and which keeps the focus as it toggles. A click here used to
+          expand the panel from lg and do nothing below it. Both headers draw
+          the same chip (healthCheckLook.test.tsx). */}
       {(localParticipantsPanelCollapsed || window.innerWidth < 1024) && (
-        <div
-          className="flex items-center gap-0.5 sm:gap-1 h-8 rounded-full border border-slate-200 bg-white px-1.5 sm:px-2.5 cursor-pointer hover:border-slate-300 hover:bg-slate-50 transition"
-          onClick={() => setLocalParticipantsPanelCollapsed(false)}
-          title={t('phases.header.expandParticipants')}
-        >
+        <div className="flex items-center gap-0.5 sm:gap-1 h-8 rounded-full border border-slate-200 bg-white px-1.5 sm:px-2.5">
           <span className="material-symbols-outlined text-lg! leading-none text-slate-600" aria-hidden="true">groups</span>
           <span className="text-xs font-semibold tabular-nums text-slate-700">
             {board

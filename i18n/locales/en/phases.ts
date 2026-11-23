@@ -20,7 +20,6 @@ const phases = {
   'phases.header.showTips': 'Show retro tips',
   'phases.header.hideTips': 'Hide retro tips',
   'phases.header.tips': 'Tips',
-  'phases.header.expandParticipants': 'Click to expand participants panel',
   'phases.header.progressFinished': 'finished',
   'phases.header.progressVoted': 'voted',
   'phases.header.progressConnected': 'connected',

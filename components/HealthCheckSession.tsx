@@ -957,13 +957,12 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
             a refused join or a stalled sync always shows (the chip decides). */}
         <SessionSyncChip isLive={isLive} joinDeniedReason={deniedReason} />
 
-        {/* Participant progress - shown when panel is collapsed or on smaller screens */}
+        {/* Participant progress, shown when the panel is collapsed or on
+            smaller screens. A count, never a control, as in the retro header:
+            below lg the panel is not drawn, and from lg its rail has its own
+            button. */}
         {(participantsPanelCollapsed || window.innerWidth < 1024) && (
-          <div
-            className="flex items-center gap-0.5 sm:gap-1 h-8 rounded-full border border-slate-200 bg-white px-1.5 sm:px-2.5 cursor-pointer hover:border-slate-300 hover:bg-slate-50 transition"
-            onClick={() => setParticipantsPanelCollapsed(false)}
-            title={t('healthCheck.header.expandParticipants')}
-          >
+          <div className="flex items-center gap-0.5 sm:gap-1 h-8 rounded-full border border-slate-200 bg-white px-1.5 sm:px-2.5">
             <span className="material-symbols-outlined text-lg! leading-none text-slate-600" aria-hidden="true">groups</span>
             <span className="text-xs font-semibold tabular-nums text-slate-700">
               {session.phase === 'SURVEY'
