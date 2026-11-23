@@ -14,10 +14,12 @@ import { motionAllowed } from '../common/motion/effects';
  * an element was drawn (a collapsed panel expanded, a phase change). And it
  * stays quiet when a change is not news:
  *
- * - before the server's first roster (`ready`): the rows drawn until then come
- *   from the cached session, and are never compared with what it says; then
- *   on that first population (`arrivedPeople` answers nobody when it has no
- *   previous list) and for `QUIET_MS` after it, however late it lands;
+ * - before the server's first roster since the session was last live
+ *   (`ready`, which the screens put down when it stops being live): the rows
+ *   drawn until then come from the cached session, or from before the outage,
+ *   and are never compared with what it says; then on that first population
+ *   (`arrivedPeople` answers nobody when it has no previous list) and for
+ *   `QUIET_MS` after it, however late it lands;
  * - for `QUIET_MS` after the viewer's own connection comes back, when every
  *   roster is delivered again;
  * - when more than two people arrive, or more than two finish, at once (a
@@ -51,9 +53,9 @@ export interface PanelMotionInput {
   /** Changes whenever a change of the whole board is not news (the phase). */
   scope?: string;
   /**
-   * The server's first roster has been applied. Until then nothing is
-   * compared, and the quiet seconds open when it turns true. Without it the
-   * panel counts as ready from its mount.
+   * The server's first roster since the session was last live has been
+   * applied. Until then nothing is compared, and the quiet seconds open when
+   * it turns true. Without it the panel counts as ready from its mount.
    */
   ready?: boolean;
   currentUserId: string;

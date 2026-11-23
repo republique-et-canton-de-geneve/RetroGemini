@@ -119,6 +119,27 @@ describe('the arrival', () => {
     expect([...result.current.arriving]).toEqual(['c']);
   });
 
+  // The screens put `ready` down when the session stops being live and up
+  // with the server's next roster (Session.tsx, HealthCheckSession.tsx →
+  // setIsLive): the rows of before the outage are a seed.
+  it('compares nothing with the rows of before an outage, however late the roster comes back', () => {
+    const { result, rerender } = mount();
+    settle();
+    rerender({ ...base, isLive: false, ready: false });
+    rerender({ ...base, isLive: true, ready: false });
+    act(() => { vi.advanceTimersByTime(QUIET_MS + 1000); });
+    rerender({ ...base, presentIds: ['me', 'a', 'b'], checkedIds: ['a'], count: 4, ready: true });
+    expect(result.current.arriving.size).toBe(0);
+    expect(result.current.finishing.size).toBe(0);
+    expect(result.current.bump).toBe(0);
+    act(() => { vi.advanceTimersByTime(QUIET_MS - 500); });
+    rerender({ ...base, presentIds: ['me', 'a', 'b', 'c'], checkedIds: ['a'], count: 4, ready: true });
+    expect(result.current.arriving.size).toBe(0);
+    act(() => { vi.advanceTimersByTime(600); });
+    rerender({ ...base, presentIds: ['me', 'a', 'b', 'c', 'd'], checkedIds: ['a'], count: 4, ready: true });
+    expect([...result.current.arriving]).toEqual(['d']);
+  });
+
   it('plays nothing while offline', () => {
     const { result, rerender } = mount();
     settle();

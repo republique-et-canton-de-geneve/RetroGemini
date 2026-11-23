@@ -37,7 +37,7 @@ interface Props {
   getMemberDisplay: (member: User) => { displayName: string; initials: string; avatarId?: string | null };
   /** The viewer's own connection: the panel animates nothing while it is down, nor just after (SessionParticipantsPanel). */
   isLive?: boolean;
-  /** The server's first roster has been applied (SessionParticipantsPanel). */
+  /** The server's first roster since the session was last live has been applied (SessionParticipantsPanel). */
   rosterReceived?: boolean;
 }
 

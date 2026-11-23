@@ -14,12 +14,14 @@ import { NO_MOTION, QUIET_AFTER_LIVE_MS, diffSessionMotion, staggerDelays, type 
  * elements by their data attributes (`MOTION_HOOKS`), so the screen renders
  * nothing more for them and keeps no state.
  *
- * It stays quiet while the connection is down and for three seconds after the
- * viewer's own (re)connection: a rolling update reconnects everybody, and the
- * snapshot that comes back is no news. Nothing is compared before the first
- * state from the server is applied (`ready`): the screen is drawn first from
- * the team cache, which lags the session row, and the join snapshot can come
- * seconds later; its differences from that seed are no news either.
+ * It stays quiet while the connection is down, and nothing is compared before
+ * the server's first state since the session was last live is applied
+ * (`ready`): the screen is drawn first from the team cache, which lags the
+ * session row, and after a reconnection from the state of before the outage;
+ * the snapshot that comes back can land seconds later (a rolling update
+ * reconnects everybody, and a pod that starts cold answers late), and its
+ * differences from that seed are no news. The three quiet seconds open when it
+ * lands, and also follow the viewer's own reconnection.
  */
 
 /** The data attributes the board carries for its effects. One table, so the markup and this hook agree. */
@@ -66,9 +68,10 @@ export interface SessionMotionInput {
   /** The session is connected and receiving. */
   isLive: boolean;
   /**
-   * The first state from the server has been applied. Before it the screen
-   * shows a seed from the cache, never compared with what follows; the quiet
-   * seconds open when it turns true.
+   * The server's first state since the session was last live has been
+   * applied: the screen puts it down when the session stops being live. Before
+   * it the screen shows a seed (the cache, or the state of before the outage),
+   * never compared with what follows; the quiet seconds open when it turns true.
    */
   ready: boolean;
   /** Where the board lies; the whole document when absent. */

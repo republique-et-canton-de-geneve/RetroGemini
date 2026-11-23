@@ -78,9 +78,10 @@ interface Props {
    */
   isLive?: boolean;
   /**
-   * The server's first roster has been applied: until then the rows come from
-   * the cached session and nothing animates, and the quiet seconds open when
-   * it lands. Omit for a panel that counts as ready from its mount.
+   * The server's first roster since the session was last live has been
+   * applied: until then the rows come from the cached session, or from before
+   * the outage, and nothing animates, and the quiet seconds open when it
+   * lands. Omit for a panel that counts as ready from its mount.
    */
   rosterReceived?: boolean;
   /** Changes when a change of the whole panel is not news: the phase. Omit for none. */

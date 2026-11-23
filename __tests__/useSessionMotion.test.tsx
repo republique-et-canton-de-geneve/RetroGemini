@@ -381,6 +381,28 @@ describe('useSessionMotion', () => {
     expect(card('t4').classList.contains('fx-card-in')).toBe(false);
   });
 
+  // The screens put `ready` down when the session stops being live and up
+  // with the server's next state (Session.tsx → setIsLive): the state of
+  // before the outage is a seed, as the cache is at the mount.
+  it('never compares the state of before the outage with the snapshot a reconnection brings back, however late it comes', () => {
+    const view = render(<Board session={session({ phase: 'OPEN_BOARD' })} isLive pending={new Set()} />);
+    act(() => { vi.advanceTimersByTime(RECONNECT_QUIET_MS + 1); });
+    view.rerender(<Board session={session({ phase: 'OPEN_BOARD' })} isLive={false} ready={false} pending={new Set()} />);
+    view.rerender(<Board session={session({ phase: 'OPEN_BOARD' })} isLive ready={false} pending={new Set()} />);
+    // A cold pod answers the re-join four seconds later.
+    act(() => { vi.advanceTimersByTime(4_000); });
+    const snapshot = session({ phase: 'OPEN_BOARD', tickets: [ticket('t1', { votes: ['bob'], reactions: { '👍': ['ana'] } }), ticket('t2')] });
+    view.rerender(<Board session={snapshot} isLive pending={new Set()} />);
+    expect(decorated()).toEqual([]);
+    act(() => { vi.advanceTimersByTime(RECONNECT_QUIET_MS - 500); });
+    view.rerender(<Board session={session({ phase: 'OPEN_BOARD', tickets: [...snapshot.tickets, ticket('t3')] })} isLive pending={new Set()} />);
+    expect(decorated()).toEqual([]);
+    act(() => { vi.advanceTimersByTime(600); });
+    view.rerender(<Board session={session({ phase: 'OPEN_BOARD', tickets: [...snapshot.tickets, ticket('t3'), ticket('t4')] })} isLive pending={new Set()} />);
+    expect(card('t4').classList.contains('fx-card-in')).toBe(true);
+    expect(card('t3').classList.contains('fx-card-in')).toBe(false);
+  });
+
   // On an open board, where a vote total and a column's count would both move.
   it('decorates nothing at all when more than six cards arrive at once', () => {
     const { show } = mount(session({ phase: 'OPEN_BOARD' }));

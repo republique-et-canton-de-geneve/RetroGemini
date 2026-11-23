@@ -1,11 +1,12 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HealthCheckSession from '../components/HealthCheckSession';
 import { HealthCheckSession as HealthCheckSessionType, Team, User } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import { mergeRemoteHealthCheckSession } from '../components/session/mergeRemoteSession';
+import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 /**
  * The participants panel and the invite flow are shared between retros and
@@ -336,5 +337,56 @@ describe('mergeRemoteHealthCheckSession keeps invitees a lost write race dropped
 
     expect(merged.invitedUsers).toEqual([{ id: 'b', name: 'Bobby' }]);
     expect(divergent).toBe(false);
+  });
+});
+
+// The panel's quiet after a reconnection, as in a retrospective (review
+// finding F60): the roster a reconnection brings back is no news, however
+// late it lands, and the quiet seconds open when it does.
+describe('Health check participants panel — the quiet after a reconnection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, json: () => Promise.resolve(null) }) as never;
+    Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+    prefersMotion('no-preference');
+  });
+  afterEach(() => {
+    vi.mocked(syncService.onConnectionChange).mockImplementation(() => () => {});
+    vi.mocked(syncService.onRoster).mockImplementation(() => () => {});
+    vi.restoreAllMocks();
+    restoreMotionPreference();
+  });
+
+  const rowOf = (name: string) => {
+    const row = screen.getAllByTestId('participant-row').find((candidate) => within(candidate).queryByText(name));
+    if (!row) throw new Error(`no participant row for ${name}`);
+    return row;
+  };
+
+  it('lets nobody arrive with the roster a reconnection brings back, however late, and lets the next guest in', () => {
+    let connection: ((connected: boolean) => void) | null = null;
+    let rosterOf: ((roster: Array<{ id: string; name: string }>) => void) | null = null;
+    vi.mocked(syncService.onConnectionChange).mockImplementation((callback) => {
+      connection = callback as (connected: boolean) => void;
+      return () => {};
+    });
+    vi.mocked(syncService.onRoster).mockImplementation((callback) => {
+      rosterOf = callback as (roster: Array<{ id: string; name: string }>) => void;
+      return () => {};
+    });
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    renderSession(createSession({ participants: [facilitator, alice, bob] }));
+    act(() => rosterOf!([{ id: 'fac', name: 'Fran' }]));
+    now += 5_000;
+    act(() => connection!(false));
+    act(() => connection!(true));
+    // The re-join is answered four seconds later, and Alice came back meanwhile.
+    now += 4_000;
+    act(() => rosterOf!([{ id: 'fac', name: 'Fran' }, { id: 'a', name: 'Alice' }]));
+    expect(rowOf('Alice').classList.contains('fx-person-in')).toBe(false);
+    now += 4_000;
+    act(() => rosterOf!([{ id: 'fac', name: 'Fran' }, { id: 'a', name: 'Alice' }, { id: 'b', name: 'Bob' }]));
+    expect(rowOf('Bob').classList.contains('fx-person-in')).toBe(true);
   });
 });

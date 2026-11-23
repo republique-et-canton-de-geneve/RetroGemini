@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { Team, User, HealthCheckSession as HealthCheckSessionType, HealthCheckDimension, ActionItem, JiraLink, MemberAvatarChoice } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
@@ -156,12 +156,18 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     team.healthChecks?.find(h => h.id === sessionId)
   );
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
-  // The panel's rows come from the cached session until the server's first
-  // roster: its motion compares nothing before it (usePanelMotion).
+  // The panel's rows come from the cached session until the server's roster:
+  // its motion compares nothing before it (usePanelMotion). Per connection,
+  // as in a retrospective: put down whenever the session stops being live
+  // (setIsLive below), so the roster a reconnection brings back is no news.
   const [rosterReceived, setRosterReceived] = useState(false);
   // Optimistic by default: pause editing only after a confirmed disconnect (see
   // Session.tsx) so the initial connecting window and tests still allow edits.
-  const [isLive, setIsLive] = useState<boolean>(true);
+  const [isLive, setLiveState] = useState<boolean>(true);
+  const setIsLive = useCallback((live: boolean) => {
+    setLiveState(live);
+    if (!live) setRosterReceived(false);
+  }, []);
   const isLiveRef = useRef<boolean>(true);
   // Set when the server refuses the join (audit H12). Unlike a disconnection
   // this never heals on its own, so it must survive a later `connect` event.

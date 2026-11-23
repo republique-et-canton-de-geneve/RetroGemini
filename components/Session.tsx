@@ -262,9 +262,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       ? contentLanguage
       : undefined;
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
-  // What the screen shows before the server first answers is a seed from the
-  // team cache, which lags the session row: the motion never compares it with
-  // what follows, and its quiet seconds open when the server's state lands.
+  // What the screen shows before the server answers is a seed: the team cache
+  // when it opens, which lags the session row, and after a reconnection the
+  // state from before the outage. The motion never compares it with what
+  // follows, and its quiet seconds open when the server's state lands (the
+  // panel's, when its roster does). Per connection: both are put down whenever
+  // the session stops being live (setIsLive below), so the snapshot a
+  // reconnection brings back is no news, however late a cold pod answers.
   const [serverStateApplied, setServerStateApplied] = useState(false);
   const [rosterReceived, setRosterReceived] = useState(false);
   const presenceBroadcasted = useRef(false);
@@ -272,7 +276,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // on a stale, disconnected snapshot (which the server would reject anyway).
   // Optimistic by default: we only pause after a confirmed disconnect, so the
   // initial connecting window (and non-socket test setups) still allow edits.
-  const [isLive, setIsLive] = useState<boolean>(true);
+  const [isLive, setLiveState] = useState<boolean>(true);
+  const setIsLive = useCallback((live: boolean) => {
+    setLiveState(live);
+    if (!live) {
+      setServerStateApplied(false);
+      setRosterReceived(false);
+    }
+  }, []);
   const isLiveRef = useRef<boolean>(true);
   // Set when the server refuses the join (audit H12). Unlike a disconnection
   // this never heals on its own, so it must survive a later `connect` event and
@@ -676,8 +687,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
 
   // The phase title slides in when the phase changes under the viewer's
   // eyes: never on the first state, a change of session, while offline, or in
-  // the seconds after a (re)connection, whose snapshot is no news — nor from
-  // the cached seed to the server's first state, however late it lands.
+  // the seconds after the state a (re)connection brings back, which is no news
+  // — nor from the seed (the cache, or the state of before the outage) to that
+  // state, however late it lands.
   const shownPhaseRef = useRef<{ id: string | null; phase: string | null }>({ id: null, phase: null });
   const liveSinceRef = useRef(0);
   useLayoutEffect(() => {

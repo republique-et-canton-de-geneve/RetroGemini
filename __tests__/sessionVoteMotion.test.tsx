@@ -679,6 +679,113 @@ describe('Session — the vote’s flight', () => {
   });
 });
 
+// A rolling update reconnects everybody, and a pod that starts with a cold
+// cache can answer the re-join seconds later. The quiet seconds open when the
+// state the reconnection brings back is drawn, not when the socket comes back:
+// counted from the socket, a snapshot four seconds late was compared with the
+// state from before the outage and played as news (review finding F60).
+describe('Session — the quiet after a reconnection', () => {
+  /** A clock the test moves by hand: the motion reads Date.now(). */
+  const handClock = () => {
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    return (ms: number) => { now += ms; };
+  };
+  /** Hands the screen the connection's state, as syncService would. */
+  const captureConnection = () => {
+    let listener: ((connected: boolean) => void) | null = null;
+    vi.mocked(syncService.onConnectionChange).mockImplementation((callback) => {
+      listener = callback as (connected: boolean) => void;
+      return () => {};
+    });
+    return (connected: boolean) => act(() => { listener?.(connected); });
+  };
+  /** Hands the screen the rosters the server sends. */
+  const captureRoster = () => {
+    let listener: ((roster: Array<{ id: string; name: string }>) => void) | null = null;
+    vi.mocked(syncService.onRoster).mockImplementation((callback) => {
+      listener = callback as (roster: Array<{ id: string; name: string }>) => void;
+      return () => {};
+    });
+    return (roster: Array<{ id: string; name: string }>) => act(() => { listener?.(roster); });
+  };
+  const brainstorm = createSession({ phase: 'BRAINSTORM' });
+  /** The server's state, at `rev`, with a card of a teammate's for each id. */
+  const withCards = (rev: number, ...ids: string[]): RetroSession => ({
+    ...JSON.parse(JSON.stringify(brainstorm)),
+    _rev: rev,
+    tickets: [...brainstorm.tickets, ...ids.map((id) => ({ id, colId: 'col-1', text: `News ${id}`, authorId: 'p1', groupId: null, votes: [] }))],
+  });
+  const rowOf = (name: string) => {
+    const row = screen.getAllByTestId('participant-row').find((candidate) => within(candidate).queryByText(name));
+    if (!row) throw new Error(`no participant row for ${name}`);
+    return row;
+  };
+
+  it('plays nothing on the board for the snapshot a reconnection brings back, however late, and plays what follows its quiet seconds', async () => {
+    allowMotion();
+    const connect = captureConnection();
+    const fromServer = captureServerStates();
+    await renderSession(brainstorm);
+    const tick = handClock();
+    act(() => fromServer(withCards(2)));
+    tick(5_000);
+    connect(false);
+    connect(true);
+    // The re-join is answered four seconds later.
+    tick(4_000);
+    act(() => fromServer(withCards(9, 'late')));
+    expect(card('late').classList.contains('fx-card-in')).toBe(false);
+    // The quiet seconds open there, not at the reconnection.
+    tick(2_000);
+    act(() => fromServer(withCards(10, 'late', 'soon')));
+    expect(card('soon').classList.contains('fx-card-in')).toBe(false);
+    tick(2_000);
+    act(() => fromServer(withCards(11, 'late', 'soon', 'news')));
+    expect(card('news').classList.contains('fx-card-in')).toBe(true);
+  });
+
+  it('slides no phase title in for the phase the late snapshot brings back, and slides the next one', async () => {
+    allowMotion();
+    const connect = captureConnection();
+    const fromServer = captureServerStates();
+    await renderSession(brainstorm);
+    const tick = handClock();
+    act(() => fromServer(withCards(2)));
+    tick(5_000);
+    connect(false);
+    connect(true);
+    tick(4_000);
+    act(() => fromServer({ ...withCards(9), phase: 'GROUP' }));
+    const group = await screen.findByRole('heading', { level: 2, name: 'Group Ideas' });
+    expect(group.querySelector('[data-phase-title]')!.classList.contains('fx-title-in')).toBe(false);
+    tick(4_000);
+    act(() => fromServer({ ...withCards(10), phase: 'VOTE' }));
+    const vote = await screen.findByRole('heading', { level: 2, name: 'Vote' });
+    expect(vote.querySelector('[data-phase-title]')!.classList.contains('fx-title-in')).toBe(true);
+  });
+
+  it('lets nobody arrive in the panel with the roster a reconnection brings back, however late, and lets the next guest in', async () => {
+    allowMotion();
+    const connect = captureConnection();
+    const roster = captureRoster();
+    const bob: User = { id: 'p2', name: 'Bob', color: 'bg-emerald-500', role: 'participant' };
+    await renderSession(createSession({ phase: 'BRAINSTORM', participants: [facilitator, participant, bob] }));
+    const tick = handClock();
+    roster([{ id: 'facilitator-1', name: 'Facilitator' }]);
+    tick(5_000);
+    connect(false);
+    connect(true);
+    tick(4_000);
+    // Alice came back during the outage: the roster that comes back lists her.
+    roster([{ id: 'facilitator-1', name: 'Facilitator' }, { id: 'p1', name: 'Alice' }]);
+    expect(rowOf('Alice').classList.contains('fx-person-in')).toBe(false);
+    tick(4_000);
+    roster([{ id: 'facilitator-1', name: 'Facilitator' }, { id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }]);
+    expect(rowOf('Bob').classList.contains('fx-person-in')).toBe(true);
+  });
+});
+
 describe('Session — the bar’s motion', () => {
   it('slides the phase title in at a phase change, never on the first paint', async () => {
     allowMotion();
