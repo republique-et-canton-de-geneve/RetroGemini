@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "Workflow"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {

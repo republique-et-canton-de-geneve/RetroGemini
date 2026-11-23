@@ -83,10 +83,19 @@ prompt: **telemetry off**, and **cross-project learnings off** (a container
 holds this one project). If a skill's preamble still emits the telemetry
 question, run `gstack-config set telemetry off` and continue without asking.
 
+**Multi-agent workflows are pre-approved.** `settings.json` also carries
+`"permissions": { "allow": ["Workflow"] }`, at the maintainer's request
+(2026-11-23): without it, every workflow launch, and every resume of one after a
+container restart, asked for a confirmation. It applies to every Claude Code
+session on this repository, a teammate's included, which then no longer shows
+the warning that a workflow can use a large share of the usage limit. Remove the
+entry to bring that confirmation back.
+
 > ⚠️ Re-running `gstack-team-init required` **overwrites** `check-gstack.sh` and
-> rewrites `.claude/settings.json`. It does not know about the two hooks above,
-> so re-add them to `settings.json` afterwards — otherwise a web session silently
-> loses both the auto-install and the routing table.
+> rewrites `.claude/settings.json`. It knows neither the two hooks above nor the
+> `Workflow` allow rule, so re-add them to `settings.json` afterwards — otherwise
+> a web session silently loses the auto-install, the routing table and the
+> pre-approved workflows.
 
 ### Manual install (local machine, once)
 
