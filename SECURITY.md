@@ -257,11 +257,14 @@ by one route, `POST /api/team/:teamId/member/avatar`.
   picture of the list, with any time, on another person's entry in that
   session, as it already can a name or a colour. The team's own record is out
   of its reach (only the route writes it), nothing but a picture of the list
-  is ever drawn, and no other session or screen shows what was planted. A
-  later choice of the person replaces it: any choice, a first "My initials"
-  included (a clear is stored dated, like a picture, and stamped into the
-  session it was made in), when the planted time is older than that
-  choice; and for a time planted ahead of the clock, a
+  is ever drawn, and no other session or screen shows what was planted; a
+  picture planted with the very time of the person's stored choice is not
+  drawn either by a browser whose copy of the team holds that choice. A later
+  choice of the person replaces it: any choice, the picture already stored
+  picked again and a first "My initials" included (each is stored dated, at
+  least a millisecond after any choice it replaces, like a new picture, and
+  stamped into the session it was made in), when the planted time is older
+  than that choice; and for a time planted ahead of the clock, a
   choice made in that session, where the route's stamp replaces a time more
   than five minutes ahead of the server's clock (no choice wrote it). A time
   planted less than five minutes ahead stands until it has passed: that is

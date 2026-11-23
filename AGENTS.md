@@ -190,7 +190,7 @@ reason: `send`'s 404 would replace our CSP with `default-src 'none'`.
 
 ## Compression and caching
 
-A team answer is 0.6 to 1 MB of JSON and the bundle 1.48 MB of JS and CSS, and
+A team answer is 0.6 to 1 MB of JSON and the bundle 1.47 MB of JS and CSS, and
 an invite link sends fifteen phones on one access point after both at once.
 Nothing was compressed and every file was revalidated on every load. Two
 modules fix that, with **no new dependency** (the reasoning `helmet` got):
@@ -217,7 +217,7 @@ modules fix that, with **no new dependency** (the reasoning `helmet` got):
   *loses the answer of a handler that throws after it* pins the cost.
 - **`npm run build` precompresses the bundle**: `scripts/precompressAssets.mjs`
   runs after `vite build` and writes a `.gz` beside each compressible file of
-  `dist/assets` at the best level, when it is smaller (1.48 MB → 373 KB
+  `dist/assets` at the best level, when it is smaller (1.47 MB → 373 KB
   today). The Dockerfile, CI and `playwright.prod.config.ts` run `npm run
   build`, so none of them names the script. Gzip only: browsers send `br` over
   HTTPS alone, and some deployments serve plain HTTP.
@@ -258,19 +258,59 @@ The interface's look lives in the `@theme` block of `index.css`, not in the
 components. A component keeps its Tailwind classes (`bg-slate-50`,
 `text-indigo-600`, `rounded-xl`, `shadow-xs`) and the block gives those names
 their values, so every screen changes at once and none can be left behind in
-another look. Ten rules:
+another look. Tailwind builds that stylesheet from the class names of the
+files it scans, and the `@source not` lines at the top of `index.css` keep the
+scan to the application's own sources: the documents, the workflow files and
+the directories that are not the application (the tests and specs, the
+scripts, the load test, `k8s/`, the tooling's) name classes the screens never
+draw, and those had become 99 dead rules of the shipped stylesheet, about
+13 kB of 110 kB. A class named only in a document is therefore no longer
+built (`__tests__/tailwindScanScope.test.ts`, which also refuses an exclusion
+that reaches a directory of the application). And `index.css` styles no class
+the screens do not apply (`__tests__/lookTokens.test.ts` → *what index.css
+styles*; `.drag-over` and `.scrollbar-hide` went in 45.3). Ten rules:
 
 - **`slate` is the neutral scale and `indigo` the brand**, both redefined step
   by step (slate-900 `#171a2b` is the ink, slate-50 the page, indigo-600
   `#4f3ff0` the brand). The other hues keep Tailwind's values. The radii
   (`rounded-sm` 6px to `rounded-3xl` 22px), the shadows (drawn with the ink
   colour) and the fonts (`font-sans` Geist, `font-mono` Geist Mono) are tokens
-  too.
+  too. A radius the steps do not name is written from them, never as pixels:
+  an overlay inside a bordered box takes the box's radius less the border
+  (`rounded-[calc(var(--radius-2xl)-2px)]`; `__tests__/lookTokens.test.ts` →
+  *one source for a radius*, which reads every arbitrary radius of
+  `components/` and `App.tsx`).
 - **A colour of the look is written once.** Outside `@theme`, `index.css` and
-  the components name tokens (a class, `var(--color-indigo-600)`), never a hex
-  of the palette: a hex is a second source that the next retune misses
-  (`__tests__/lookTokens.test.ts` → *one source for a colour*). Colours that
-  are data stay data: a column's colour, `ColorPicker`'s list.
+  the components name tokens (a class, `var(--color-indigo-600)`, mixed as
+  `color-mix(in srgb, var(--color-…) N%, transparent)` when it must be
+  translucent), never a hex or an `rgb()` of the palette: a literal is a
+  second source that the next retune misses. `__tests__/lookTokens.test.ts` →
+  *one source for a colour* reads `index.css` outside `@theme` and every
+  string, template and JSX text of `components/` and `App.tsx` (comments are
+  not read), and refuses there a hex, an `rgb()`, `rgba()`, `hsl()` or
+  `hsla()` other than pure white and black; it reads no other notation there,
+  so an `oklch()` or a named colour would pass it. Colours that are data stay
+  data, listed there (`COLOUR_DATA`) with their reason and every value:
+  `ColorPicker`'s list and its start for a column with none, the Dashboard's
+  `customColor` for a new template's columns and for a column with none and
+  the five steps of its health-check trend waves, and the colour of a column
+  Edit Layout adds. An inline style names its theme variable whole
+  (`'--color-red-500'`, never `--color-${hue}`): Tailwind emits a theme
+  variable only where the sources name it (*names every theme variable a
+  screen reads whole*). The body paints the page as `var(--color-slate-50)`,
+  and `@theme` keeps no `retro-*` alias of the palette. Inside `@theme` a
+  value is written once too: no token copies another token's literal value,
+  and no value draws a colour another token holds. It names that token
+  (`--color-person-neutral-ink: var(--color-slate-700)`, `--radius:
+  var(--radius-sm)`, `--shadow: var(--shadow-sm)`), mixed with transparent
+  when it is translucent: every shadow draws slate-900 as
+  `color-mix(in srgb, var(--color-slate-900) N%, transparent)`, which in srgb
+  keeps the ink's channels and sets only the alpha (*writes each value of
+  @theme once*, which reads every declaration of the `@theme` blocks,
+  comments left out). `utils/participantColors.ts` keeps the person tones as
+  hex for an inline `style`, a mirror its test holds equal
+  (`__tests__/participantColors.test.ts` → *hands out as hex exactly the tone
+  tokens index.css defines*).
 - **Each token has a job, stated as a measured pair** in
   `__tests__/lookTokens.test.ts`, with axe-core's engine. Muted text is
   slate-500 on white, the page, the panels and the brand tints; slate-600 and
@@ -278,8 +318,14 @@ another look. Ten rules:
   **slate-400 is an edge, not a text colour**: it draws a control's outline
   at 3:1 on white and on the page (3.41:1 on white) and is far under 4.5:1 there
   as text; on the dark screens it fails on their slate-800 panels (4.14:1), so
-  their muted text is slate-200 and -300 (no single value does both jobs). The
-  one place it is text is a placeholder inside a slate-900 field (5.05:1).
+  their muted text is slate-200 and -300 (no single value does both jobs). It
+  is text in two cases only: a placeholder inside a slate-900 field (5.05:1:
+  the Icebreaker's question and the ROTI follow-up), and the label of a
+  disabled control, which 1.4.3 does not hold to the text floor (3.41:1 on
+  white): the phases a participant cannot press, in both session headers
+  (`disabled:text-slate-400`; `__tests__/sessionHeaderLook.test.tsx` → *shows
+  a participant phases they cannot press as disabled, without opacity*), and
+  the timer's +30s and +1m while the session is not live.
   Retune a value in that test first, then in the block.
 - **The contrast helper measures what is painted.**
   `__tests__/helpers/tailwindTheme.ts` reads Tailwind's `theme.css` and then
@@ -320,7 +366,8 @@ another look. Ten rules:
   screens' as the constants at the top of `components/TeamLogin.tsx`, the
   dialog frame as `DIALOG_OVERLAY_CLASS` / `DIALOG_PANEL_CLASS` in
   `ModalDialog.tsx`; the session's are written inline in its components, and
-  both session headers carry the same class set
+  both session headers carry the same class set and mark their current
+  phase the same way, with `aria-current="step"`
   (`__tests__/healthCheckLook.test.tsx` compares them). The administration
   console draws with the dashboard's recipes, imported and never copied, plus
   the few it needs of its own in `components/admin/adminLook.ts` (card titles,
@@ -348,8 +395,17 @@ another look. Ten rules:
   card's hairline (slate-200) is not a control. `__tests__/fieldEdgeContrast.test.ts`
   reads every field of `components/` with the TypeScript parser, follows its
   class list through constants and conditionals, and measures each border
-  against each fill it can take; a native checkbox or radio stays native
-  (`accent-indigo-600`) and is not read. A field made read-only — its
+  against each fill it can take. A field that hovers moves its edge, one step
+  darker in the recipe (`FIELD_BOX`'s `hover:border-slate-500`), never to the
+  colour it rests on: the open board's search and sort and *Colour by* hovered
+  to their own slate-400 until 45.3, so hovering them changed nothing (→ *a
+  field's hover moves its edge*). A native checkbox or radio stays native and
+  its edge is not measured, but it takes the brand's accent,
+  `accent-indigo-600`, which the same suite requires of every one (→ *every
+  native checkbox and radio takes the brand accent*); that check also refuses
+  an input whose `type` is not written as a literal, or that spreads attributes
+  it cannot read or that set its `type`, so no checkbox hides from it. A field
+  made read-only — its
   `readonly` attribute, which among the fields drawn with `dashboardLook.ts`'s
   recipe only the Feedback Hub's title and description carry, while a send is
   on its way (`readOnly={submitting}`) — takes the page's grey from
@@ -458,6 +514,11 @@ modules decide it:
   `customColor` when it is a hex (short hex too), else the hue its Tailwind
   classes name through a fixed table (a custom template made by an old release
   stores classes only), else `null`. Nothing is written back to the column.
+  Everything a session draws in a column's colour reads it there: the board's
+  cards and column head, the comments dialog's card, the Discuss topic, the
+  origin chip, and the dots of the column navigator and of the AI suggestions
+  dialog, both drawn in the hue's `ink` (until 45.3 the dialog's dot read
+  `customColor` raw, and painted nothing for a class-only column).
 - **`utils/cardTones.ts` → `cardTones(hue)`**: `tint` (the card's background),
   `tintStrong` (an icon tile, an open control), `line` (the border) and `ink`
   (the hue darkened until it reads on both tints), for **any** colour a
@@ -509,7 +570,7 @@ card's filler keeps its shape.
 A guest who arrives, a card that lands, a vote that is cast, hidden cards that
 are shown, a dialog that opens: each has a short animation. All of it is
 **decoration**. The state an effect accompanies is already on screen in words
-or in a count, and a reader who asked for less motion gets none of it. Eight
+or in a count, and a reader who asked for less motion gets none of it. Nine
 rules:
 
 - **The effects are classes of `index.css`, all under
@@ -541,6 +602,12 @@ rules:
   `EFFECT_LENGTH_MS`, are a copy of the stylesheet's, and
   `__tests__/motionEffects.test.ts` reads `index.css` and requires them
   equal, so an animation lengthened in one place is not cut off by the other).
+  Every other clock that takes an effect class off reads that table too, plus
+  a margin: the participants panel's (`ARRIVAL_MS`, `POP_MS` in
+  `usePanelMotion.ts`, which listens for no `animationend` at all), the avatar
+  picker's swap net (`SWAP_FALLBACK_MS`) and a dialog's entrance net
+  (`ENTRANCE_NET_MS`, a second at least); `__tests__/motionNets.test.tsx`
+  holds each one past its animation, at today's 2200, 500, 700 and 1000 ms.
   Where React state puts the class on instead (a dialog's entrance, the avatar
   picker's swap), its end is listened for in a **layout** effect, in the commit
   that puts the class on: a passive effect runs after that commit, later still
@@ -553,14 +620,26 @@ rules:
   keep seeing the class strings React wrote. `motionAllowed()` reads the
   reader's setting live, and **every effect asks it first**: the board's, the
   vote's flight, a dialog's entrance, an arriving row, the writing pencil, the
-  avatar picker's swap. A reader who asked for less motion, or a browser that
-  cannot tell (jsdom has no `matchMedia`), is given no `fx-*` class at all;
+  avatar picker's swap. So does every smooth scroll, written `behavior:
+  motionAllowed() ? 'smooth' : 'auto'`: the Discuss focus of both session
+  types, the release analysis' result, the board's column navigator. A smooth
+  scroll has no media query of its own, and the Discuss focus and the release
+  analysis' result glided for every reader until 45.3.
+  `__tests__/reducedMotionGate.test.ts` reads the code of `components/`,
+  `App.tsx`, `index.tsx`, `utils/` (its `.js` rules included) and
+  `services/`, and refuses there any `'smooth'` that is not that question's
+  first branch and any class that sets `scroll-behavior: smooth`
+  (`scroll-smooth`, or `[scroll-behavior:smooth]`) without `motion-safe:`; in
+  `index.css` it refuses a `scroll-behavior: smooth` outside `no-preference`.
+  A reader who asked for less motion, or a browser that cannot tell (jsdom
+  has no `matchMedia`), is given no `fx-*` class at all and no glide;
   the CSS gate above remains the guarantee. Tests state the preference with
   `__tests__/helpers/motionPreference.ts`, whose queries match exactly (a stub
   that matched "reduce" inside "reduced-motion" tested nothing).
 - **Quiet by default.** Nothing plays on first paint, on a phase change or a
   change of session, while the connection is down, in the three seconds after
-  it comes back (a rolling update reconnects everybody), or for a burst: more
+  the state it brings back lands (a rolling update reconnects everybody, and a
+  pod that starts cold answers the re-join late), or for a burst: more
   than six cards or more than two people at once is a healed state or a
   restore, not people working. The card burst is one rule, decided in
   `diffSessionMotion`: more than six new cards in one write
@@ -572,16 +651,24 @@ rules:
   in the window only, sixty at most (`MAX_REVEALED_AT_ONCE`); the others are
   simply shown. Who finished is the participants panel's to show: it is not an
   event of the board, which a state that only says "someone is done" does not
-  wake. **The first paint is a seed, never a "before".**
-  A session screen is drawn first from the cached team record, which lags the
-  session row, and the server's state or roster can land seconds later. So
-  nothing is compared until the server's first state has been applied
-  (`useSessionMotion`'s `ready`, set by `Session.tsx` in the same batch as that
-  state; the phase title's slide waits for it too) or its first roster
-  (`usePanelMotion`'s `ready`, the panel's `rosterReceived`, set by both
-  session screens), and the three quiet seconds open at that moment, not at the
-  mount: counted from the mount, a join snapshot four seconds late played
-  every card and every person it brought.
+  wake. **The first paint is a seed, never a "before", and so is the state
+  from before an outage.** A session screen is drawn first from the cached
+  team record, which lags the session row, and after a reconnection from the
+  state it showed before the drop; the server's state or roster can land
+  seconds later. So nothing is compared until the server's first state since
+  the session was last live has been applied: `useSessionMotion`'s `ready`,
+  which is `serverStateApplied` in `Session.tsx`, put down by its `setIsLive`
+  whenever the session stops being live and put up again in the same batch as
+  the next state (the phase title's slide waits for it too); for the panel,
+  its first roster since then (`usePanelMotion`'s `ready`, the panel's
+  `rosterReceived`, put down the same way by both session screens). The three
+  quiet seconds (`QUIET_AFTER_LIVE_MS` in `utils/sessionMotion.ts`, one value
+  for the board, the phase title, the vote controls and the panel) open at
+  that moment, not at the mount; the board's hook also opens them when the
+  socket comes back, but the window the state opens always comes later and
+  supersedes it. Counted from the mount, a join snapshot four seconds late
+  played every card and every person it brought; counted from the
+  reconnection, so did a re-join that a cold pod answered four seconds late.
 - **An effect never changes a box that a test measures or a click aims at.**
   Rings and washes are drawn on pseudo-elements; a participant's row may
   animate only opacity, a pseudo-element and `translateX`, never its height or
@@ -623,7 +710,10 @@ rules:
   lack of votes shakes the budget (`shakeVoteBudget`). The session holds the
   vote's marks until the token lands
   (`heldVotes`, `playLandedVote`; the hold is counted, so two quick votes on
-  one card each keep it held until their own token lands), and a button
+  one card each keep it held until their own token lands; and a token arrives
+  once, even when its animation ends after the net's timer took it, as in a
+  tab shown again: `motionFlight.test.ts` → *removes the token at the timeout
+  when the animation never finishes*), and a button
   answers its press once the vote
   is drawn: played during the click, the class was wiped by the one React
   wrote in the same commit. A write that wrote nothing is followed by nothing
@@ -632,7 +722,20 @@ rules:
   for the next state. A token that cannot fly (an end outside the window, a
   browser that cannot animate) arrives at once, so the marks play where they
   stand and nothing stays held. Past ten votes, with unlimited votes and on the
-  open board, the dot pops in place. The budget (`VoteBudget`) draws one filled
+  open board, no token flies and nothing is held: the dot pops in place, or,
+  past three dots, the number bumps in place, in the guided pill and on the
+  board's control alike. Every mark a vote control plays on its own keeps the
+  board's quiet (*Quiet by default*), and so does the budget's refilled token:
+  `GuidedVoteControl` and `BoardVoteControl` take `Session.tsx`'s
+  `motionQuiet`, which the phase title reads too, and `VoteBudget` takes
+  `budgetMotionQuiet` under the same prop name, quiet with the board unless the
+  change it draws is a vote of the viewer's own (`castVote` says so for the
+  commit that draws it). Each is a required prop, read when the count
+  changes, never while drawing. So a dot, a number or a token that the
+  server's first state, or a reconnection's snapshot, brings back is drawn
+  without its spring, while a press of the control's own button in those
+  seconds is still answered (`PRESS_ANSWER_MS`). The budget (`VoteBudget`)
+  draws one filled
   token per vote left and one outline per vote the viewer really cast: a vote
   one vote per item leaves no item to place on (five votes, three items) is
   neither, and is not drawn, so the tokens never show a vote as cast that was
@@ -655,12 +758,39 @@ rules:
 - **A new effect is a class in `index.css` with its numbers, a trigger read
   from two states, and a test.** `__tests__/sessionMotion.test.ts`,
   `motionEffects.test.ts`, `motionFlight.test.ts`, `useSessionMotion.test.tsx`,
-  `sessionVoteMotion.test.tsx`, `panelMotion.test.tsx` and
-  `modalDialogEntrance.test.tsx` hold the rules in jsdom (which has neither
-  `matchMedia` nor `Element.animate`: each suite stubs them and also runs
-  bare), and `e2e/session-motion.spec.ts`, in the `motion` project, proves in a
-  browser that each effect plays once, leaves no class and no layer behind,
-  moves no box, and that reduced motion plays nothing.
+  `sessionVoteMotion.test.tsx`, `panelMotion.test.tsx`,
+  `modalDialogEntrance.test.tsx` and `motionNets.test.tsx` (the clocks of the
+  classes React puts on) hold the rules in jsdom. jsdom has neither
+  `matchMedia` nor `Element.animate`: each suite stubs what it needs, and all
+  but `motionNets.test.tsx` also run bare. `e2e/session-motion.spec.ts`, in the
+  `motion` project, proves in a browser that each effect plays once, leaves no
+  class and no layer behind, moves no box, and that reduced motion plays
+  nothing.
+- **A spinner, a pulse and a transition that moves a box are gated like the
+  effects.** Tailwind's `animate-*` utilities carry no media query, so each is
+  written behind `motion-safe:` (`motion-safe:animate-spin`). So is a
+  transition that moves or resizes a box: the participants panel's width, a
+  bar's height or width, a switch's knob (`SWITCH_KNOB`, `adminSwitchKnob`),
+  the timer's ring and the reaction picker's grow on hover (which, for a
+  reader who asked for less motion, snaps to its size). `.bar-anim` in
+  `index.css` is gated too, under `no-preference` in a block after the
+  effects block (`lookTokens.test.ts` reads everything before that block's
+  start). The duration goes behind the gate with its transition:
+  `transition-property` starts as `all`, so a `duration-*` left alone
+  animates every change of the box. A mixed transition is gated whole; a
+  transition of colours, a shadow or an opacity stays for everyone. One
+  animation of `index.css` is declared for every reader and stopped under
+  `prefers-reduced-motion: reduce` instead, the typing cue's dots
+  (`.typing-dot`). Nothing pulses at rest: the console's Live dot is still,
+  as the session's Live chip is. A smooth scroll asks the reader too
+  (`behavior: motionAllowed() ? 'smooth' : 'auto'`; see the rule on
+  `motionAllowed()` above). `__tests__/reducedMotionGate.test.ts` reads every
+  class list of `components/` and `App.tsx` through the TypeScript parser (a
+  template whole, with its branches and the capitalised recipes it names) and
+  every rule of `index.css`, and refuses an ungated animation, a moving
+  transition outside the gate, a lone duration, an animation of `index.css`
+  declared outside `no-preference` and not stopped under `reduce`, and a
+  smooth scroll that does not ask.
 
 ## Accessibility (audit H42)
 
@@ -679,7 +809,9 @@ dialog its **entrance** (45.0): the veil fades in and the panel rises a few
 pixels, once, when the dialog mounts, and nothing plays on the way out (an exit
 would delay the return of focus and keep the focus trap alive). The effect
 classes come off at their own `animationend`, or after a second when none
-comes (an animation that is interrupted never ends), and their fill mode is
+comes (`ENTRANCE_NET_MS`: a second, or the longest entrance in
+`EFFECT_LENGTH_MS` plus a margin should one ever last longer; an animation
+that is interrupted never ends), and their fill mode is
 `backwards`, so no transform remains: a transformed panel is the containing
 block of its `position: fixed` descendants. A dialog whose panel holds a fixed
 child while it opens passes `entrance="fade"` (opacity only), as the image
@@ -910,9 +1042,12 @@ fact about the codebase since 45.0, and the same suite holds it (its third
 family, `beside`): 51 buttons read an icon beside their label on the release
 before, none does now, and the next one fails the build. The suite knows an
 icon span by its class, written out or one of the look's icon recipes, which
-are all named `…ICON…` (`TAB_ICON`, `CHIP_ICON_CLASS`, `BANNER_ICON_CLASS`):
-name a new icon recipe that way, or the guard reads the icon as the button's
-words. An icon that is the only carrier of a state gets that state another way
+are all named `…ICON…` (`TAB_ICON`, `CHIP_ICON_CLASS`, `BANNER_ICON_CLASS`).
+The rule lives in `__tests__/helpers/iconClass.ts` (`drawsIconFont`), which
+the ligature gate (`e2e-prod/icon-ligatures.spec.ts`) reads too: name a new
+icon recipe that way, or the guard reads the icon as the button's words and
+the gate never measures its name. An icon that is the only carrier of a
+state gets that state another way
 (words, `aria-pressed`, `aria-busy`) before it is hidden; and **a button whose
 only content is an icon and a count is named in words, the count it shows
 first** (WCAG 2.5.3): a card's comments button is "2 comments", a proposal's
@@ -921,8 +1056,27 @@ votes "1 vote for" and "Vote neutral" (the icon read as a name said
 colour**: a button that selects one option among several carries
 `aria-pressed` (the Welcome phase's moods, Discuss's *Move On*, the ROTI
 scores of both session types, the health check's survey scores, the invite
-dialog's tabs and member rows, the avatar picker's tiles, joining the
-language switcher and the impact-rating choices that had it), and a chosen
+dialog's tabs and member rows, the avatar picker's tiles, the filter pills of
+the Dashboard's Actions tab, the Feedback Hub and the console's feedback tab,
+the template editors' colour swatches and icon tiles, a card's reaction
+chips, pressed when the viewer reacted with them, joining the language
+switcher and the impact-rating choices that had it;
+`__tests__/filterPillState.test.tsx` reads every element drawn with
+`FILTER_PILL_ON` with the TypeScript parser, through constants,
+class-building arrows and import aliases, and refuses one without it, and
+`__tests__/reactionChipState.test.tsx` holds the chips). A colour swatch is
+named by its colour in words, never by its code (`shared.colorPicker.color.*`).
+A switch says its state with `role="switch"` and `aria-checked`, and every
+switch of the Dashboard and of the console does: the Dashboard's anonymity
+switches, the console's own three (the new-team notification, the AI
+features and the AI's self-signed certificates, each named by its setting, a
+name no state changes: `__tests__/superAdminSwitches.test.tsx`) and its Jira
+switches. So does the login screen's star, whose name still says what a
+press does ("Add … to favorites", then "Remove … from favorites":
+`ACCESSIBILITY.md`, gap 10). The current item of a set says so too: the
+Dashboard's and the console's current tab carry `aria-current="page"`, and
+the phase a session is in carries `aria-current="step"`, the same in both
+session headers (`__tests__/currentItemState.test.tsx`). And a chosen
 option is never drawn by fading the others (`opacity-*`, `grayscale`), which
 both hides the choice from assistive technology and takes the unchosen text
 under 4.5:1. A sortable table header carries `aria-sort` on the
@@ -1677,7 +1831,12 @@ change to it lands in both.**
   with it the typing line, the rail and the Vote phase's votes left, is drawn
   from `lg` (1024 CSS px) up (`hidden lg:flex`, as before 43.0); below it the
   header chip shows a count only (who is done in a guided phase, who is
-  connected on an open board). A count for narrow screens is not built. In French the votes chip may be cut after its number in a wide font
+  connected on an open board). At every width that count is a status, never a
+  control: from `lg`, while the panel is collapsed, the panel's rail expands
+  it with its own button, which the keyboard reaches and which keeps the focus
+  as it toggles (`__tests__/sessionHeaderLook.test.tsx` → *the participants'
+  count*, `__tests__/healthCheckLook.test.tsx` → *the participants' count in
+  the header*). A count for narrow screens is not built. In French the votes chip may be cut after its number in a wide font
   with a classic scrollbar; the count comes first and is never cut.
 
   **Nothing that changes while people work moves a row.** The line keeps one
@@ -1855,7 +2014,7 @@ icon font, nothing is unreadable without it.
 ### When Adding New Features
 1. **Check for external resource dependencies** — if a new library or feature loads something from the internet, find an offline alternative
 2. **If you need a new icon** that isn't rendering, the Material Symbols woff2 file may need to be updated — re-download the Rounded static cut (weight 400) from Google Fonts and replace `public/fonts/material-symbols-rounded.woff2`. The class stays `material-symbols-outlined` and the ligature names are the same in every cut: 45.0 changed the drawing, not the markup, so every test that finds an icon by its text kept working.
-   **Every name the application can draw is measured.** The icons written in the components, the picker's list (`components/iconPickerIcons.ts`) and the built-in template icons are each drawn as one 24px glyph in the built app by `e2e-prod/icon-ligatures.spec.ts` (a missing ligature is the raw word, several characters wide: `groups_off` measured 120px), which also checks that the previous cut still draws them when the Rounded file is unreachable. A stored name no cut draws is read as one that draws through `columnIconName` (today only `clarity` → `light_mode`): call it wherever a column's stored icon reaches the screen.
+   **Every name the application can draw is measured.** The icons written in the components (in an element whose class draws the icon font, written out or through one of the look's `…ICON…` recipes: `__tests__/helpers/iconClass.ts`, the rule `__tests__/iconButtonNames.test.tsx` reads too), the picker's list (`components/iconPickerIcons.ts`) and the built-in template icons are each drawn as one 24px glyph in the built app by `e2e-prod/icon-ligatures.spec.ts` (a missing ligature is the raw word, several characters wide: `groups_off` measured 120px), which also checks that the previous cut still draws them when the Rounded file is unreachable. A stored name no cut draws is read as one that draws through `columnIconName` (today only `clarity` → `light_mode`): call it wherever a column's stored icon reaches the screen.
    ⚠️ **That file is a *static* cut with no `FILL` axis**, so it cannot draw a
    filled variant of anything: `star`, `star_border`, `star_outline` and `grade`
    all resolve to the same outlined glyph in it, which is why
@@ -1961,12 +2120,21 @@ language switcher stays usable while a validation error or a "saved"
 confirmation is visible, so a translated string kept in state would stay in the
 old language while the rest of the screen changes. Keep `i18n/notice.ts`'s
 `Notice` (a key and its params, or a raw data-layer error) and translate with
-`noticeText(notice, t)` when rendering — the Dashboard settings, the login
-screen and the avatar picker's save error work this way. The picker keeps
-`noticeFromError`'s answer (`errors.unknown` for a refusal without words);
-it is modal, so a language change reaches it from another tab, which the
+`noticeText(notice, t)` when rendering. The Dashboard settings, the login
+screen, the avatar picker's save error, the release analysis dialog's error,
+the invite dialog's status line and the assistant's group-suggestion error
+work this way; the status line words its count with `tp` at render, and each
+address's error is a `Notice` of its own. The picker keeps
+`noticeFromError`'s answer (`errors.unknown` for a refusal without words).
+It is modal, so a language change reaches it from another tab, which the
 provider follows (`avatarPicker.test.tsx` → *says a failure in the language
-the reader switches to while it shows*).
+the reader switches to while it shows*); so do the three other dialogs, each
+with a test of its own (`i18nDashboard.test.tsx` → *ReleaseAnalysisModal in
+French*, `i18nEntry.test.tsx` → *words its status line in the language the
+reader switches to while it shows*, `i18nOpenBoard.test.tsx` → *says the
+assistant’s failure in the language the reader switches to while it
+shows*). The assistant's error reads no `message` from the route and never
+shows the browser's own words for a failed request.
 
 **Formats follow the reader's regional settings.** Dates and decimal marks use
 `locale` (`intlLocaleFor`), which keeps the browser's regional variant of the
@@ -2003,7 +2171,11 @@ and from 360px for a facilitator, whose header also carries invite and play
 (`data-viewer-avatar`). The phase labels are drawn in mixed case by CSS from
 the dictionary's capitals, so every accessible name and every test that clicks
 a phase by its name is unchanged. Both session headers carry one class set,
-control for control (`__tests__/healthCheckLook.test.tsx`), and the
+control for control (`__tests__/healthCheckLook.test.tsx`), and the current
+phase's pill is painted by those classes alone: no rule of `index.css` sets
+`.phase-nav-btn`'s colour, fill or weight
+(`__tests__/sessionHeaderLook.test.tsx` → *leaves the pill's colour, fill
+and weight to its classes*); and the
 dashboard's top bar is `components/AppHeader.tsx`, rendered by `App.tsx`'s
 `renderHeader`, with the viewer's avatar at every width. Tailwind 4 emits an
 arbitrary `min-[Npx]:` variant before the named breakpoints, so
@@ -2079,9 +2251,18 @@ beside the locale. `playwright.config.ts` has a second project, `motion`, which
 runs the specs an animation can actually change (`retro-touch-card-controls`,
 `retro-full-flow`, `retro-wide-board`, `accessibility-audit`) with motion on,
 plus `session-motion.spec.ts`, which runs only there and proves the animations
-play once and leave nothing behind. `npm run test:e2e` runs both projects. A
-context a spec opens itself with `browser.newContext()` inherits neither
-setting: set it there. `audit()` in `e2e/helpers/axe.ts` waits for the page's
+play once and leave nothing behind. Playwright says nothing of a listed name
+that matches no file, so `__tests__/playwrightMotionProject.test.ts` checks
+that each is a spec of `e2e/` and that the motion-only spec is among them;
+`__tests__/playwrightDualUrlFlows.test.ts` does the same for the two full
+flows `playwright.dual-url-flows.config.ts` runs at the native URL and behind
+the proxy. `npm run test:e2e` runs both projects. A context a spec opens
+itself with `browser.newContext()` takes both settings, and every other
+option of its project and of a `test.use`, for each option it does not pass:
+Playwright Test fills them in before the context is created
+(`runBeforeCreateBrowserContext`), in a test and in a hook alike. Pass
+`locale` or `reducedMotion` only to differ from them. `audit()` in
+`e2e/helpers/axe.ts` waits for the page's
 finite animations to end (five seconds at most, then it fails naming the
 animation) before axe reads a colour, so an audit never samples a fade
 half-way; `e2e/axe-animations.spec.ts` holds that wait.
@@ -2181,8 +2362,16 @@ user cannot see it, so it does not belong in the user-facing "What's New".
   tree with the tree of the commit the run started from. Trees, not commits:
   a branch released by hand and then squash-merged or rebased (another commit,
   the same tree) passes, and its image is built from the tag. Only then does
-  it dispatch `docker-deploy.yml` on that tag with the version, and it
-  generates the SBOM from a checkout of the same tag. Run by hand from a
+  it dispatch `docker-deploy.yml` on that tag, named in full (`--ref
+  refs/tags/<version>`, as the check fetches it: a short name is a branch's
+  as much as a tag's, and a branch named like the version, whose tree the
+  check never compared, could be built in the tag's place), with the
+  version, and it generates the SBOM from a checkout of the same tag. That
+  the dispatch API takes a qualified ref, as the dispatches that pass
+  `github.ref` rely on, could not be checked offline: were it refused, the
+  step would fail with an HTTP 422 and stop the run before any image is
+  built or any SBOM attached, the release already created; the next release
+  run settles it. Run by hand from a
   branch (Actions → *Publish GitHub Release* → the branch), it therefore
   releases that branch whole; with `--ref main`, as it was until 45.2, it
   published main's code under the branch's version. When the trees differ the
@@ -2224,7 +2413,10 @@ user cannot see it, so it does not belong in the user-facing "What's New".
   from the release to the dispatch run under `set -euo pipefail`.
   `docker-deploy.yml` dispatched by hand still defaults `push_latest` to
   `true`. `__tests__/deploymentManifestParity.test.ts` → *the release builds
-  its image from its own tag*.
+  its image from its own tag*, which runs the newest-release step's own script
+  under bash with a stand-in `gh` rather than only reading its lines: the
+  newest release, a higher one, 45.10 against 45.9, the first release, a
+  draft, names that are not `X.Y`, and `gh` failing.
 - The Docker deploy action reads `VERSION`, so every deployable change needs a
   bump (user-visible → `X`, internal → `Y`).
 - ⚠️ **Those two rules meet as soon as a version has been deployed, and the
@@ -2388,9 +2580,16 @@ the English file does not have. Both files ship in the image (`Dockerfile`,
    if it falls: when you remove warnings, lower `BUDGET` in that file in the
    same change, otherwise the freed slots are silently spent by the next
    warning to appear. Errors always fail, budget or not. Two directories of
-   local tooling are not linted (`eslint.config.js`): `.claude/worktrees/`
-   and `.gstack/`, gstack's working directory, where `/qa` and `/review`
-   write their probe scripts.
+   local tooling, `.claude/worktrees/` and `.gstack/` (gstack's working
+   directory, where `/qa` and `/review` write their probe scripts), are not
+   linted (`eslint.config.js` → its global `ignores`), not collected by vitest
+   (`vitest.config.ts` → `test.exclude`) and not counted by the whole-codebase
+   coverage sweep (`scripts/coverage-scope.mjs` → `EXCLUDE`). vitest globs dot
+   directories and reads no `.gitignore`, so a probe named `*.spec.ts` under
+   `.gstack/` failed `npm run test`. `__tests__/localToolingExclusions.test.ts`
+   holds the three lists together; it reads ESLint's list from its global
+   ignores alone, since an `ignores` beside `files` or `rules` only narrows
+   its own block.
 2. **Run type check**: `npm run type-check`
 3. **Run tests with coverage**: `npm run test:coverage`
 4. **Run build**: `npm run build`
@@ -2519,7 +2718,9 @@ green state and address automated feedback:
   the next test that waits for one (a dialog's first focus) times out, far
   from its cause. So: `view.unmount()` (or `cleanup()`), then
   `act(() => { vi.runOnlyPendingTimers(); })`, then `vi.useRealTimers()`, in
-  that order (`modalDialogEntrance.test.tsx`, `avatarScreensWiring.test.tsx`).
+  that order (`modalDialogEntrance.test.tsx`, `avatarScreensWiring.test.tsx`,
+  and the `afterEach` of `useSessionMotion`, `panelMotion`,
+  `guidedVoteControl`, `boardVoteControl` and `voteBudgetChip`).
 
 ### Regression coverage (leave a durable guard, not a throwaway)
 
@@ -2665,16 +2866,19 @@ The following files MUST be included in the Docker image (check `.dockerignore`)
   immutable, which is safe; the runtime stage's `COPY --from=builder /app/dist`
   carries the dot-directory
 
-`.dockerignore` leaves out `.claude/` and `.gstack/` (the lint skips
-`.claude/worktrees/` and `.gstack/`, *Before Committing*, item 1), because the
-builder copies the whole context (`COPY . .`):
+`.dockerignore` leaves out `.claude/` and `.gstack/` (the lint, the unit run
+and the coverage sweep skip `.claude/worktrees/` and `.gstack/`, *Before
+Committing*, item 1), because the builder copies the whole context
+(`COPY . .`):
 
 - `.claude/worktrees/` holds whole checkouts of the repository, often older
-  ones, and Tailwind's scan in the builder would read their components. The
-  scan skips what a `.gitignore` names, and the file that names them, the root
-  `.gitignore`, is the one `.dockerignore` drops (its `.gitignore` pattern is
-  anchored at the root). A directory's own `.gitignore` stays in the context,
-  but a worktree's own copy of that file does not name its own components.
+  ones, and until 45.3 Tailwind's scan in the builder would have read their
+  components: the scan skips what a `.gitignore` names, and the file that
+  names them, the root `.gitignore`, is the one `.dockerignore` drops (its
+  `.gitignore` pattern is anchored at the root). A directory's own
+  `.gitignore` stays in the context, but a worktree's own copy of that file
+  does not name its own components. Since 45.3 `index.css` keeps `.claude/`
+  and `.gstack/` out of the scan itself, wherever the build runs (*The look*).
 - `.gstack/` is gstack's state: its browser's access token (`browse.json`),
   its cookies and storage when session persistence is on
   (`session-state.json`), the logs of the pages and requests it made
@@ -2869,7 +3073,7 @@ that take a team credential (`/api/send-invite`, `/api/wifi-config`,
 | `/api/team/list` | GET | Team summaries for the login screen picker |
 | `/api/team/exists/:teamName` | GET | Check team-name availability. The name arrives **already percent-decoded** — Express decodes route params — so the handler must not decode it again: a second `decodeURIComponent` threw `URIError` on a bare `%` (answered `500`, and `dataService.renameTeam` fails the rename when this check does not answer, so no team could ever be renamed to "Sprint 50%") and silently answered about a different name when a decoded name still looked encoded |
 | `/api/team/:teamId` | POST | Fetch the authenticated team's current state. The team is returned without `teamFeedbacks` (stored on the record, stripped from every team answer): the Feedback Hub reads `/api/feedbacks/all`, and no client version read the field. The Dashboard skips the read that follows a whole-team load by less than 5 s, once (`refreshFromServer({ maxAgeMs })`, see *Key Design Principles*) |
-| `/api/team/:teamId/update` | POST | Update team fields. A rename claims the new index key, writes the record, then releases the old key (`409 team_name_exists` if another team holds the name) — never the reverse, which left the old name free across the record write and needed a rollback that could evict whoever took it. **It never replaces a list another route owns.** `retrospectives`, `healthChecks`, `globalActions` and `teamFeedbacks` are ignored; `customTemplates` and `customHealthCheckTemplates` are **merged add-only** (a retro template is added unless one with the same name and columns is stored; a health-check template is added by a new id or replaces the stored one with that id; nothing is ever removed); one warning line names what was ignored and what was merged. A whole-list replace from a second tab left on a stale Dashboard erased a live retro from the team record (incident ISS, 2026-10-12), and the template lists had the same flaw. New clients use the template routes below and `/api/feedbacks/*`. The add-only merge exists for the clients from before that fix, which save a template only by sending the whole list: during and after a rolling update their tabs stay open, and stripping the lists silently discarded every template they saved. Their deletes simply do not stick, which is the safe way to be wrong. A `facilitatorEmail` in the updates follows the shared email rule (see *Email addresses*): it is judged before anything is written, the name claim included (`400 invalid_email`), stored cleaned, and `null`, `''` or a blank value **clears** it — the Dashboard sends `null`, because the `undefined` it used to send vanished in JSON and the address could never be emptied. `mergedFrom` is ignored like `passwordHash`: only the super-admin merge writes it. So are `jiraTarget` (written by `/jira/target` alone), `jiraClaims` (server-only, see *Jira*), `jiraParents` and `jiraParentClaims` (each session's parent issue and the claims on parents being created, written by `/jira/issues` alone). A change of `facilitatorEmail` is recorded as `team.recovery-email-change` (that address is where a reset link goes), with the credential `authenticateTeam` actually accepted (`via`), never inferred from the body — a valid token wins over any password sent beside it. A rename also answers `409 team_name_exists` when another **record** displays the name with no index entry, as the super-admin rename does. The team is returned without `teamFeedbacks` (stored on the record, stripped from every team answer): the Feedback Hub reads `/api/feedbacks/all`, and no client version read the field. |
+| `/api/team/:teamId/update` | POST | Update team fields. A rename claims the new index key, writes the record, then releases the old key (`409 team_name_exists` if another team holds the name) — never the reverse, which left the old name free across the record write and needed a rollback that could evict whoever took it. **It never replaces a list another route owns.** `retrospectives`, `healthChecks`, `globalActions` and `teamFeedbacks` are ignored; `customTemplates` and `customHealthCheckTemplates` are **merged add-only** (a retro template is added unless one with the same name and columns is stored; a health-check template is added by a new id or replaces the stored one with that id; nothing is ever removed); one warning line names what was ignored and what was merged. A whole-list replace from a second tab left on a stale Dashboard erased a live retro from the team record (incident ISS, 2026-10-12), and the template lists had the same flaw. New clients use the template routes below and `/api/feedbacks/*`. The add-only merge exists for the clients from before that fix, which save a template only by sending the whole list: during and after a rolling update their tabs stay open, and stripping the lists silently discarded every template they saved. Their deletes simply do not stick, which is the safe way to be wrong. A `facilitatorEmail` in the updates follows the shared email rule (see *Email addresses*): it is judged before anything is written, the name claim included (`400 invalid_email`), stored cleaned, and `null`, `''` or a blank value **clears** it — the Dashboard sends `null`, because the `undefined` it used to send vanished in JSON and the address could never be emptied. `mergedFrom` is ignored like `passwordHash`: only the super-admin merge writes it. So are `jiraTarget` (written by `/jira/target` alone), `jiraClaims` (server-only, see *Jira*), `jiraParents` and `jiraParentClaims` (each session's parent issue and the claims on parents being created, written by `/jira/issues` alone), and `memberAvatars` (each member's avatar, written by `/member/avatar` alone). A change of `facilitatorEmail` is recorded as `team.recovery-email-change` (that address is where a reset link goes), with the credential `authenticateTeam` actually accepted (`via`), never inferred from the body — a valid token wins over any password sent beside it. A rename also answers `409 team_name_exists` when another **record** displays the name with no index entry, as the super-admin rename does. The team is returned without `teamFeedbacks` (stored on the record, stripped from every team answer): the Feedback Hub reads `/api/feedbacks/all`, and no client version read the field. |
 | `/api/team/:teamId/retrospective/:retroId` | POST | Persist one retrospective. Carries a rev guard: a blob built on an older `_rev` than the stored one is dropped, and so is a blob with **no** `_rev` over an entry that has one — an invite placeholder must never overwrite a real retro. For an existing entry it **keeps the stored `name`**: every client persists its whole blob here, so the stored title used to be whatever the last saver's cache held. A name is set by creation and by the `/name` route, nowhere else. An action's `jira` is never taken from the blob: the stored value is kept, and a link the record does not hold is dropped, on new actions too (`withoutUnstoredJiraLinks`) |
 | `/api/team/:teamId/retrospective/:retroId/name` | POST | Rename one retrospective. **Granular on purpose** (audit H35): renaming by persisting the whole blob sends the caller's cached `_rev`, which is stale for any retro a live session has since advanced, so the rev guard above dropped the entire write and the title reverted with nothing reporting a problem. This route carries no revision, touches only `name`, and deliberately does **not** bump the stored `_rev` — a title change must not make every live client lose its next optimistic-concurrency race. Answers `404 retrospective_not_found` when the id matches nothing; a rename to the name it already has is a success, not a 404. **It also renames the live session** (`server/services/liveSessionRename.js`, wired from `server.js`): when `session:{id}` exists for the same team, the name goes through the session compare-and-swap (which bumps the *session* `_rev`, never the team record's) and the room receives the new state. Best-effort and after the answer, so it never fails or delays the rename (during a rolling update, a rename handled by a pod from before this change reaches the team record only; the next rename heals the session); it runs even when the team record already held the name, which is what heals a session left diverged. Without it, a rename made after the invitations went out left every participant on the old title, and the server refused each of their writes (incident ISS) |
 | `/api/team/:teamId/healthcheck/:hcId` | POST | Persist one health check (same rev guard, same rules on a missing `_rev`, on the stored `name` and on `jira`) |
@@ -2884,7 +3088,7 @@ that take a team credential (`/api/send-invite`, `/api/wifi-config`,
 | `/api/team/:teamId/action` | POST | Persist a global action update. **Additive, not a replace** (`utils/actionImpact.js` → `mergeActionImpactState`): it folds the incoming action onto the stored one so `impactRatings`, `closedAt` and `impactDeferredBy` survive a caller that never read them. Without that, a facilitator renaming an action from a client loaded before anyone voted wipes the whole rating round. It also stamps `closedAt` when *it* is what closes the action, which is what keeps the field correct through a rolling update where an older pod closes an action without stamping — but it never invents one for an action already stored as closed without a stamp, because those are the pre-feature closures and dating them would drag the entire historical backlog into the next rating round. Its `jira` comes from the record only (`withRecordedJiraLink`: the stored copy's value, else another copy's, else none), so a caller can neither drop a link nor plant one |
 | `/api/team/:teamId/action/impact` | POST | Record one participant's impact vote on one closed action (`{ actionId, userId, vote }`; `vote: 1 \| 2 \| 3 \| 'abstain' \| null`, `null` clears the caller's own vote). **Deliberately narrow, for the same reason `/retrospective/:retroId/name` is**: `impactRatings` is the first per-user data on the team record and it has one writer per participant, so sending a whole action would make two people voting in the same second race, with the loser's vote vanishing silently. This writes exactly `impactRatings[userId]` inside `atomicTeamUpdate`, so concurrent voters never contend for the same key. Carries no revision, touches no other field, and takes no retro/health-check hint — it scans all three homes, because a hint would be a second way to locate an action that could disagree with the scan. Answers `404 action_not_found` (after the write, never from a preliminary read) and `400 invalid_vote` for anything off the scale, refused rather than coerced. **`{ actionId, reset: true }` drops the whole map for one action** — what a *later* retrospective does when it puts a postponed action back to the team, because "Rate later" promises the question is asked again and a vote left in place is pre-filled next time, so the early answerer is never re-asked. It lives on this route rather than a new one because `impactRatings` is owned here and nowhere else (the whole-action route deliberately cannot touch it), and a clear written elsewhere would be a second owner. The reset is performed at **re-presentation**, never at the deferral: that is what keeps the "Rate later" toggle lossless, so a mis-click stays undoable and the votes only go when the round that would have shown them really reopens. `reset` must be a literal `true`; anything else falls through to the ordinary vote path and its validation |
 | `/api/team/:teamId/members` | POST | Update the member roster. Member emails are **cleaned, never refused** by the shared email rule (`cleanRosterEmails`, the function the heal pass uses): a value that does not parse is stored as sent, and so is one whose cleaned form another member already holds — a roster write carries joins, and member emails are identities on the client. Answers `{ success: true }`: it used to return the whole team, which no client read, so every join paid for a second copy of the history |
-| `/api/team/:teamId/member/avatar` | POST | Set or clear one member's avatar `{ memberId, avatar: <id> \| null, sessionId? }` (`server/routes/teamAvatarRoutes.js`). Credential first (`401`); `400 invalid_member` unless `memberId` is a plausible member id (`isValidRaterId`); `400 invalid_avatar` unless `avatar` is `null` or an id the release accepts (`isAcceptedAvatarId` in `utils/avatars.js`: the offered ids, and those accepted one release ahead of being offered): refused, never coerced, because an id this pod does not know may be one a later release offers. Under the row lock it writes `memberAvatars[memberId] = { id, at }`, with `at` the server's clock in ms and never before the entry it replaces, and a clear stored as `{ id: null, at }` (so a clear too is newer than every copy of the choice it replaces). It rebuilds the map from its valid entries, so junk heals (an entry whose `at` is not a date, `isAvatarTime`, is junk: nothing could be dated after it), and caps it at 500 entries (ids on neither roster list go first, then the oldest; never the one just written), where a first clear takes its place like any choice. A repeat of the stored picture, or a clear of a cleared choice, writes nothing (a session named by `sessionId` is still stamped with the stored entry); a first clear, with no valid entry stored before it (none, or junk the same write drops: an entry that is not `{ id, at }`, or whose `at` is no date, or whose `id` is not of the stored shape, `isMemberAvatarEntry`), is stored as `{ id: null, at }`, dated by the clock, and stamped into the session like any choice. Answers `{ success: true, memberAvatars }` after the write. With a `sessionId`, after the answer and best-effort, it stamps that live session's participant entry with `avatar` and `avatarAt` through `liveSessionPatch`: only the team's own session, only a participant it already holds, only when the stored stamp is older (or dated far ahead of the server's clock: a participant entry is data, and no pick wrote such a stamp). `/update` ignores `memberAvatars`. The client calls it through `dataService.setMemberAvatar`, which retries an older pod's HTML 404 across a rollout, takes the route's own refusals as final (a value refused, the team gone, the credential refused, the limiter's 429: sent again, they took seven seconds to be said to someone watching "Saving…") and never posts the roster |
+| `/api/team/:teamId/member/avatar` | POST | Set or clear one member's avatar `{ memberId, avatar: <id> \| null, sessionId? }` (`server/routes/teamAvatarRoutes.js`). Credential first (`401`); `400 invalid_member` unless `memberId` is a plausible member id (`isValidRaterId`); `400 invalid_avatar` unless `avatar` is `null` or an id the release accepts (`isAcceptedAvatarId` in `utils/avatars.js`: the offered ids, and those accepted one release ahead of being offered): refused, never coerced, because an id this pod does not know may be one a later release offers. Under the row lock it writes `memberAvatars[memberId] = { id, at }`, with `at` the server's clock in ms and never before the entry it replaces, and a clear stored as `{ id: null, at }` (so a clear too is newer than every copy of the choice it replaces). It rebuilds the map from its valid entries, so junk heals (an entry whose `at` is not a date, `isAvatarTime`, is junk: nothing could be dated after it), and caps it at 500 entries (ids on neither roster list go first, then the oldest; never the one just written), where a first clear takes its place like any choice. Every pick is written dated: a repeat of the stored picture, or a clear of a cleared choice, is dated again (at least one millisecond after the entry it replaces, by the clock alone after the largest date, which has no next one), so its stamp replaces a newer copy on that member's session entry (a copy dated less than five minutes ahead of the server's clock stands until that time has passed, as for any pick); a first clear, with no valid entry stored before it (none, or junk the same write drops: an entry that is not `{ id, at }`, or whose `at` is no date, or whose `id` is not of the stored shape, `isMemberAvatarEntry`), is stored as `{ id: null, at }`, dated by the clock, and stamped into the session like any choice. Answers `{ success: true, memberAvatars }` after the write. With a `sessionId`, after the answer and best-effort, it stamps that live session's participant entry with `avatar` and `avatarAt` through `liveSessionPatch`: only the team's own session, only a participant it already holds, only when the stored stamp is older (or dated far ahead of the server's clock: a participant entry is data, and no pick wrote such a stamp). `/update` ignores `memberAvatars`. The client calls it through `dataService.setMemberAvatar`, which retries an older pod's HTML 404 across a rollout, takes the route's own refusals as final (a value refused, the team gone, the credential refused, the limiter's 429: sent again, they took seven seconds to be said to someone watching "Saving…"), never posts the roster, and merges the answered map into the cached team's member by member (`mergeMemberAvatars`: the newer entry of each, the answered one on a tie, the largest date ranking below every other), because the answer is the map at that pick's write and a refresh answered first may hold another member's later choice; it resolves with the merged map |
 | `/api/team/:teamId/invite-credential` | POST | Derive the team's current invite credential for embedding in invite links (revoked by password rotation) |
 | `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links). **Revokes every session token of the team** (decision D3b): the same transaction gives the team a new session epoch, and the answer is `{ success, sessionToken }`, a token under the new epoch for the caller, so the facilitator who changed it keeps working (a 41.0 client ignores it and keeps authenticating by the new password it holds). After the answer, best-effort, the team's live sockets are cut on this pod and the others (`sessionRevocation.js`). Recorded as `team.password-change` with `detail.sessionsRevoked: true` |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned; its Jira token, `team-secret:{teamId}`, is deleted before the record). The Dashboard waits for the answer: a failure keeps the team signed in and says so, and `team_not_found` (already deleted — a lost answer, another tab, the super admin) counts as done |
@@ -3085,8 +3289,10 @@ alone and ignored by `/update`. It is a top-level key, not a field of the
 member row, because `/members` replaces the rows wholesale with whatever roster
 a client cached: a stale tab would lose a value kept there. It is sent to
 clients as stored and read through `memberAvatar` / `memberAvatarId`
-(`utils/avatars.js`), as data: any holder of a team credential can post
-anything. An entry whose `at` is not a date (`isAvatarTime`: whole
+(`utils/avatars.js`), as data (the route and the merge read the whole map
+through `memberAvatarEntries` and the roster through `rosterIds`; a client
+merges a pick's answer through `mergeMemberAvatars`): any holder of a team
+credential can post anything. An entry whose `at` is not a date (`isAvatarTime`: whole
 milliseconds that a number counts exactly) is no entry. A merge re-keys it through the member-id map (an entry one team
 kept for an id that is off its roster and on the other team's is not carried
 onto that other member; `mergedMemberAvatars`:
@@ -3589,16 +3795,32 @@ Rules:
   drawn and marked as initials in their browser at once (`useOwnAvatar.test.tsx`
   → *after a first clear made in the session*), and for the room through the
   route's stamp (`teamAvatarRoutes.test.ts` → *stores a first clear as a dated
-  entry, like any choice, and stamps it into the session*).
+  entry, like any choice, and stamps it into the session*). So is a repeat:
+  the stored picture picked again, or a clear of a cleared choice, is dated
+  again like any pick and written, so in the session it was made in its stamp
+  replaces another picture planted on the entry with a time newer than the
+  stored choice (a time planted ahead follows *A participant entry is data*
+  below), and the newer copy a merge kept or a tab open across a restore
+  stamped (`teamAvatarRoutes.test.ts` → *puts the stored picture back over a
+  newer entry when the person picks it again in that session*;
+  `useOwnAvatar.test.tsx` → *draws and marks the stored picture again over a
+  newer one planted on the entry, and writes the entry once the wait is
+  over*).
 - **A session shows its own copy.** A participant entry of a session carries
   `avatar` and `avatarAt`. The route stamps the entry of the session the pick
   came from (the room sees it at once); and each client keeps a **copy of its
   own entry** on the team's choice when that choice is newer
   (`ownAvatarEntry`). Nobody writes another person's entry, and a team member
   row never gains an `avatar` field. When drawing, `sessionAvatarOf` takes the
-  entry only when its `avatarAt` is at least the team choice's `at` (an entry
-  with no time counts as 0), otherwise the team's: a pick made on the
-  dashboard stamps no session, and the session's copy must not outlive it.
+  entry only when its `avatarAt` is newer than the team choice's `at` (an
+  entry with no time counts as 0, so it never wins), otherwise the team's: a
+  pick made on the dashboard stamps no session, and the session's copy must
+  not outlive it. On a tie it draws the team's choice, as the picker marks it
+  (`ownAvatarChoice`): a tie the server wrote carries one picture in both
+  places (the route's stamp and the own entry copy the stored entry), so an
+  entry with another picture at the same time was planted by another client
+  (`sessionAvatars.test.ts` → *takes the team's choice on a tie, as the picker
+  marks it: a tie with another picture is not one the server wrote*).
 - **The own entry rides the writes the screen already sends.** Both screens
   stamp it in their one write function (`stampOwnAvatarEntry`, after the
   updater), so the write that adds a person to a session carries their
@@ -3654,7 +3876,15 @@ Rules:
 - **Values are copied as stored and checked only to draw.** `toAvatarId` is
   applied where a picture is drawn (`Avatar`, `sessionAvatarOf`,
   `memberAvatarId`), never where a value is copied: a tab or pod that does not
-  know a newer id keeps it as it is, and draws the initials. Adding avatars
+  know a newer id keeps it as it is, and draws the initials, as long as the id
+  is of the stored shape (`isMemberAvatarEntry`: words of the lower-case
+  letters a to z joined by single hyphens, at most 64 characters). Every pod
+  and tab from 45.0 on applies that shape when it reads the map, merges two
+  teams or rebuilds the map at a pick, so an id of any other shape reads as no
+  choice there and is dropped at the team's next pick. The shape is therefore
+  a contract with every deployed release, not a naming style: a new id must
+  fit it, and widening it in `utils/avatars.js` does not reach the pods
+  already running (`__tests__/avatars.test.ts` holds it). Adding avatars
   therefore takes **two releases**: first the id goes into
   `ACCEPTED_ONLY_AVATAR_IDS` in `utils/avatars.js`, which the route accepts
   (`isAcceptedAvatarId`) and the picker neither offers nor draws; the next
@@ -3724,10 +3954,18 @@ Rules:
   the save fails. A click on the picture
   already marked is written too: the mark is this browser's copy of the
   choice and can be older than the server's (a pick made since in another
-  browser, from the dashboard), and the server writes nothing when it already
-  holds it. `App` puts the answered map on a **new** team object, only for the
-  team still open (`__tests__/appAvatar.test.tsx`: not after a sign-out, not
-  on another team opened meanwhile), so nothing survives a sign-out.
+  browser, from the dashboard), and the server dates it again like any pick.
+  When the opener reported another choice while a write ran (the person's
+  other browser picked meanwhile, and its stamp reached this session first),
+  the picker marks the opener's word once the answer is drawn, not the choice
+  it stored (`avatarPicker.test.tsx` → *marks the opener's word after a write
+  during which the opener reported another choice*). `App` merges the map a
+  pick resolved with into the open team's, member by member
+  (`mergeMemberAvatars`, as `dataService.setMemberAvatar` does in its cache:
+  the answer is the map at that pick's write, and the team on screen may hold
+  another member's later choice), on a **new** team object, only for the team
+  still open (`__tests__/appAvatar.test.tsx`: not after a sign-out, not on
+  another team opened meanwhile), so nothing survives a sign-out.
 - **Each person is told once that the avatar can be changed** (the
   maintainer: nothing said it, and not everybody reads What's New). A band
   right under the header, `AvatarDiscoveryHint`: in both session screens after
@@ -3827,9 +4065,12 @@ Residuals, stated on purpose:
 - **A pick made in a session is one write of that session**: the route's
   stamp moves its revision, as a vote does, so a participant's write that
   crosses it loses its race and is healed like any other. A first clear made
-  in a session is one too: the route stamps it, and if no stamp comes within
-  `SERVER_STAMP_WAIT_MS` the client writes `{ avatar: null, avatarAt }` on its
-  own entry (before 45.3 a first clear cost the session nothing). The route
+  in a session is one too, and so is a repeat of the stored choice: both are
+  dated and stamped like any pick, and if no stamp comes within
+  `SERVER_STAMP_WAIT_MS` the client writes the entry itself (`{ avatar: null,
+  avatarAt }` for a clear); a repeat is also one team write (before 45.3 a
+  first clear cost the session nothing, and a repeat wrote nothing to the
+  team). The route
   builds a limiter of its own, with the team writes' budget (300 a minute per
   address and per pod, which a whole office shares): lower, it would refuse a
   team choosing its pictures together. Being a separate instance, its budget
@@ -3838,7 +4079,11 @@ Residuals, stated on purpose:
   over by that refresh's answer, read before the pick, until the next
   refresh (the general rule of a write made after a refresh started, see
   *Key Design Principles*); the server holds the pick, and the next refresh
-  shows it.
+  shows it. The other order is merged, not taken whole: a pick's answer that
+  lands after a refresh which read the team later keeps, for each member, the
+  newer of the two entries (`mergeMemberAvatars`), so another member's later
+  choice stays (`dataServiceAvatar.test.ts` → *keeps a newer choice that a
+  refresh brought in while the pick's answer was on its way*).
 - **After a merge, a unified member's old sessions can show the other
   picture.** The merged team keeps the main team's choice for a member the
   merge unified, and the sessions that came from the second team carry that
@@ -3848,8 +4093,11 @@ Residuals, stated on purpose:
 - **A whole-store restore rolls the team's map back, not what open tabs
   hold.** The newer `at` wins everywhere, so a tab that was open across the
   restore keeps drawing, and stamping into the sessions it enters, the choice
-  it knew, until it reloads; the record holds the archive's choice, and the
-  next pick is newer than both.
+  it knew, until it reloads or its Dashboard refreshes the team; a pick of its
+  own no longer brings the other members' entries back to the record's there
+  (its answer is merged, the newer entry of each), so their pre-restore
+  choices stay drawn too. The record holds the archive's choice, and the next
+  pick is newer than both, the archive's picture picked again included.
 - **The avatar hint is once per member and browser, not once per person.**
   Everyone on the facilitator's seat is one member, so one choice hides it
   for all of them; a second browser shows it once more until the person
@@ -3863,10 +4111,13 @@ Residuals, stated on purpose:
   once, which is why it is decided with the screen and never comes back
   during one.
 
-The guards: `__tests__/avatars.test.ts`, `teamAvatarRoutes.test.ts` (the
-route, its two failure answers, the stamp and a stamp dated ahead of the
-clock), `dataServiceAvatar.test.ts` (an answer that arrives after a sign-out
-or another team's login included), `appAvatar.test.tsx`, the avatar cases of
+The guards: `__tests__/avatars.test.ts` (with `memberAvatarEntries`,
+`rosterIds` and `mergeMemberAvatars`), `teamAvatarRoutes.test.ts` (the route,
+its two failure answers, its cap, which never evicts the pick just written,
+its limiter's 301st pick, a repeat dated again, the stamp and a stamp dated
+ahead of the clock), `dataServiceAvatar.test.ts` (an answer that arrives
+after a sign-out or another team's login included, and one that lands after
+a newer refresh, merged), `appAvatar.test.tsx`, the avatar cases of
 `teamMerge.test.ts`, `teamRestore.test.ts` and `archiveContract.test.ts`,
 `avatarArt.test.tsx`, `i18nAvatars.test.ts`, `avatarComponent.test.tsx`,
 `avatarPicker.test.tsx`, `sessionAvatars.test.ts`, `useOwnAvatar.test.tsx`,
@@ -3877,7 +4128,9 @@ session), the avatar cases of `sessionRoster.test.ts`, `avatarSource.test.ts`,
 reaching the other's panel and card, a reload, a clear, a refused save, an
 anonymous retrospective, and the picker in the axe audit). The hint's:
 `avatarDiscoveryHint.test.tsx` (the rule and the band: English and French,
-who sees it, the literal key, the latch, focus, where a key's "Got it" hands
+who sees it, the literal key and the fifty most recent kept under it, a
+stored value that is not a list read as nobody, the latch, focus, where a
+key's "Got it" hands
 the keyboard past an undrawn control to the next drawn one, else to the
 opener, and a pointer's moves nothing, the pictures and the sentence from
 `lg` and never from `sm`, the visibility class, contrast), `seenOnce.test.ts`
@@ -3892,11 +4145,15 @@ session turning anonymous, the band still gone when it names its authors
 again (which holds the latch on both session screens), "Got it" remembered
 across a new mount of the screen, a choice stamped on the viewer's own entry
 from their other browser taking the band and the dot away in the render that
-draws it, read at every commit through a React `Profiler`, and a refused
-join, still gone once the connection comes back) and `appAvatar.test.tsx`
-(the dashboard, with the picker opened from the top bar's avatar and a
-revoked session, still gone once the revocation is cleared, which holds the
-latch on the dashboard), `sessionHeaderLook.test.tsx` and
+draws it, read at every commit through a React `Profiler`, a refused join,
+still gone once the connection comes back, a revoked credential, still gone
+once another tab's token clears it, a key's "Got it" handing the keyboard to
+the first control after the band, and a screen left untouched, which shows
+the band again at its next mount) and `appAvatar.test.tsx`
+(the dashboard, with the picker opened from the top bar's avatar, a revoked
+session, still gone once the revocation is cleared, which holds the latch on
+the dashboard, and a key's "Got it" handing the keyboard to the dashboard),
+`sessionHeaderLook.test.tsx` and
 `healthCheckLook.test.tsx` (the same opener and dot in both headers),
 `i18nAvatars.test.ts`, the hint block of `e2e/avatars.spec.ts` (a French
 phone's guest and the dashboard, audited as `avatar-hint` and

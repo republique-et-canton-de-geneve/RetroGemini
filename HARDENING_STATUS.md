@@ -1869,7 +1869,7 @@ Keep visible so nobody "rediscovers" them as bugs:
   separate, later decision. The `npm run build` warning about the 500 kB
   threshold is expected output, not a regression to chase.
   **Note (2026-10-22, performance series item 9):** the bundle now crosses the
-  wire compressed — precompressed at build time, 1.48 MB of JS and CSS to
+  wire compressed — precompressed at build time, 1.47 MB of JS and CSS to
   373 KB at 45.3 — and its hashed files are cached immutably for a year, so a
   returning phone downloads it once per release (AGENTS.md → *Compression and
   caching*).
