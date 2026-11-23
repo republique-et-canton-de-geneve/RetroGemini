@@ -27,7 +27,8 @@ import { noticeFromError, noticeText, type Notice } from '../../i18n/notice';
  *   selected: the previous one, or the one the opener reported meanwhile. The
  *   failure is kept as what to say (`Notice`) and worded at each render, so
  *   it follows a change of language made while it shows (from another tab:
- *   the dialog is modal).
+ *   the dialog is modal). A write that lands while the opener reported
+ *   another choice selects the opener's word once the answer is drawn.
  * - The dialog stays open after a choice, so the person can change their mind;
  *   "Done" closes it. ModalDialog gives the focus back to the opener.
  */
@@ -105,11 +106,23 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
   // back to it, not to what was selected when the write began.
   const storedRef = useRef<Choice>(currentAvatarId ?? null);
   storedRef.current = currentAvatarId ?? null;
+  // Whether the opener reported a word while the write ran (a pick made in
+  // another browser reached it meanwhile), and a count that runs the effect
+  // below again once such a write has landed.
+  const reportedDuringWrite = useRef(false);
+  const [followOpener, setFollowOpener] = useState(0);
 
-  // The opener's word for the stored choice, once no write of ours is pending.
+  // The opener's word for the stored choice, once no write of ours is pending;
+  // and once more after a write during which it reported another word: drawn
+  // with the answer, its word is then the newer of the two choices, which the
+  // choice this write stored may not be.
   useEffect(() => {
-    if (!inFlight.current) setChosen(currentAvatarId ?? null);
-  }, [currentAvatarId]);
+    if (inFlight.current) {
+      reportedDuringWrite.current = true;
+      return;
+    }
+    setChosen(currentAvatarId ?? null);
+  }, [currentAvatarId, followOpener]);
 
   // A new opening starts from the stored choice, with nothing said yet.
   useEffect(() => {
@@ -144,6 +157,7 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
 
   const write = useCallback(async (choice: Choice) => {
     inFlight.current = true;
+    reportedDuringWrite.current = false;
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -175,6 +189,11 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
     }
     inFlight.current = false;
     setSaving(false);
+    // The opener spoke while the write ran: once the answer is drawn, its
+    // word is the stored choice (the other browser's pick when that one was
+    // written after this one). With no word meanwhile, the mark stays on the
+    // choice just stored, which the opener's next word follows as usual.
+    if (stored && reportedDuringWrite.current) setFollowOpener((count) => count + 1);
   }, []);
 
   const pick = (choice: Choice) => {

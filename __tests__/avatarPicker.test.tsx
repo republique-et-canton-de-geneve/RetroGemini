@@ -411,6 +411,54 @@ describe('AvatarPicker', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('true'));
   });
 
+  // Two browsers of one person (or two people on the facilitator's seat)
+  // pick within one round trip: the other's newer choice reaches the opener
+  // while this write runs (stamped on the session's entry), and is still the
+  // opener's word once this write has landed. The picker follows that word
+  // then, as it does after a failed write: kept on the choice this write
+  // stored, it marked a picture neither the session nor the server held any
+  // more, reopened included.
+  it("marks the opener's word after a write during which the opener reported another choice", async () => {
+    const first = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    const props = { onClose: vi.fn(), colorClasses: avatarColorClasses('bg-rose-500'), initials: 'LM', name: 'Léa Martin', onPick };
+    const picker = (open: boolean, currentAvatarId: string) => (
+      <LanguageProvider initialLanguage="en"><AvatarPicker {...props} open={open} currentAvatarId={currentAvatarId} /></LanguageProvider>
+    );
+    const { rerender } = render(picker(true, 'fox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    rerender(picker(true, 'bat'));
+    await act(async () => { first.resolve(); });
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(en['avatars.picker.saved']));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Bat' }).getAttribute('aria-pressed')).toBe('true'));
+    expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('false');
+
+    rerender(picker(false, 'bat'));
+    rerender(picker(true, 'bat'));
+    expect(screen.getByRole('button', { name: 'Bat' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  // The same race the other way round: the other browser's pick was written
+  // first, so this write's answer is the newer, and the opener's word turns
+  // to this write's choice once that answer is drawn.
+  it("marks this write's choice when the opener's word turns to it once the write has landed", async () => {
+    const first = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    const props = { onClose: vi.fn(), colorClasses: avatarColorClasses('bg-rose-500'), initials: 'LM', name: 'Léa Martin', onPick };
+    const picker = (currentAvatarId: string) => (
+      <LanguageProvider initialLanguage="en"><AvatarPicker {...props} open currentAvatarId={currentAvatarId} /></LanguageProvider>
+    );
+    const { rerender } = render(picker('fox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    rerender(picker('bat'));
+    await act(async () => { first.resolve(); });
+    rerender(picker('owl'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('true'));
+    expect(screen.getByRole('button', { name: 'Bat' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByRole('status').textContent).toBe(en['avatars.picker.saved']);
+  });
+
   it('writes nothing while the choice cannot be saved, and says why', () => {
     const { onPick } = renderPicker({ disabled: true });
     const owl = screen.getByRole('button', { name: 'Owl' });
