@@ -3,6 +3,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, fireEvent, screen } from '@testing-library/react';
 import AiGroupSuggestionsModal, { AiSuggestedGroup } from '../components/session/AiGroupSuggestionsModal';
 import type { Column, Ticket } from '../types';
+import { cardTones } from '../utils/cardTones';
+import { columnHue } from '../utils/columnHue';
 
 const columns: Column[] = [
   { id: 'c1', title: 'Liked', color: 'bg-emerald-50', border: 'border-emerald-300', icon: 'sentiment_satisfied', text: 'text-emerald-700', ring: 'focus:ring-emerald-200' },
@@ -339,5 +341,46 @@ describe('AiGroupSuggestionsModal', () => {
 
     expect(screen.queryByText('Applied')).toBeNull();
     expect(screen.getByText('Fresh cluster')).toBeTruthy();
+  });
+
+  // The dot beside each card is its column's hue, read as every other screen
+  // reads it (utils/columnHue.ts) and drawn in its ink, as the column
+  // navigator draws its own dot. A custom template saved by an older release
+  // stores Tailwind classes only: read as a raw `customColor`, its dot painted
+  // nothing here while the board showed the column's hue.
+  it("paints each card's dot with its column's hue, a column stored as classes included", () => {
+    const hexColumn: Column = { id: 'c3', title: 'Puzzles', color: 'bg-white', border: 'border-white', icon: 'help', text: 'text-white', ring: '', customColor: '#7c3aed' };
+    const noHue: Column = { id: 'c4', title: 'Anything', color: '', border: '', icon: 'help', text: '', ring: '' };
+    const more: Ticket[] = [
+      { id: 't7', colId: 'c3', text: 'Odd puzzle', authorId: 'u1', groupId: null, votes: [] },
+      { id: 't8', colId: 'c4', text: 'Plain note', authorId: 'u1', groupId: null, votes: [] },
+    ];
+    render(
+      <AiGroupSuggestionsModal
+        isOpen
+        loading={false}
+        error={null}
+        suggestions={[{ title: 'Mixed', ticketIds: ['t1', 't3', 't7', 't8'] }]}
+        tickets={[...tickets, ...more]}
+        columns={[...columns, hexColumn, noHue]}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        onAcceptAll={vi.fn()}
+        onRegenerate={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    const dotOf = (text: string) => screen.getByText(text).closest('li')!.querySelector('span.rounded-full[aria-hidden="true"]') as HTMLElement;
+    // A colour as the DOM writes it back, so both sides compare in one notation.
+    const painted = (hex: string) => {
+      const probe = document.createElement('span');
+      probe.style.backgroundColor = hex;
+      return probe.style.backgroundColor;
+    };
+    expect(dotOf('Great planning meeting').style.backgroundColor).toBe(painted(cardTones(columnHue(columns[0]))!.ink));
+    expect(dotOf('CI flaky').style.backgroundColor).toBe(painted(cardTones(columnHue(columns[1]))!.ink));
+    expect(dotOf('Odd puzzle').style.backgroundColor).toBe(painted(cardTones('#7c3aed')!.ink));
+    // No hue: no paint, as the white card the board draws for it.
+    expect(dotOf('Plain note').style.backgroundColor).toBe('');
   });
 });

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import type { Column, Ticket } from '../../types';
 import ModalDialog from '../common/ModalDialog';
 import { useTranslation } from '../../i18n/I18nContext';
+import { cardTones } from '../../utils/cardTones';
+import { columnHue } from '../../utils/columnHue';
 
 export interface AiSuggestedGroup {
   title: string;
@@ -262,6 +264,10 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                     <ul className="space-y-1.5 pl-1">
                       {groupTickets.map(ticket => {
                         const col = columnById.get(ticket.colId);
+                        // The column's hue as the board reads it (a hex, or an
+                        // old template's classes), drawn in its ink as the
+                        // column navigator draws its dot; none for no hue.
+                        const dotInk = cardTones(columnHue(col))?.ink;
                         const included = isIncluded(index, ticket.id);
                         return (
                           <li key={ticket.id} className="text-xs flex items-start">
@@ -279,7 +285,7 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                               {col && (
                                 <span
                                   className="inline-block w-2 h-2 rounded-full mt-1.5 shrink-0"
-                                  style={col.customColor ? { backgroundColor: col.customColor } : undefined}
+                                  style={dotInk ? { backgroundColor: dotInk } : undefined}
                                   aria-hidden
                                 />
                               )}
