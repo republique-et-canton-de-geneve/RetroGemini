@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import ModalDialog from './ModalDialog';
 import Avatar from './Avatar';
-import { motionAllowed } from './motion/effects';
+import { EFFECT_LENGTH_MS, motionAllowed } from './motion/effects';
 import {
   AVATAR_FAMILIES,
   AVATAR_FAMILY_LABEL_KEYS,
@@ -63,10 +63,11 @@ const TILE_BASE = `grid place-items-center aspect-square min-h-11 p-1.5 rounded-
 const TILE_OFF = 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md';
 const TILE_ON = 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-600/20';
 
-// The big avatar's swap lasts 0.5s (index.css, .fx-swap); this takes the class
-// off should no animationend come. A reader who asked for less motion is never
-// given the class (motionAllowed, the rule of every effect).
-const SWAP_FALLBACK_MS = 700;
+// The big avatar's swap (index.css, .fx-swap: its length is EFFECT_LENGTH_MS's,
+// which motionEffects.test.ts holds to the stylesheet) and a margin; this takes
+// the class off should no animationend come. A reader who asked for less motion
+// is never given the class (motionAllowed, the rule of every effect).
+const SWAP_FALLBACK_MS = EFFECT_LENGTH_MS['fx-swap'] + 200;
 
 const AvatarPicker: React.FC<AvatarPickerProps> = ({
   open,

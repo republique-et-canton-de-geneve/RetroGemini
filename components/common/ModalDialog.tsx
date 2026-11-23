@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isTopDialog, pushDialog } from './modalDialogStack';
 import { useReturnFocus } from './useReturnFocus';
-import { motionAllowed } from './motion/effects';
+import { EFFECT_LENGTH_MS, motionAllowed } from './motion/effects';
 import { FOCUSABLE_SELECTOR, isVisible } from './focusable';
 
 /**
@@ -74,12 +74,17 @@ const PANEL_ENTRANCE_CLASS: Record<DialogEntrance, string> = {
 
 /**
  * Past this, an entrance class is taken off even if its animation never ended
- * (ms): the longest entrance lasts 280 ms. An animation that is interrupted
- * sends no `animationend` — its element hidden meanwhile, motion turned off
- * between this script's check and the stylesheet's — and the class it left
- * would play again the next time the element is shown.
+ * (ms): a second, or the longest entrance and a margin should one ever last
+ * longer (280 ms today; `EFFECT_LENGTH_MS`, which motionEffects.test.ts holds
+ * to the stylesheet). An animation that is interrupted sends no
+ * `animationend` — its element hidden meanwhile, motion turned off between
+ * this script's check and the stylesheet's — and the class it left would play
+ * again the next time the element is shown.
  */
-const ENTRANCE_NET_MS = 1000;
+const ENTRANCE_NET_MS = Math.max(
+  1000,
+  Math.max(...[VEIL_ENTRANCE_CLASS, ...Object.values(PANEL_ENTRANCE_CLASS)].map((name) => EFFECT_LENGTH_MS[name] ?? 0)) + 250
+);
 
 /**
  * Whether an element still carries its entrance class. It comes off when that

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { QUIET_AFTER_LIVE_MS, arrivedPeople } from '../../utils/sessionMotion';
-import { motionAllowed } from '../common/motion/effects';
+import { EFFECT_LENGTH_MS, motionAllowed } from '../common/motion/effects';
 
 /**
  * The participants panel's motion: who just arrived, who just finished, and
@@ -33,10 +33,17 @@ import { motionAllowed } from '../common/motion/effects';
 
 /** How long after the mount, or after the viewer's own reconnection, nothing plays: the board's seconds too. */
 export const QUIET_MS = QUIET_AFTER_LIVE_MS;
-/** The arrival's longest piece: the presence dot's two pulses after 0.3s (index.css `fx-halo`). */
-export const ARRIVAL_MS = 2200;
-/** `fx-pop` and `fx-bump` last 0.45s. */
-export const POP_MS = 500;
+/**
+ * How long a row wears the arrival (ms): its longest piece, the presence dot's
+ * two pulses after 0.3s (`fx-halo`), past the row's slide and wash
+ * (`fx-person-in`) and the avatar's spring (`fx-pop`), and a margin. The panel
+ * listens for no animationend, so its classes come off by this clock alone:
+ * read from `EFFECT_LENGTH_MS`, which `__tests__/motionEffects.test.ts` holds
+ * to index.css, an animation lengthened there is never cut short here.
+ */
+export const ARRIVAL_MS = Math.max(EFFECT_LENGTH_MS['fx-person-in'], EFFECT_LENGTH_MS['fx-halo'], EFFECT_LENGTH_MS['fx-pop']) + 100;
+/** How long a check springs in (`fx-pop`) and the title's count bumps (`fx-bump`), and a margin (ms). */
+export const POP_MS = Math.max(EFFECT_LENGTH_MS['fx-pop'], EFFECT_LENGTH_MS['fx-bump']) + 50;
 
 export interface PanelMotionInput {
   /** Who is listed and connected, in any order. The viewer is ignored. */
