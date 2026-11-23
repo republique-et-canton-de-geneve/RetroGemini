@@ -254,6 +254,7 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
           <label key={mode} className="inline-flex items-center gap-1.5 text-sm text-slate-700">
             <input
               type="radio"
+              className="accent-indigo-600"
               name={`${idPrefix}-mode`}
               value={mode}
               checked={value.mode === mode}

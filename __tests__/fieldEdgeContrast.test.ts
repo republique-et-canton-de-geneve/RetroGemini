@@ -290,3 +290,76 @@ describe('the off track of every switch clears 3:1 on white', () => {
     for (const fill of fills) expect(tokenContrast(fill, 'white'), `bg-${fill}`).toBeGreaterThanOrEqual(EDGE);
   });
 });
+
+describe('every native checkbox and radio takes the brand accent', () => {
+  // A checkbox and a radio stay native, drawn by the browser in the accent
+  // their class gives them: the brand's, `accent-indigo-600` (AGENTS.md, *The
+  // look*). Nothing sets `accent-color` for the whole page, so each control
+  // carries the class, and one written without it draws the browser's blue
+  // beside the brand: the Jira target form's mode radios and the batch
+  // dialog's two checkboxes did. Read through constants, conditionals and
+  // recipes, as the edges above are.
+  const native = everyField.filter((field) => field.tag === 'input' && /^(checkbox|radio)$/.test(field.type));
+
+  it('finds the checkboxes and the radios of the screens', () => {
+    expect(native.filter((field) => field.type === 'checkbox').length).toBeGreaterThanOrEqual(10);
+    expect(native.filter((field) => field.type === 'radio').length).toBeGreaterThanOrEqual(4);
+  });
+
+  /** The keys an attribute spread writes, read through a constant; null when they cannot be read. */
+  const spreadKeys = (expression: ts.Expression, file: string): string[] | null => {
+    let object: ts.Expression = ts.isParenthesizedExpression(expression) ? expression.expression : expression;
+    let inFile = file;
+    if (ts.isIdentifier(object)) {
+      const declared = declarationOf(object.text, file);
+      if (!declared) return null;
+      object = declared.expression;
+      inFile = declared.file;
+    }
+    if (!ts.isObjectLiteralExpression(object)) return null;
+    const keys: string[] = [];
+    for (const property of object.properties) {
+      const name = ts.isSpreadAssignment(property) ? undefined : property.name;
+      if (!name) return null;
+      if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
+        keys.push(name.text);
+        continue;
+      }
+      if (!ts.isComputedPropertyName(name)) return null;
+      const key = ts.isIdentifier(name.expression) ? declarationOf(name.expression.text, inFile)?.expression : name.expression;
+      if (!key || !(ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key))) return null;
+      keys.push(key.text);
+    }
+    return keys;
+  };
+
+  it('reads the type of every input as written, so none hides a checkbox from the guard', () => {
+    const unread: string[] = [];
+    for (const file of FILES) {
+      const source = sourceOf(file);
+      const visit = (node: ts.Node) => {
+        if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(source) === 'input') {
+          const at = `${relative(ROOT, file)}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`;
+          for (const attribute of node.attributes.properties) {
+            if (ts.isJsxSpreadAttribute(attribute)) {
+              const keys = spreadKeys(attribute.expression, file);
+              if (!keys || keys.includes('type')) unread.push(`${at} spreads ${attribute.expression.getText(source)}`);
+            } else if (attribute.name.getText(source) === 'type' && !(attribute.initializer && ts.isStringLiteral(attribute.initializer))) {
+              unread.push(`${at} type={…}`);
+            }
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    }
+    expect(unread).toEqual([]);
+  });
+
+  it('gives each of them accent-indigo-600', () => {
+    const missing = native
+      .filter((field) => !field.classText.split(/\s+/).includes('accent-indigo-600'))
+      .map((field) => `${field.at} <input type="${field.type}">`);
+    expect(missing).toEqual([]);
+  });
+});

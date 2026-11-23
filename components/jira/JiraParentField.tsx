@@ -246,7 +246,7 @@ const JiraParentField: React.FC<Props> = ({
             <input
               id={ids.replace}
               type="checkbox"
-              className="mt-0.5"
+              className="mt-0.5 accent-indigo-600"
               checked={replace.checked}
               onChange={(e) => replace.onChange(e.target.checked)}
               aria-describedby={ids.replaceList}
