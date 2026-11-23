@@ -25,9 +25,10 @@ test.describe('the audit waits for animations', () => {
 
   test('an animation that repeats for ever is not waited for', async ({ page: p }) => {
     await p.setContent(page('<span style="animation: spin 1s linear infinite">.</span>'));
-    const started = Date.now();
-    await waitForFiniteAnimations(p);
-    expect(Date.now() - started).toBeLessThan(1_000);
+    // Waited for, the spin would never end and the wait would throw at its
+    // deadline, naming it (the test below). The deadline is read only while
+    // an animation it waits for still runs, so a slow runner cannot fail this.
+    await expect(waitForFiniteAnimations(p, { timeoutMs: 300 })).resolves.toBeUndefined();
   });
 
   test('an animation that does not end in time fails loudly, naming it', async ({ page: p }) => {
