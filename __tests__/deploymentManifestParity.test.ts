@@ -608,6 +608,15 @@ describe('base deployment manifest (audit H7.1)', () => {
    * releases. A major bump is by definition a user-visible change, so requiring
    * the majors to agree catches that while leaving the normal lag (same major,
    * older `Y`) alone.
+   *
+   * The retag names the version that pull request's merge publishes, which is
+   * `VERSION` as it is merged: `X.Y`, not `X.0`, when the branch was deployed
+   * and bumped `Y` before its merge. Main never publishes the branch's earlier
+   * numbers, so a tag left at `X.0` sends the next `apply -k` to an image that
+   * was never built (`45.0`, left behind while the branch went to 45.3) or to
+   * a test build of the branch. This test cannot see that: a tag left behind
+   * on the branch and the lag of later `Y` bumps on main are both the current
+   * major with an older `Y`, and only main's history tells them apart.
    */
   it('is pinned to an image from the current major', () => {
     const version = read('VERSION').trim();
