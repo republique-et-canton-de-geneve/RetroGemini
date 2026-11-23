@@ -17,9 +17,11 @@ import { effectivePair, themeValue } from './helpers/tailwindTheme';
 const COLUMN_COLOURS = ['#10b981', '#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b', '#000000', '#ffffff'];
 
 type Props = React.ComponentProps<typeof BoardVoteControl>;
+/** A board past its quiet seconds (Session.tsx → motionQuiet): what the control draws, it plays. */
+const notQuiet = () => false;
 const props = (over: Partial<Props> = {}): Props => ({
   kind: 'ticket', total: 2, mine: 0, canAdd: true, readOnly: false, countHidden: false, disabled: false,
-  onAdd: vi.fn(), onRemove: vi.fn(), ...over,
+  onAdd: vi.fn(), onRemove: vi.fn(), motionQuiet: notQuiet, ...over,
 });
 
 const Harness: React.FC<{ budget: number; takeBackOnly?: boolean; start?: number }> = ({ budget, takeBackOnly, start = 0 }) => {
@@ -165,6 +167,23 @@ describe('BoardVoteControl', () => {
     expect(screen.getByTestId('my-votes').lastElementChild!.classList.contains('fx-pop')).toBe(true);
     act(() => { vi.runAllTimers(); });
     expect(document.querySelector('[class*="fx-"]')).toBeNull();
+  });
+
+  // While the board is quiet (the server's first state after the cached seed,
+  // the snapshot a reconnection brings back), a count that rises is drawn
+  // without its spring; a press of the thumb still answers.
+  it('springs nothing in while the board is quiet, unless its own thumb was just pressed', () => {
+    window.matchMedia = ((query: string) => ({ matches: query.includes('no-preference') })) as unknown as typeof window.matchMedia;
+    const quiet = () => true;
+    const onAdd = vi.fn();
+    const { rerender } = render(<BoardVoteControl {...props({ mine: 1, onAdd, motionQuiet: quiet })} />);
+    rerender(<BoardVoteControl {...props({ mine: 2, onAdd, motionQuiet: quiet })} />);
+    expect(screen.getByTestId('my-votes').children).toHaveLength(2);
+    expect(document.querySelector('[class*="fx-"]')).toBeNull();
+    act(() => { screen.getByTestId('vote-add').click(); });
+    rerender(<BoardVoteControl {...props({ mine: 3, onAdd, motionQuiet: quiet })} />);
+    expect(screen.getByTestId('vote-add').classList.contains('fx-press')).toBe(true);
+    expect(screen.getByTestId('my-votes').lastElementChild!.classList.contains('fx-pop')).toBe(true);
   });
 
   it('tells the screen of a thumb pressed while it cannot add, never while reconnecting', async () => {

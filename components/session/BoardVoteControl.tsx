@@ -46,6 +46,12 @@ interface Props {
   onRemove: () => void;
   /** The thumb was pressed while it could not add, connected: the screen says why (the budget shakes). */
   onRefused?: () => void;
+  /**
+   * Whether the board is quiet right now (Session.tsx → motionQuiet): read when
+   * the viewer's count changes, never while drawing. A count that rises then
+   * is drawn without its spring, unless this thumb was just pressed.
+   */
+  motionQuiet: () => boolean;
 }
 
 const BoardVoteControl: React.FC<Props> = ({
@@ -59,7 +65,8 @@ const BoardVoteControl: React.FC<Props> = ({
   disabled,
   onAdd,
   onRemove,
-  onRefused
+  onRefused,
+  motionQuiet
 }) => {
   const { t, tp } = useTranslation();
   const addRef = useRef<HTMLButtonElement>(null);
@@ -69,17 +76,23 @@ const BoardVoteControl: React.FC<Props> = ({
   // the class that vote gives the button would wipe an effect put on before.
   const pressedAt = useRef(0);
   // The dot a vote just added springs in (the number bumps past three dots).
-  // Compared with what was shown, so a remount (a phase change) plays nothing.
+  // Compared with what was shown, so a remount (a phase change) plays nothing;
+  // and quiet with the board, so the votes the server's first state or a
+  // reconnection's snapshot brings back are drawn without playing. A press of
+  // this thumb is answered all the same.
   useLayoutEffect(() => {
     if (mine > shownMine.current) {
-      const dots = dotsRef.current;
-      if (mine <= MAX_DOTS) playEffect(dots?.lastElementChild, 'fx-pop');
-      else playEffect(dots, 'fx-bump');
-      if (Date.now() - pressedAt.current < PRESS_ANSWER_MS) playEffect(addRef.current, 'fx-press');
+      const pressed = Date.now() - pressedAt.current < PRESS_ANSWER_MS;
+      if (pressed || !motionQuiet()) {
+        const dots = dotsRef.current;
+        if (mine <= MAX_DOTS) playEffect(dots?.lastElementChild, 'fx-pop');
+        else playEffect(dots, 'fx-bump');
+        if (pressed) playEffect(addRef.current, 'fx-press');
+      }
     }
     pressedAt.current = 0;
     shownMine.current = mine;
-  }, [mine]);
+  }, [mine, motionQuiet]);
 
   // A white pill, because a card takes a tint of its column's colour, and
   // the number must read the same on every tint. The sentence is what a screen reader announces, so the number

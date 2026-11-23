@@ -54,9 +54,10 @@ import BoardVoteControl from './session/BoardVoteControl';
 import GuidedVoteControl from './session/GuidedVoteControl';
 import VoteBudget from './session/VoteBudget';
 import { VOTE_BUDGET_HOOKS, shakeVoteBudget, voteFlightHome, voteFlightStart } from './session/voteControls';
-import { RECONNECT_QUIET_MS, playLandedVote, useSessionMotion, voteTargetOf } from './session/useSessionMotion';
+import { playLandedVote, useSessionMotion, voteTargetOf } from './session/useSessionMotion';
 import { FLIGHT_BACK_MS, fly } from './common/motion/flight';
 import { motionAllowed, playEffect } from './common/motion/effects';
+import { QUIET_AFTER_LIVE_MS } from '../utils/sessionMotion';
 import TicketOriginBadge from './session/TicketOriginBadge';
 import { getAssignableMembers } from './session/assignableMembers';
 import { JOIN_DENIED_REVOKED, SessionConnectionBanner } from './session/SessionConnectionStatus';
@@ -691,18 +692,35 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
   // — nor from the seed (the cache, or the state of before the outage) to that
   // state, however late it lands.
   const shownPhaseRef = useRef<{ id: string | null; phase: string | null }>({ id: null, phase: null });
-  const liveSinceRef = useRef(0);
+  // The board's quiet, for what plays outside the board's own hook: the phase
+  // title and the vote controls' own marks (GuidedVoteControl,
+  // BoardVoteControl, VoteBudget). Quiet while the session is not live, until
+  // the server's first state since it was last live is drawn, and for
+  // QUIET_AFTER_LIVE_MS after it: the seconds the board's hook keeps, opened
+  // by the same state (its `ready`). Stamped as that state is drawn, and read
+  // when a mark would play, never while rendering, so the controls' effects
+  // still run only when what they draw changes.
+  const liveSinceRef = useRef<number | null>(null);
   useLayoutEffect(() => {
-      if (isLive && serverStateApplied) liveSinceRef.current = Date.now();
+      liveSinceRef.current = isLive && serverStateApplied ? Date.now() : null;
   }, [isLive, serverStateApplied]);
+  const motionQuiet = useCallback(
+      () => !isLiveRef.current || liveSinceRef.current === null || Date.now() - liveSinceRef.current < QUIET_AFTER_LIVE_MS,
+      []
+  );
+  // A vote of the viewer's own, added or taken back (castVote), until the
+  // commit that draws it is over: the budget's press. The token a vote taken
+  // back refills answers it, quiet or not.
+  const ownVoteDrawnRef = useRef(false);
+  const budgetMotionQuiet = useCallback(() => !ownVoteDrawnRef.current && motionQuiet(), [motionQuiet]);
   useLayoutEffect(() => {
       const shown = shownPhaseRef.current;
       const next = { id: session?.id ?? null, phase: session?.phase ?? null };
       shownPhaseRef.current = serverStateApplied ? next : { id: null, phase: null };
       if (!serverStateApplied || !shown.phase || shown.id !== next.id || shown.phase === next.phase) return;
-      if (!isLive || Date.now() - liveSinceRef.current < RECONNECT_QUIET_MS) return;
+      if (motionQuiet()) return;
       playEffect(document.querySelector('[data-phase-title]'), 'fx-title-in');
-  }, [session?.id, session?.phase, isLive, serverStateApplied]);
+  }, [session?.id, session?.phase, serverStateApplied, motionQuiet]);
   // Edit Layout belongs to Brainstorm and to the open board, the two screens
   // where cards are written. setPhase closes it for this tab; a phase changed
   // from another facilitator tab must close it too, or the move, remove and
@@ -1646,6 +1664,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // as "no vote of mine left", a vote taken back queued its token's
       // flight home and held its marks, played at the next state.
       if (!written) return;
+      // The budget answers this vote in the commit that draws it, and in no other.
+      ownVoteDrawnRef.current = true;
+      afterDrawRef.current.push(() => { ownVoteDrawnRef.current = false; });
       const after = mine(written);
       if (add ? after > before : after < before) {
           // Taken back, flying home or not: the token of the vote it takes
@@ -3091,7 +3112,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // the last one disabled the very button it was cast with, and the focus
       // fell to the page (2.4.3).
       const renderGuidedVote = () => (
-          <GuidedVoteControl kind="ticket" mine={myVotesOnThis} canAdd={canVote} onAdd={addMyVote} onRemove={removeMyVote} onRefused={refuseVote} />
+          <GuidedVoteControl kind="ticket" mine={myVotesOnThis} canAdd={canVote} onAdd={addMyVote} onRemove={removeMyVote} onRefused={refuseVote} motionQuiet={motionQuiet} />
       );
       // On a board: voting off leaves the total alone. A card this viewer
       // cannot read takes no vote, but the votes they gave it while it was
@@ -3600,6 +3621,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                         onAdd={addMyVote}
                         onRemove={removeMyVote}
                         onRefused={refuseVote}
+                        motionQuiet={motionQuiet}
                     />
                 </div>
             )}
@@ -3813,7 +3835,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                   </div>
               );
           }
-          return <VoteBudget left={votesLeft} cast={myVotesCast} budget={voteBudget(session.settings)} unlimited={!!session.settings.unlimitedVotes} />;
+          return <VoteBudget left={votesLeft} cast={myVotesCast} budget={voteBudget(session.settings)} unlimited={!!session.settings.unlimitedVotes} motionQuiet={budgetMotionQuiet} />;
       };
 
       const renderEditLayoutButton = () => (
@@ -4261,7 +4283,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             {mode === 'VOTE' && (
                                                 <div className="mt-2 pt-2 border-t border-slate-200 flex items-center justify-end">
                                                     {/* `aria-disabled`, as on a card's above. */}
-                                                    <GuidedVoteControl kind="group" mine={myVotesOnThis} canAdd={canVote} onAdd={addGroupVote} onRemove={removeGroupVote} onRefused={refuseVote} />
+                                                    <GuidedVoteControl kind="group" mine={myVotesOnThis} canAdd={canVote} onAdd={addGroupVote} onRemove={removeGroupVote} onRefused={refuseVote} motionQuiet={motionQuiet} />
                                                 </div>
                                             )}
                                             {isBoard && showsGroupVotes && (
@@ -4278,6 +4300,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                         onAdd={addGroupVote}
                                                         onRemove={removeGroupVote}
                                                         onRefused={refuseVote}
+                                                        motionQuiet={motionQuiet}
                                                     />
                                                 </div>
                                             )}

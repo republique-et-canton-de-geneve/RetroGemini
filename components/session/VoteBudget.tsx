@@ -29,19 +29,28 @@ interface VoteBudgetProps {
   budget: number;
   /** Votes are unlimited: nothing is counted, nothing is drawn. */
   unlimited: boolean;
+  /**
+   * Whether the board is quiet right now, and the change drawn is not a vote
+   * of the viewer's own (Session.tsx → budgetMotionQuiet): read when the
+   * number changes, never while drawing. A number that rises then is drawn
+   * without its spring.
+   */
+  motionQuiet: () => boolean;
 }
 
-const VoteBudget: React.FC<VoteBudgetProps> = ({ left, cast, budget, unlimited }) => {
+const VoteBudget: React.FC<VoteBudgetProps> = ({ left, cast, budget, unlimited, motionQuiet }) => {
   const { tp } = useTranslation();
   const remaining = Math.max(0, Math.floor(left));
   const chipRef = useRef<HTMLDivElement>(null);
   const shownLeft = useRef(remaining);
   // A vote taken back refills its token, which springs in. Compared with the
-  // number shown before, so a bar drawn again (a phase change) plays nothing.
+  // number shown before, so a bar drawn again (a phase change) plays nothing;
+  // and quiet with the board, so a number the server's first state or a
+  // reconnection's snapshot brings back is drawn without playing.
   useLayoutEffect(() => {
-    if (remaining > shownLeft.current) playEffect(chipRef.current?.querySelector(VOTE_BUDGET_HOOKS.next), 'fx-pop');
+    if (remaining > shownLeft.current && !motionQuiet()) playEffect(chipRef.current?.querySelector(VOTE_BUDGET_HOOKS.next), 'fx-pop');
     shownLeft.current = remaining;
-  }, [remaining]);
+  }, [remaining, motionQuiet]);
   if (unlimited) return null;
   const total = Math.max(0, Math.floor(budget));
   const tokens = total > 0 && total <= MAX_VOTE_TOKENS;

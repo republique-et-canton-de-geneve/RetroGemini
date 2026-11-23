@@ -26,9 +26,15 @@ interface GuidedVoteControlProps {
   onRemove: () => void;
   /** The plus was pressed while it could not add: the screen says why (the budget shakes). */
   onRefused?: () => void;
+  /**
+   * Whether the board is quiet right now (Session.tsx → motionQuiet): read when
+   * the count changes, never while drawing. A count that rises then is drawn
+   * without its spring, unless this plus was just pressed.
+   */
+  motionQuiet: () => boolean;
 }
 
-const GuidedVoteControl: React.FC<GuidedVoteControlProps> = ({ kind, mine, canAdd, onAdd, onRemove, onRefused }) => {
+const GuidedVoteControl: React.FC<GuidedVoteControlProps> = ({ kind, mine, canAdd, onAdd, onRemove, onRefused, motionQuiet }) => {
   const { t, tp } = useTranslation();
   const dotsRef = useRef<HTMLSpanElement>(null);
   const plusRef = useRef<HTMLButtonElement>(null);
@@ -37,17 +43,23 @@ const GuidedVoteControl: React.FC<GuidedVoteControlProps> = ({ kind, mine, canAd
   // the class the last vote gives the button would wipe an effect put on before.
   const pressedAt = useRef(0);
   // The dot a vote just added springs in (the number bumps past three dots).
-  // Compared with what was shown, so a remount (a phase change) plays nothing.
+  // Compared with what was shown, so a remount (a phase change) plays nothing;
+  // and quiet with the board, so the votes the server's first state or a
+  // reconnection's snapshot brings back are drawn without playing. A press of
+  // this plus is answered all the same.
   useLayoutEffect(() => {
     if (mine > shownMine.current) {
-      const dots = dotsRef.current;
-      if (mine <= MAX_VOTE_DOTS) playEffect(dots?.lastElementChild, 'fx-pop');
-      else playEffect(dots, 'fx-bump');
-      if (Date.now() - pressedAt.current < PRESS_ANSWER_MS) playEffect(plusRef.current, 'fx-press');
+      const pressed = Date.now() - pressedAt.current < PRESS_ANSWER_MS;
+      if (pressed || !motionQuiet()) {
+        const dots = dotsRef.current;
+        if (mine <= MAX_VOTE_DOTS) playEffect(dots?.lastElementChild, 'fx-pop');
+        else playEffect(dots, 'fx-bump');
+        if (pressed) playEffect(plusRef.current, 'fx-press');
+      }
     }
     pressedAt.current = 0;
     shownMine.current = mine;
-  }, [mine]);
+  }, [mine, motionQuiet]);
 
   const canRemove = mine > 0;
   return (

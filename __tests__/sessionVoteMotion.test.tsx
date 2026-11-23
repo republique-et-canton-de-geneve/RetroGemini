@@ -786,6 +786,126 @@ describe('Session — the quiet after a reconnection', () => {
   });
 });
 
+// The vote controls draw the viewer's own votes, and spring the dot a vote
+// adds, compared with what they drew last. They keep the board's quiet
+// (Session.tsx → motionQuiet): the server's first state after the cached
+// seed, or the snapshot a reconnection brings back, carries votes the seed
+// lacked, and drawing them is no news — unless the control was just pressed,
+// which a click in those seconds still answers (review finding F07).
+describe('Session — the vote controls keep the board’s quiet', () => {
+  const handClock = () => {
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    return (ms: number) => { now += ms; };
+  };
+  const captureConnection = () => {
+    let listener: ((connected: boolean) => void) | null = null;
+    vi.mocked(syncService.onConnectionChange).mockImplementation((callback) => {
+      listener = callback as (connected: boolean) => void;
+      return () => {};
+    });
+    return (connected: boolean) => act(() => { listener?.(connected); });
+  };
+  const clone = (state: RetroSession, rev: number): RetroSession => ({ ...JSON.parse(JSON.stringify(state)), _rev: rev });
+  /** `state` with the viewer's votes on the card or group `id`. */
+  const withMyVotes = (state: RetroSession, rev: number, id: string, mine: number): RetroSession => {
+    const next = clone(state, rev);
+    const votes = Array.from({ length: mine }, () => 'facilitator-1');
+    next.tickets = next.tickets.map((t) => (t.id === id ? { ...t, votes } : t));
+    next.groups = next.groups.map((g) => (g.id === id ? { ...g, votes } : g));
+    return next;
+  };
+  const guidedDot = (root: HTMLElement) => within(root).getByTestId('my-guided-votes').lastElementChild as HTMLElement;
+  const group = () => document.querySelector('[data-group-id="g1"]') as HTMLElement;
+
+  it('pops none of the viewer’s dots on the server’s first state after the cached seed', async () => {
+    allowMotion();
+    const fromServer = captureServerStates();
+    // The team cache lacks the vote the viewer cast just before reloading.
+    const seed = createSession();
+    await renderSession(seed);
+    act(() => fromServer(withMyVotes(seed, 3, 't1', 1)));
+    expect(within(card('t1')).getByText('You gave it 1 vote')).toBeTruthy();
+    expect(guidedDot(card('t1')).classList.contains('fx-pop')).toBe(false);
+    expect(effects()).toEqual([]);
+  });
+
+  it('pops no token of the budget for a number the server’s first state raises', async () => {
+    allowMotion();
+    const fromServer = captureServerStates();
+    const seed = createSession({}, { maxVotes: 3 });
+    await renderSession(seed);
+    const first = clone(seed, 3);
+    first.settings = { ...first.settings, maxVotes: 5 };
+    act(() => fromServer(first));
+    expect(screen.getByText('5 votes remaining')).toBeTruthy();
+    expect(document.querySelector('[data-vote-budget] [data-vote-next]')!.classList.contains('fx-pop')).toBe(false);
+  });
+
+  it('pops none of the viewer’s dots on an open board’s first state after the seed', async () => {
+    allowMotion();
+    const fromServer = captureServerStates();
+    const seed = createSession({ phase: 'OPEN_BOARD' });
+    await renderSession(seed);
+    act(() => fromServer(withMyVotes(seed, 3, 't1', 1)));
+    const dots = within(card('t1')).getByTestId('my-votes');
+    expect(dots.children).toHaveLength(1);
+    expect(dots.lastElementChild!.classList.contains('fx-pop')).toBe(false);
+  });
+
+  it('pops none of a group’s dots for the snapshot a reconnection brings back', async () => {
+    allowMotion();
+    const connect = captureConnection();
+    const fromServer = captureServerStates();
+    const seed = createSession();
+    await renderSession(seed);
+    const tick = handClock();
+    act(() => fromServer(clone(seed, 2)));
+    tick(5_000);
+    connect(false);
+    connect(true);
+    // The viewer voted from their other browser meanwhile.
+    tick(500);
+    act(() => fromServer(withMyVotes(seed, 9, 'g1', 1)));
+    expect(within(group()).getByText('You gave it 1 vote')).toBeTruthy();
+    expect(guidedDot(group()).classList.contains('fx-pop')).toBe(false);
+  });
+
+  it('still answers a click in those seconds: the dot it adds springs in', async () => {
+    allowMotion();
+    const fromServer = captureServerStates();
+    // Past ten votes no token flies: the dot springs in place.
+    const seed = createSession({}, { maxVotes: 12 });
+    await renderSession(seed);
+    act(() => fromServer(clone(seed, 3)));
+    await userEvent.click(within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' }));
+    expect(guidedDot(card('t1')).classList.contains('fx-pop')).toBe(true);
+  });
+
+  it('still answers a vote taken back in those seconds: the token it refills springs in', async () => {
+    allowMotion();
+    const fromServer = captureServerStates();
+    const seed = withMyVotes(createSession(), 1, 't1', 1);
+    await renderSession(seed);
+    act(() => fromServer(clone(seed, 3)));
+    await userEvent.click(within(card('t1')).getByRole('button', { name: 'Remove a vote from this ticket' }));
+    expect(screen.getByText('5 votes remaining')).toBeTruthy();
+    expect(document.querySelector('[data-vote-budget] [data-vote-next]')!.classList.contains('fx-pop')).toBe(true);
+  });
+
+  it('pops the dot of a vote from the viewer’s other browser once the quiet seconds are over', async () => {
+    allowMotion();
+    const fromServer = captureServerStates();
+    const seed = createSession({}, { maxVotes: 12 });
+    await renderSession(seed);
+    const tick = handClock();
+    act(() => fromServer(clone(seed, 3)));
+    tick(4_000);
+    act(() => fromServer(withMyVotes(seed, 4, 't1', 1)));
+    expect(guidedDot(card('t1')).classList.contains('fx-pop')).toBe(true);
+  });
+});
+
 describe('Session — the bar’s motion', () => {
   it('slides the phase title in at a phase change, never on the first paint', async () => {
     allowMotion();
