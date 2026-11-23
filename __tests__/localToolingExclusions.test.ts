@@ -10,9 +10,9 @@ import { describe, expect, it } from 'vitest';
  * reports `/qa` and `/review` write). Neither is versioned, and every tool that
  * walks the checkout must leave both out:
  *
- *  - ESLint (`eslint.config.js` → `ignores`): linted, a worktree doubles every
- *    warning of the budget, and a probe script fails the build of whoever ran
- *    one of those commands last;
+ *  - ESLint (`eslint.config.js` → its global `ignores`): linted, a worktree
+ *    doubles every warning of the budget, and a probe script fails the build
+ *    of whoever ran one of those commands last;
  *  - vitest (`vitest.config.ts` → `test.exclude`): it globs with `dot: true`,
  *    so a `*.spec.ts` probe under `.gstack/` was collected and failed
  *    `npm run test` on Playwright's `test()`, and a worktree ran every test
@@ -63,14 +63,24 @@ const patternsOf = (where: string, node: ts.Node | undefined): string[] => {
   });
 };
 
-/** `eslint.config.js`: every `ignores` list of the configuration. */
+/**
+ * `eslint.config.js`: its global ignores. ESLint reads an `ignores` list as
+ * global only in a configuration object that holds nothing else but a `name`
+ * (`@eslint/config-array`'s `isGlobalIgnores`); beside `files` or `rules` the
+ * same list only narrows that object, as the jsx-a11y block's does, and a
+ * `basePath` would make its patterns relative to another directory. Read from
+ * such an object alone: an entry moved into another would leave every other
+ * block linting the directory again.
+ */
 const eslintIgnores = (): string[] => {
   const file = sourceOf('eslint.config.js');
   const lists = nodesOf(file)
-    .filter(ts.isPropertyAssignment)
-    .filter((node) => propertyName(node) === 'ignores');
-  if (lists.length === 0) throw new Error('eslint.config.js has no ignores list');
-  return lists.flatMap((node) => patternsOf('eslint.config.js → ignores', node.initializer));
+    .filter(ts.isObjectLiteralExpression)
+    .filter((object) => object.properties.some((property) => propertyName(property) === 'ignores'))
+    .filter((object) => object.properties.every((property) => ['ignores', 'name'].includes(propertyName(property) ?? '')))
+    .map((object) => object.properties.find((property) => propertyName(property) === 'ignores') as ts.PropertyAssignment);
+  if (lists.length === 0) throw new Error('eslint.config.js has no global ignores');
+  return lists.flatMap((node) => patternsOf('eslint.config.js → global ignores', node.initializer));
 };
 
 /** `vitest.config.ts`: the `exclude` of `test`, not the one of `test.coverage`. */
@@ -95,7 +105,7 @@ const coverageSweepExclude = (): string[] => {
 
 describe('local tooling directories', () => {
   it.each([
-    ['ESLint', 'eslint.config.js → ignores', eslintIgnores],
+    ['ESLint', 'eslint.config.js → global ignores', eslintIgnores],
     ['vitest', 'vitest.config.ts → test.exclude', vitestExclude],
     ['the whole-codebase coverage sweep', 'scripts/coverage-scope.mjs → EXCLUDE', coverageSweepExclude],
   ])('are left out by %s', (_tool, where, read) => {
