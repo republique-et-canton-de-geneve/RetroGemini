@@ -189,6 +189,9 @@ describe('the header is the retrospective header', () => {
       bar: bar.className,
       active: header.querySelector('.phase-nav-btn.active')?.className,
       inactive: header.querySelector('.phase-nav-btn:not(.active)')?.className,
+      // The current phase is said as a state, the same way in both headers.
+      activeState: header.querySelector('.phase-nav-btn.active')?.getAttribute('aria-current') ?? null,
+      inactiveState: header.querySelector('.phase-nav-btn:not(.active)')?.getAttribute('aria-current') ?? null,
       label: header.querySelector('.phase-nav-btn span')?.className,
       cluster: (invite ?? header.querySelector('[data-viewer-avatar]'))?.parentElement?.className,
       invite: invite?.className,
@@ -216,6 +219,7 @@ describe('the header is the retrospective header', () => {
     expect(actual).toEqual(expected);
     // Compared, not absent from both: the hint shows here, and marks the opener.
     expect(actual.dot).not.toBeNull();
+    expect(actual.activeState).toBe('step');
     expect(actual.sync).toBeDefined();
     expect(actual.chip).toBeDefined();
   });

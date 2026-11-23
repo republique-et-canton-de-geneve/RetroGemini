@@ -1368,6 +1368,8 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
   // scrolls sideways, and would scroll a pixel vertically too).
   const tabClass = (id: TabType) =>
     `dash-tab px-4 py-3 font-semibold text-sm flex items-center gap-2 rounded-t-lg transition whitespace-nowrap ${tab === id ? 'active' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`;
+  // The tab shown says so to a screen reader too, as the Dashboard's does.
+  const tabCurrent = (id: TabType) => (tab === id ? 'page' as const : undefined);
 
   // Contrast is decided by the surface a token lands on (audit H42): muted
   // text is `text-slate-500` on the white cards (5.41:1 with the 45.0 tokens)
@@ -1767,11 +1769,11 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             on the page's grey (slate-50), where slate-500 would read too
             (5.01:1). */}
         <div className="flex gap-1 border-b border-slate-200 mb-6 overflow-x-auto">
-          <button onClick={() => setTab('TEAMS')} className={tabClass('TEAMS')}>
+          <button onClick={() => setTab('TEAMS')} className={tabClass('TEAMS')} aria-current={tabCurrent('TEAMS')}>
             <span className={TAB_ICON} aria-hidden="true">groups</span>
             {t('admin.tabs.teams', { count: teams.length })}
           </button>
-          <button onClick={() => setTab('FEEDBACKS')} className={tabClass('FEEDBACKS')}>
+          <button onClick={() => setTab('FEEDBACKS')} className={tabClass('FEEDBACKS')} aria-current={tabCurrent('FEEDBACKS')}>
             <span className={TAB_ICON} aria-hidden="true">feedback</span>
             {t('admin.tabs.feedbacks', { count: feedbacks.length })}
             {unreadCount > 0 && (
@@ -1780,7 +1782,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </span>
             )}
           </button>
-          <button onClick={() => setTab('LIVE')} className={tabClass('LIVE')}>
+          <button onClick={() => setTab('LIVE')} className={tabClass('LIVE')} aria-current={tabCurrent('LIVE')}>
             <span className={TAB_ICON} aria-hidden="true">stream</span>
             {t('admin.tabs.live')}
             {/* No pulse: an opacity animation is measured at a random moment,
@@ -1791,7 +1793,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </span>
             )}
           </button>
-          <button onClick={() => setTab('LOGS')} className={tabClass('LOGS')}>
+          <button onClick={() => setTab('LOGS')} className={tabClass('LOGS')} aria-current={tabCurrent('LOGS')}>
             <span className={TAB_ICON} aria-hidden="true">terminal</span>
             {t('admin.tabs.logs')}
             {serverLogs.filter(l => l.level === 'error').length > 0 && (
@@ -1800,7 +1802,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               </span>
             )}
           </button>
-          <button onClick={() => setTab('BACKUPS')} className={tabClass('BACKUPS')}>
+          <button onClick={() => setTab('BACKUPS')} className={tabClass('BACKUPS')} aria-current={tabCurrent('BACKUPS')}>
             <span className={TAB_ICON} aria-hidden="true">backup</span>
             {t('admin.tabs.backups')}
             {backups.length > 0 && (

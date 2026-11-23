@@ -928,6 +928,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               // SessionHeader): enabling this for participants of a closed one
               // offered a click that did nothing.
               disabled={!isFacilitator}
+              // The current phase says so as a state, as the retrospective's does.
+              aria-current={session.phase === p ? 'step' : undefined}
               // The retrospective's pill, class for class (SessionHeader):
               // __tests__/healthCheckLook.test.tsx compares the two headers.
               className={`phase-nav-btn h-8 shrink-0 whitespace-nowrap px-1.5 2xl:px-2.5 text-[13px] leading-none ${

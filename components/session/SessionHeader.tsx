@@ -124,6 +124,9 @@ const SessionHeader: React.FC<Props> = ({
             // enabled for participants once the session closed, yet the click
             // did nothing: a control that looks live and is not.
             disabled={!isFacilitator}
+            // The phase the session is in says so as a state, not by its fill
+            // alone; the health check's bar says it the same way.
+            aria-current={session.phase === phase ? 'step' : undefined}
             // Each phase is a pill centred in the bar; the current one is filled
             // (its classes alone paint it: no rule of index.css styles the pill's
             // colours, so the contrast tests measure what is drawn). A phase
