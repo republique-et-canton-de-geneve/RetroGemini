@@ -43,12 +43,18 @@ export const LINK_BUTTON =
   'inline-flex items-center gap-1 rounded-md text-sm font-semibold text-indigo-700 hover:text-indigo-800 hover:underline';
 
 /**
- * A text field. Its border is slate-400, not the lighter hairline of a card:
- * the border is the only thing that shows where the field is, so it clears
- * 3:1 on white (WCAG 1.4.11). The focus ring is the brand's.
+ * A field: a text field, a textarea, a select. Its border is slate-400, not
+ * the lighter hairline of a card: the border is the only thing that shows
+ * where the field is, so it clears 3:1 on white (WCAG 1.4.11). The focus ring
+ * is the brand's.
+ *
+ * A field made read-only (its `readonly` attribute: the Feedback Hub's draft
+ * while it is sent) takes the page's grey. Never with `read-only:`, which is
+ * `:read-only`: it matches every element that cannot be typed in, so every
+ * select and every file input drawn with this recipe took the grey at rest.
  */
 export const FIELD_BOX =
-  'rounded-lg border border-slate-400 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-500 outline-hidden hover:border-slate-500 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 transition read-only:bg-slate-50';
+  'rounded-lg border border-slate-400 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-500 outline-hidden hover:border-slate-500 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 transition [&[readonly]]:bg-slate-50';
 /** The same, filling its line. */
 export const FIELD = `w-full ${FIELD_BOX}`;
 

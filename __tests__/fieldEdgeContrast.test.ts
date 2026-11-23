@@ -127,7 +127,10 @@ const restingColours = (classText: string, kind: 'border' | 'bg'): string[] =>
 const NATIVE_TYPES = /^(checkbox|radio|file|range|hidden|color|submit|button)$/;
 
 interface Field { at: string; tag: string; classText: string }
+/** The fields whose edge is measured: every one but the controls that stay native. */
 const fields: Field[] = [];
+/** Every input, select and textarea, the native ones included, with its `type`. */
+const everyField: Array<Field & { type: string }> = [];
 for (const file of FILES) {
   const source = sourceOf(file);
   const visit = (node: ts.Node) => {
@@ -142,10 +145,10 @@ for (const file of FILES) {
           if (attributeName === 'type' && ts.isStringLiteral(attribute.initializer)) type = attribute.initializer.text;
           if (attributeName === 'className') className = attribute.initializer;
         }
-        if (!NATIVE_TYPES.test(type)) {
-          const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
-          fields.push({ at: `${relative(ROOT, file)}:${line}`, tag, classText: classTextOf(className, file) });
-        }
+        const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+        const field = { at: `${relative(ROOT, file)}:${line}`, tag, classText: classTextOf(className, file) };
+        everyField.push({ ...field, type });
+        if (!NATIVE_TYPES.test(type)) fields.push(field);
       }
     }
     ts.forEachChild(node, visit);
@@ -180,6 +183,49 @@ describe('the edge of every field clears 3:1 on its fill', () => {
     // The guard must follow the recipes (dashboardLook's FIELD), or it measures nothing on those screens.
     const viaRecipe = fields.find((field) => field.at.startsWith('components/Dashboard.tsx') && field.classText.includes('focus:ring-indigo-600/15'));
     expect(viaRecipe?.classText).toContain('border-slate-400');
+  });
+});
+
+/** The input types that take no text: the `readonly` attribute does not apply to them, and `:read-only` always matches them. */
+const UNTYPED_INPUT_TYPES = /^(checkbox|radio|file|range|hidden|color|submit|button|image|reset)$/;
+/** A class whose variant names the `:read-only` pseudo-class: `read-only:…`, `md:read-only:…`, `[&:read-only]:…`. */
+const READ_ONLY_VARIANT = /(^|:)read-only:|:read-only\b/;
+
+describe('a field that cannot be typed in is never styled as read-only', () => {
+  // `:read-only` matches every element that cannot be typed in, so a select,
+  // a file input or a checkbox always matches it, enabled or not: a class
+  // under it draws the field at rest in the look of a field that was locked.
+  // The dashboard's field recipe carried its grey under `read-only:`, and
+  // seven selects and the feedback image field were drawn so. A fill for a
+  // field made read-only keys on its `readonly` attribute, which only a field
+  // that takes text can carry.
+  const neverTypedIn = everyField.filter((field) => field.tag === 'select' || (field.tag === 'input' && UNTYPED_INPUT_TYPES.test(field.type)));
+
+  it('finds the selects, the file input and the checkboxes of the screens', () => {
+    expect(neverTypedIn.filter((field) => field.tag === 'select').length).toBeGreaterThan(10);
+    expect(neverTypedIn.some((field) => field.type === 'file')).toBe(true);
+    expect(neverTypedIn.some((field) => field.type === 'checkbox')).toBe(true);
+    // Through the recipes too: the Actions tab's select takes dashboardLook's FIELD_BOX.
+    expect(neverTypedIn.find((field) => field.at.startsWith('components/dashboard/DashboardActionsTab.tsx'))?.classText).toContain('border-slate-400');
+  });
+
+  it('gives none of them a read-only variant', () => {
+    const styledAsReadOnly = neverTypedIn
+      .filter((field) => field.classText.split(/\s+/).some((token) => READ_ONLY_VARIANT.test(token)))
+      .map((field) => `${field.at} <${field.tag}${field.type ? ` type="${field.type}"` : ''}>`);
+    expect(styledAsReadOnly).toEqual([]);
+  });
+
+  it('knows a read-only variant however it is written', () => {
+    // Under a utility no theme has (`bg-locked`): Tailwind scans these files
+    // too, and a real class written here would add a rule to the build.
+    for (const token of ['read-only:bg-locked', 'md:read-only:bg-locked', '[&:read-only]:bg-locked', '[&:not(:read-only)]:bg-locked']) {
+      expect(READ_ONLY_VARIANT.test(token), token).toBe(true);
+    }
+    // The attribute a field made read-only carries is not the pseudo-class.
+    for (const token of ['[&[readonly]]:bg-locked', 'aria-readonly:bg-locked', 'bg-locked']) {
+      expect(READ_ONLY_VARIANT.test(token), token).toBe(false);
+    }
   });
 });
 

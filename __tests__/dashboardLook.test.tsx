@@ -89,9 +89,56 @@ describe('the recipes, measured', () => {
   it('gives a field an edge of 3:1 and a placeholder of 4.5:1', () => {
     expect(tokenContrast(tokenOf(look.FIELD_BOX, 'border-'), 'white')).toBeGreaterThanOrEqual(EDGE);
     expect(tokenContrast(tokenOf(look.FIELD_BOX, 'placeholder:text-'), 'white')).toBeGreaterThanOrEqual(TEXT);
-    expect(tokenContrast(tokenOf(look.FIELD_BOX, 'text-'), tokenOf(look.FIELD_BOX, 'read-only:bg-'))).toBeGreaterThanOrEqual(TEXT);
     expect(tokenContrast(tokenOf(look.COLUMN_ICON_BUTTON, 'border-'), 'white')).toBeGreaterThanOrEqual(EDGE);
     expect(tokenContrast(tokenOf(look.SEGMENTED, 'border-'), 'white')).toBeGreaterThanOrEqual(EDGE);
+  });
+
+  describe('the fill of a field made read-only', () => {
+    // Every background the recipe gives a field in a state of its own, as the
+    // selector it is drawn under: `read-only:` is `:read-only`, an arbitrary
+    // variant `[&…]` is its own selector. Hover and focus are what a pointer
+    // and the keyboard do to a field, not a state of it.
+    const stateFills = look.FIELD_BOX.split(/\s+/).flatMap((token) => {
+      const match = /^(.+):bg-([a-z]+-\d{2,3}|white)$/.exec(token);
+      if (!match) return [];
+      const [, variant, colour] = match;
+      if (variant === 'hover' || variant === 'focus') return [];
+      const arbitrary = /^\[(.+)\]$/.exec(variant);
+      if (arbitrary) return [{ selector: arbitrary[1].replace(/&/g, ''), colour }];
+      if (variant === 'read-only') return [{ selector: ':read-only', colour }];
+      throw new Error(`FIELD_BOX fills a field under "${variant}": say here which fields that is`);
+    });
+
+    it('is drawn on a text field or a textarea made read-only, never on a select or a file input', () => {
+      // `:read-only` is not "made read-only": it matches every element that
+      // cannot be typed in, every select and every file input among them,
+      // disabled or not (jsdom and Chromium agree; e2e/dashboard-actions-tab.spec.ts
+      // measures what Chromium paints on the Actions tab's select). Given so,
+      // the fill drew the selects and the feedback image field of these
+      // screens at rest as the Feedback Hub draws a draft locked while it is
+      // sent. The locked draft keeps its fill.
+      expect(stateFills.length).toBeGreaterThan(0);
+      document.body.innerHTML = `
+        <input data-case="a text field made read-only" type="text" readonly>
+        <textarea data-case="a textarea made read-only" readonly></textarea>
+        <input data-case="a text field" type="text">
+        <textarea data-case="a textarea"></textarea>
+        <select data-case="a select"><option>One</option></select>
+        <select data-case="a disabled select" disabled><option>One</option></select>
+        <input data-case="a file input" type="file">
+        <input data-case="a disabled file input" type="file" disabled>`;
+      const filled = [...document.querySelectorAll('[data-case]')]
+        .filter((field) => stateFills.some(({ selector }) => field.matches(selector)))
+        .map((field) => field.getAttribute('data-case'));
+      document.body.innerHTML = '';
+      expect(filled).toEqual(['a text field made read-only', 'a textarea made read-only']);
+    });
+
+    it('keeps the field’s text at 4.5:1', () => {
+      for (const { colour } of stateFills) {
+        expect(tokenContrast(tokenOf(look.FIELD_BOX, 'text-'), colour), colour).toBeGreaterThanOrEqual(TEXT);
+      }
+    });
   });
 
   it('draws a switch whose track shows on white in both states, and whose knob shows on the track', () => {
