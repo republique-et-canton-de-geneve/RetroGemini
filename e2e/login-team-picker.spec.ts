@@ -116,8 +116,11 @@ const openPicker = async (
   viewport: { width: number; height: number },
   device: { isMobile?: boolean; hasTouch?: boolean } = {}
 ): Promise<Page> => {
-  // A context a spec opens itself inherits neither the locale nor the motion
-  // setting of the configuration.
+  // A context a spec opens takes the project's and `test.use`'s options for
+  // every one it does not pass: Playwright Test fills them in before the
+  // context is created. The locale is passed because this list is read in
+  // French; the motion setting repeats the project's, so that the tiles are
+  // still measured at rest should the spec run with motion on.
   const context = await browser.newContext({ locale: 'fr-CH', reducedMotion: 'reduce', viewport, ...device });
   await context.addInitScript((ids) => {
     window.localStorage.setItem('retro-favorite-teams', JSON.stringify(ids));
