@@ -68,7 +68,10 @@ const ACCEPTED_AVATAR_ID_SET = new Set(ACCEPTED_AVATAR_IDS);
 
 // The shape of an id some release may store. Wider than the lists on purpose:
 // a tab or pod that does not know a newer id must keep it as stored rather
-// than erase it. It is never drawn unless the families have it.
+// than erase it. It is never drawn unless the families have it. Frozen: every
+// release from 45.0 on drops an entry of any other shape, so a new id must
+// fit this one; widened here, it would not reach the pods already running
+// (__tests__/avatars.test.ts holds the shape).
 const STORED_AVATAR_ID = /^[a-z]+(-[a-z]+)*$/;
 const STORED_AVATAR_ID_MAX_LENGTH = 64;
 

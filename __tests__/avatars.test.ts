@@ -22,6 +22,22 @@ import {
  * never used as a key, a class, a URL part or a message key.
  */
 
+// The shape of a stored avatar id: a contract with every release deployed
+// since 45.0, frozen, not a naming style. Every pod and tab from 45.0 on keeps
+// an entry of this shape as stored (utils/avatars.js → isMemberAvatarEntry:
+// lower-case ASCII words joined by hyphens, at most 64 characters), and drops
+// an entry of any other shape when it reads the map, merges two teams, or
+// rebuilds the map at the team's next pick. So a later release's new id must
+// fit it: widening it here and in the module together would look safe, and
+// the pods still running the older release would erase those choices during
+// the rollout.
+const STORED_ID_SHAPE = /^[a-z]+(-[a-z]+)*$/;
+const STORED_ID_MAX_LENGTH = 64;
+const expectStoredShape = (id: string) => {
+  expect(id).toMatch(STORED_ID_SHAPE);
+  expect(id.length, id).toBeLessThanOrEqual(STORED_ID_MAX_LENGTH);
+};
+
 describe('the avatar list', () => {
   it('holds six families of twenty, in the order the picker shows them', () => {
     expect(AVATAR_FAMILIES.map((family) => family.id)).toEqual(['animals', 'monsters', 'objects', 'shapes', 'nature', 'games']);
@@ -30,11 +46,11 @@ describe('the avatar list', () => {
     expect(AVATAR_FAMILIES[5].avatars.at(-1)).toBe('roller-skate');
   });
 
-  it('lists 120 unique ids of one lower-case ASCII shape, every family in order', () => {
+  it('lists 120 unique ids of the stored shape, every family in order', () => {
     expect(AVATAR_IDS).toHaveLength(120);
     expect(new Set(AVATAR_IDS).size).toBe(120);
     expect(AVATAR_IDS).toEqual(AVATAR_FAMILIES.flatMap((family) => family.avatars));
-    for (const id of AVATAR_IDS) expect(id).toMatch(/^[a-z]+(-[a-z]+)*$/);
+    for (const id of AVATAR_IDS) expectStoredShape(id);
   });
 
   it('cannot be changed at run time', () => {
@@ -97,7 +113,7 @@ describe('the ids the route accepts', () => {
     const offered = new Set<string>(AVATAR_IDS);
     for (const id of ACCEPTED_ONLY_AVATAR_IDS) {
       expect(offered.has(id), id).toBe(false);
-      expect(id).toMatch(/^[a-z]+(-[a-z]+)*$/);
+      expectStoredShape(id);
       expect(isAcceptedAvatarId(id), id).toBe(true);
       // Accepted, never drawn: this release has no picture for it.
       expect(isAvatarId(id), id).toBe(false);
