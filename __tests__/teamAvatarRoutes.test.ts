@@ -332,13 +332,34 @@ describe('POST /api/team/:teamId/member/avatar', () => {
     });
   });
 
-  it('never dates a choice before the one it replaces, whatever this pod\'s clock says', async () => {
-    stored().memberAvatars = { p1: { id: 'owl', at: Date.now() + 60_000 } };
+  // Whatever this pod's clock says: the stored date is kept in a variable and
+  // the answer pinned exactly, so the test reads the clock once (a second read
+  // after the round trip failed the test whenever a worker stalled a second).
+  it("never dates a choice before the one it replaces: one millisecond after a stored choice ahead of this pod's clock", async () => {
+    const ahead = Date.now() + 60 * 60_000;
+    stored().memberAvatars = { p1: { id: 'owl', at: ahead } };
     await pick({ memberId: 'p1', avatar: 'fox' });
-    const entry = stored().memberAvatars!.p1;
-    expect(entry.id).toBe('fox');
-    expect(entry.at).toBeGreaterThan(Date.now() + 59_000);
+    expect(stored().memberAvatars!.p1).toEqual({ id: 'fox', at: ahead + 1 });
   });
+
+  // CodeQL js/missing-rate-limiting: pinned as the template routes pin theirs
+  // (templateListOwnership.test.ts), since a limiter a later refactor drops
+  // would otherwise leave every other test green. Its code is also a contract
+  // with the client, which takes it as final (dataService.ts,
+  // AVATAR_FINAL_REFUSALS): reworded, the rollout retries would come back,
+  // each one more request against the limiter. beforeEach builds a new app,
+  // so the limiter starts empty here.
+  it('refuses the 301st pick within a minute, with the code the client takes as final', async () => {
+    const statuses: number[] = [];
+    let last: Response | null = null;
+    for (let i = 0; i < 301; i += 1) {
+      last = await pick({ memberId: 'p1', avatar: i % 2 ? 'fox' : 'owl' });
+      statuses.push(last.status);
+    }
+    expect(statuses.slice(0, 300)).not.toContain(429);
+    expect(statuses[300]).toBe(429);
+    expect(await last!.json()).toMatchObject({ error: 'too_many_requests' });
+  }, 30_000);
 
   it('stays bounded: past the cap, off-roster entries go first, the oldest first', async () => {
     const map: Record<string, Entry> = {};

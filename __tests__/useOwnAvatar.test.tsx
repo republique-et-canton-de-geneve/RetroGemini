@@ -80,6 +80,15 @@ describe('useOwnAvatar, the own entry', () => {
     expect(updateSession).toHaveBeenCalledTimes(1);
   });
 
+  // StrictMode runs every effect twice in development (index.tsx renders
+  // <React.StrictMode>), with the same key: the second run must not send a
+  // second update behind the first.
+  it('writes once under StrictMode, whose effects run twice', () => {
+    const updateSession = vi.fn(() => session);
+    renderHook(() => useOwnAvatar({ session, team, currentUser: me, updateSession, canWrite: true }), { reactStrictMode: true });
+    expect(updateSession).toHaveBeenCalledTimes(1);
+  });
+
   it('writes again after a reconnection when the write it tried was dropped', () => {
     // The screen's updateSession drops a write while offline (isLiveRef), even
     // when the render the effect belongs to still read the session as live.
@@ -238,6 +247,36 @@ describe('useOwnAvatar, the own entry', () => {
       expect(updateSession).not.toHaveBeenCalled();
       act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS / 2); });
       expect(updateSession).toHaveBeenCalledTimes(1);
+    });
+
+    // A second pick inside the wait starts the wait again. Left running, the
+    // first pick's timer ended the second pick's wait early, and the hook
+    // wrote the entry from the revision the server's stamp for the second
+    // pick was about to move: the double write the wait exists to avoid.
+    it("waits the whole wait after a second pick: the first pick's timer does not end it", async () => {
+      vi.useFakeTimers();
+      const maps: Record<string, MemberAvatarChoice>[] = [{ ada: { id: 'cat', at: 300 } }, { ada: { id: 'owl', at: 400 } }];
+      vi.spyOn(dataService, 'setMemberAvatar').mockImplementation(async () => maps.shift()!);
+      const updateSession = vi.fn();
+      const current = { id: 's1', participants: [{ ...me, avatar: 'fox', avatarAt: 100 }] };
+      const view = renderHook((props: { team: Team }) => useOwnAvatar({
+        session: current, team: props.team, currentUser: me, updateSession, canWrite: true,
+      }), { initialProps: { team } });
+
+      await act(async () => { await view.result.current.pick('cat'); });
+      view.rerender({ team: { ...team, memberAvatars: { ada: { id: 'cat', at: 300 } } } as unknown as Team });
+      act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS - 500); });
+      await act(async () => { await view.result.current.pick('owl'); });
+      view.rerender({ team: { ...team, memberAvatars: { ada: { id: 'owl', at: 400 } } } as unknown as Team });
+
+      // Past the end of the first pick's wait: the second's goes on.
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(updateSession).not.toHaveBeenCalled();
+      act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS - 600); });
+      expect(updateSession).toHaveBeenCalledTimes(1);
+
+      view.unmount();
+      act(() => { vi.runOnlyPendingTimers(); });
     });
 
     it('leaves no timer behind when the screen goes during the wait', async () => {
