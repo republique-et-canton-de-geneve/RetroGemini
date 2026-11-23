@@ -141,8 +141,11 @@ test('audits every tab of the super-admin console with axe-core', async ({ brows
   //    its fields (only turning it off posts), the message preview is local,
   //    and a chosen restore file only enables "Upload & Restore" — never
   //    clicked. The reload throws all of it away.
-  const enableAi = admin.getByRole('button', { name: 'Enable AI features' });
-  if (await enableAi.count()) await enableAi.click();
+  //    The AI card's switch says whether it is on (aria-checked) under a name
+  //    no state changes.
+  const aiSwitch = admin.getByRole('switch', { name: 'AI Assistant', exact: true });
+  if ((await aiSwitch.getAttribute('aria-checked')) !== 'true') await aiSwitch.click();
+  await expect(aiSwitch).toHaveAttribute('aria-checked', 'true');
   await expect(admin.getByLabel(/API URL/)).toBeVisible();
   await admin.getByPlaceholder(/Scheduled maintenance/).fill('Maintenance on Sunday, 2-4 AM.');
   await expect(admin.locator('p', { hasText: 'Maintenance on Sunday, 2-4 AM.' })).toBeVisible();

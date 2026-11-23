@@ -1512,15 +1512,24 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       <span className={ADMIN_SUBTITLE_ICON} aria-hidden="true">group_add</span>
                       {t('admin.notifications.newTeamTitle')}
                     </h3>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p id="admin-new-team-description" className="text-xs text-slate-500 mt-1">
                       {t('admin.notifications.newTeamDescription')}
                     </p>
                   </div>
+                  {/* A switch, as the Jira card's: named by its setting, it says
+                      whether the setting is on (aria-checked), and no state
+                      changes its name. The tooltip says why it cannot be used
+                      yet, while it cannot. */}
                   <button
+                    type="button"
+                    role="switch"
+                    aria-checked={notifyNewTeam}
+                    aria-label={t('admin.notifications.newTeamTitle')}
+                    aria-describedby="admin-new-team-description"
                     onClick={handleToggleNotifyNewTeam}
                     disabled={notifyNewTeamSaving || !adminEmail}
                     className={adminSwitchTrack(notifyNewTeam)}
-                    title={!adminEmail ? t('admin.notifications.newTeamNeedsEmail') : notifyNewTeam ? t('admin.notifications.newTeamDisable') : t('admin.notifications.newTeamEnable')}
+                    title={!adminEmail ? t('admin.notifications.newTeamNeedsEmail') : undefined}
                   >
                     <span className={adminSwitchKnob(notifyNewTeam)} />
                   </button>
@@ -1544,6 +1553,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 </p>
               </div>
               <button
+                type="button"
+                role="switch"
+                aria-checked={aiEnabled}
+                aria-label={t('admin.ai.title')}
                 onClick={async () => {
                   const newEnabled = !aiEnabled;
                   setAiEnabled(newEnabled);
@@ -1558,7 +1571,6 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                   }
                 }}
                 className={adminSwitchTrack(aiEnabled)}
-                title={aiEnabled ? t('admin.ai.disable') : t('admin.ai.enable')}
               >
                 <span className={adminSwitchKnob(aiEnabled)} />
               </button>
@@ -1617,14 +1629,20 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                       <span className={ADMIN_SUBTITLE_ICON} aria-hidden="true">verified_user</span>
                       {t('admin.ai.selfSignedTitle')}
                     </h3>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p id="admin-ai-self-signed-description" className="text-xs text-slate-500 mt-1">
                       {t('admin.ai.selfSignedDescription')}
                     </p>
                   </div>
+                  {/* Described, as Jira's own self-signed switch is: the console
+                      draws two of that name. */}
                   <button
+                    type="button"
+                    role="switch"
+                    aria-checked={aiAllowSelfSignedCerts}
+                    aria-label={t('admin.ai.selfSignedTitle')}
+                    aria-describedby="admin-ai-self-signed-description"
                     onClick={() => setAiAllowSelfSignedCerts(!aiAllowSelfSignedCerts)}
                     className={adminSwitchTrack(aiAllowSelfSignedCerts)}
-                    title={aiAllowSelfSignedCerts ? t('admin.ai.selfSignedDisable') : t('admin.ai.selfSignedEnable')}
                   >
                     <span className={adminSwitchKnob(aiAllowSelfSignedCerts)} />
                   </button>

@@ -188,12 +188,12 @@ describe('the console in the dashboard vocabulary', () => {
 
   it('draws the switches in the brand colour when on, slate-400 off, and states a disabled one', async () => {
     await renderConsole();
-    const aiSwitch = await screen.findByRole('button', { name: 'Disable AI features' });
+    const aiSwitch = await screen.findByRole('switch', { name: 'AI Assistant', checked: true });
     expect(classColor(aiSwitch.getAttribute('class') ?? '', 'bg')).toBe('indigo-600');
-    const selfSigned = screen.getByRole('button', { name: 'Allow self-signed certificates' });
+    const selfSigned = await screen.findByRole('switch', { name: 'Allow Self-Signed Certificates', checked: false });
     expect(classColor(selfSigned.getAttribute('class') ?? '', 'bg')).toBe('slate-400');
     expect(tokenContrast('slate-400', 'white')).toBeGreaterThanOrEqual(EDGE);
-    const notify = await screen.findByRole('button', { name: 'Disable new team notifications' });
+    const notify = await screen.findByRole('switch', { name: 'New Team Notification', checked: true });
     expect(classColor(notify.getAttribute('class') ?? '', 'bg')).toBe('indigo-600');
 
     // No admin email yet: the switch cannot be used, and says so in a colour
@@ -201,7 +201,8 @@ describe('the console in the dashboard vocabulary', () => {
     replies['/api/super-admin/admin-email'] = { adminEmail: '', notifyNewTeam: false };
     document.body.innerHTML = '';
     await renderConsole();
-    const locked = await screen.findByRole('button', { name: /Set an admin email first/ });
+    const locked = await screen.findByRole('switch', { name: 'New Team Notification', description: /Requires an admin email/ });
+    expect(locked).toHaveAttribute('title', 'Set an admin email first');
     expect(locked).toBeDisabled();
     const tokens = (locked.getAttribute('class') ?? '').split(/\s+/);
     expect(tokens).toContain('disabled:bg-slate-300');

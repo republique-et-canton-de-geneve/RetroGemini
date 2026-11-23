@@ -43,8 +43,6 @@ const admin = {
   'admin.notifications.newTeamDescription':
     'Receive an email when a new team is created. Requires an admin email and SMTP to be configured.',
   'admin.notifications.newTeamNeedsEmail': 'Set an admin email first',
-  'admin.notifications.newTeamDisable': 'Disable new team notifications',
-  'admin.notifications.newTeamEnable': 'Enable new team notifications',
   'admin.notifications.newTeamEnabled': 'New team notifications enabled',
   'admin.notifications.newTeamDisabled': 'New team notifications disabled',
   'admin.notifications.newTeamFailed': 'Failed to update notification setting',
@@ -53,8 +51,6 @@ const admin = {
   'admin.ai.title': 'AI Assistant',
   'admin.ai.description':
     'Connect an OpenAI-compatible LLM to enable automatic group title suggestions and retrospective summary generation.',
-  'admin.ai.disable': 'Disable AI features',
-  'admin.ai.enable': 'Enable AI features',
   'admin.ai.apiUrlLabel': 'API URL',
   'admin.ai.apiUrlPlaceholder': 'https://api.openai.com/v1',
   'admin.ai.apiUrlHint': 'Base URL of the OpenAI-compatible API (e.g. https://api.openai.com/v1)',
@@ -68,8 +64,6 @@ const admin = {
   'admin.ai.selfSignedTitle': 'Allow Self-Signed Certificates',
   'admin.ai.selfSignedDescription':
     'Enable this for internal servers with self-signed or corporate TLS certificates.',
-  'admin.ai.selfSignedDisable': 'Disable self-signed cert support',
-  'admin.ai.selfSignedEnable': 'Allow self-signed certificates',
   'admin.ai.testing': 'Testing...',
   'admin.ai.test': 'Test Connection',
   'admin.ai.save': 'Save Settings',
