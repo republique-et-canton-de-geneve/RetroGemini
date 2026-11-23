@@ -377,6 +377,71 @@ describe('AvatarPicker', () => {
     expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('writes a clear picked during a write that is then refused, and leaves no error once it is stored', async () => {
+    const first = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    renderPicker({ onPick, currentAvatarId: 'fox' });
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    fireEvent.click(screen.getByRole('button', { name: /, My initials$/ }));
+    expect(onPick).toHaveBeenCalledTimes(1);
+    await act(async () => { first.reject(new Error(AVATAR_NOT_SAVED)); });
+    await waitFor(() => expect(onPick).toHaveBeenCalledTimes(2));
+    expect(onPick).toHaveBeenLastCalledWith(null);
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(en['avatars.picker.saved']));
+    expect(screen.getByRole('button', { name: /, My initials$/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Fox' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  // The second click of a double click waits for the first. Refused, the
+  // first stored nothing, so the second is no repeat of a stored choice: it
+  // is written, a retry of the refused one, and the refusal is no longer said
+  // while that retry runs.
+  it('writes a double click again when its first write is refused, and says nothing of the refusal while the retry runs', async () => {
+    const first = deferred();
+    const retry = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(retry.promise);
+    renderPicker({ onPick, currentAvatarId: 'fox' });
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    expect(onPick).toHaveBeenCalledTimes(1);
+    await act(async () => { first.reject(new Error(AVATAR_NOT_SAVED)); });
+    expect(onPick.mock.calls.map(([choice]) => choice)).toEqual(['owl', 'owl']);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe(en['avatars.picker.saving']);
+    // Until the retry lands, the choice stored is the one marked.
+    expect(screen.getByRole('button', { name: 'Fox' }).getAttribute('aria-pressed')).toBe('true');
+
+    await act(async () => { retry.resolve(); });
+    expect(screen.getByRole('status').textContent).toBe(en['avatars.picker.saved']);
+    expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(onPick).toHaveBeenCalledTimes(2);
+  });
+
+  // Only the latest pick made during a write waits for it: a later pick
+  // replaces the one waiting, whatever that one was. The first write runs
+  // once, and only the latest pick is written after it.
+  it.each([
+    ['the second click of a double click', 'Owl'],
+    ['the marked picture', 'Fox'],
+    ['another picture', 'Cat'],
+    ['"My initials"', /, My initials$/],
+  ] as const)('never writes %s, picked during a write, when a later pick replaces it', async (_kind, replaced) => {
+    const first = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    renderPicker({ onPick, currentAvatarId: 'fox' });
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    fireEvent.click(screen.getByRole('button', { name: replaced }));
+    fireEvent.click(screen.getByRole('button', { name: 'Whale' }));
+    expect(onPick).toHaveBeenCalledTimes(1);
+    await act(async () => { first.resolve(); });
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(en['avatars.picker.saved']));
+    expect(onPick.mock.calls.map(([choice]) => choice)).toEqual(['owl', 'whale']);
+    expect(screen.getByRole('button', { name: 'Whale' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Owl' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('follows a new current choice from its opener', () => {
     const { rerender, onPick, onClose } = renderPicker({ currentAvatarId: 'fox' });
     rerender(
