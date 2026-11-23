@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import ts from 'typescript';
 import { RETRO_TEMPLATES } from '../i18n/content/retroTemplates';
 import { ICON_PICKER_ICONS } from '../components/iconPickerIcons';
+import { ICON_FONT_CLASS, drawsIconFont } from '../__tests__/helpers/iconClass';
 
 /**
  * Every icon the application can draw is a Material Symbols ligature: a name
@@ -20,7 +21,6 @@ import { ICON_PICKER_ICONS } from '../components/iconPickerIcons';
 
 // The package is an ES module: no __dirname.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const ICON_CLASS = 'material-symbols-outlined';
 const LIGATURE = /^[a-z0-9_]+$/;
 
 const sourceOf = (file: string) =>
@@ -62,7 +62,10 @@ const classNameOf = (attributes: ts.JsxAttributes, file: ts.SourceFile): string 
 /**
  * The names written in the components, read with the TypeScript parser (a
  * regular expression stops at the first `>` of an arrow function, AGENTS.md →
- * Accessibility): the children of every element carrying the icon class, and
+ * Accessibility): the children of every element that draws the icon font, its
+ * class written out or one of the look's icon recipes (`SETTING_ICON`,
+ * `TAB_ICON`, `CHIP_ICON_CLASS`: `__tests__/helpers/iconClass.ts`, the rule
+ * `__tests__/iconButtonNames.test.tsx` reads too), and
  * for the icons a component reads from a table or a helper (`tab.icon`,
  * `sortIconOf(…)`, `activityIcon(…)`), the string values of every `icon`,
  * `previous` and `next` property and what each function named like an icon
@@ -77,7 +80,7 @@ const namesInComponents = (): Map<string, string> => {
     const file = sourceOf(path);
     const where = (node: ts.Node) => `${relative(ROOT, path)}:${file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1}`;
     const visit = (node: ts.Node) => {
-      if (ts.isJsxElement(node) && classNameOf(node.openingElement.attributes, file).includes(ICON_CLASS)) {
+      if (ts.isJsxElement(node) && drawsIconFont(classNameOf(node.openingElement.attributes, file))) {
         for (const child of node.children) {
           if (ts.isJsxText(child)) add(child.text.trim(), where(child));
           else for (const value of valuesOf(child)) add(value, where(child));
@@ -142,7 +145,7 @@ const measure = async (page: Page, names: string[]) =>
       host.remove();
       return boxes;
     },
-    { names, iconClass: ICON_CLASS },
+    { names, iconClass: ICON_FONT_CLASS },
   );
 
 /** A ligature is one 24px glyph (24.02 measured); a missing one is a word, 120px for `groups_off`. */
@@ -162,6 +165,13 @@ test('the source holds the icon names this spec measures', () => {
   expect(templateNames().length).toBeGreaterThan(30);
   for (const known of ['arrow_back', 'qr_code_2', 'unfold_more', 'group_off', 'light_mode', 'play_arrow']) {
     expect(names.has(known), known).toBe(true);
+  }
+  // Drawn only through one of the look's icon recipes: a settings card's
+  // title, on the Dashboard or in the console (SETTING_ICON), a console
+  // card's subtitle (ADMIN_SUBTITLE_ICON), a console tab (TAB_ICON), the
+  // connection chip (CHIP_ICON_CLASS).
+  for (const known of ['badge', 'insights', 'email', 'group_add', 'cloud_download', 'stream', 'terminal', 'backup', 'integration_instructions', 'sync_problem', 'wifi']) {
+    expect(names.has(known), `${known}, drawn through a recipe`).toBe(true);
   }
 });
 

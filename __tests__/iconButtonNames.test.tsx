@@ -6,6 +6,7 @@ import { join, relative } from 'path';
 import ts from 'typescript';
 import TicketCommentsModal from '../components/session/TicketCommentsModal';
 import type { Ticket, User } from '../types';
+import { drawsIconFont } from './helpers/iconClass';
 
 /**
  * Audit H52 — **an icon-only button is named by the icon font's ligature.**
@@ -75,8 +76,7 @@ const tagNameOf = (node: ts.JsxElement | ts.JsxSelfClosingElement) =>
 const isIconSpan = (node: ts.Node): boolean => {
   if (!ts.isJsxElement(node) && !ts.isJsxSelfClosingElement(node)) return false;
   if (tagNameOf(node) !== 'span') return false;
-  const className = attributeOf(node, 'className')?.initializer?.getText() ?? '';
-  return className.includes('material-symbols-outlined') || /\b[A-Z0-9_]*ICON[A-Z0-9_]*\b/.test(className);
+  return drawsIconFont(attributeOf(node, 'className')?.initializer?.getText() ?? '');
 };
 
 /** An icon span a screen reader reads out: one that is not `aria-hidden`. */
