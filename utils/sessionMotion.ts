@@ -32,6 +32,16 @@ export const MAX_CARD_BURST = 6;
  */
 export const MAX_PEOPLE_BURST = 2;
 
+/**
+ * How long the session's motion stays quiet after the viewer's connection
+ * comes back and after the server's first state (ms): a rolling update
+ * reconnects everybody, and what comes back then is no news. One value for
+ * the board (`useSessionMotion`), the phase title (Session.tsx) and the
+ * participants panel (`usePanelMotion`), so none of them is quiet for other
+ * seconds than the rest.
+ */
+export const QUIET_AFTER_LIVE_MS = 3000;
+
 export interface SessionMotionContext {
   /** The person looking at the screen. */
   viewerId: string;

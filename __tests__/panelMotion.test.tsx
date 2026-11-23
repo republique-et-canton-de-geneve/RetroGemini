@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { ARRIVAL_MS, POP_MS, PanelMotionInput, QUIET_MS, usePanelMotion } from '../components/session/usePanelMotion';
+import { RECONNECT_QUIET_MS } from '../components/session/useSessionMotion';
+import { QUIET_AFTER_LIVE_MS } from '../utils/sessionMotion';
 import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 /**
@@ -37,6 +39,17 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   restoreMotionPreference();
+});
+
+// One rule, the three quiet seconds after a (re)connection (AGENTS.md → Motion),
+// held by one constant: tuned in one hook alone, the panel and the board would
+// stay quiet for different seconds after the same reconnection.
+describe('the quiet seconds', () => {
+  it('are the board’s seconds too, three of them', () => {
+    expect(QUIET_MS).toBe(QUIET_AFTER_LIVE_MS);
+    expect(RECONNECT_QUIET_MS).toBe(QUIET_AFTER_LIVE_MS);
+    expect(QUIET_AFTER_LIVE_MS).toBe(3000);
+  });
 });
 
 describe('the arrival', () => {

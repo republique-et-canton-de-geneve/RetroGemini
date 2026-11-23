@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { arrivedPeople } from '../../utils/sessionMotion';
+import { QUIET_AFTER_LIVE_MS, arrivedPeople } from '../../utils/sessionMotion';
 import { motionAllowed } from '../common/motion/effects';
 
 /**
@@ -29,8 +29,8 @@ import { motionAllowed } from '../common/motion/effects';
  *   follows (`motionAllowed`).
  */
 
-/** How long after the mount, or after the viewer's own reconnection, nothing plays. */
-export const QUIET_MS = 3000;
+/** How long after the mount, or after the viewer's own reconnection, nothing plays: the board's seconds too. */
+export const QUIET_MS = QUIET_AFTER_LIVE_MS;
 /** The arrival's longest piece: the presence dot's two pulses after 0.3s (index.css `fx-halo`). */
 export const ARRIVAL_MS = 2200;
 /** `fx-pop` and `fx-bump` last 0.45s. */

@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 import type { RetroSession } from '../../types';
 import { motionAllowed, playEffect } from '../common/motion/effects';
-import { NO_MOTION, diffSessionMotion, staggerDelays, type SessionMotion } from '../../utils/sessionMotion';
+import { NO_MOTION, QUIET_AFTER_LIVE_MS, diffSessionMotion, staggerDelays, type SessionMotion } from '../../utils/sessionMotion';
 
 /**
  * Plays the board's effects for what just happened in a session: a card that
@@ -39,8 +39,8 @@ export const MOTION_HOOKS = Object.freeze({
 /** A card's words, inside its root (kept on that element: tests and the reveal read it). */
 export const CARD_TEXT_SELECTOR = '.whitespace-pre-wrap';
 
-/** How long the board stays quiet after the viewer's connection comes back (ms). */
-export const RECONNECT_QUIET_MS = 3000;
+/** How long the board stays quiet after the viewer's connection comes back (ms): the panel's seconds too. */
+export const RECONNECT_QUIET_MS = QUIET_AFTER_LIVE_MS;
 /** Hidden cards being shown start this far apart (ms)... */
 export const REVEAL_STEP_MS = 80;
 /** ...and the last one starts within this (ms). */
