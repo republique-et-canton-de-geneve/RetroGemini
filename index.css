@@ -238,16 +238,6 @@ body {
   outline-offset: -2px;
 }
 
-/* Hide scrollbar */
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
-}
-
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
 /* Bar animation */
 .bar-anim {
   transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
@@ -277,13 +267,6 @@ body {
   .typing-dot {
     animation: none;
   }
-}
-
-/* Drag and drop styles */
-.drag-over {
-  background-color: var(--color-indigo-50) !important;
-  border-color: var(--color-indigo-500) !important;
-  transform: scale(1.01);
 }
 
 /* Auto-sizing textarea */

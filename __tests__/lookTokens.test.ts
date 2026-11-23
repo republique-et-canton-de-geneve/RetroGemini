@@ -12,9 +12,20 @@ import { parsedColor, themeBlocks, tokenContrast } from './helpers/tailwindTheme
  * sweep breaks (AGENTS.md, "a contrast fix is directional").
  */
 
-const CSS = readFileSync(join(__dirname, '..', 'index.css'), 'utf8');
+const ROOT = join(__dirname, '..');
+const CSS = readFileSync(join(ROOT, 'index.css'), 'utf8');
 const TEXT = 4.5;
 const EDGE = 3;
+
+/** Every file under `dir` whose name matches `pattern`. */
+const walk = (dir: string, pattern: RegExp, out: string[] = []): string[] => {
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) walk(path, pattern, out);
+    else if (pattern.test(name)) out.push(path);
+  }
+  return out;
+};
 
 const luminance = (token: string): number => {
   const { red, green, blue } = parsedColor(token);
@@ -178,6 +189,45 @@ describe('one source for a colour', () => {
 });
 
 /**
+ * A rule whose class no screen applies is a look nobody sees, kept in step by
+ * hand: 45.0 re-tokenised the colours of `.drag-over`, a scaled drop target no
+ * element had carried for several releases (a drop target is ringed, never
+ * scaled), and `.scrollbar-hide` was as dead.
+ */
+describe('what index.css styles', () => {
+  /** The classes the selectors name; comments and at-rule preludes are left out. */
+  const styledClasses = (css: string): string[] => {
+    const names = new Set<string>();
+    for (const match of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{};]+)\{/g)) {
+      const selector = match[1].trim();
+      if (selector.startsWith('@')) continue;
+      for (const name of selector.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) names.add(name[1]);
+    }
+    return [...names];
+  };
+
+  it('styles no class that nothing applies', () => {
+    const code = [
+      ...walk(join(ROOT, 'components'), /\.tsx?$/),
+      ...walk(join(ROOT, 'utils'), /\.[jt]sx?$/),
+      ...walk(join(ROOT, 'services'), /\.tsx?$/),
+      ...['App.tsx', 'index.tsx', 'index.html'].map((file) => join(ROOT, file)),
+    ].map((file) => readFileSync(file, 'utf8')).join('\n');
+    const styled = styledClasses(CSS);
+    expect(styled.length).toBeGreaterThan(20);
+    // Named as a whole word where a screen is drawn from. A class built from
+    // parts at run time (`tone-${hue}`) would need its names written out.
+    const unapplied = styled.filter((name) => !new RegExp(`(?<![\\w-])${name}(?![\\w-])`).test(code));
+    expect(unapplied).toEqual([]);
+  });
+
+  it('reads the classes of a selector, never the numbers of a declaration', () => {
+    const css = '/* .gone {} */ .a:hover, .b .c::after { transition: opacity 0.5s; } @media (x) { .d { top: 0.5rem; } } @keyframes k { 0.5% { opacity: 0; } }';
+    expect(styledClasses(css)).toEqual(['a', 'b', 'c', 'd']);
+  });
+});
+
+/**
  * A control that shrinks, grows or shifts while it is pressed moves its own
  * edge from under the pointer. Pressed on its outer pixel, the release lands
  * beside it, the browser sends the click to the ancestor both events share,
@@ -187,16 +237,6 @@ describe('one source for a colour', () => {
  * colour, never with its box.
  */
 describe('a press never moves the control pressed', () => {
-  const ROOT = join(__dirname, '..');
-  const walk = (dir: string, out: string[] = []): string[] => {
-    for (const name of readdirSync(dir)) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) walk(path, out);
-      else if (/\.tsx?$/.test(name)) out.push(path);
-    }
-    return out;
-  };
-
   /** A class's variants and its utility: `motion-safe:active:scale-[0.97]` is two variants and `scale-[0.97]`. */
   const parts = (token: string): string[] => {
     const out: string[] = [];
@@ -235,7 +275,7 @@ describe('a press never moves the control pressed', () => {
       .map((match) => match[1].trim());
 
   it('no class of the components moves a box on a press', () => {
-    const files = [...walk(join(ROOT, 'components')), join(ROOT, 'App.tsx')];
+    const files = [...walk(join(ROOT, 'components'), /\.tsx?$/), join(ROOT, 'App.tsx')];
     expect(files.length).toBeGreaterThan(100);
     const found = files.flatMap((file) => pressMoves(readFileSync(file, 'utf8')).map((token) => `${relative(ROOT, file)}: ${token}`));
     expect(found).toEqual([]);
