@@ -9,6 +9,24 @@
    nowhere else in this file (`__tests__/participantColors.test.ts` checks). */
 
 @import 'tailwindcss';
+@source not './**/*.{md,yml,yaml}';
+@source not './__tests__';
+@source not './e2e';
+@source not './e2e-prod';
+@source not './scripts';
+@source not './loadtest';
+@source not './k8s';
+@source not './.github';
+@source not './.claude';
+@source not './.gstack';
+@source not './.husky';
+
+/* Tailwind builds this stylesheet from the class names it finds in the files it
+   scans, and by default that is every file git keeps: documents, tests, specs
+   and workflows name classes the application never draws (a guard's
+   counter-example, an AGENTS.md example), and each became a dead rule of the
+   shipped CSS. So the scan reads the application only; never exclude one of
+   its directories here (`__tests__/tailwindScanScope.test.ts`). */
 
 @theme {
   /* Neutrals: the slate scale, cooler and slightly violet. 500 is the lightest
