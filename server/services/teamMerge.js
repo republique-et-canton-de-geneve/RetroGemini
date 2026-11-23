@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
-import { isValidRaterId, withoutUnstoredJiraLinks } from '../../utils/actionImpact.js';
-import { isMemberAvatarEntry } from '../../utils/avatars.js';
+import { withoutUnstoredJiraLinks } from '../../utils/actionImpact.js';
+import { memberAvatarEntries, rosterIds } from '../../utils/avatars.js';
 import { parseEmailInput } from '../../utils/emailAddress.js';
 import { isJiraLinked, isJiraUncertain } from '../../utils/jira.js';
 import { valuesEqual } from './sessionGuard.js';
@@ -842,11 +842,6 @@ const mergedJiraParents = (sources) => {
   return entries.length > 0 ? Object.fromEntries(entries) : null;
 };
 
-const rosterIdSet = (team) =>
-  new Set([...asArray(team?.members), ...asArray(team?.archivedMembers)]
-    .filter((member) => isPlainObject(member) && typeof member.id === 'string')
-    .map((member) => member.id));
-
 /**
  * Both sources' avatar choices (`memberAvatars`), keyed by the merged team's
  * member ids: the main team's as they are, the second's through its user-id
@@ -863,22 +858,22 @@ const rosterIdSet = (team) =>
  */
 const mergedMemberAvatars = (primary, secondary, secondaryUserIds) => {
   const entries = new Map();
-  const readable = (team) => (isPlainObject(team.memberAvatars) ? Object.entries(team.memberAvatars) : [])
-    .filter(([memberId, entry]) => isValidRaterId(memberId) && isMemberAvatarEntry(entry));
-  const primaryRoster = rosterIdSet(primary);
-  const secondaryRoster = rosterIdSet(secondary);
-  for (const [memberId, entry] of readable(primary)) {
+  const primaryRoster = rosterIds(primary);
+  const secondaryRoster = rosterIds(secondary);
+  // `memberAvatarEntries` answers copies of the valid entries only: the ones
+  // the avatar route keeps when it rebuilds the map.
+  for (const [memberId, entry] of memberAvatarEntries(primary)) {
     // An entry kept for an id the main team's roster no longer holds, which
     // is a member of the second team: in the merged team that id is theirs.
     if (!primaryRoster.has(memberId) && secondaryRoster.has(memberId)) continue;
-    entries.set(memberId, { id: entry.id, at: entry.at });
+    entries.set(memberId, entry);
   }
-  for (const [memberId, entry] of readable(secondary)) {
+  for (const [memberId, entry] of memberAvatarEntries(secondary)) {
     // And the mirror: an off-roster entry of the second team under the id of
     // a member of the main team.
     if (!secondaryRoster.has(memberId) && primaryRoster.has(memberId)) continue;
     const mergedId = secondaryUserIds.get(memberId) ?? memberId;
-    if (!entries.has(mergedId)) entries.set(mergedId, { id: entry.id, at: entry.at });
+    if (!entries.has(mergedId)) entries.set(mergedId, entry);
   }
   return entries.size > 0 ? Object.fromEntries(entries) : null;
 };

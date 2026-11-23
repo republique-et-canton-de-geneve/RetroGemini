@@ -8,7 +8,9 @@ import {
   isAvatarId,
   isAvatarTime,
   memberAvatar,
+  memberAvatarEntries,
   memberAvatarId,
+  rosterIds,
   toAvatarId
 } from '../utils/avatars.js';
 
@@ -207,5 +209,65 @@ describe('memberAvatar and memberAvatarId', () => {
   it('answer null for a member id that is not a string', () => {
     const t = team({ 7: { id: 'fox', at: 1 } });
     expect(memberAvatar(t, 7 as unknown as string)).toBeNull();
+  });
+});
+
+// The one reader of the whole map, and of the roster it is bounded and
+// re-keyed by: the avatar route rebuilds the map from these on every pick,
+// and the merge of two teams carries what they answer, so neither can keep
+// what the other drops.
+describe('memberAvatarEntries', () => {
+  it('answers copies of the valid entries, in stored order', () => {
+    const map = { ada: { id: 'fox', at: 3 }, bob: { id: null, at: 1 }, later: { id: 'space-whale', at: 2, extra: true } };
+    const team = { memberAvatars: map };
+    const entries = memberAvatarEntries(team);
+    // An id this release does not know is kept as stored, an extra field dropped.
+    expect(entries).toEqual([['ada', { id: 'fox', at: 3 }], ['bob', { id: null, at: 1 }], ['later', { id: 'space-whale', at: 2 }]]);
+    entries[0][1].id = 'owl';
+    expect(map.ada).toEqual({ id: 'fox', at: 3 });
+  });
+
+  it('leaves out a key that is no member id and an entry that is no stored choice', () => {
+    // JSON.parse gives the map an own `__proto__` key, as a stored record can.
+    const memberAvatars = JSON.parse('{"__proto__": {"id": "fox", "at": 1}, "ok": {"id": "fox", "at": 5}}');
+    Object.assign(memberAvatars, {
+      'with space': { id: 'fox', at: 5 },
+      [`m${'x'.repeat(64)}`]: { id: 'fox', at: 5 },
+      bare: 'fox',
+      undated: { id: 'fox' },
+      tooLate: { id: 'fox', at: 1e300 },
+      shapeless: { id: 'Fox Face', at: 5 }
+    });
+    expect(Object.prototype.hasOwnProperty.call(memberAvatars, '__proto__')).toBe(true);
+    expect(memberAvatarEntries({ memberAvatars })).toEqual([['ok', { id: 'fox', at: 5 }]]);
+  });
+
+  it.each([
+    ['no team', null],
+    ['a team that is not an object', 'team'],
+    ['a team with no map', { id: 't1' }],
+    ['a map that is an array', { memberAvatars: [{ id: 'fox', at: 1 }] }],
+    ['a map that is a string', { memberAvatars: 'fox' }],
+    ['a map that is null', { memberAvatars: null }]
+  ])('answers no entry for %s', (_label, team) => {
+    expect(memberAvatarEntries(team)).toEqual([]);
+  });
+});
+
+describe('rosterIds', () => {
+  it('holds the ids of both roster lists', () => {
+    const team = { members: [{ id: 'a' }, { id: 'b' }], archivedMembers: [{ id: 'old' }] };
+    expect([...rosterIds(team)]).toEqual(['a', 'b', 'old']);
+  });
+
+  it('reads a row only when it is an object with a string id', () => {
+    const team = { members: [null, 'a', 7, ['b'], { id: 3 }, { name: 'no id' }, { id: 'c' }], archivedMembers: 'nobody' };
+    expect([...rosterIds(team)]).toEqual(['c']);
+  });
+
+  it('is empty for no team, or a team with no lists', () => {
+    expect(rosterIds(null).size).toBe(0);
+    expect(rosterIds('team').size).toBe(0);
+    expect(rosterIds({ id: 't1' }).size).toBe(0);
   });
 });

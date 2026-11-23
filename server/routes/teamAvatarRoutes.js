@@ -1,6 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import { isValidRaterId } from '../../utils/actionImpact.js';
-import { isAcceptedAvatarId, isAvatarTime, isMemberAvatarEntry, memberAvatar } from '../../utils/avatars.js';
+import { isAcceptedAvatarId, isAvatarTime, memberAvatar, memberAvatarEntries, rosterIds } from '../../utils/avatars.js';
 import { NO_OP_LIVE_SESSION_PATCH } from '../services/liveSessionRename.js';
 
 /**
@@ -32,28 +32,11 @@ const MEMBER_AVATARS_MAX = 500;
 const SESSION_ID_MAX_LENGTH = 128;
 const isSessionId = (value) => typeof value === 'string' && value.length > 0 && value.length <= SESSION_ID_MAX_LENGTH;
 
-const rosterIdsOf = (team) => {
-  const ids = new Set();
-  for (const list of [team?.members, team?.archivedMembers]) {
-    if (!Array.isArray(list)) continue;
-    for (const member of list) if (member && typeof member.id === 'string') ids.add(member.id);
-  }
-  return ids;
-};
-
-// The stored map's valid entries, in their stored order. Built through a Map,
-// so a caller-supplied key is data and never a property write; a key that is
-// not a plausible member id (`__proto__` among them) or an entry that is not
-// `{ id, at }` is dropped, which is how junk any path left heals.
-const validEntriesOf = (team) => {
-  const entries = new Map();
-  const map = team?.memberAvatars;
-  if (!map || typeof map !== 'object' || Array.isArray(map)) return entries;
-  for (const [memberId, entry] of Object.entries(map)) {
-    if (isValidRaterId(memberId) && isMemberAvatarEntry(entry)) entries.set(memberId, { id: entry.id, at: entry.at });
-  }
-  return entries;
-};
+// The stored map's valid entries, in their stored order (`memberAvatarEntries`:
+// a key that is not a plausible member id, `__proto__` among them, or an
+// entry that is not `{ id, at }` is dropped, which is how junk any path left
+// heals). A Map, so a caller-supplied key is data and never a property write.
+const validEntriesOf = (team) => new Map(memberAvatarEntries(team));
 
 /**
  * The map after `memberId` chose `avatar` (an id, or `null` for none) at
@@ -82,21 +65,18 @@ const nextMemberAvatars = (team, memberId, avatar, now, { max = MEMBER_AVATARS_M
   entries.set(memberId, { id: avatar, at });
 
   if (entries.size > max) {
-    const roster = rosterIdsOf(team);
-    const byAge = [...entries].filter(([id]) => id !== memberId).sort((a, b) => a[1].at - b[1].at);
-    for (const [id] of byAge.filter(([candidate]) => !roster.has(candidate))) {
-      if (entries.size <= max) break;
-      entries.delete(id);
-    }
-    for (const [id] of byAge) {
-      if (entries.size <= max) break;
-      entries.delete(id);
-    }
+    // One order: off-roster ids before roster ones, the oldest first within
+    // each. The sort is stable, so equal dates keep their stored order.
+    const roster = rosterIds(team);
+    const evictable = [...entries.keys()]
+      .filter((id) => id !== memberId)
+      .sort((a, b) => Number(roster.has(a)) - Number(roster.has(b)) || entries.get(a).at - entries.get(b).at);
+    for (const id of evictable.slice(0, entries.size - max)) entries.delete(id);
   }
   return Object.fromEntries(entries);
 };
 
-const toAnsweredMap = (team) => Object.fromEntries(validEntriesOf(team));
+const toAnsweredMap = (team) => Object.fromEntries(memberAvatarEntries(team));
 
 // How far ahead of this pod's clock a stamp another pod wrote can be: the
 // difference between two pods' clocks, with room to spare.

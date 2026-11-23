@@ -13,7 +13,9 @@
  * a class, a URL part or a message key.
  */
 
-const family = (id, avatars) => Object.freeze({ id, avatars: Object.freeze(avatars) });
+import { isValidRaterId } from './actionImpact.js';
+
+const family =(id, avatars) => Object.freeze({ id, avatars: Object.freeze(avatars) });
 
 /** The six families in the order the picker shows them, twenty avatars each. */
 export const AVATAR_FAMILIES = Object.freeze([
@@ -127,6 +129,14 @@ export const isMemberAvatarEntry = (value) => {
   return typeof id === 'string' && id.length <= STORED_AVATAR_ID_MAX_LENGTH && STORED_AVATAR_ID.test(id);
 };
 
+// The team's `memberAvatars` when it is a map (an object that is not an
+// array), or null: what every reader below starts from.
+const avatarMapOf = (team) => {
+  if (!team || typeof team !== 'object') return null;
+  const map = team.memberAvatars;
+  return map && typeof map === 'object' && !Array.isArray(map) ? map : null;
+};
+
 /**
  * A member's stored choice, `{ id, at }` (a copy), or `null` when there is
  * none or what is stored is not one. Read as an own property of a plain
@@ -137,12 +147,56 @@ export const isMemberAvatarEntry = (value) => {
  * @returns {{ id: string | null, at: number } | null}
  */
 export const memberAvatar = (team, memberId) => {
-  if (!team || typeof team !== 'object' || typeof memberId !== 'string') return null;
-  const map = team.memberAvatars;
-  if (!map || typeof map !== 'object' || Array.isArray(map)) return null;
-  if (!Object.prototype.hasOwnProperty.call(map, memberId)) return null;
+  if (typeof memberId !== 'string') return null;
+  const map = avatarMapOf(team);
+  if (!map || !Object.prototype.hasOwnProperty.call(map, memberId)) return null;
   const entry = map[memberId];
   return isMemberAvatarEntry(entry) ? { id: entry.id, at: entry.at } : null;
+};
+
+/**
+ * Every valid choice of the team's map, as `[memberId, { id, at }]` pairs
+ * (copies) in stored order: a key that is not a plausible member id
+ * (`isValidRaterId`, which refuses `__proto__` and its kin) or an entry that
+ * is not a stored choice (`isMemberAvatarEntry`) is left out. The one reader
+ * of the whole map: the avatar route rebuilds the map from it on every pick,
+ * which is how junk heals, and a merge of two teams carries what it answers,
+ * so neither keeps what the other drops. Pairs, not an object: a key is data,
+ * never a property write (build a `Map` or use `Object.fromEntries`).
+ *
+ * @param {unknown} team
+ * @returns {Array<[string, { id: string | null, at: number }]>}
+ */
+export const memberAvatarEntries = (team) => {
+  const map = avatarMapOf(team);
+  if (!map) return [];
+  const entries = [];
+  for (const [memberId, entry] of Object.entries(map)) {
+    if (isValidRaterId(memberId) && isMemberAvatarEntry(entry)) entries.push([memberId, { id: entry.id, at: entry.at }]);
+  }
+  return entries;
+};
+
+/**
+ * The ids on the team's two roster lists, `members` and `archivedMembers`: an
+ * id held by a row that is an object (not an array) with a string `id`. What
+ * "on the roster" means wherever the avatar map is bounded or re-keyed: past
+ * the route's cap an entry for an id on neither list goes first, and a merge
+ * never carries such an entry onto the other team's member of that id.
+ *
+ * @param {unknown} team
+ * @returns {Set<string>}
+ */
+export const rosterIds = (team) => {
+  const ids = new Set();
+  if (!team || typeof team !== 'object') return ids;
+  for (const list of [team.members, team.archivedMembers]) {
+    if (!Array.isArray(list)) continue;
+    for (const member of list) {
+      if (member && typeof member === 'object' && !Array.isArray(member) && typeof member.id === 'string') ids.add(member.id);
+    }
+  }
+  return ids;
 };
 
 /**
