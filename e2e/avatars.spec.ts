@@ -179,7 +179,7 @@ test.describe('avatars', () => {
       // Still the stored choice: Owl stays selected, and the alert stays.
       await expect(picker.getByRole('button', { name: 'Owl', exact: true })).toHaveAttribute('aria-pressed', 'true');
       await expect(picker.getByRole('button', { name: 'Bee', exact: true })).toHaveAttribute('aria-pressed', 'false');
-      await guest.waitForTimeout(1_000);
+      await guest.waitForTimeout(1_000); // gstack-timing-ok: a negative window: an alert that went away by itself would be gone within it
       await expect(picker.getByRole('alert')).toContainText('The avatar could not be saved.');
       await picker.getByRole('button', { name: 'Done' }).click();
       await expect(guest.locator('header [data-viewer-avatar] [data-avatar-art="owl"]')).toBeVisible();
