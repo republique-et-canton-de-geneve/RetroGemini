@@ -1,5 +1,6 @@
-import { test, expect, devices, Page, Locator } from '@playwright/test';
+import { test, expect, devices, Browser, Page, Locator } from '@playwright/test';
 import { dismissAnnouncementsIfPresent } from './helpers/announcements';
+import { waitForFiniteAnimations } from './helpers/axe';
 
 /**
  * A card's edit, delete and comment controls on a screen with nothing to
@@ -1272,3 +1273,171 @@ test('on a computer the same controls wait for the pointer', async ({ page }) =>
     expect(hovered!.lines.filter((line) => rectsOverlap(line, hovered!.edit)), `anonymous: ${anonymous}`).toEqual([]);
   }
 });
+
+// Review finding (pass 2 of 45.3): a card's corner Delete — a guided
+// Brainstorm card's, a grouped card's on an open board — lay over the end of
+// its foot row, where 45.0 put the reactions, the control that adds one and
+// the comments on one line. On a phone (a 294 px card) with four reactions,
+// the Comments button lay under the Delete, and a tap meant for it deleted
+// the card for everyone, with nothing asked. The row leaves the corner free
+// wherever that Delete is drawn. A computer is measured across widths: the
+// card's width moves where the row ends, and each number of reactions
+// reached the corner in a band of widths about the Delete's own.
+
+/**
+ * The box of a card's corner Delete, the boxes of every other control the
+ * card draws, and what a press at the centre of its Comments reaches. A
+ * keyboard path is `sr-only` (one clipped pixel) until it is focused: not
+ * drawn, so not measured.
+ */
+const cornerOfCard = (target: Locator) =>
+  target.evaluate((cardEl) => {
+    const toBox = (r: DOMRect) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+    const remove = cardEl.querySelector<HTMLElement>('button[aria-label="Delete ticket"]');
+    const comments = cardEl.querySelector<HTMLElement>('[data-testid="ticket-comment-btn"]');
+    if (!remove || !comments) return null;
+    const controls = [...cardEl.querySelectorAll<HTMLElement>('button')]
+      .filter((control) => control !== remove)
+      .map((control) => ({ name: control.getAttribute('aria-label') || control.textContent?.trim() || control.tagName, box: toBox(control.getBoundingClientRect()) }))
+      .filter(({ box }) => box.right - box.left > 1 && box.bottom - box.top > 1);
+    const c = comments.getBoundingClientRect();
+    const hit = document.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2);
+    return {
+      remove: toBox(remove.getBoundingClientRect()),
+      controls,
+      commentsCentre: hit && comments.contains(hit) ? 'Comments' : (hit?.closest('button')?.getAttribute('aria-label') ?? hit?.tagName ?? null),
+      cardWidth: Math.round(cardEl.getBoundingClientRect().width),
+    };
+  });
+
+/** The card's corner Delete lies over none of its controls, and Comments takes a press at its centre. */
+const expectCornerClear = async (page: Page, target: Locator, label: string) => {
+  await target.scrollIntoViewIfNeeded();
+  // A reaction that just landed springs in, past its size and back.
+  await waitForFiniteAnimations(page);
+  const corner = await cornerOfCard(target);
+  expect(corner, `${label}: the card's Delete and its Comments`).not.toBeNull();
+  const where = `${label}, a ${corner!.cardWidth} px card`;
+  expect(corner!.controls.filter((control) => rectsOverlap(control.box, corner!.remove)).map((control) => control.name), `${where}: the controls under its Delete`).toEqual([]);
+  expect(corner!.commentsCentre, `${where}: what a press at the centre of Comments reaches`).toBe('Comments');
+};
+
+const addReaction = async (target: Locator, nth: number) => {
+  await target.getByTestId('add-reaction-btn').click();
+  await target.getByTestId('emoji-option').nth(nth).click();
+  await expect(target.getByTestId('ticket-reaction')).toHaveCount(nth + 1, { timeout: 5_000 });
+};
+
+const addComment = async (page: Page, target: Locator) => {
+  await target.getByTestId('ticket-comment-btn').click();
+  await page.getByTestId('add-comment-input').fill('A comment');
+  await page.getByTestId('submit-comment-btn').click();
+  await expect(target.getByTestId('comment-count')).toHaveText('1', { timeout: 5_000 });
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('ticket-comments-modal')).toBeHidden();
+};
+
+/**
+ * The computer's widths, 1100 to 1400 px: a Brainstorm card about 7 px wider
+ * at each (230 to 329 px, measured), so every band of widths a number of
+ * reactions brings into the corner (one about the Delete's width, every 51 px:
+ * a reaction and the row's gap) is crossed, twice over.
+ */
+const COMPUTER_WIDTHS = Array.from({ length: 16 }, (_, index) => 1100 + index * 20);
+
+/**
+ * Each card with no reaction up to six, the first one with no comment and
+ * the second with one: the corner is measured at every count, at the phone's
+ * one width or at each of the computer's.
+ */
+const measureEveryFootRow = async (page: Page, device: 'phone' | 'computer', cards: Array<{ text: string; commented: boolean }>, kind: string) => {
+  for (const { text, commented } of cards) {
+    const target = card(page, text);
+    if (commented) await addComment(page, target);
+    for (let reactions = 0; reactions <= 6; reactions += 1) {
+      const label = `${kind}, ${commented ? 'a comment' : 'no comment'}, ${reactions} reaction${reactions === 1 ? '' : 's'}`;
+      if (device === 'phone') {
+        await expectCornerClear(page, target, label);
+      } else {
+        for (const width of COMPUTER_WIDTHS) {
+          await page.setViewportSize({ width, height: 900 });
+          await expectCornerClear(page, target, `${label}, at ${width} px`);
+        }
+        await page.setViewportSize({ width: 1280, height: 900 });
+      }
+      if (reactions < 6) await addReaction(target, reactions);
+    }
+  }
+};
+
+const cornerContext = (browser: Browser, device: 'phone' | 'computer') => {
+  const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
+  return browser.newContext(device === 'phone' ? { ...phone, locale: 'en-US' } : { locale: 'en-US', viewport: { width: 1280, height: 900 } });
+};
+
+for (const device of ['phone', 'computer'] as const) {
+  test(`a Brainstorm card's corner Delete lies over none of its controls, whatever its foot row holds, on a ${device}`, async ({ browser }) => {
+    const context = await cornerContext(browser, device);
+    const page = await context.newPage();
+    try {
+      const teamName = `${TEAM_NAME}-corner-${device}`;
+      await page.goto('/');
+      await page.waitForLoadState('networkidle');
+      await page.getByRole('button', { name: '+ New Team' }).click();
+      await page.getByPlaceholder('e.g. Design Team').fill(teamName);
+      await page.locator('input[type="password"]').fill(TEAM_PASSWORD);
+      await page.getByLabel('Recovery Email').fill('facilitator@example.com');
+      await page.getByRole('button', { name: 'Create & Join' }).click();
+      await expect(page.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 15_000 });
+      await dismissAnnouncementsIfPresent(page);
+      await page.getByRole('button', { name: 'New Retrospective' }).click();
+      await page.getByRole('dialog').getByTestId('retro-template-start_stop_continue').click();
+      await page.getByRole('button', { name: 'Start Session' }).click();
+      // The Icebreaker, then the Welcome, then the Brainstorm.
+      await page.getByRole('button', { name: 'Next Phase' }).click();
+      await page.getByRole('button', { name: 'Next Phase' }).click();
+      await expect(page.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 10_000 });
+
+      const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+      const cards = [{ text: 'Corner card, plain', commented: false }, { text: 'Corner card, commented', commented: true }];
+      for (const { text } of cards) {
+        await field.fill(text);
+        await page.keyboard.press('Enter');
+        await expect(card(page, text)).toBeVisible();
+      }
+      await field.blur();
+      await measureEveryFootRow(page, device, cards, 'Brainstorm');
+    } finally {
+      await context.close();
+    }
+  });
+
+  test(`a grouped card's corner Delete on an open board lies over none of its controls, on a ${device}`, async ({ browser }) => {
+    const context = await cornerContext(browser, device);
+    const page = await context.newPage();
+    try {
+      await startOpenBoard(page, `${TEAM_NAME}-corner-board-${device}`);
+      const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
+      const cards = [{ text: 'Grouped card, plain', commented: false }, { text: 'Grouped card, commented', commented: true }];
+      for (const { text } of cards) {
+        await field.fill(text);
+        await page.keyboard.press('Enter');
+        await expect(card(page, text)).toBeVisible();
+      }
+      // Grouped through the keyboard path, the same on both screens.
+      await page.getByRole('button', { name: /Pick up the ticket Grouped card, plain/ }).focus();
+      await page.keyboard.press('Enter');
+      await page.getByRole('button', { name: /group the selected ticket with Grouped card, commented/ }).focus();
+      await page.keyboard.press('Enter');
+      const title = page.locator('.group-container input[data-group-title-id]');
+      await expect(title).toBeFocused({ timeout: 10_000 });
+      await title.fill('Corner group');
+      await title.press('Enter');
+      await title.blur();
+      for (const { text } of cards) await expect(page.locator('.group-container').filter({ has: card(page, text) })).toHaveCount(1);
+      await measureEveryFootRow(page, device, cards, 'A grouped card on a board');
+    } finally {
+      await context.close();
+    }
+  });
+}

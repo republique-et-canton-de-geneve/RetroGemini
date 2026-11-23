@@ -3077,6 +3077,11 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // Brainstorm deletes a card of its own (or any, for the facilitator)
       // that is not grouped; a board, any of them, grouped or not.
       const canDeleteCard = (isMine || isFacilitator) && ((mode === 'BRAINSTORM' && !isGrouped) || isBoard);
+      // Its Delete takes the card's bottom right corner, except on a board's
+      // card outside a group (its vote row carries it) and while the card is
+      // edited (it would lie over the field). The foot row leaves that corner
+      // free: one condition for both.
+      const drawsCornerDelete = canDeleteCard && !isEditing && !(isBoard && !isGrouped);
       // Its text is edited in Brainstorm and on the board, by its author or the
       // facilitator, once they can read it.
       const canEditText = visible && (mode === 'BRAINSTORM' || isBoard) && (isMine || isFacilitator);
@@ -3373,9 +3378,13 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
             )}
 
             {/* One foot row: the reactions, the control that adds one, and
-                the comments. */}
+                the comments. The corner Delete covers the last 24px of the
+                card's content (right-2 and w-7, on its p-3), so the row stops
+                28px short, the row's own 4px gap before the Delete: no
+                reaction and no Comments lies under it. The Delete asks
+                nothing, and a tap meant for Comments deleted the card. */}
             {visible && !isEditing && (
-                <div className="mt-2 flex flex-wrap items-center gap-1 relative">
+                <div className={`mt-2 flex flex-wrap items-center gap-1 relative ${drawsCornerDelete ? 'pr-7' : ''}`}>
                     {Object.entries(t.reactions || {}).map(([emoji, users]: [string, string[]]) => (
                         <button
                             key={emoji}
@@ -3491,8 +3500,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                 button, and an invisible control still takes the click. Hidden
                 until hover only where hovering exists: a phone has none, and a
                 delete no one can see would be tapped by accident. Not while
-                the card is edited: it would lie over the field's corner. */}
-            {canDeleteCard && !isEditing && !(isBoard && !isGrouped) && (
+                the card is edited: it would lie over the field's corner. The
+                foot row leaves this corner to it (drawsCornerDelete). */}
+            {drawsCornerDelete && (
                 <button
                     onClick={deleteCard}
                     className="absolute bottom-2 right-2 w-7 h-7 flex items-center justify-center rounded-lg bg-white text-slate-600 hover:text-rose-700 hover:bg-rose-50 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus:opacity-100 transition"

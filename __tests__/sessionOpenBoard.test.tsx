@@ -3685,6 +3685,40 @@ describe('Open board — every hold and every drop', () => {
     expect(commentControl.className).toContain('focus-within:opacity-100');
   });
 
+  // Review finding (pass 2 of 45.3): a card's corner Delete lay over the end
+  // of its foot row — the reactions, the control that adds one, the comments
+  // — and a tap on Comments deleted the card. One condition draws that Delete
+  // and makes the row leave its corner. jsdom lays nothing out: the geometry
+  // is measured by e2e/retro-touch-card-controls.spec.ts.
+  it('leaves the corner of a card’s foot row to its corner Delete, wherever that Delete is drawn and nowhere else', () => {
+    const footRow = (cardEl: HTMLElement) => within(cardEl).getByTestId('add-reaction-btn').parentElement!.parentElement!;
+    const cornerDelete = (cardEl: HTMLElement) => within(cardEl).queryByRole('button', { name: 'Delete ticket' });
+    const leavesCorner = /(^|\s)pr-7(\s|$)/;
+
+    // A Brainstorm card, the facilitator's own or a teammate's.
+    const asFacilitator = renderBoard(createBoard({ phase: 'BRAINSTORM' }));
+    const teammates = cardElement('Flaky deploys');
+    expect(cornerDelete(teammates)!.className).toContain('absolute bottom-2 right-2');
+    expect(footRow(teammates).className).toMatch(leavesCorner);
+    asFacilitator.unmount();
+    // A participant deletes their own card only: a teammate's leaves nothing free.
+    const asAlice = renderBoard(createBoard({ phase: 'BRAINSTORM' }), alice);
+    expect(footRow(cardElement('Flaky deploys')).className).toMatch(leavesCorner);
+    expect(cornerDelete(cardElement('Slow rollbacks'))).toBeNull();
+    expect(footRow(cardElement('Slow rollbacks')).className).not.toMatch(leavesCorner);
+    asAlice.unmount();
+
+    // A board: a grouped card's Delete is in its corner; a card outside a
+    // group carries its Delete in its vote row, which the foot row does not reach.
+    renderBoard(groupedBoard());
+    const grouped = cardElement('Flaky deploys');
+    expect(cornerDelete(grouped)!.className).toContain('absolute bottom-2 right-2');
+    expect(footRow(grouped).className).toMatch(leavesCorner);
+    const alone = cardElement('Too many meetings');
+    expect(cornerDelete(alone)!.className).not.toContain('absolute');
+    expect(footRow(alone).className).not.toMatch(leavesCorner);
+  });
+
   // The comments button holds an icon and, once a card has comments, their
   // number: nothing else. Its name was the icon's ligature read as a word
   // ("comment 3"). It is named in words, the number it shows first (2.5.3).
