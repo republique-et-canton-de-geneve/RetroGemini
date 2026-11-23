@@ -148,6 +148,15 @@ describe('one source for a colour', () => {
     expect(written.filter((colour) => !pure(colour))).toEqual([]);
   });
 
+  // The test above cannot see inside @theme: 45.0 kept five `retro-*` aliases
+  // there as hex copies of slate and indigo, four painted by nothing and the
+  // fifth by the body alone, so a retune of slate-50 would have left the body
+  // (what shows before React draws, and past an overscroll) on the old page.
+  it('paints the page from slate-50 itself, and keeps no retro-* copy of the palette', () => {
+    expect(CSS).toMatch(/\bbody\s*\{[^}]*\bbackground-color:\s*var\(--color-slate-50\);/);
+    expect(themeBlocks(CSS).join('\n')).not.toMatch(/--color-retro-/);
+  });
+
   /**
    * The colours the screens' code writes: in a string, a template or JSX text
    * (comments are not read), as hex, `rgb()`, `rgba()`, `hsl()` or `hsla()`,
@@ -253,15 +262,6 @@ describe('one source for a colour', () => {
     expect(built).toEqual([]);
     const probe = 'const a = `var(--color-${hue}) var(--radius-${size}) ${whole} --x`; const b = `var(${variable})`;';
     expect(variablesBuiltFromParts('probe.ts', probe)).toEqual(['--color-${…}', '--radius-${…}']);
-  });
-
-  // The test above cannot see inside @theme: 45.0 kept five `retro-*` aliases
-  // there as hex copies of slate and indigo, four painted by nothing and the
-  // fifth by the body alone, so a retune of slate-50 would have left the body
-  // (what shows before React draws, and past an overscroll) on the old page.
-  it('paints the page from slate-50 itself, and keeps no retro-* copy of the palette', () => {
-    expect(CSS).toMatch(/\bbody\s*\{[^}]*\bbackground-color:\s*var\(--color-slate-50\);/);
-    expect(themeBlocks(CSS).join('\n')).not.toMatch(/--color-retro-/);
   });
 
   it('serves every font from this deployment', () => {
