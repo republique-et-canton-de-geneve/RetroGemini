@@ -3825,7 +3825,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
               title={tr('session.board.suggestGroupsHint')}
               className="flex items-center gap-1 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-3 py-1.5 rounded-full transition disabled:opacity-60 disabled:cursor-not-allowed"
           >
-              <span className={`material-symbols-outlined text-sm ${aiGroupSuggestionsLoading ? 'animate-spin' : ''}`} aria-hidden="true">
+              <span className={`material-symbols-outlined text-sm ${aiGroupSuggestionsLoading ? 'motion-safe:animate-spin' : ''}`} aria-hidden="true">
                   {aiGroupSuggestionsLoading ? 'progress_activity' : 'auto_awesome'}
               </span>
               <span>{tr('session.board.suggestGroups')}</span>
@@ -4215,7 +4215,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                                             className="w-full text-sm font-semibold text-slate-900 border-none focus:ring-0 bg-transparent p-0 rounded-sm placeholder:text-slate-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                                                           />
                                                           {aiSuggestingGroupId === g.id && (
-                                                            <span className="material-symbols-outlined text-sm! leading-none text-violet-600 animate-spin" aria-hidden="true">progress_activity</span>
+                                                            <span className="material-symbols-outlined text-sm! leading-none text-violet-600 motion-safe:animate-spin" aria-hidden="true">progress_activity</span>
                                                           )}
                                                         </div>
                                                     ) : (

@@ -341,7 +341,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
 
       <div className="flex justify-center">
         <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs">
-          {qrDataUrl ? <img src={qrDataUrl} alt={t('invite.link.qrAlt')} className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 animate-pulse rounded" />}
+          {qrDataUrl ? <img src={qrDataUrl} alt={t('invite.link.qrAlt')} className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 motion-safe:animate-pulse rounded" />}
         </div>
       </div>
 
@@ -373,7 +373,7 @@ const InviteModal: React.FC<Props> = ({ team, activeSession, activeHealthCheck, 
 
       <div className="flex justify-center">
         <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs">
-          {wifiQrDataUrl ? <img src={wifiQrDataUrl} alt={t('invite.wifi.qrAlt')} className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 animate-pulse rounded" />}
+          {wifiQrDataUrl ? <img src={wifiQrDataUrl} alt={t('invite.wifi.qrAlt')} className="w-48 h-48" /> : <div className="w-48 h-48 bg-slate-100 motion-safe:animate-pulse rounded" />}
         </div>
       </div>
 

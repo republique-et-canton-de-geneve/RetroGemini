@@ -476,7 +476,7 @@ const ReviewPhase: React.FC<Props> = ({
                     : 'bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200'
                 }`}
               >
-                <span className={`material-symbols-outlined text-sm ${aiGenerating ? 'animate-spin' : ''}`} aria-hidden="true">
+                <span className={`material-symbols-outlined text-sm ${aiGenerating ? 'motion-safe:animate-spin' : ''}`} aria-hidden="true">
                   {aiGenerating ? 'progress_activity' : 'smart_toy'}
                 </span>
                 {aiGenerating ? t('phases.review.generating') : t('phases.review.generate')}
