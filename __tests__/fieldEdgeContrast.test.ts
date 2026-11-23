@@ -186,6 +186,32 @@ describe('the edge of every field clears 3:1 on its fill', () => {
   });
 });
 
+/** The edge colours a field hovers to: `hover:border-slate-500` → `slate-500`. */
+const hoverEdges = (classText: string): string[] =>
+  [...new Set(classText.split(/\s+/).flatMap((token) => {
+    const match = /^hover:border-([a-z]+-\d+)$/.exec(token);
+    return match ? [match[1]] : [];
+  }))];
+
+describe("a field's hover moves its edge", () => {
+  // The port raised the resting edge of the open board's search and sort and
+  // of "Colour by" to slate-400, the colour they hovered to, and kept the
+  // hover: hovering them changed nothing. The recipe's fields rest on
+  // slate-400 and hover one step darker (FIELD_BOX, `hover:border-slate-500`).
+  it('finds the fields that hover', () => {
+    expect(fields.filter((field) => hoverEdges(field.classText).length > 0).length).toBeGreaterThan(20);
+  });
+
+  it('never hovers a field to an edge it rests on', () => {
+    const still = fields.flatMap((field) =>
+      hoverEdges(field.classText)
+        .filter((hover) => restingColours(field.classText, 'border').includes(hover))
+        .map((hover) => `${field.at} <${field.tag}> rests on and hovers to border-${hover}`),
+    );
+    expect(still).toEqual([]);
+  });
+});
+
 /** The input types that take no text: the `readonly` attribute does not apply to them, and `:read-only` always matches them. */
 const UNTYPED_INPUT_TYPES = /^(checkbox|radio|file|range|hidden|color|submit|button|image|reset)$/;
 /**

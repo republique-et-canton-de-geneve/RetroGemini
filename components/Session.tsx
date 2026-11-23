@@ -3656,7 +3656,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
           disabled={!isLive}
           value={session.settings.isAnonymous ? 'topic' : (session.settings.colorBy || 'topic')}
           onChange={(e) => updateSession(s => s.settings.colorBy = e.target.value as 'author' | 'topic')}
-          className={`text-sm bg-white border border-slate-400 rounded-lg px-2 py-1 text-slate-800 font-semibold cursor-pointer hover:border-slate-400 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 disabled:cursor-not-allowed`}
+          className={`text-sm bg-white border border-slate-400 rounded-lg px-2 py-1 text-slate-800 font-semibold cursor-pointer hover:border-slate-500 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 disabled:cursor-not-allowed`}
         >
           <option value="topic">{tr('session.board.colorByTopic')}</option>
           <option value="author" disabled={session.settings.isAnonymous}>{tr('session.board.colorByAuthor')}</option>
