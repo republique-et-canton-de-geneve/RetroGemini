@@ -138,8 +138,11 @@ interface AxeColorModule {
 }
 const axeColor = (axe.commons as unknown as { color: AxeColorModule }).color;
 
+/** A colour as CSS writes it (hex, `rgb()`, `hsl()`, `oklch()`…), parsed and clipped by axe's engine. */
+export const parsedColorValue = (value: string): AxeColor => new axeColor.Color().parseString(value);
+
 /** The theme value parsed and clipped by axe's engine. */
-export const parsedColor = (token: string): AxeColor => new axeColor.Color().parseString(themeValue(token));
+export const parsedColor = (token: string): AxeColor => parsedColorValue(themeValue(token));
 
 /**
  * Which axe-core this helper measures with, and which one the e2e gate

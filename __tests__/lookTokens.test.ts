@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
 import ts from 'typescript';
-import { parsedColor, themeBlocks, tokenContrast } from './helpers/tailwindTheme';
+import { parsedColor, parsedColorValue, themeBlocks, tokenContrast } from './helpers/tailwindTheme';
 
 /**
  * The look (45.0) lives in the `@theme` block of index.css: the components keep
@@ -155,6 +155,80 @@ describe('one source for a colour', () => {
   it('paints the page from slate-50 itself, and keeps no retro-* copy of the palette', () => {
     expect(CSS).toMatch(/\bbody\s*\{[^}]*\bbackground-color:\s*var\(--color-slate-50\);/);
     expect(themeBlocks(CSS).join('\n')).not.toMatch(/--color-retro-/);
+  });
+
+  /** Every declaration of a stylesheet's @theme blocks, in order, comments left out. */
+  const themeDeclarations = (css: string): Array<{ name: string; value: string }> =>
+    themeBlocks(css).flatMap((block) =>
+      [...block.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(--[A-Za-z0-9-]+)\s*:\s*([^;{}]+);/g)]
+        .map(([, name, value]) => ({ name, value: value.trim().replace(/\s+/g, ' ') })));
+
+  const COLOUR_LITERAL = /#[0-9a-fA-F]{3,8}(?![\w-])|(?<![\w-])(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\([^()]*\)/g;
+  /** A colour's channels, its alpha aside: `rgb(23 26 43 / 0.06)` is the colour of `#171a2b`, made translucent. */
+  const channels = (colour: string): string => {
+    const { red, green, blue } = parsedColorValue(colour);
+    return [red, green, blue].map(Math.round).join(',');
+  };
+
+  /**
+   * The values of the @theme blocks that copy another token's instead of
+   * naming it: a value written whole as an earlier token's literal value
+   * (`--radius: 0.375rem` beside `--radius-sm: 0.375rem`), and a colour drawn
+   * in a value (a shadow's included) that an earlier colour token holds, its
+   * alpha aside. A value that names a token (`var(--…)`) copies nothing.
+   */
+  const themeCopies = (css: string): string[] => {
+    const seen: Array<{ name: string; value: string }> = [];
+    const colourTokens = new Map<string, string>();
+    const copies: string[] = [];
+    for (const { name, value } of themeDeclarations(css)) {
+      const named = /\bvar\(/.test(value);
+      const whole = named ? undefined : seen.find((earlier) => earlier.value === value);
+      if (whole) copies.push(`${name} copies ${whole.name} (${value})`);
+      else {
+        for (const [colour] of value.matchAll(COLOUR_LITERAL)) {
+          const holder = colourTokens.get(channels(colour));
+          if (holder && holder !== name) copies.push(`${name} draws ${holder} (${colour})`);
+        }
+      }
+      if (!named) seen.push({ name, value });
+      const own = !named && name.startsWith('--color-') && value.match(COLOUR_LITERAL)?.[0] === value ? channels(value) : null;
+      if (own && !colourTokens.has(own)) colourTokens.set(own, name);
+    }
+    return copies;
+  };
+
+  // The tests above read index.css outside @theme. Inside it, 45.0 left a
+  // copy of slate-700 and one of slate-400 as the neutral person's ink and
+  // accent, and slate-900's channels in every shadow: a retune of those steps
+  // would have left the departed participants' initials, their pictures and
+  // every shadow of the look on the old values. A token names another,
+  // `var(--…)`, mixed with `color-mix(…, transparent)` when it is translucent.
+  it('writes each value of @theme once: no token copies another, nor draws a colour another holds', () => {
+    expect(themeDeclarations(CSS).length).toBeGreaterThan(50);
+    expect(themeCopies(CSS)).toEqual([]);
+  });
+
+  it('reads a copy of a token in @theme, whole or inside a value, and leaves a reference', () => {
+    const css = [
+      '@theme {',
+      '  --color-ink: #171a2b;',
+      '  --color-muted: #3c415a; /* a comment: #3c415a */',
+      '  --color-person-ink: #3C415A;',
+      '  --color-person-pop: var(--color-muted);',
+      '  --shadow-sm: 0 1px 2px 0 rgb(23 26 43 / 0.06), 0 1px rgba(23, 26, 43, 0.1);',
+      '  --shadow-md: 0 2px 4px color-mix(in srgb, var(--color-ink) 6%, transparent);',
+      '  --radius-sm: 0.375rem;',
+      '  --radius: 0.375rem;',
+      '  --radius-md: var(--radius-sm);',
+      '}',
+    ].join('\n');
+    expect(themeCopies(css)).toEqual([
+      '--color-person-ink draws --color-muted (#3C415A)',
+      '--shadow-sm draws --color-ink (rgb(23 26 43 / 0.06))',
+      '--shadow-sm draws --color-ink (rgba(23, 26, 43, 0.1))',
+      '--radius copies --radius-sm (0.375rem)',
+    ]);
   });
 
   /**

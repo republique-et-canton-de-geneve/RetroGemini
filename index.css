@@ -70,10 +70,12 @@
   --color-person-pink: #ffcbad;
   --color-person-pink-ink: #953a05;
   --color-person-pink-pop: #ff8b4f;
-  /* A colour this release does not know, and a person who has left. */
+  /* A colour this release does not know, and a person who has left: its ink
+     and its accent are the neutral scale's own steps, named, so a retune of
+     slate reaches them too. */
   --color-person-neutral: #dde0ea;
-  --color-person-neutral-ink: #3c415a;
-  --color-person-neutral-pop: #858aa2;
+  --color-person-neutral-ink: var(--color-slate-700);
+  --color-person-neutral-pop: var(--color-slate-400);
 
   --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
@@ -84,19 +86,24 @@
   --radius-xl: 0.875rem;
   --radius-2xl: 1.125rem;
   --radius-3xl: 1.375rem;
-  --radius: 0.375rem;
+  /* A bare `rounded` is the small step. */
+  --radius: var(--radius-sm);
 
   /* Shadows carry the ink's colour and stay thin; only dialogs and popovers
-     (xl, 2xl) are deep. */
-  --shadow-2xs: 0 1px rgb(23 26 43 / 0.05);
-  --shadow-xs: 0 1px 2px 0 rgb(23 26 43 / 0.06);
-  --shadow-sm: 0 1px 2px 0 rgb(23 26 43 / 0.06), 0 2px 6px -2px rgb(23 26 43 / 0.08);
-  --shadow: 0 1px 2px 0 rgb(23 26 43 / 0.06), 0 2px 6px -2px rgb(23 26 43 / 0.08);
-  --shadow-md: 0 2px 4px -1px rgb(23 26 43 / 0.06), 0 8px 16px -6px rgb(23 26 43 / 0.14);
-  --shadow-lg: 0 4px 8px -2px rgb(23 26 43 / 0.06), 0 14px 28px -10px rgb(23 26 43 / 0.2);
-  --shadow-xl: 0 8px 16px -6px rgb(23 26 43 / 0.08), 0 22px 44px -14px rgb(23 26 43 / 0.26);
-  --shadow-2xl: 0 30px 70px -20px rgb(23 26 43 / 0.45);
-  --shadow-inner: inset 0 2px 4px 0 rgb(23 26 43 / 0.05);
+     (xl, 2xl) are deep. The ink is slate-900, named and mixed with
+     transparent, which in srgb keeps its channels and sets its alpha alone
+     (6% is rgb(23 26 43 / 0.06)): a retune of slate-900 reaches every shadow.
+     A bare `shadow` is the small one; named rather than copied, it takes no
+     shadow colour utility (nothing writes one). */
+  --shadow-2xs: 0 1px color-mix(in srgb, var(--color-slate-900) 5%, transparent);
+  --shadow-xs: 0 1px 2px 0 color-mix(in srgb, var(--color-slate-900) 6%, transparent);
+  --shadow-sm: 0 1px 2px 0 color-mix(in srgb, var(--color-slate-900) 6%, transparent), 0 2px 6px -2px color-mix(in srgb, var(--color-slate-900) 8%, transparent);
+  --shadow: var(--shadow-sm);
+  --shadow-md: 0 2px 4px -1px color-mix(in srgb, var(--color-slate-900) 6%, transparent), 0 8px 16px -6px color-mix(in srgb, var(--color-slate-900) 14%, transparent);
+  --shadow-lg: 0 4px 8px -2px color-mix(in srgb, var(--color-slate-900) 6%, transparent), 0 14px 28px -10px color-mix(in srgb, var(--color-slate-900) 20%, transparent);
+  --shadow-xl: 0 8px 16px -6px color-mix(in srgb, var(--color-slate-900) 8%, transparent), 0 22px 44px -14px color-mix(in srgb, var(--color-slate-900) 26%, transparent);
+  --shadow-2xl: 0 30px 70px -20px color-mix(in srgb, var(--color-slate-900) 45%, transparent);
+  --shadow-inner: inset 0 2px 4px 0 color-mix(in srgb, var(--color-slate-900) 5%, transparent);
 
   --ease-settle: cubic-bezier(0.2, 0.9, 0.3, 1);
   --ease-spring: cubic-bezier(0.3, 1.8, 0.5, 1);
