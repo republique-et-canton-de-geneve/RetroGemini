@@ -175,82 +175,90 @@ const DashboardActionsTab: React.FC<Props> = ({
       ) : (
         filteredActions.map((action) => (
           <div key={action.id} className="flex flex-wrap sm:flex-nowrap items-center gap-y-2 px-4 py-3.5 border-b border-slate-200 last:border-0 hover:bg-slate-50 group">
-            <button
-              onClick={() => onToggleAction(action.id)}
-              className={`mr-3 inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-lg hover:bg-emerald-50 transition ${action.done ? 'text-emerald-700' : 'text-slate-500 hover:text-emerald-700'}`}
-              aria-label={action.done ? t('dashboard.actions.markNotDone') : t('dashboard.actions.markDone')}
-            >
-              <span className="material-symbols-outlined text-2xl" aria-hidden="true">
-                {action.done ? 'check_circle' : 'radio_button_unchecked'}
-              </span>
-            </button>
-            {/* At least 12rem for the text: on a phone the assignee goes under it rather than squeeze it. */}
-            <div className="flex-1 min-w-[12rem] mr-4">
-              <input
-                // Fixed text, never the action: the value says which one.
-                aria-label={t('dashboard.actions.textLabel')}
-                defaultValue={action.text}
-                onBlur={(e) => onUpdateActionText(action.id, e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') e.currentTarget.blur();
-                }}
-                className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-md px-2 py-1 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 outline-hidden transition font-medium ${action.done ? 'line-through text-slate-500' : 'text-slate-900'}`}
-              />
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs mt-1 px-2 empty:hidden">
-                {action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID && (
-                  <span className={`${CHIP} bg-amber-50 text-amber-800`}>
-                    {t('dashboard.actions.retroImprovement')}
-                  </span>
-                )}
-                {action.originRetro !== 'Dashboard' && (
-                  // slate-600: slate-500 on this slate-100 chip measured 4.34:1.
-                  <span className={`${CHIP} bg-slate-100 text-slate-700`}>{action.originRetro}</span>
-                )}
-                {action.contextText && (
-                  <span className="text-indigo-700 italic truncate max-w-[200px]" title={action.contextText}>
-                    {t('dashboard.actions.context', { text: action.contextText })}
-                  </span>
-                )}
-                {/* What the team said this action was worth. Only on a closed
-                    action that was actually rated: an open action has not been
-                    put to anyone, and a closed one with no votes must show
-                    nothing rather than a zero. `role="img"` so the pill is one
-                    phrase to a screen reader instead of a star row plus a loose
-                    number. */}
-                {(() => {
-                  if (!ratingEnabled || !action.done) return null;
-                  const score = actionImpactScore(action);
-                  if (score == null) return null;
-                  const votes = actionImpactVoteCount(action);
-                  const rounded = localizeDecimal(String(Math.round(score * 10) / 10), locale);
-                  return (
-                    <span
-                      role="img"
-                      aria-label={tp('dashboard.actions.impactAria', votes, { score: rounded })}
-                      data-testid="action-impact-score"
-                      title={tp('dashboard.actions.impactTitle', votes)}
-                      className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5"
-                    >
-                      <StarRating value={score} starClassName="w-3 h-3" />
-                      <span className="font-semibold tabular-nums text-slate-700">{rounded}/3</span>
-                    </span>
-                  );
-                })()}
-              </div>
-              {/* The action's issue, or "Create in Jira" for a facilitator.
-                  Hidden when the control renders nothing. */}
-              <div className="mt-1 px-2 empty:hidden">
-                <JiraActionControl
-                  action={action}
-                  status={jiraStatus}
-                  teamId={team.id}
-                  isFacilitator={isFacilitator}
-                  kind={jiraKindOf(action.id)}
-                  requestedBy={requestedBy}
-                  team={team}
-                  onCreated={() => onJiraChanged?.()}
-                  onStatusStale={onJiraStatusStale}
+            {/* The done toggle and the text are one item of the row, which
+                never wraps, so the toggle stays on its action's line. At
+                least 16rem together (12rem of text), or the row's whole width
+                on a narrower screen: on a phone the assignee goes under the
+                text rather than squeeze it. With 12rem on the text alone, the
+                text did not fit beside the toggle below about 338px either,
+                and the toggle took a line of its own above it. */}
+            <div className="flex items-center flex-1 min-w-[min(16rem,100%)]">
+              <button
+                onClick={() => onToggleAction(action.id)}
+                className={`mr-3 inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-lg hover:bg-emerald-50 transition ${action.done ? 'text-emerald-700' : 'text-slate-500 hover:text-emerald-700'}`}
+                aria-label={action.done ? t('dashboard.actions.markNotDone') : t('dashboard.actions.markDone')}
+              >
+                <span className="material-symbols-outlined text-2xl" aria-hidden="true">
+                  {action.done ? 'check_circle' : 'radio_button_unchecked'}
+                </span>
+              </button>
+              <div className="flex-1 min-w-0 mr-4">
+                <input
+                  // Fixed text, never the action: the value says which one.
+                  aria-label={t('dashboard.actions.textLabel')}
+                  defaultValue={action.text}
+                  onBlur={(e) => onUpdateActionText(action.id, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur();
+                  }}
+                  className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-md px-2 py-1 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 outline-hidden transition font-medium ${action.done ? 'line-through text-slate-500' : 'text-slate-900'}`}
                 />
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs mt-1 px-2 empty:hidden">
+                  {action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID && (
+                    <span className={`${CHIP} bg-amber-50 text-amber-800`}>
+                      {t('dashboard.actions.retroImprovement')}
+                    </span>
+                  )}
+                  {action.originRetro !== 'Dashboard' && (
+                    // slate-600: slate-500 on this slate-100 chip measured 4.34:1.
+                    <span className={`${CHIP} bg-slate-100 text-slate-700`}>{action.originRetro}</span>
+                  )}
+                  {action.contextText && (
+                    <span className="text-indigo-700 italic truncate max-w-[200px]" title={action.contextText}>
+                      {t('dashboard.actions.context', { text: action.contextText })}
+                    </span>
+                  )}
+                  {/* What the team said this action was worth. Only on a closed
+                      action that was actually rated: an open action has not been
+                      put to anyone, and a closed one with no votes must show
+                      nothing rather than a zero. `role="img"` so the pill is one
+                      phrase to a screen reader instead of a star row plus a loose
+                      number. */}
+                  {(() => {
+                    if (!ratingEnabled || !action.done) return null;
+                    const score = actionImpactScore(action);
+                    if (score == null) return null;
+                    const votes = actionImpactVoteCount(action);
+                    const rounded = localizeDecimal(String(Math.round(score * 10) / 10), locale);
+                    return (
+                      <span
+                        role="img"
+                        aria-label={tp('dashboard.actions.impactAria', votes, { score: rounded })}
+                        data-testid="action-impact-score"
+                        title={tp('dashboard.actions.impactTitle', votes)}
+                        className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5"
+                      >
+                        <StarRating value={score} starClassName="w-3 h-3" />
+                        <span className="font-semibold tabular-nums text-slate-700">{rounded}/3</span>
+                      </span>
+                    );
+                  })()}
+                </div>
+                {/* The action's issue, or "Create in Jira" for a facilitator.
+                    Hidden when the control renders nothing. */}
+                <div className="mt-1 px-2 empty:hidden">
+                  <JiraActionControl
+                    action={action}
+                    status={jiraStatus}
+                    teamId={team.id}
+                    isFacilitator={isFacilitator}
+                    kind={jiraKindOf(action.id)}
+                    requestedBy={requestedBy}
+                    team={team}
+                    onCreated={() => onJiraChanged?.()}
+                    onStatusStale={onJiraStatusStale}
+                  />
+                </div>
               </div>
             </div>
             <div className="flex items-center ml-12 sm:ml-0">
