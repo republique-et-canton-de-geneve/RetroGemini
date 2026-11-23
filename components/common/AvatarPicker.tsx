@@ -12,7 +12,7 @@ import {
 } from './avatars/avatarArt';
 import { toAvatarId } from '../../utils/avatars.js';
 import { useTranslation } from '../../i18n/I18nContext';
-import { translateErrorMessage } from '../../i18n/errorMessages';
+import { noticeFromError, noticeText, type Notice } from '../../i18n/notice';
 
 /**
  * The viewer's own avatar picker: six families as tabs, twenty pictures each
@@ -24,7 +24,10 @@ import { translateErrorMessage } from '../../i18n/errorMessages';
  *   could land in either order.
  * - A choice is shown as made only once `onPick` resolved. A failure stays on
  *   screen in words until the next attempt, and the stored choice is the one
- *   selected: the previous one, or the one the opener reported meanwhile.
+ *   selected: the previous one, or the one the opener reported meanwhile. The
+ *   failure is kept as what to say (`Notice`) and worded at each render, so
+ *   it follows a change of language made while it shows (from another tab:
+ *   the dialog is modal).
  * - The dialog stays open after a choice, so the person can change their mind;
  *   "Done" closes it. ModalDialog gives the focus back to the opener.
  */
@@ -85,7 +88,7 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
   const [chosen, setChosen] = useState<Choice>(currentAvatarId ?? null);
   const [family, setFamily] = useState<AvatarFamilyId>(() => familyOf(currentAvatarId ?? null));
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Notice>(null);
   const [saved, setSaved] = useState(false);
   const [swapping, setSwapping] = useState(false);
   const [swapCount, setSwapCount] = useState(0);
@@ -155,7 +158,7 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
         setSwapCount((count) => count + 1);
       }
     } catch (err) {
-      setError(translateErrorMessage(err instanceof Error ? err.message : null, t));
+      setError(noticeFromError(err, { key: 'errors.unknown' }));
       chosenRef.current = storedRef.current;
       setChosen(storedRef.current);
     }
@@ -171,7 +174,7 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
     }
     inFlight.current = false;
     setSaving(false);
-  }, [t]);
+  }, []);
 
   const pick = (choice: Choice) => {
     if (disabled) return;
@@ -303,7 +306,7 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
       </div>
 
       {disabled && <p className="text-sm text-slate-600">{t('avatars.picker.unavailable')}</p>}
-      {error && <p role="alert" className="text-sm font-medium text-rose-800 bg-rose-50 rounded-lg px-3 py-2">{error}</p>}
+      {error && <p role="alert" className="text-sm font-medium text-rose-800 bg-rose-50 rounded-lg px-3 py-2">{noticeText(error, t)}</p>}
 
       <div className="flex items-center justify-between gap-3">
         <p role="status" className="text-sm text-slate-600">{status}</p>

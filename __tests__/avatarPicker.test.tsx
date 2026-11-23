@@ -2,6 +2,7 @@ import React, { useLayoutEffect, useState } from 'react';
 import { describe, it, expect, vi, onTestFinished } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import LanguageProvider from '../i18n/LanguageProvider';
+import { LANGUAGE_STORAGE_KEY } from '../i18n/languages';
 import AvatarPicker from '../components/common/AvatarPicker';
 import { AVATAR_FAMILIES, AVATAR_FAMILY_LABEL_KEYS, AVATAR_FAMILY_PITCH_KEYS, AVATAR_NAME_KEYS } from '../components/common/avatars/avatarArt';
 import { avatarColorClasses } from '../utils/participantColors';
@@ -192,6 +193,27 @@ describe('AvatarPicker', () => {
     expect(screen.getByRole('dialog')).toBeTruthy();
     const pair = effectivePair(alert);
     expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // A message on screen is stored as what to say, never as the sentence
+  // (AGENTS.md, *Internationalisation*). The dialog is modal, so the language
+  // reaches it from another tab of the app, which the provider follows: a
+  // sentence kept in state stayed in the old language under the new screen.
+  it.each([
+    ['fr', 'en', en['errors.avatarNotSaved'], fr['errors.avatarNotSaved']],
+    ['en', 'fr', fr['errors.avatarNotSaved'], en['errors.avatarNotSaved']],
+  ] as const)('says a failure in the language the reader switches to while it shows (%s to %s)', async (from, to, sentence, previous) => {
+    const onPick = vi.fn(async () => { throw new Error(AVATAR_NOT_SAVED); });
+    renderPicker({ onPick, currentAvatarId: 'fox' }, from);
+    fireEvent.click(screen.getByRole('button', { name: (from === 'fr' ? fr : en)['avatars.name.owl'] }));
+    expect((await screen.findByRole('alert')).textContent).toBe(previous);
+
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: LANGUAGE_STORAGE_KEY, newValue: to }));
+    });
+
+    expect(screen.getByRole('dialog', { name: (to === 'fr' ? fr : en)['avatars.picker.title'] })).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toBe(sentence);
   });
 
   it('swaps the big avatar once on success and stays open until Done', async () => {
