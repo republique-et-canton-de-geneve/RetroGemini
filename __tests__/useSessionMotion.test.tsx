@@ -226,6 +226,46 @@ describe('useSessionMotion', () => {
     expect(document.querySelector(`[${MOTION_HOOKS.columnCount}="start"]`)!.classList.contains('fx-bump')).toBe(true);
   });
 
+  // A board whose voting is off and whose counts are hidden draws no vote on
+  // any card or group, the viewer's own included (Session.tsx →
+  // showsBoardVotes, showsGroupVotes): its bar says "Voting is off". The votes
+  // cast while the vote was open stay, and a regrouping still carries them
+  // (combineVotes): a ring there marked a vote that nothing on screen showed.
+  const regroupOnBoard = (voteSettings: Partial<RetroSession['settings']>) => {
+    const settings = { revealBrainstorm: true, ...voteSettings } as RetroSession['settings'];
+    const group = (votes: string[]) => ({ id: 'g1', title: 'G', colId: 'start', votes, anchorTicketId: 'ga' }) as unknown as Group;
+    const anchor = ticket('ga', { groupId: 'g1' });
+    const { show } = mount(session({ phase: 'OPEN_BOARD', settings, tickets: [anchor, ticket('t1', { votes: ['me'] })], groups: [group([])] }));
+    // t1 joins the group, and the viewer's vote goes with it.
+    show(session({ phase: 'OPEN_BOARD', settings, tickets: [anchor, ticket('t1', { groupId: 'g1' })], groups: [group(['me'])] }));
+  };
+
+  it('marks no vote a regrouping carries on a board with voting off and the counts hidden, which draws none', () => {
+    regroupOnBoard({ votingDisabled: true, voteCountHidden: true });
+    expect(document.querySelector(`[${MOTION_HOOKS.group}="g1"]`)!.classList.contains('fx-ring')).toBe(false);
+    expect(document.querySelector('[data-testid="group-count-g1"]')!.classList.contains('fx-bump')).toBe(false);
+    expect(card('t1').classList.contains('fx-ring')).toBe(false);
+    expect(card('t1').querySelector(`[${MOTION_HOOKS.voteCount}]`)!.classList.contains('fx-bump')).toBe(false);
+    // What the screen does draw still moves, and nothing else: the column
+    // holds one entry less.
+    expect(decorated()).toEqual(['start:fx-bump']);
+  });
+
+  // With the counts shown, voting off leaves every total drawn, and they move.
+  it('still marks the group a regrouping carries a vote into on a board with voting off and the counts shown', () => {
+    regroupOnBoard({ votingDisabled: true });
+    expect(document.querySelector(`[${MOTION_HOOKS.group}="g1"]`)!.classList.contains('fx-ring')).toBe(true);
+    expect(document.querySelector('[data-testid="group-count-g1"]')!.classList.contains('fx-bump')).toBe(true);
+  });
+
+  it('marks no vote a lowered number takes back on a board with voting off and the counts hidden', () => {
+    const settings = { revealBrainstorm: true, votingDisabled: true, voteCountHidden: true } as RetroSession['settings'];
+    const { show } = mount(session({ phase: 'OPEN_BOARD', settings, tickets: [ticket('t1', { votes: ['me', 'me', 'bob'] })] }));
+    // The facilitator lowers the number: capVotes takes one of the viewer's back.
+    show(session({ phase: 'OPEN_BOARD', settings: { ...settings, maxVotes: 1 }, tickets: [ticket('t1', { votes: ['me', 'bob'] })] }));
+    expect(decorated()).toEqual([]);
+  });
+
   it('leaves a vote a flight carries to the screen, which plays it where the token lands', () => {
     const held = new Set(['t2']);
     const view = render(<Board session={session({ phase: 'VOTE', tickets: [ticket('t1'), ticket('t2')] })} isLive pending={new Set()} held={held} />);

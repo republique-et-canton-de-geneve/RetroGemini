@@ -138,16 +138,21 @@ const reactionCount = (session: RetroSession, ticketId: string, emoji: string): 
 };
 
 /**
- * Whose vote totals may be marked. Only the open board and the guided Vote
- * phase draw a vote on a card or a group: every other phase draws none, and a
- * ring there (a regrouping in the Group phase carries a card's votes into its
- * group) would say that an item holds votes the screen keeps hidden. The
- * guided Vote phase keeps everyone's votes to itself, and so does a board
- * whose counts are hidden: a ring there on a teammate's vote would say where
- * it went. Only the viewer's own votes move then.
+ * Whose vote totals may be marked: only where the screen draws a vote. The
+ * guided Vote phase and the open board draw one on a card or a group, but a
+ * board whose voting is off and whose counts are hidden draws none, the
+ * viewer's own included (Session.tsx → showsBoardVotes, showsGroupVotes).
+ * Where none is drawn, a ring would say that an item holds votes the screen
+ * keeps hidden: a regrouping carries a card's votes into its group
+ * (combineVotes), in the Group phase and on such a board alike, and a lowered
+ * number takes some back (capVotes). The guided Vote phase keeps everyone's
+ * votes to itself, and so does a board whose counts are hidden: a ring there
+ * on a teammate's vote would say where it went. Only the viewer's own votes
+ * move then.
  */
 const visibleVoteChanges = (motion: SessionMotion, prev: RetroSession, next: RetroSession, viewerId: string): string[] => {
   if (next.phase !== 'VOTE' && next.phase !== 'OPEN_BOARD') return [];
+  if (next.phase === 'OPEN_BOARD' && !!next.settings?.votingDisabled && !!next.settings?.voteCountHidden) return [];
   const totalsHidden = next.phase === 'VOTE' || !!next.settings?.voteCountHidden;
   if (!totalsHidden) return motion.voteTotals;
   const itemsOf = (session: RetroSession) =>
