@@ -3457,7 +3457,7 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     <button
                                         key={e}
                                         data-testid="emoji-option"
-                                        className="hover:bg-slate-100 p-1.5 rounded-lg text-lg transition transform hover:scale-125"
+                                        className="hover:bg-slate-100 p-1.5 rounded-lg text-lg motion-safe:transition transform hover:scale-125"
                                         onClick={(evt) => {
                                             evt.stopPropagation();
                                             updateSession(s => {

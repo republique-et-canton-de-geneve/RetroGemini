@@ -1369,7 +1369,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                   {/* An empty rating keeps a stub in a neutral
                                       token: its count above says 0. */}
                                   <div
-                                    className={`w-full rounded-t-md transition-all duration-300 ${count === 0 ? 'bg-slate-200' : barColor} ${voters.length > 0 ? 'cursor-help' : ''}`}
+                                    className={`w-full rounded-t-md motion-safe:transition-all motion-safe:duration-300 ${count === 0 ? 'bg-slate-200' : barColor} ${voters.length > 0 ? 'cursor-help' : ''}`}
                                     style={{ height: `${heightPx}px` }}
                                   />
                                   {voters.length > 0 && (
@@ -1747,7 +1747,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                     {count > 0 && <span className="text-xs font-bold tabular-nums text-slate-300 mb-1">{count}</span>}
                     {/* An empty score keeps a stub in a dark token, not a fade. */}
                     <div
-                      className={`w-8 rounded-t-md relative transition-all duration-500 ${count > 0 ? 'bg-indigo-400' : 'bg-slate-600'}`}
+                      className={`w-8 rounded-t-md relative motion-safe:transition-all motion-safe:duration-500 ${count > 0 ? 'bg-indigo-400' : 'bg-slate-600'}`}
                       style={{ height: count > 0 ? `${(count / maxVal) * 100}%` : '4px' }}
                     />
                   </div>

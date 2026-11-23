@@ -106,7 +106,7 @@ const ClosePhase: React.FC<Props> = ({
                 <div key={index} className="flex flex-col items-center justify-end h-full">
                   {count > 0 && <span className="text-xs font-mono font-semibold mb-1">{count}</span>}
                   <div
-                    className="w-8 bg-indigo-500 rounded-t-md relative transition-all duration-500"
+                    className="w-8 bg-indigo-500 rounded-t-md relative motion-safe:transition-all motion-safe:duration-500"
                     style={{
                       height: count > 0 ? `${(count / maxVal) * 100}%` : '4px',
                       opacity: count > 0 ? 1 : 0.2

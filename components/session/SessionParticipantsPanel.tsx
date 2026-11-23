@@ -323,7 +323,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
   return (
     <div
       data-testid="participants-panel"
-      className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex transition-[width] duration-200 ${isCollapsed ? 'w-12' : 'w-64'}`}
+      className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex motion-safe:transition-[width] motion-safe:duration-200 ${isCollapsed ? 'w-12' : 'w-64'}`}
     >
       <div className={`border-b border-slate-200 flex items-center py-3 ${isCollapsed ? 'justify-center px-2' : 'justify-between gap-2 pl-4 pr-2.5'}`}>
         {!isCollapsed && (

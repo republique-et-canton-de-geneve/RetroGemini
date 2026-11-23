@@ -36,4 +36,4 @@ export const adminSwitchTrack = (on: boolean): string =>
   }`;
 
 export const adminSwitchKnob = (on: boolean): string =>
-  `inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`;
+  `inline-block h-4 w-4 rounded-full bg-white shadow-sm motion-safe:transition-transform ${on ? 'translate-x-6' : 'translate-x-1'}`;

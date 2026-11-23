@@ -234,11 +234,6 @@ body {
   outline-offset: -2px;
 }
 
-/* Bar animation */
-.bar-anim {
-  transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
 /* Typing activity indicator (participants panel) - messaging-app style dots */
 @keyframes typing-blink {
   0%,
@@ -548,5 +543,15 @@ body {
       opacity: 0;
       transform: scale(0.3) rotate(-25deg);
     }
+  }
+}
+
+/* The Welcome phase's mood bars grow to their new height only for a reader who
+   allows motion; the count above each bar says the number either way. A
+   transition a bar always carries, not an effect of the block above, and kept
+   after it: lookTokens.test.ts reads everything before that block's start. */
+@media (prefers-reduced-motion: no-preference) {
+  .bar-anim {
+    transition: height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   }
 }

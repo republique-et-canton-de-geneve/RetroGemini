@@ -128,7 +128,8 @@ export const FILTER_PILL_OFF = 'bg-white border-slate-200 text-slate-600 hover:b
 export const SWITCH_TRACK = 'w-11 h-6 shrink-0 rounded-full relative transition';
 export const SWITCH_ON = 'bg-indigo-600';
 export const SWITCH_OFF = 'bg-slate-400';
-export const SWITCH_KNOB = 'absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm transition';
+// The knob slides only for a reader who allows motion: the track's colour says the state.
+export const SWITCH_KNOB = 'absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow-sm motion-safe:transition-transform';
 
 /** A segmented choice (board type, template language): the frame, and its two states. */
 export const SEGMENTED = 'inline-flex shrink-0 rounded-lg border border-slate-400 bg-white p-0.5 text-sm font-semibold';

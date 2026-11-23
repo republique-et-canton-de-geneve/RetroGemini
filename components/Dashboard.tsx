@@ -1947,7 +1947,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                         {layers.map(layer => layer.count > 0 && (
                                           <div
                                             key={layer.rating}
-                                            className="h-full transition-all"
+                                            className="h-full motion-safe:transition-all"
                                             style={{
                                               width: `${layer.percentage}%`,
                                               backgroundColor: layer.color
@@ -1983,7 +1983,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                                   <span className={`px-1.5 py-0.5 rounded-sm text-xs font-bold ${badgeBg}`}>{count}</span>
                                                 </div>
                                                 <div className="flex-1 bg-slate-200 rounded-full h-2 overflow-hidden">
-                                                  <div className={`h-full ${ratingBadge.bg} transition-all`} style={{ width: `${percentage}%` }}></div>
+                                                  <div className={`h-full ${ratingBadge.bg} motion-safe:transition-all`} style={{ width: `${percentage}%` }}></div>
                                                 </div>
                                               </div>
                                             );
