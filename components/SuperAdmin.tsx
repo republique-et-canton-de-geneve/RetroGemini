@@ -2008,24 +2008,28 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
             <div className="mb-3 flex gap-2 flex-wrap">
               <button
                 onClick={() => setFeedbackFilter('all')}
+                aria-pressed={feedbackFilter === 'all'}
                 className={`${FILTER_PILL} ${feedbackFilter === 'all' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
               >
                 {t('adminFeedbacks.filter.all', { count: feedbacks.length })}
               </button>
               <button
                 onClick={() => setFeedbackFilter('unread')}
+                aria-pressed={feedbackFilter === 'unread'}
                 className={`${FILTER_PILL} ${feedbackFilter === 'unread' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
               >
                 {t('adminFeedbacks.filter.unread', { count: unreadCount })}
               </button>
               <button
                 onClick={() => setFeedbackFilter('bug')}
+                aria-pressed={feedbackFilter === 'bug'}
                 className={`${FILTER_PILL} ${feedbackFilter === 'bug' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
               >
                 {t('adminFeedbacks.filter.bugs', { count: feedbacks.filter(f => f.type === 'bug').length })}
               </button>
               <button
                 onClick={() => setFeedbackFilter('feature')}
+                aria-pressed={feedbackFilter === 'feature'}
                 className={`${FILTER_PILL} ${feedbackFilter === 'feature' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
               >
                 {t('adminFeedbacks.filter.features', { count: feedbacks.filter(f => f.type === 'feature').length })}
@@ -2039,6 +2043,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                 <button
                   key={status}
                   onClick={() => setStatusFilter(status)}
+                  aria-pressed={statusFilter === status}
                   className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
                     statusFilter === status
                       ? 'bg-slate-800 border-slate-800 text-white'

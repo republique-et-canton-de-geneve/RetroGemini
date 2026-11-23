@@ -702,24 +702,28 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setFilter('all')}
+            aria-pressed={filter === 'all'}
             className={`${FILTER_PILL} ${filter === 'all' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
           >
             {t('feedback.filter.all', { count: allFeedbacks.length })}
           </button>
           <button
             onClick={() => setFilter('mine')}
+            aria-pressed={filter === 'mine'}
             className={`${FILTER_PILL} ${filter === 'mine' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
           >
             {t('feedback.filter.myTeam', { count: myFeedbacksCount })}
           </button>
           <button
             onClick={() => setFilter('bug')}
+            aria-pressed={filter === 'bug'}
             className={`${FILTER_PILL} ${filter === 'bug' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
           >
             {t('feedback.filter.bugs', { count: bugsCount })}
           </button>
           <button
             onClick={() => setFilter('feature')}
+            aria-pressed={filter === 'feature'}
             className={`${FILTER_PILL} ${filter === 'feature' ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
           >
             {t('feedback.filter.features', { count: featuresCount })}
@@ -735,6 +739,7 @@ const TeamFeedback: React.FC<TeamFeedbackProps> = ({
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
+              aria-pressed={statusFilter === status}
               className={`px-3 py-1 rounded-full font-semibold text-xs border transition ${
                 statusFilter === status
                   ? 'bg-slate-800 border-slate-800 text-white'

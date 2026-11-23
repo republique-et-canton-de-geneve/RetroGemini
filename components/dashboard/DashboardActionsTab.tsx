@@ -150,6 +150,7 @@ const DashboardActionsTab: React.FC<Props> = ({
           <button
             key={filter}
             onClick={() => onActionFilterChange(filter)}
+            aria-pressed={actionFilter === filter}
             className={`${FILTER_PILL} ${actionFilter === filter ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
           >
             {t(`dashboard.actions.filter.${filter}`)}
