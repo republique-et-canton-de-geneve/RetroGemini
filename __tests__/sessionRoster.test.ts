@@ -185,9 +185,9 @@ describe('memberJoinedChange', () => {
   });
 });
 
-// The list the session screens draw people from, and where the board and the
-// Discuss topic find a card's author (utils/cardHue.ts): one person per id and
-// per name, as `getParticipants` in Session.tsx and HealthCheckSession.tsx.
+// The list the session screens draw people from (their `getParticipants`),
+// and where the board and the Discuss topic find a card's author
+// (utils/cardHue.ts): one person per id and per name.
 describe('sessionParticipants', () => {
   const claire: User = { id: 'u-claire', name: 'Claire', color: 'bg-indigo-500', role: 'participant' };
 
@@ -203,6 +203,14 @@ describe('sessionParticipants', () => {
   it('lists the viewer alone for a session with nobody yet', () => {
     expect(sessionParticipants(undefined, claire)).toEqual([claire]);
     expect(sessionParticipants([], claire)).toEqual([claire]);
+  });
+
+  // Every client writes the participant list, so what the session holds there
+  // is data. The screens' own copies read a list that is not one (`{}`) as
+  // nobody, and the shared function must not throw where they did not.
+  it('lists the viewer alone when the session’s list is not a list', () => {
+    expect(sessionParticipants({} as unknown as User[], claire)).toEqual([claire]);
+    expect(sessionParticipants('Alice' as unknown as User[], claire)).toEqual([claire]);
   });
 
   it('lists each id once, the first entry kept', () => {

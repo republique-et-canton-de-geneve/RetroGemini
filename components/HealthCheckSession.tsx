@@ -24,7 +24,7 @@ import {
   PendingCreation
 } from './session/mergeRemoteSession';
 import { getAssignableMembers } from './session/assignableMembers';
-import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessionRoster';
+import { memberJoinedChange, mergeRosterIntoParticipants, sessionParticipants } from './session/sessionRoster';
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import { useDoubleGestureGuard } from './session/doubleGestureGuard';
 import SyncStalledBanner from './session/SyncStalledBanner';
@@ -255,24 +255,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     setReadJiraParents({ base: team.jiraParents, read: cached?.jiraParents ?? team.jiraParents });
   };
 
-  // Get participants
-  const getParticipants = () => {
-    const roster = session?.participants?.length ? [...session.participants] : [];
-    if (!roster.some(p => p.id === currentUser.id)) {
-      roster.push(currentUser);
-    }
-    const deduped: typeof roster = [];
-    const seen = new Set<string>();
-    const seenNames = new Set<string>();
-    roster.forEach((p) => {
-      const nameKey = p.name.trim().toLowerCase();
-      if (seen.has(p.id) || seenNames.has(nameKey)) return;
-      seen.add(p.id);
-      seenNames.add(nameKey);
-      deduped.push(p);
-    });
-    return deduped;
-  };
+  // The people this screen lists: one rule with the retrospective
+  // (sessionRoster.ts).
+  const getParticipants = () => sessionParticipants(session?.participants, currentUser);
 
   const participants = getParticipants();
   const assignableMembers = getAssignableMembers(team);

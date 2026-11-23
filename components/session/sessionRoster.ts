@@ -31,14 +31,17 @@ const nameKey = (name: string) => name.trim().toLowerCase();
 /**
  * The people a session screen lists: the session's participants, the viewer
  * added when the session does not list them yet, each id once and each name
- * once (matched as above; the first one listed wins). It is the list the two
- * session screens build (`getParticipants` in Session.tsx and
- * HealthCheckSession.tsx). The board finds a card's author in it, and so does
- * the Discuss topic the card becomes (`utils/cardHue.ts`), so both paint the
- * card alike. Never mutates what it was given.
+ * once (matched as above; the first one listed wins). Both session screens
+ * list their people with it, as their `getParticipants`, and build the list
+ * nowhere else (`__tests__/sessionParticipantsShared.test.ts`). The board
+ * finds a card's author in it, and so does the Discuss topic the card becomes
+ * (`utils/cardHue.ts`), so both paint the card alike. Every client writes the
+ * participant list, so a value that is not a list reads as nobody. Never
+ * mutates what it was given.
  */
 export const sessionParticipants = (participants: readonly User[] | undefined, viewer: User): User[] => {
-  const roster = participants?.some(p => p.id === viewer.id) ? participants : [...(participants ?? []), viewer];
+  const listedNow: readonly User[] = Array.isArray(participants) ? participants : [];
+  const roster = listedNow.some(p => p.id === viewer.id) ? listedNow : [...listedNow, viewer];
   const listed: User[] = [];
   const ids = new Set<string>();
   const names = new Set<string>();
