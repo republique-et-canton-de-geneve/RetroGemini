@@ -25,10 +25,10 @@ afterEach(() => {
 });
 
 // A pick answered by the route's own rule (server/routes/teamAvatarRoutes.js):
-// the map it stores at `at`, or the stored one when it writes nothing.
+// the map it stores at `at` (every pick is written dated, a repeat included).
 const answerAsTheRoute = (stored: Team, at: number) =>
   async (memberId: string, avatar: string | null): Promise<Record<string, MemberAvatarChoice>> =>
-    nextMemberAvatars(stored, memberId, avatar, at) ?? { ...(stored.memberAvatars ?? {}) };
+    nextMemberAvatars(stored, memberId, avatar, at);
 
 // Whether the viewer has ever used the picker, for the one-time avatar hint
 // (hasOwnAvatarChoice): the screens read it here, never off an entry.
@@ -323,6 +323,43 @@ describe('useOwnAvatar, the own entry', () => {
       const draft = structuredClone(planted);
       updateSession.mock.calls[0][0](draft);
       expect(draft.participants[0]).toMatchObject({ id: 'ada', avatar: null, avatarAt: 300 });
+
+      view.unmount();
+      act(() => { vi.runOnlyPendingTimers(); });
+    });
+  });
+
+  // The same planted picture, newer than a choice the viewer has: picking the
+  // stored picture again is a pick like any other. The route dates it again,
+  // so this browser draws and marks it at once, and its stamp, waited for,
+  // replaces the copy for the room. Kept at its stored date, the repeat
+  // changed nothing anywhere while the picker said Saved.
+  describe('after a repeat of the stored choice made in the session', () => {
+    it('draws and marks the stored picture again over a newer one planted on the entry, and writes the entry once the wait is over', async () => {
+      vi.useFakeTimers();
+      const storedTeam = { ...team, memberAvatars: { ada: { id: 'fox', at: 100 } } } as unknown as Team;
+      const planted = { id: 's1', participants: [{ ...me, avatar: 'bat', avatarAt: 200 }] };
+      vi.spyOn(dataService, 'setMemberAvatar').mockImplementation(answerAsTheRoute(storedTeam, 300));
+      const updateSession = vi.fn<(updater: (s: typeof planted) => void) => unknown>(() => planted);
+      let answered: Record<string, MemberAvatarChoice> = {};
+      const view = renderHook((props: { team: Team }) => useOwnAvatar({
+        session: planted, team: props.team, currentUser: me, updateSession, canWrite: true,
+        onTeamAvatars: (_teamId, map) => { answered = map; },
+      }), { initialProps: { team: storedTeam } });
+      expect(view.result.current.avatarIdOf('ada')).toBe('bat');
+      expect(view.result.current.currentChoice).toBe('bat');
+
+      await act(async () => { await view.result.current.pick('fox'); });
+      view.rerender({ team: { ...storedTeam, memberAvatars: answered } as unknown as Team });
+
+      expect(view.result.current.avatarIdOf('ada')).toBe('fox');
+      expect(view.result.current.currentChoice).toBe('fox');
+      expect(updateSession).not.toHaveBeenCalled();
+      act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS); });
+      expect(updateSession).toHaveBeenCalledTimes(1);
+      const draft = structuredClone(planted);
+      updateSession.mock.calls[0][0](draft);
+      expect(draft.participants[0]).toMatchObject({ id: 'ada', avatar: 'fox', avatarAt: 300 });
 
       view.unmount();
       act(() => { vi.runOnlyPendingTimers(); });

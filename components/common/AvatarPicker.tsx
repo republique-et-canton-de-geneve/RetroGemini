@@ -185,9 +185,10 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
     }
     // The picture already marked is written too: the mark is this browser's
     // copy of the choice, and can be older than what the server holds (a pick
-    // made since in another browser). The server writes nothing when it
-    // already holds it. Only a pick that waited behind a write is dropped,
-    // when it is the choice that write just stored (see `write`).
+    // made since in another browser). The server dates it again, like any
+    // pick, so it also replaces a newer copy on the session's entry. Only a
+    // pick that waited behind a write is dropped, when it is the choice that
+    // write just stored (see `write`).
     void write(choice);
   };
 

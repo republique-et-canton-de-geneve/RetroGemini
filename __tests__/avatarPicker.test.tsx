@@ -137,9 +137,9 @@ describe('AvatarPicker', () => {
   // The mark is this browser's copy of the choice, and can be older than the
   // server's: picked since in another browser, from the dashboard, the choice
   // reached no session this one is in. A click on the marked picture is the
-  // person's latest word, so it is written (the server writes nothing when it
-  // already holds it). Skipped as "already chosen", it left the other
-  // browser's pick in place for good.
+  // person's latest word, so it is written (the server dates it again, like
+  // any pick). Skipped as "already chosen", it left the other browser's pick
+  // in place for good.
   it('writes a click on the picture already marked: the mark may be older than what the server holds', async () => {
     const { onPick } = renderPicker({ currentAvatarId: 'fox' });
     fireEvent.click(screen.getByRole('button', { name: 'Fox' }));

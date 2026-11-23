@@ -18,9 +18,11 @@ import { NO_OP_LIVE_SESSION_PATCH } from '../services/liveSessionRename.js';
  * browsers of one person write the same value, so the session copies need no
  * own-change ledger slice. A clear is stored as `{ id: null, at }` rather than
  * removed, so it too is newer than every copy of the choice it replaces. So
- * is a first clear, with nothing stored before it: a session entry is data
- * any client writes, and may show a picture the person never chose, which
- * "my initials" must replace there like any choice (SECURITY.md).
+ * is a first clear, with nothing stored before it, and so is a repeat of the
+ * stored choice, which is dated again like any pick: a session entry is data
+ * any client writes, and may show a picture the person never chose, newer
+ * than their stored choice, which the person's next pick must replace there,
+ * whatever they pick (SECURITY.md).
  */
 
 // Far more people than any team has: a bound on what one credential can make
@@ -40,10 +42,11 @@ const validEntriesOf = (team) => new Map(memberAvatarEntries(team));
 
 /**
  * The map after `memberId` chose `avatar` (an id, or `null` for none) at
- * `now`, or `null` when that is the stored choice already: a repeat of the
- * stored picture, or a clear of a cleared one. A first clear (nothing stored,
- * or an entry that is not one) is a choice like any other, written dated.
- * Pure: it runs inside the team's update, under the row lock.
+ * `now`. Every pick is a new choice, written dated: a first clear (nothing
+ * stored, or an entry that is not one), and a repeat of the stored choice
+ * too (the stored picture again, a clear of a cleared one), whose new date is
+ * what replaces a newer copy on a session's entry. Pure: it runs inside the
+ * team's update, under the row lock.
  *
  * Bounded by `max`: past it, entries for ids on neither roster list go first,
  * then the oldest of the rest, never the one just written. An off-roster
@@ -52,8 +55,6 @@ const validEntriesOf = (team) => new Map(memberAvatarEntries(team));
  */
 const nextMemberAvatars = (team, memberId, avatar, now, { max = MEMBER_AVATARS_MAX } = {}) => {
   const current = memberAvatar(team, memberId);
-  if (current && current.id === avatar) return null;
-
   const entries = validEntriesOf(team);
   entries.delete(memberId);
   // Never dated before the choice it replaces, whatever this pod's clock says
@@ -75,8 +76,6 @@ const nextMemberAvatars = (team, memberId, avatar, now, { max = MEMBER_AVATARS_M
   }
   return Object.fromEntries(entries);
 };
-
-const toAnsweredMap = (team) => Object.fromEntries(memberAvatarEntries(team));
 
 // How far ahead of this pod's clock a stamp another pod wrote can be: the
 // difference between two pods' clocks, with room to spare.
@@ -149,11 +148,6 @@ const registerTeamAvatarRoutes = ({ app, authenticateTeam, atomicUpdateTeam, liv
       let entry = null;
       const result = await atomicUpdateTeam(teamId, (currentTeam) => {
         const next = nextMemberAvatars(currentTeam, memberId, avatar, Date.now());
-        if (!next) {
-          answered = toAnsweredMap(currentTeam);
-          entry = memberAvatar(currentTeam, memberId);
-          return null;
-        }
         answered = next;
         entry = next[memberId];
         return { ...currentTeam, memberAvatars: next };
@@ -167,8 +161,10 @@ const registerTeamAvatarRoutes = ({ app, authenticateTeam, atomicUpdateTeam, liv
 
       // After the answer, best-effort, in its own catch (a handler must not
       // throw once it has answered): the session the pick came from learns it
-      // now rather than when the person next enters it. Also when the choice
-      // was stored already, which heals a session a lost patch left behind.
+      // now rather than when the person next enters it. A repeat of the stored
+      // choice carries its new date too, which heals a session a lost patch
+      // left behind and replaces a newer copy on the entry (one dated ahead of
+      // the clock by less than STAMP_CLOCK_SLACK_MS stands until it has passed).
       if (isSessionId(sessionId) && entry) {
         const stamp = entry;
         Promise.resolve()

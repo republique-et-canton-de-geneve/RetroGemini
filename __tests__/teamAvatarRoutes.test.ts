@@ -186,24 +186,32 @@ describe('POST /api/team/:teamId/member/avatar', () => {
     expect(stored().memberAvatars!.p1.at).toBeGreaterThan(first);
   });
 
-  it('writes nothing when the choice is the stored one, a clear of a cleared choice included', async () => {
+  // A repeat is a pick like any other: dated again, at least one millisecond
+  // after the choice it replaces, and written, with a session or without one.
+  // Read as "nothing to change", it kept the stored date, so its stamp never
+  // replaced a newer copy on a session's entry (a picture another client
+  // planted there, a merge's or a restore's): the session went on drawing the
+  // other picture while the picker said Saved.
+  it('dates a repeat of the stored choice again and writes it, a clear of a cleared choice included', async () => {
     await pick({ memberId: 'p1', avatar: 'fox' });
     const writes = dataStore.control.writes;
-    const map = structuredClone(stored().memberAvatars);
+    const first = stored().memberAvatars!.p1.at;
 
     const same = await pick({ memberId: 'p1', avatar: 'fox' });
     expect(same.status).toBe(200);
-    expect(await same.json()).toEqual({ success: true, memberAvatars: map });
-    expect(dataStore.control.writes).toBe(writes);
-    expect(stored().memberAvatars).toEqual(map);
+    expect(dataStore.control.writes).toBe(writes + 1);
+    expect(stored().memberAvatars!.p1).toEqual({ id: 'fox', at: expect.any(Number) });
+    expect(stored().memberAvatars!.p1.at).toBeGreaterThan(first);
+    expect(await same.json()).toEqual({ success: true, memberAvatars: stored().memberAvatars });
 
     expect((await pick({ memberId: 'p1', avatar: null })).status).toBe(200);
-    const cleared = structuredClone(stored().memberAvatars);
+    const cleared = stored().memberAvatars!.p1.at;
     const clearAgain = await pick({ memberId: 'p1', avatar: null });
     expect(clearAgain.status).toBe(200);
-    expect(await clearAgain.json()).toEqual({ success: true, memberAvatars: cleared });
-    expect(dataStore.control.writes).toBe(writes + 1);
-    expect(stored().memberAvatars).toEqual(cleared);
+    expect(dataStore.control.writes).toBe(writes + 3);
+    expect(stored().memberAvatars!.p1).toEqual({ id: null, at: expect.any(Number) });
+    expect(stored().memberAvatars!.p1.at).toBeGreaterThan(cleared);
+    expect(await clearAgain.json()).toEqual({ success: true, memberAvatars: stored().memberAvatars });
   });
 
   // "My initials" picked by someone who never chose is a choice like any
@@ -464,6 +472,30 @@ describe('POST /api/team/:teamId/member/avatar', () => {
       expect(liveSessionPatch).toHaveBeenCalledTimes(1);
     });
 
+    // Another client of the session can write the person's entry with any
+    // picture and any time, and the team's map (sent to every client) says
+    // which time outranks the stored choice. Picked again there, the stored
+    // picture is dated again, after that time: its stamp replaces the copy.
+    // The stored date is set a minute back so that the pick is dated by the
+    // clock, after both planted times, whatever the clock reads.
+    it('puts the stored picture back over a newer entry when the person picks it again in that session', async () => {
+      const storedAt = Date.now() - 60_000;
+      stored().memberAvatars = { p1: { id: 'fox', at: storedAt } };
+      const justBefore = Date.now() - 1;
+
+      await pick({ memberId: 'p1', avatar: 'fox', sessionId: 'retro-1' });
+      await flush();
+
+      const repicked = stored().memberAvatars!.p1;
+      expect(repicked.id).toBe('fox');
+      expect(repicked.at).toBeGreaterThan(justBefore);
+      const [{ mutate }] = liveSessionPatch.mock.calls.at(-1)!;
+      for (const plantedAt of [storedAt + 1, justBefore]) {
+        const session = { id: 'retro-1', teamId, participants: [{ id: 'p1', name: 'Ada', avatar: 'bat', avatarAt: plantedAt }] };
+        expect(mutate(session)?.participants[0], String(plantedAt)).toEqual({ id: 'p1', name: 'Ada', avatar: 'fox', avatarAt: repicked.at });
+      }
+    });
+
     it('is not touched without a session id, or with one that is not a non-empty string', async () => {
       await pick({ memberId: 'p1', avatar: 'fox' });
       await pick({ memberId: 'p1', avatar: 'owl', sessionId: '' });
@@ -646,9 +678,18 @@ describe('nextMemberAvatars', () => {
     expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'owl', at: ahead } } }, 'p1', 'fox', now)).toEqual({ p1: { id: 'fox', at: ahead + 1 } });
   });
 
-  it('answers null when nothing changes: a repeat of the stored choice, a clear of a cleared one', () => {
-    expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'fox', at: 1 } } }, 'p1', 'fox', 10)).toBeNull();
-    expect(nextMemberAvatars({ memberAvatars: { p1: { id: null, at: 1 } } }, 'p1', null, 10)).toBeNull();
+  // A repeat of the stored choice is a pick like any other, its edge cases
+  // included: it is what replaces a newer copy on a session's entry.
+  it('dates a repeat of the stored choice again, a clear of a cleared one included, by the rule of any pick', () => {
+    expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'fox', at: 1 } } }, 'p1', 'fox', 10)).toEqual({ p1: { id: 'fox', at: 10 } });
+    expect(nextMemberAvatars({ memberAvatars: { p1: { id: null, at: 1 } } }, 'p1', null, 10)).toEqual({ p1: { id: null, at: 10 } });
+    // One millisecond after a stored date ahead of the clock.
+    expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'fox', at: 50 } } }, 'p1', 'fox', 10)).toEqual({ p1: { id: 'fox', at: 51 } });
+    // By the clock alone after the largest date, which has no next one.
+    expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'fox', at: Number.MAX_SAFE_INTEGER } } }, 'p1', 'fox', 10))
+      .toEqual({ p1: { id: 'fox', at: 10 } });
+    // An entry whose date is no date is no choice: the repeat is dated by the clock.
+    expect(nextMemberAvatars({ memberAvatars: { p1: { id: 'fox', at: 1e300 } } }, 'p1', 'fox', 10)).toEqual({ p1: { id: 'fox', at: 10 } });
   });
 
   it('stores a first clear, with nothing stored before it, dated like any choice', () => {
