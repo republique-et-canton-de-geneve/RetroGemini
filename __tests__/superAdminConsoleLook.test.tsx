@@ -284,6 +284,22 @@ describe('the console in the dashboard vocabulary', () => {
     measured(screen.getByText('Team: Alpha'));
   });
 
+  // Still, as the session header's "Live" chip is: the word says the state,
+  // and a dot that pulses forever, one per session on a tab watched for
+  // minutes, would be the one thing moving at rest, for every reader.
+  it('draws the dot beside each live session still', async () => {
+    await renderConsole();
+    await openTab(/^Live Sessions/);
+    await screen.findByText('Sprint 12');
+    const labels = screen.getAllByText('LIVE');
+    expect(labels).toHaveLength(SESSIONS.length);
+    for (const label of labels) {
+      const dot = label.previousElementSibling!;
+      expect(dot.getAttribute('aria-hidden')).toBe('true');
+      expect((dot.getAttribute('class') ?? '').split(/\s+/).filter((token) => /(^|:)animate-/.test(token))).toEqual([]);
+    }
+  });
+
   it('measures the level and source chips of the logs', async () => {
     await renderConsole();
     await openTab(/^Server Logs/);

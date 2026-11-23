@@ -2235,7 +2235,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
                             {session.type === 'healthcheck' ? t('adminLive.type.healthcheck') : t('adminLive.type.retrospective')}
                           </span>
                           <span className="flex items-center gap-1 text-emerald-700">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 motion-safe:animate-pulse" aria-hidden="true"></span>
+                            {/* Still: the word says the state, and a dot that pulses
+                                forever, one per session, would be the one thing
+                                moving at rest (as the session chip's "Live" is). */}
+                            <span className="w-2 h-2 rounded-full bg-emerald-500" aria-hidden="true"></span>
                             <span className="text-xs font-medium">{t('adminLive.live')}</span>
                           </span>
                         </div>
