@@ -116,7 +116,8 @@ export function usePanelMotion(input: PanelMotionInput): PanelMotion {
   // painted once without it, the row would flash in place before sliding.
   useLayoutEffect(() => {
     const now = Date.now();
-    // The seed drawn before the server's first roster is never a "before".
+    // The seed drawn before the server's first roster since the session was
+    // last live is never a "before".
     if (!ready) {
       previous.current = null;
       return;
@@ -153,26 +154,20 @@ export function usePanelMotion(input: PanelMotionInput): PanelMotion {
     // row that was active before can finish.
     const finished = arrivedPeople(before.checked, checked).filter((id) => before.active.has(id));
 
-    if (arrived.length > 0) {
-      setArriving((current) => new Set([...current, ...arrived]));
-      later(ARRIVAL_MS, () =>
-        setArriving((current) => {
+    // Each row wears its class now, and takes it off once its effect is over.
+    const flash = (set: typeof setArriving, ids: string[], ms: number) => {
+      if (ids.length === 0) return;
+      set((current) => new Set([...current, ...ids]));
+      later(ms, () =>
+        set((current) => {
           const next = new Set(current);
-          arrived.forEach((id) => next.delete(id));
+          ids.forEach((id) => next.delete(id));
           return next.size ? next : EMPTY;
         })
       );
-    }
-    if (finished.length > 0) {
-      setFinishing((current) => new Set([...current, ...finished]));
-      later(POP_MS, () =>
-        setFinishing((current) => {
-          const next = new Set(current);
-          finished.forEach((id) => next.delete(id));
-          return next.size ? next : EMPTY;
-        })
-      );
-    }
+    };
+    flash(setArriving, arrived, ARRIVAL_MS);
+    flash(setFinishing, finished, POP_MS);
     if (count !== before.count) {
       // A second change within the bump restarts it, and only the last one ends it.
       const mine = ++bumps.current;
