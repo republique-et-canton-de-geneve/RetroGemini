@@ -104,7 +104,12 @@ const EXCLUDE = [
   'vitest.setup.ts',
   // Type declarations and the DOM entrypoint carry no logic to cover.
   'types.ts',
-  'index.tsx'
+  'index.tsx',
+  // Local tooling, never production code: an agent's isolated checkout (a
+  // second copy of the repository) and gstack's working directory (its probe
+  // scripts). The sweep reads dot directories, so it counted both.
+  '.claude/worktrees/**',
+  '.gstack/**'
 ];
 
 const runMeasurement = () => {

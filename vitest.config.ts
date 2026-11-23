@@ -69,7 +69,13 @@ export default defineConfig({
     // `*.spec.ts` and fails on the `@playwright/test` import.
     // `.claude/worktrees` holds an agent's isolated checkout, a second copy of
     // every test of this repository.
-    exclude: ['node_modules', 'dist', 'build', 'e2e', 'e2e-prod', '.claude/worktrees/**'],
+    // `.gstack` is gstack's working directory (the probe scripts `/qa` and
+    // `/review` write, their notes): local artefacts of the tooling, never
+    // tests of this repository, and not versioned. The glob reads dot
+    // directories and no `.gitignore`, so a probe named `*.spec.ts` there was
+    // collected and failed the run on Playwright's `test()`.
+    // `__tests__/localToolingExclusions.test.ts` keeps both beside the lint's.
+    exclude: ['node_modules', 'dist', 'build', 'e2e', 'e2e-prod', '.claude/worktrees/**', '.gstack/**'],
   },
   resolve: {
     alias: {
