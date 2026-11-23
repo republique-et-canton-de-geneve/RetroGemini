@@ -119,7 +119,7 @@ export const stampOwnAvatarEntry = (draft: MaybeSession, team: MaybeTeam, member
   return true;
 };
 
-/** When `memberId`'s choice in `memberAvatars` (a map the server answered) was made, or null without one. */
+/** When `memberId`'s choice in `memberAvatars` (the map a pick resolved with) was made, or null without one. */
 export const avatarChoiceTime = (
   memberAvatars: Team['memberAvatars'] | null | undefined,
   memberId: string

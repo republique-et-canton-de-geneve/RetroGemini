@@ -9,8 +9,9 @@ import type { MemberAvatarChoice, Team, User } from '../types';
 /**
  * A pick made from the dashboard's top bar, at App's level.
  *
- * The write is awaited (`dataService.setMemberAvatar`), and App puts the map
- * the server answered on a **new** team object, so every screen holding the
+ * The write is awaited (`dataService.setMemberAvatar`), and App merges the
+ * map it resolved with into the open team's, member by member (the newer
+ * entry of each), on a **new** team object, so every screen holding the
  * team draws the picture at once. Only onto the team still open: the answer
  * of a write that outlived its screen opens nothing, as a sign-out is final
  * for everything still on its way (`appSignOut.test.tsx`).

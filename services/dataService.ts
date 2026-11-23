@@ -2584,7 +2584,8 @@ export const dataService = {
 
   /**
    * Store one member's avatar (`null` for their initials) through its own
-   * route, and resolve with the team's map as the server stored it.
+   * route, and resolve with the cached team's map once the answer has been
+   * merged into it (see below).
    *
    * Awaited like the recovery address, so a screen says "saved" only once the
    * server has it. `sessionId` names the live session the choice was made in,

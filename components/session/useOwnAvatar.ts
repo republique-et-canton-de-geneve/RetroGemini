@@ -29,7 +29,10 @@ interface Options<S extends AvatarSession> {
   updateSession: (updater: (session: S) => void) => unknown;
   /** False while the session reconnects or its credential was revoked: nothing is written then. */
   canWrite: boolean;
-  /** Shows the map the server answered after a pick (App puts it on a new team object). */
+  /**
+   * Shows the map a pick resolved with (the answer merged into the cached
+   * team's); App merges it into the open team, on a new team object.
+   */
   onTeamAvatars?: (teamId: string, memberAvatars: Record<string, MemberAvatarChoice>) => void;
   /**
    * True while the screen has yet to send the write it sends on entering
@@ -66,7 +69,7 @@ interface Options<S extends AvatarSession> {
  *   whether the one-time avatar hint shows (`useAvatarDiscoveryHint`).
  *
  * Nothing of it outlives the screen: the session unmounts on a sign-out, and
- * App applies the answered map only to the team still open.
+ * App merges the map a pick resolved with only into the team still open.
  */
 export function useOwnAvatar<S extends AvatarSession>({
   session,

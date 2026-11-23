@@ -172,7 +172,8 @@ interface Props {
   // expired or belongs to another team, so the only way out is the login
   // screen (audit H12). Falls back to `onExit` when the host does not wire it.
   onSessionExpired?: () => void;
-  // Shows the avatar map the server answered after the viewer's pick.
+  // Shows the avatar map the viewer's pick resolved with (the server's
+  // answer merged into the cached team's).
   onTeamAvatars?: (teamId: string, memberAvatars: Record<string, MemberAvatarChoice>) => void;
 }
 
