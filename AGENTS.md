@@ -357,16 +357,18 @@ another look. Ten rules:
   `read-only:`. That variant is the `:read-only` pseudo-class, which matches
   every element that is not `:read-write`: every select and every file input,
   disabled or not, and, by the HTML standard, a disabled text field. The
-  recipe carried its grey under it from 45.0 to 45.2, which drew its seven
-  selects (the new health check's template, the Actions tab's new-action
-  assignee, the merge dialog's two teams, the console's feedback status and
-  its two Logs filters) and the Feedback Hub's image field grey at rest, the
-  look of a draft locked while it is sent; from 45.3 they are white at rest.
-  The recipe has no disabled look of its own: no text field, textarea or
-  select drawn with it is disabled today, the image field carries its own
-  `disabled:bg-slate-100 disabled:text-slate-600`, and a new disabled field
-  needs `disabled:` colours of its own, measured in
-  `__tests__/dashboardLook.test.tsx`. Three guards hold the fill.
+  recipe carried its grey under it from 45.0 to 45.2, which drew the Feedback
+  Hub's image field and every select drawn with it grey at rest, the look of
+  a draft locked while it is sent: two selects in 45.0 (the new health
+  check's template and the Actions tab's new-action assignee), and seven once
+  the console took the look in 45.1, with the merge dialog's two teams, the
+  console's feedback status and its two Logs filters. From 45.3 they are
+  white at rest. The recipe has no disabled look of its own: no text field,
+  textarea or select drawn with it is disabled today, the image field carries
+  its own `disabled:bg-slate-100 disabled:text-slate-600` (5.86:1, which no
+  test measures), and a new disabled field needs `disabled:` colours of its
+  own, measured where it is drawn (for the Dashboard and the Feedback Hub, in
+  `__tests__/dashboardLook.test.tsx`). Three guards hold the fill.
   `__tests__/dashboardLook.test.tsx` → *the fill of a field made read-only*
   matches the recipe's state fills against a text field and a textarea (made
   read-only, plain and disabled) and a select and a file input (disabled or
@@ -378,8 +380,8 @@ another look. Ten rules:
   variant or not, and `:read-only` inside an arbitrary variant
   (`[&:read-only]:`, `[&:not(:read-only)]:`). `e2e/dashboard-actions-tab.spec.ts`
   → *draws its fields white at rest, its select included* measures what
-  Chromium paints, and checks that Chromium reads every select as
-  `:read-only`.
+  Chromium paints on the Actions tab's form (its text field and its select,
+  white at rest), and checks that Chromium reads that select as `:read-only`.
 - **A strip that scrolls sideways scrolls vertically too, and clips at its
   padding box.** `overflow-x-auto` turns `overflow-y` to `auto`, so an item
   that hangs a pixel past the strip draws a classic scrollbar and is cut off:
@@ -494,7 +496,9 @@ sits in (`cardTones(columnHue(column))`), whatever the board is coloured by:
 a group has many authors and no column of origin, and the board draws a group
 as a neutral panel (slate-50, a dashed slate-300 border) around its tinted
 cards. `__tests__/discussTopicTint.test.tsx` renders the real board and the
-real Discuss for one session and compares what they paint. Three rules the
+real Discuss for one session and compares what they paint for a card topic,
+and holds a group topic to its column's tint (*a group topic takes its
+column's tint*). Three rules the
 old model had and the new one keeps: **an anonymous session is never coloured
 by author**, **a card hidden
 from its reader takes its topic's tint only, never its author's**, and a hidden
@@ -853,7 +857,7 @@ the first line
 before it on every screen — kept on a computer too, where the pencil used to
 appear over the last words of the line under the pointer — and the corner
 delete is not drawn while the card is edited, where it would lie over the
-field, nor drawn over another control. On a guided Brainstorm card or a
+field, nor over its foot row's controls. On a guided Brainstorm card or a
 grouped card on an open board it takes the last 24px of the card's content
 across and down, and under the one condition that draws it
 (`drawsCornerDelete`) the card's foot row stops 28px short (`pr-7`). That
@@ -862,7 +866,10 @@ and the Delete asks nothing: on a phone (a 294px card) with four reactions, a
 tap meant for Comments deleted the card for everyone
 (`__tests__/sessionOpenBoard.test.tsx` → *leaves the corner of a card's foot
 row to its corner Delete, wherever that Delete is drawn and nowhere else*).
-So must every icon control shown at rest, hover or not: the card's
+A keyboard path (the Brainstorm move's, the grouping control of a board's
+grouped card) is drawn only while it is focused, the card's whole width at
+its foot, and its last 24px across and down still lie under that corner.
+Every icon control shown at rest, hover or not, must be seen too: the card's
 *Add reaction*, a comment's edit and delete, and an action row's done circle
 (open and checked) and trash, in Review, Open Actions, the health check's
 Review and the Dashboard's Actions tab, were slate-300 on white (1.49:1) or a
@@ -1510,9 +1517,12 @@ screen at once):
   row, no name on the typing line; their own Vote bar shows their count, beside
   a row that bears their name and shows the other person's. It reaches the
   tint too: on a board coloured by author, the second of two people whose
-  names differ only in case is found nowhere and gets white cards, on the
-  board and in Discuss alike (`__tests__/discussTopicTint.test.tsx` → *finds
-  the author where the board does, when two people share a name*).
+  names differ only in case is found nowhere and gets white cards, the card
+  `cardHue` gives an author the screen does not list
+  (`__tests__/cardHue.test.ts`), on the board and in Discuss alike
+  (`__tests__/discussTopicTint.test.tsx` → *finds the author where the board
+  does, when two people share a name* holds that Discuss paints the card as
+  the board does).
 - **Taking a card out of a pair hands the card left every vote of the group**,
   including the votes cast for the other card before they were grouped: a
   group does not record which card a vote was for, on purpose — the votes are
@@ -1558,7 +1568,8 @@ computer, the pencil over no text on either, a grouping tap that clicks
 nothing else, an editor left open through the taps keeping its text, on a
 card and on a group's blank area, a press that leaves an editor landing
 on the control pressed, on a computer and a phone, and a card's corner Delete
-lying over none of its controls while Comments takes a press at its centre,
+lying over none of the controls the card draws at rest while Comments takes a
+press at its centre,
 on a guided Brainstorm card and on a board's grouped card, with 0 to 6
 reactions, with and without a comment: a phone at its one width, a computer
 swept from 1100 to 1400px, a card about 7px wider at each step), and
@@ -1694,8 +1705,8 @@ change to it lands in both.**
   both paint the card alike (see *A card's colour*); each screen used to build
   the list inline. Every client writes the participant list, so its value is
   data: one that is not a list reads as nobody, and the viewer is listed
-  alone, as the screens' own copies read it (`sessionRoster.test.ts` → *lists
-  the viewer alone when the session's list is not a list*).
+  alone, as the screens' former copies read `{}` (`sessionRoster.test.ts` →
+  *lists the viewer alone when the session's list is not a list*).
   `__tests__/sessionParticipantsShared.test.ts` reads the screens with the
   TypeScript parser and fails when a screen's `getParticipants` is anything
   but that call, when a screen keys a person by a name of its own
@@ -2654,8 +2665,8 @@ The following files MUST be included in the Docker image (check `.dockerignore`)
   immutable, which is safe; the runtime stage's `COPY --from=builder /app/dist`
   carries the dot-directory
 
-`.dockerignore` leaves out `.claude/` and `.gstack/`, the two directories of
-local tooling the lint skips too (*Before Committing*, item 1), because the
+`.dockerignore` leaves out `.claude/` and `.gstack/` (the lint skips
+`.claude/worktrees/` and `.gstack/`, *Before Committing*, item 1), because the
 builder copies the whole context (`COPY . .`):
 
 - `.claude/worktrees/` holds whole checkouts of the repository, often older
@@ -2873,7 +2884,7 @@ that take a team credential (`/api/send-invite`, `/api/wifi-config`,
 | `/api/team/:teamId/action` | POST | Persist a global action update. **Additive, not a replace** (`utils/actionImpact.js` → `mergeActionImpactState`): it folds the incoming action onto the stored one so `impactRatings`, `closedAt` and `impactDeferredBy` survive a caller that never read them. Without that, a facilitator renaming an action from a client loaded before anyone voted wipes the whole rating round. It also stamps `closedAt` when *it* is what closes the action, which is what keeps the field correct through a rolling update where an older pod closes an action without stamping — but it never invents one for an action already stored as closed without a stamp, because those are the pre-feature closures and dating them would drag the entire historical backlog into the next rating round. Its `jira` comes from the record only (`withRecordedJiraLink`: the stored copy's value, else another copy's, else none), so a caller can neither drop a link nor plant one |
 | `/api/team/:teamId/action/impact` | POST | Record one participant's impact vote on one closed action (`{ actionId, userId, vote }`; `vote: 1 \| 2 \| 3 \| 'abstain' \| null`, `null` clears the caller's own vote). **Deliberately narrow, for the same reason `/retrospective/:retroId/name` is**: `impactRatings` is the first per-user data on the team record and it has one writer per participant, so sending a whole action would make two people voting in the same second race, with the loser's vote vanishing silently. This writes exactly `impactRatings[userId]` inside `atomicTeamUpdate`, so concurrent voters never contend for the same key. Carries no revision, touches no other field, and takes no retro/health-check hint — it scans all three homes, because a hint would be a second way to locate an action that could disagree with the scan. Answers `404 action_not_found` (after the write, never from a preliminary read) and `400 invalid_vote` for anything off the scale, refused rather than coerced. **`{ actionId, reset: true }` drops the whole map for one action** — what a *later* retrospective does when it puts a postponed action back to the team, because "Rate later" promises the question is asked again and a vote left in place is pre-filled next time, so the early answerer is never re-asked. It lives on this route rather than a new one because `impactRatings` is owned here and nowhere else (the whole-action route deliberately cannot touch it), and a clear written elsewhere would be a second owner. The reset is performed at **re-presentation**, never at the deferral: that is what keeps the "Rate later" toggle lossless, so a mis-click stays undoable and the votes only go when the round that would have shown them really reopens. `reset` must be a literal `true`; anything else falls through to the ordinary vote path and its validation |
 | `/api/team/:teamId/members` | POST | Update the member roster. Member emails are **cleaned, never refused** by the shared email rule (`cleanRosterEmails`, the function the heal pass uses): a value that does not parse is stored as sent, and so is one whose cleaned form another member already holds — a roster write carries joins, and member emails are identities on the client. Answers `{ success: true }`: it used to return the whole team, which no client read, so every join paid for a second copy of the history |
-| `/api/team/:teamId/member/avatar` | POST | Set or clear one member's avatar `{ memberId, avatar: <id> \| null, sessionId? }` (`server/routes/teamAvatarRoutes.js`). Credential first (`401`); `400 invalid_member` unless `memberId` is a plausible member id (`isValidRaterId`); `400 invalid_avatar` unless `avatar` is `null` or an id the release accepts (`isAcceptedAvatarId` in `utils/avatars.js`: the offered ids, and those accepted one release ahead of being offered): refused, never coerced, because an id this pod does not know may be one a later release offers. Under the row lock it writes `memberAvatars[memberId] = { id, at }`, with `at` the server's clock in ms and never before the entry it replaces, and a clear stored as `{ id: null, at }` (so a clear too is newer than every copy of the choice it replaces). It rebuilds the map from its valid entries, so junk heals (an entry whose `at` is not a date, `isAvatarTime`, is junk: nothing could be dated after it), and caps it at 500 entries (ids on neither roster list go first, then the oldest; never the one just written), where a first clear takes its place like any choice. A repeat of the stored picture, or a clear of a cleared choice, writes nothing (a session named by `sessionId` is still stamped with the stored entry); a first clear, with no valid entry stored before it (none, or one that is not `{ id, at }`, which the same write drops), is stored as `{ id: null, at }`, dated by the clock, and stamped into the session like any choice. Answers `{ success: true, memberAvatars }` after the write. With a `sessionId`, after the answer and best-effort, it stamps that live session's participant entry with `avatar` and `avatarAt` through `liveSessionPatch`: only the team's own session, only a participant it already holds, only when the stored stamp is older (or dated far ahead of the server's clock: a participant entry is data, and no pick wrote such a stamp). `/update` ignores `memberAvatars`. The client calls it through `dataService.setMemberAvatar`, which retries an older pod's HTML 404 across a rollout, takes the route's own refusals as final (a value refused, the team gone, the credential refused, the limiter's 429: sent again, they took seven seconds to be said to someone watching "Saving…") and never posts the roster |
+| `/api/team/:teamId/member/avatar` | POST | Set or clear one member's avatar `{ memberId, avatar: <id> \| null, sessionId? }` (`server/routes/teamAvatarRoutes.js`). Credential first (`401`); `400 invalid_member` unless `memberId` is a plausible member id (`isValidRaterId`); `400 invalid_avatar` unless `avatar` is `null` or an id the release accepts (`isAcceptedAvatarId` in `utils/avatars.js`: the offered ids, and those accepted one release ahead of being offered): refused, never coerced, because an id this pod does not know may be one a later release offers. Under the row lock it writes `memberAvatars[memberId] = { id, at }`, with `at` the server's clock in ms and never before the entry it replaces, and a clear stored as `{ id: null, at }` (so a clear too is newer than every copy of the choice it replaces). It rebuilds the map from its valid entries, so junk heals (an entry whose `at` is not a date, `isAvatarTime`, is junk: nothing could be dated after it), and caps it at 500 entries (ids on neither roster list go first, then the oldest; never the one just written), where a first clear takes its place like any choice. A repeat of the stored picture, or a clear of a cleared choice, writes nothing (a session named by `sessionId` is still stamped with the stored entry); a first clear, with no valid entry stored before it (none, or junk the same write drops: an entry that is not `{ id, at }`, or whose `at` is no date, or whose `id` is not of the stored shape, `isMemberAvatarEntry`), is stored as `{ id: null, at }`, dated by the clock, and stamped into the session like any choice. Answers `{ success: true, memberAvatars }` after the write. With a `sessionId`, after the answer and best-effort, it stamps that live session's participant entry with `avatar` and `avatarAt` through `liveSessionPatch`: only the team's own session, only a participant it already holds, only when the stored stamp is older (or dated far ahead of the server's clock: a participant entry is data, and no pick wrote such a stamp). `/update` ignores `memberAvatars`. The client calls it through `dataService.setMemberAvatar`, which retries an older pod's HTML 404 across a rollout, takes the route's own refusals as final (a value refused, the team gone, the credential refused, the limiter's 429: sent again, they took seven seconds to be said to someone watching "Saving…") and never posts the roster |
 | `/api/team/:teamId/invite-credential` | POST | Derive the team's current invite credential for embedding in invite links (revoked by password rotation) |
 | `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links). **Revokes every session token of the team** (decision D3b): the same transaction gives the team a new session epoch, and the answer is `{ success, sessionToken }`, a token under the new epoch for the caller, so the facilitator who changed it keeps working (a 41.0 client ignores it and keeps authenticating by the new password it holds). After the answer, best-effort, the team's live sockets are cut on this pod and the others (`sessionRevocation.js`). Recorded as `team.password-change` with `detail.sessionsRevoked: true` |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned; its Jira token, `team-secret:{teamId}`, is deleted before the record). The Dashboard waits for the answer: a failure keeps the team signed in and says so, and `team_not_found` (already deleted — a lost answer, another tab, the super admin) counts as done |
@@ -3573,10 +3584,12 @@ Rules:
   is why this feature needs **no own-change ledger slice**. A clear is a dated
   choice too, a first one included: "My initials" picked by someone with no
   stored choice is stored as `{ id: null, at }`, so in the session it was made
-  in it replaces a picture another client planted on their entry — drawn and
-  marked as initials in their browser at once, and for the room through the
-  route's stamp (`useOwnAvatar.test.tsx` → *after a first clear made in the
-  session*).
+  in it replaces a picture another client planted on their entry with an older
+  time (a time planted ahead follows *A participant entry is data* below) —
+  drawn and marked as initials in their browser at once (`useOwnAvatar.test.tsx`
+  → *after a first clear made in the session*), and for the room through the
+  route's stamp (`teamAvatarRoutes.test.ts` → *stores a first clear as a dated
+  entry, like any choice, and stamps it into the session*).
 - **A session shows its own copy.** A participant entry of a session carries
   `avatar` and `avatarAt`. The route stamps the entry of the session the pick
   came from (the room sees it at once); and each client keeps a **copy of its
@@ -3677,10 +3690,11 @@ Rules:
   from the tone class in CSS, so the id alone decides what it draws
   (`avatarArt.test.tsx` → *is not built again when its parent draws again
   with the same id, and a new id draws at once*). The file is the source: its
-  families (`AVATAR_FAMILIES`) are its one list of ids, and `AvatarArtId` and
-  `AVATAR_ART_IDS` are read from them, so tsc refuses a family's id that has
-  no name or no picture, and a name or picture no family holds (*writes the
-  ids once, in their families*). To add or change a picture, edit its shapes
+  families (`AVATAR_FAMILIES`) are its one list of ids (*writes the ids once,
+  in their families*), and `AvatarArtId` and `AVATAR_ART_IDS` are read from
+  them, so tsc refuses a family's id that has no name or no picture, and a
+  name or picture no family holds (`AVATAR_NAME_KEYS` and `AVATAR_ART` are
+  keyed by `AvatarArtId`). To add or change a picture, edit its shapes
   there, with its id in its family there and in `utils/avatars.js`, and its
   name in both `avatars` dictionaries (`__tests__/avatarArt.test.tsx` checks
   the three agree).

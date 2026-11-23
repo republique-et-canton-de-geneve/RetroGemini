@@ -260,7 +260,7 @@ by one route, `POST /api/team/:teamId/member/avatar`.
   is ever drawn, and no other session or screen shows what was planted. A
   later choice of the person replaces it: any choice, a first "My initials"
   included (a clear is stored dated, like a picture, and stamped into the
-  session it was made in), when the planted time is not ahead of that
+  session it was made in), when the planted time is older than that
   choice; and for a time planted ahead of the clock, a
   choice made in that session, where the route's stamp replaces a time more
   than five minutes ahead of the server's clock (no choice wrote it). A time

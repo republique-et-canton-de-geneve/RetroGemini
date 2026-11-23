@@ -887,8 +887,10 @@ facilitator-only fields, and `validateSessionUpdateShape` checks the top level
 alone (an object, its id, a finite `_rev`). The other fields reach every client
 as another client wrote them, and several are read as if they were typed: a
 `participants[]` entry whose `name` (or `email`) is not a string throws in
-`getParticipants` (`p.name.trim()`), `getMemberDisplay` and `pendingInvitees`
-(`p.email.trim()`) on every render of both session types; `tickets: null`,
+`sessionParticipants` (`sessionRoster.ts`'s `nameKey`, `name.trim()`), which
+both screens' `getParticipants` and the Discuss phase call, in
+`getMemberDisplay` and in `pendingInvitees` (`p.email.trim()`) on every render
+of both session types; `tickets: null`,
 `groups: null` and `happiness: null` throw in the merge
 (`mergeRemoteRetroSession`) or the render (Session.tsx counts the reader's
 votes on every render, the participants panel runs `session.tickets.forEach`).
