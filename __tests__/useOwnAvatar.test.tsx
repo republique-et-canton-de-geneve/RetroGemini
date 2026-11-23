@@ -286,6 +286,115 @@ describe('useOwnAvatar, the own entry', () => {
       expect(updateSession).not.toHaveBeenCalled();
       expect(vi.getTimerCount()).toBe(0);
     });
+
+    // "My initials" is a pick like any picture: the route answers it dated
+    // (`{ id: null, at }`), the server stamps it on this session, and the
+    // hook waits for that stamp the same way.
+    describe('a clear', () => {
+      type Shown = { id: string; participants: User[] };
+      const cleared = { ada: { id: null, at: 300 } };
+      const teamCleared = { ...team, memberAvatars: cleared } as unknown as Team;
+      const showsFox: Shown = { id: 's1', participants: [{ ...me, avatar: 'fox', avatarAt: 100 }] };
+
+      const clearInSession = async () => {
+        vi.useFakeTimers();
+        vi.spyOn(dataService, 'setMemberAvatar').mockResolvedValue(cleared);
+        const updateSession = vi.fn<(updater: (s: Shown) => void) => unknown>(() => showsFox);
+        const view = renderHook((props: { team: Team; canWrite: boolean; shown: Shown }) => useOwnAvatar({
+          session: props.shown, team: props.team, currentUser: me, updateSession, canWrite: props.canWrite,
+        }), { initialProps: { team, canWrite: true, shown: showsFox } });
+        await act(async () => { await view.result.current.pick(null); });
+        expect(dataService.setMemberAvatar).toHaveBeenCalledWith('ada', null, 's1');
+        // App's part: the answered map on a new team object.
+        view.rerender({ team: teamCleared, canWrite: true, shown: showsFox });
+        expect(updateSession).not.toHaveBeenCalled();
+        /** What the hook's first write put on the viewer's own entry. */
+        const written = () => {
+          const draft = structuredClone(showsFox);
+          updateSession.mock.calls[0][0](draft);
+          return draft.participants[0];
+        };
+        // A fake clock is run dry once what it drove is gone, before the real one comes back.
+        const finish = () => {
+          view.unmount();
+          act(() => { vi.runOnlyPendingTimers(); });
+        };
+        return { ...view, updateSession, written, finish };
+      };
+
+      it("writes nothing when the stamp comes: it brings the initials at the clear's time", async () => {
+        const { rerender, updateSession, finish } = await clearInSession();
+        rerender({ team: teamCleared, canWrite: true, shown: { id: 's1', participants: [{ ...me, avatar: null, avatarAt: 300 }] } });
+        act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS * 2); });
+        expect(updateSession).not.toHaveBeenCalled();
+        finish();
+      });
+
+      it('writes the initials once, back online, when the wait ended while offline', async () => {
+        const { rerender, updateSession, written, finish } = await clearInSession();
+        rerender({ team: teamCleared, canWrite: false, shown: showsFox });
+        act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS * 2); });
+        expect(updateSession).not.toHaveBeenCalled();
+
+        rerender({ team: teamCleared, canWrite: true, shown: showsFox });
+        expect(updateSession).toHaveBeenCalledTimes(1);
+        rerender({ team: teamCleared, canWrite: true, shown: showsFox });
+        expect(updateSession).toHaveBeenCalledTimes(1);
+        expect(written()).toMatchObject({ id: 'ada', avatar: null, avatarAt: 300 });
+        finish();
+      });
+
+      it('goes on waiting for the stamp after a reconnection inside the wait, and writes the initials when it ends', async () => {
+        const { rerender, updateSession, written, finish } = await clearInSession();
+        rerender({ team: teamCleared, canWrite: false, shown: showsFox });
+        act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS / 2); });
+        rerender({ team: teamCleared, canWrite: true, shown: showsFox });
+        expect(updateSession).not.toHaveBeenCalled();
+        act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS / 2 - 1); });
+        expect(updateSession).not.toHaveBeenCalled();
+        act(() => { vi.advanceTimersByTime(1); });
+        expect(updateSession).toHaveBeenCalledTimes(1);
+        expect(written()).toMatchObject({ id: 'ada', avatar: null, avatarAt: 300 });
+        finish();
+      });
+
+      it('writes a newer choice made elsewhere at once: the wait holds only the clear made here', async () => {
+        const { rerender, updateSession, written, finish } = await clearInSession();
+        rerender({ team: { ...team, memberAvatars: { ada: { id: 'owl', at: 900 } } } as unknown as Team, canWrite: true, shown: showsFox });
+        expect(updateSession).toHaveBeenCalledTimes(1);
+        expect(written()).toMatchObject({ id: 'ada', avatar: 'owl', avatarAt: 900 });
+        finish();
+      });
+
+      // A pick inside the clear's wait starts the wait again: left running,
+      // the clear's timer would end the pick's wait early.
+      it("waits the whole wait of a pick made during the clear's wait, and writes the pick once", async () => {
+        const { result, rerender, updateSession, written, finish } = await clearInSession();
+        act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS / 2); });
+        const picked = { ada: { id: 'owl', at: 400 } };
+        vi.mocked(dataService.setMemberAvatar).mockResolvedValue(picked);
+        await act(async () => { await result.current.pick('owl'); });
+        rerender({ team: { ...team, memberAvatars: picked } as unknown as Team, canWrite: true, shown: showsFox });
+
+        // Past the end of the clear's wait: the pick's goes on.
+        act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS - 1); });
+        expect(updateSession).not.toHaveBeenCalled();
+        act(() => { vi.advanceTimersByTime(1); });
+        expect(updateSession).toHaveBeenCalledTimes(1);
+        expect(written()).toMatchObject({ id: 'ada', avatar: 'owl', avatarAt: 400 });
+        finish();
+      });
+
+      it('leaves no timer behind when the screen goes during the wait', async () => {
+        const { unmount, updateSession } = await clearInSession();
+        // The wait's own timer, and nothing else.
+        expect(vi.getTimerCount()).toBe(1);
+        unmount();
+        expect(vi.getTimerCount()).toBe(0);
+        act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS * 3); });
+        expect(updateSession).not.toHaveBeenCalled();
+      });
+    });
   });
 
   // A participant entry is data every client of the session writes: another
