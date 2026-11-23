@@ -59,10 +59,13 @@ const entryTime = (entry: User): number => {
  * The avatar id to draw for `memberId` in `session`, or null for initials.
  * An anonymous session shows none: a picture beside a card says who wrote it.
  * An entry that states an avatar (`null` included) wins over the team's
- * choice when it is at least as new; otherwise, or without one, the team's: a
- * pick made outside the session stamps no entry, and a viewer whose copy of
- * the team holds it must not draw the older picture. Outside a session, read
- * `memberAvatarId`.
+ * choice when it is newer; otherwise, or without one, the team's: a pick made
+ * outside the session stamps no entry, and a viewer whose copy of the team
+ * holds it must not draw the older picture. On a tie the team's choice is
+ * drawn, as the picker marks it (`ownAvatarChoice`): a tie the server wrote
+ * carries one picture in both (the route's stamp and the own entry copy the
+ * stored choice), so an entry with another picture at the same time is one
+ * another client planted. Outside a session, read `memberAvatarId`.
  */
 export const sessionAvatarOf = (session: MaybeSession, team: MaybeTeam, memberId: string): string | null => {
   if (isAnonymousSession(session)) return null;
@@ -70,7 +73,7 @@ export const sessionAvatarOf = (session: MaybeSession, team: MaybeTeam, memberId
   if (
     entry &&
     Object.prototype.hasOwnProperty.call(entry, 'avatar') &&
-    entryTime(entry) >= (memberAvatar(team, memberId)?.at ?? 0)
+    entryTime(entry) > (memberAvatar(team, memberId)?.at ?? 0)
   ) {
     return toAvatarId(entry.avatar);
   }

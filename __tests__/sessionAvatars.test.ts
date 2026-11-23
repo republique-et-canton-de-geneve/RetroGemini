@@ -52,12 +52,30 @@ describe('sessionAvatarOf', () => {
     expect(sessionAvatarOf({ ...retro, settings: { isAnonymous: false } }, team, 'bob')).toBe('owl');
   });
 
-  it("takes the entry's avatar when the entry is at least as new as the team's choice", () => {
+  it("takes the entry's avatar when the entry is newer than the team's choice", () => {
     expect(sessionAvatarOf(sessionWith([person('ada', { avatar: 'cat', avatarAt: 150 })]), team, 'ada')).toBe('cat');
-    // A tie is the same choice, written by the server into both: the entry's.
-    expect(sessionAvatarOf(sessionWith([person('ada', { avatar: 'cat', avatarAt: 100 })]), team, 'ada')).toBe('cat');
     // An entry stating an avatar, with no team choice at all, is the only word.
     expect(sessionAvatarOf(sessionWith([person('carol', { avatar: 'cat', avatarAt: 5 })]), team, 'carol')).toBe('cat');
+  });
+
+  // A tie the server wrote is one choice in both places: the route's stamp
+  // and the viewer's own entry copy the stored entry, its picture with its
+  // time. An entry with another picture at the same time is not one of
+  // those: another client planted it, with the time every client reads in
+  // the team's map. Drawn, it disagreed with the picker's mark (which takes
+  // the team's choice on a tie) and with what the person chose.
+  it("takes the team's choice on a tie, as the picker marks it: a tie with another picture is not one the server wrote", () => {
+    const tied = sessionWith([person('ada', { avatar: 'cat', avatarAt: 100 })]);
+    expect(sessionAvatarOf(tied, team, 'ada')).toBe('fox');
+    expect(ownAvatarChoice(tied, team, 'ada')).toBe('fox');
+    // A tie the server wrote draws the same picture by either rule.
+    expect(sessionAvatarOf(sessionWith([person('ada', { avatar: 'fox', avatarAt: 100 })]), team, 'ada')).toBe('fox');
+    // A planted clear at the same time does not hide a picture either.
+    expect(sessionAvatarOf(sessionWith([person('ada', { avatar: null, avatarAt: 100 })]), team, 'ada')).toBe('fox');
+    // And a planted picture at the time of a cleared choice draws no picture.
+    const cleared = teamWith({ ada: { id: null, at: 100 } });
+    expect(sessionAvatarOf(tied, cleared, 'ada')).toBeNull();
+    expect(ownAvatarChoice(tied, cleared, 'ada')).toBeNull();
   });
 
   // The newer `at` wins when drawing too: a pick made on the Dashboard of
