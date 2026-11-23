@@ -74,6 +74,103 @@ const setAnonymous = async (page: Page, anonymous: boolean) => {
   await expect(settings).toBeHidden();
 };
 
+/**
+ * Settled: what a gesture whose write the test reads back waits for. Two
+ * writes of one screen inside one round trip lose the second (AGENTS.md,
+ * *The open board*, residuals): a write leaves stamped with the revision of
+ * the state it was built on, the server keeps one write per revision, and the
+ * heal that answers the loser puts back the cards being created, the votes
+ * and the settings, never a grouping, a comment, a reaction, an edit or a
+ * phase. The corner test lost its grouping so once in a full local run (the
+ * group's title never found), and loses it every time against a server slow
+ * to answer, when the grouping leaves before the cards' writes are answered.
+ *
+ * Read off the wire, from before the page's first write (recordSessionWrites):
+ * - live: the header's sync chip says so (SessionSyncChip, by its title; it
+ *   steps aside below 400px), on a Socket.IO connection that has joined the
+ *   session. The chip is optimistic until the first connection (Session.tsx),
+ *   while syncService holds the writes back;
+ * - every `update-session` the page sent on that connection answered, by a
+ *   `session-ack` or a `session-update-refused`: the server answers each with
+ *   one of them (socketHandlers.js; a session created under another team's id
+ *   gets none, and the wait times out);
+ * - no frame of the session for SETTLED_QUIET_MS (a typing cue is none).
+ */
+interface SessionConnection {
+  url: string;
+  closed: boolean;
+  joined: boolean;
+  writes: number;
+  answers: number;
+}
+
+const sessionSyncs = new WeakMap<Page, { connections: SessionConnection[]; lastFrameAt: number }>();
+
+// A heal's re-send leaves 150 to 400 ms after it (mergeRemoteSession.ts →
+// scheduleSessionResend). The seventh re-send in a row with no write accepted
+// waits 800 ms (syncService.getResendDelayMs): such a session is failing, not
+// settling.
+const SETTLED_QUIET_MS = 600;
+
+// A Socket.IO event as it is on the wire: the engine.io message `4`, the
+// EVENT packet `2`, an optional namespace and acknowledgement id (this app
+// uses neither), then the JSON array: `42["update-session",{…}]`,
+// `42["session-ack",{"sessionId":"…","rev":3}]`.
+const socketEvent = (payload: string | Buffer) =>
+  /^42(?:\/[^,]*,)?\d*\["([^"]+)"/.exec(typeof payload === 'string' ? payload : payload.toString())?.[1] ?? null;
+
+/**
+ * Follows the page's session frames for waitForSessionToSettle, from before
+ * its first write; answers the `update-session` frames the page sends, in
+ * order, for the tests that count writes.
+ */
+const recordSessionWrites = (page: Page) => {
+  const sent: string[] = [];
+  const sync = { connections: [] as SessionConnection[], lastFrameAt: Date.now() };
+  sessionSyncs.set(page, sync);
+  page.on('websocket', (socket) => {
+    // Vite's hot-reload socket shares the page.
+    if (!socket.url().includes('/socket.io/')) return;
+    const connection: SessionConnection = { url: socket.url(), closed: false, joined: false, writes: 0, answers: 0 };
+    sync.connections.push(connection);
+    // A typing cue writes nothing, and repeats while a draft has the focus.
+    socket.on('framesent', ({ payload }) => {
+      const event = socketEvent(payload);
+      if (!event || event === 'participant-activity') return;
+      sync.lastFrameAt = Date.now();
+      if (event === 'join-session') connection.joined = true;
+      if (event !== 'update-session') return;
+      connection.writes += 1;
+      sent.push(typeof payload === 'string' ? payload : payload.toString());
+    });
+    socket.on('framereceived', ({ payload }) => {
+      const event = socketEvent(payload);
+      if (!event || event === 'participant-activity') return;
+      sync.lastFrameAt = Date.now();
+      if (event === 'session-ack' || event === 'session-update-refused') connection.answers += 1;
+    });
+    socket.on('close', () => { connection.closed = true; });
+  });
+  return sent;
+};
+
+const waitForSessionToSettle = async (page: Page, timeout = 15_000) => {
+  const sync = sessionSyncs.get(page);
+  if (!sync) throw new Error('waitForSessionToSettle: call recordSessionWrites(page) before the page opens its session');
+  const live = page.getByTitle('Real-time sync active');
+  await expect.poll(async () => {
+    if (!(await live.isVisible())) return 'the sync chip does not say "Live"';
+    const connection = sync.connections.at(-1);
+    if (!connection || connection.closed) return 'no Socket.IO connection open';
+    if (!connection.joined) return 'the connection has not joined the session';
+    if (connection.writes > connection.answers) {
+      return `${connection.writes - connection.answers} of the ${connection.writes} update-session frames sent on ${connection.url} unanswered`;
+    }
+    const quiet = Date.now() - sync.lastFrameAt;
+    return quiet >= SETTLED_QUIET_MS ? 'settled' : `the last session frame ${quiet} ms ago`;
+  }, { message: 'the session settles before a gesture whose write must land', timeout, intervals: [50] }).toBe('settled');
+};
+
 test('a card shows its controls on a phone, and its edit control lies over none of its text', async ({ browser }) => {
   const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
   const phoneContext = await browser.newContext({ ...phone, locale: 'en-US' });
@@ -135,11 +232,7 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
   const phoneContext = await browser.newContext({ ...phone, locale: 'en-US' });
   const page = await phoneContext.newPage();
   // The session writes this page sends, counted where the test says.
-  const sent: string[] = [];
-  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
-    const text = typeof payload === 'string' ? payload : payload.toString();
-    if (text.includes('"update-session"')) sent.push(text);
-  }));
+  const sent = recordSessionWrites(page);
   try {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
@@ -165,6 +258,9 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
       await expect(card(page, text)).toBeVisible();
     }
 
+    // The grouping below is a write the test reads back: it leaves once the
+    // cards' writes are answered.
+    await waitForSessionToSettle(page);
     await expect(field).toBeFocused();
     await card(page, 'Flaky deploys').tap();
     await expect(page.getByRole('button', { name: /Selected for grouping/ })).toBeVisible();
@@ -200,6 +296,7 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
     // Holding its partner leaves the editor and writes what it held, alone
     // and at once: a hold writes nothing of its own, and held for a later
     // write the text rode one that could lose (review finding, pass 7 of 42.1).
+    await waitForSessionToSettle(page);
     sent.length = 0;
     await card(page, 'Slow rollbacks').tap();
     await expect(page.locator('textarea:not([placeholder])')).toHaveCount(0);
@@ -207,7 +304,7 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
     await expect.poll(() => sent.length).toBe(1);
     expect(sent[0]).toContain('Flaky deploys in staging');
     // Past the server's answer: the drop below is a write of its own.
-    await page.waitForTimeout(500);
+    await waitForSessionToSettle(page);
     // Dropped on the loose card, the partner leaves the edited card alone.
     await card(page, 'Late release notes').tap();
     const group = page.locator('.group-container');
@@ -218,7 +315,7 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
     await expect.poll(() => sent.length).toBe(2);
     // Still there once the server has answered the drop: nothing was refused
     // and healed away.
-    await page.waitForTimeout(500);
+    await waitForSessionToSettle(page);
     await expect(page.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
     await expect(group).toHaveCount(1);
     expect(sent).toHaveLength(2);
@@ -245,7 +342,7 @@ test('a tap that groups two cards on a phone clicks nothing else, and leaves the
     await expect(page.locator('textarea:not([placeholder])')).toHaveCount(0);
     await expect.poll(() => sent.length).toBe(1);
     expect(sent[0]).toContain('Slow rollbacks again');
-    await page.waitForTimeout(500);
+    await waitForSessionToSettle(page);
     await expect(page.getByText('Slow rollbacks again', { exact: true })).toBeVisible();
     await expect(group.getByText('Flaky deploys in staging', { exact: true })).toBeVisible();
   } finally {
@@ -263,6 +360,7 @@ for (const device of ['computer', 'phone'] as const) {
     const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
     const context = await browser.newContext(device === 'phone' ? { ...phone, locale: 'en-US' } : { locale: 'en-US', viewport: { width: 1280, height: 900 } });
     const page = await context.newPage();
+    recordSessionWrites(page);
     const press = (target: Locator) => (device === 'phone' ? target.tap() : target.click());
     try {
       await page.goto('/');
@@ -297,11 +395,15 @@ for (const device of ['computer', 'phone'] as const) {
         await page.keyboard.type(typed);
       };
 
-      // Its own vote.
+      // Its own vote. Each press below leaves an editor, whose text rides its
+      // control's write: a write the test reads back, so each waits until the
+      // write before it is answered.
+      await waitForSessionToSettle(page);
       await edit('Too many meetings', ' on Mondays');
       await press(voteOn('Too many meetings'));
       await expect(card(page, 'Too many meetings on Mondays').getByRole('button', { name: /^1 vote/ })).toBeVisible();
       // The vote of the card under it.
+      await waitForSessionToSettle(page);
       await edit('Too many meetings on Mondays', ' again');
       await press(voteOn('Late release notes'));
       await expect(card(page, 'Late release notes').getByRole('button', { name: /^1 vote/ })).toBeVisible();
@@ -312,6 +414,7 @@ for (const device of ['computer', 'phone'] as const) {
       await page.keyboard.press('Enter');
       await expect(card(page, 'Slow rollbacks')).toBeVisible();
       // Held through its keyboard control, the same on both screens.
+      await waitForSessionToSettle(page);
       await page.getByRole('button', { name: /Pick up the ticket Slow rollbacks/ }).focus();
       await page.keyboard.press('Enter');
       await expect(page.getByRole('button', { name: /Selected for grouping/ })).toBeVisible();
@@ -320,7 +423,7 @@ for (const device of ['computer', 'phone'] as const) {
       await expect(columns(page).nth(0).getByText('Slow rollbacks', { exact: true })).toBeVisible();
       await expect(page.getByText('Late release notes too', { exact: true })).toBeVisible();
       // And all of it after the server answered.
-      await page.waitForTimeout(500);
+      await waitForSessionToSettle(page);
       await expect(columns(page).nth(0).getByText('Slow rollbacks', { exact: true })).toBeVisible();
       await expect(card(page, 'Late release notes too').getByRole('button', { name: /^1 vote/ })).toBeVisible();
     } finally {
@@ -337,11 +440,7 @@ for (const device of ['computer', 'phone'] as const) {
 test('a drag from a card\u2019s editor moves the card dragged in one write, and the card edited too', async ({ browser }) => {
   const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
-  const sent: string[] = [];
-  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
-    const text = typeof payload === 'string' ? payload : payload.toString();
-    if (text.includes('"update-session"')) sent.push(text);
-  }));
+  const sent = recordSessionWrites(page);
   try {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
@@ -358,8 +457,9 @@ test('a drag from a card\u2019s editor moves the card dragged in one write, and 
     await dialog.getByTestId('retro-template-lean_coffee').click();
     await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
     // The facilitator's screen sends its state once, half a second after the
-    // session opens: past that, every write counted is this test's own.
-    await page.waitForTimeout(700);
+    // session opens: once it is answered, every write counted is this test's
+    // own.
+    await waitForSessionToSettle(page);
 
     const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
     for (const text of ['Late release notes', 'Too many meetings']) {
@@ -385,7 +485,9 @@ test('a drag from a card\u2019s editor moves the card dragged in one write, and 
       await page.mouse.up();
     };
 
-    // Another card, from an open editor: its move and the text in one write.
+    // Another card, from an open editor: its move and the text in one write,
+    // once the cards' writes are answered.
+    await waitForSessionToSettle(page);
     await edit('Too many meetings', ' on Mondays');
     const before = sent.length;
     const other = (await card(page, 'Late release notes').boundingBox())!;
@@ -393,7 +495,7 @@ test('a drag from a card\u2019s editor moves the card dragged in one write, and 
     await expect(columns(page).nth(1).getByText('Late release notes', { exact: true })).toBeVisible();
     await expect(editors).toHaveCount(0, { timeout: 1_000 });
     await expect(page.getByText('Too many meetings on Mondays', { exact: true })).toBeVisible();
-    await page.waitForTimeout(500);
+    await waitForSessionToSettle(page);
     expect(sent.length - before).toBe(1);
     expect(sent.at(-1)).toContain('Too many meetings on Mondays');
 
@@ -414,11 +516,7 @@ test('a drag from a card\u2019s editor moves the card dragged in one write, and 
 test('a press in a group’s title selects its words, and drags no group', async ({ browser }) => {
   const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
-  const sent: string[] = [];
-  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
-    const text = typeof payload === 'string' ? payload : payload.toString();
-    if (text.includes('"update-session"')) sent.push(text);
-  }));
+  const sent = recordSessionWrites(page);
   try {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
@@ -435,9 +533,9 @@ test('a press in a group’s title selects its words, and drags no group', async
     await dialog.getByTestId('retro-template-lean_coffee').click();
     await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
     // The facilitator's screen sends its state once, half a second after the
-    // session opens: past that, every write counted is this test's own, and
-    // none of the setup's loses its race to it.
-    await page.waitForTimeout(700);
+    // session opens: once it is answered, every write counted is this test's
+    // own, and none of the setup's loses its race to it.
+    await waitForSessionToSettle(page);
 
     const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
     for (const text of ['Late release notes', 'Too many meetings']) {
@@ -445,16 +543,19 @@ test('a press in a group’s title selects its words, and drags no group', async
       await page.keyboard.press('Enter');
       await expect(card(page, text)).toBeVisible();
     }
-    // Grouped with the keyboard, then named.
+    // Grouped with the keyboard, then named: two writes the test reads back
+    // (the title's words below), each once the write before it is answered.
+    await waitForSessionToSettle(page);
     await page.getByRole('button', { name: /Pick up the ticket Late release notes/ }).focus();
     await page.keyboard.press('Enter');
     await page.getByRole('button', { name: /group the selected ticket with Too many meetings/ }).focus();
     await page.keyboard.press('Enter');
     const title = page.locator('.group-container input[data-group-title-id]');
     await expect(title).toBeFocused({ timeout: 10_000 });
+    await waitForSessionToSettle(page);
     await title.fill('Delivery problems');
     await title.press('Enter');
-    await page.waitForTimeout(700);
+    await waitForSessionToSettle(page);
     const before = sent.length;
 
     // Pressed near the start of the title, dragged along it, released.
@@ -514,11 +615,7 @@ test('a press in a group’s title selects its words, and drags no group', async
 test('a double click whose first click closes an editor presses nothing the layout moved under it', async ({ browser }) => {
   const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
-  const sent: string[] = [];
-  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
-    const text = typeof payload === 'string' ? payload : payload.toString();
-    if (text.includes('"update-session"')) sent.push(text);
-  }));
+  const sent = recordSessionWrites(page);
   try {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
@@ -536,7 +633,7 @@ test('a double click whose first click closes an editor presses nothing the layo
     await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
     // The vote under the pointer is what the second press must not press.
     await openTheVote(page);
-    await page.waitForTimeout(700);
+    await waitForSessionToSettle(page);
 
     const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
     for (const text of ['Late release notes', 'Too many meetings']) {
@@ -544,6 +641,9 @@ test('a double click whose first click closes an editor presses nothing the layo
       await page.keyboard.press('Enter');
       await expect(card(page, text)).toBeVisible();
     }
+    // Grouped once the cards' writes are answered: the heal of a lost write
+    // puts the cards back, never a grouping.
+    await waitForSessionToSettle(page);
     await page.getByRole('button', { name: /Pick up the ticket Late release notes/ }).focus();
     await page.keyboard.press('Enter');
     await page.getByRole('button', { name: /group the selected ticket with Too many meetings/ }).focus();
@@ -566,7 +666,7 @@ test('a double click whose first click closes an editor presses nothing the layo
     // The end of the text, not of its first line.
     await editor.press('Control+End');
     await page.keyboard.type(' too');
-    await page.waitForTimeout(700);
+    await waitForSessionToSettle(page);
     const before = sent.length;
 
     // A person's double click: two presses on the first word, a moment
@@ -605,11 +705,7 @@ for (const { taps, gap } of [{ taps: 2, gap: 120 }, { taps: 3, gap: 300 }]) test
   const { defaultBrowserType: _ignored, ...phone } = devices['Pixel 7'];
   const context = await browser.newContext({ ...phone, locale: 'en-US' });
   const page = await context.newPage();
-  const sent: string[] = [];
-  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
-    const text = typeof payload === 'string' ? payload : payload.toString();
-    if (text.includes('"update-session"')) sent.push(text);
-  }));
+  const sent = recordSessionWrites(page);
   try {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
@@ -625,7 +721,7 @@ for (const { taps, gap } of [{ taps: 2, gap: 120 }, { taps: 3, gap: 300 }]) test
     await dialog.getByRole('button', { name: 'Open board', exact: true }).click();
     await dialog.getByTestId('retro-template-lean_coffee').click();
     await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
-    await page.waitForTimeout(700);
+    await waitForSessionToSettle(page);
 
     const field = columns(page).nth(0).getByPlaceholder('Add an idea...');
     await field.fill('Late release notes');
@@ -640,7 +736,7 @@ for (const { taps, gap } of [{ taps: 2, gap: 120 }, { taps: 3, gap: 300 }]) test
     await expect(editor).toBeFocused();
     await editor.press('Control+End');
     await page.keyboard.type(' too');
-    await page.waitForTimeout(700);
+    await waitForSessionToSettle(page);
     const before = sent.length;
 
     // Near the top of the card below: the editor closing pushes it down.
@@ -667,15 +763,11 @@ for (const { taps, gap } of [{ taps: 2, gap: 120 }, { taps: 3, gap: 300 }]) test
 
 /**
  * Creates a team and opens a Lean Coffee board on it, its vote open when the
- * test presses a vote (a board starts with voting off); answers what the page
- * sends.
+ * test presses a vote (a board starts with voting off), and waits for the
+ * session to settle; answers what the page sends.
  */
 const startOpenBoard = async (page: Page, teamName: string, { withVote = false } = {}) => {
-  const sent: string[] = [];
-  page.on('websocket', (socket) => socket.on('framesent', ({ payload }) => {
-    const text = typeof payload === 'string' ? payload : payload.toString();
-    if (text.includes('"update-session"')) sent.push(text);
-  }));
+  const sent = recordSessionWrites(page);
   await page.goto('/');
   await page.waitForLoadState('networkidle');
   await page.getByRole('button', { name: '+ New Team' }).click();
@@ -691,7 +783,7 @@ const startOpenBoard = async (page: Page, teamName: string, { withVote = false }
   await dialog.getByTestId('retro-template-lean_coffee').click();
   await expect(page.getByRole('heading', { level: 2, name: 'Open board' })).toBeVisible({ timeout: 15_000 });
   if (withVote) await openTheVote(page);
-  await page.waitForTimeout(700);
+  await waitForSessionToSettle(page);
   return sent;
 };
 
@@ -738,6 +830,9 @@ test('taps after one on a group’s title that closes an editor press nothing th
       await page.keyboard.press('Enter');
       await expect(card(page, text)).toBeVisible();
     }
+    // Grouped once the cards' writes are answered: the heal of a lost write
+    // puts the cards back, never a grouping.
+    await waitForSessionToSettle(page);
     await page.getByRole('button', { name: /Pick up the ticket Late release notes/ }).focus();
     await page.keyboard.press('Enter');
     await page.getByRole('button', { name: /group the selected ticket with Too many meetings/ }).focus();
@@ -767,6 +862,9 @@ test('taps after one on a group’s title that closes an editor press nothing th
     // pixels away, on a control of the card once the editor has closed and the
     // card grown back — the closest pair of points between the two, so that
     // the next taps are a fingertip from the first whatever the font lays out.
+    // The blur below writes the text they are measured on, once the long
+    // card's write is answered.
+    await waitForSessionToSettle(page);
     await openEditor(long, ' too');
     const titleRect = await rectOf(title);
     await editor.evaluate((el) => (el as HTMLElement).blur());
@@ -808,7 +906,7 @@ test('taps after one on a group’s title that closes an editor press nothing th
     for (let letter = 0; letter < 3; letter += 1) await page.keyboard.press('Backspace');
     await page.keyboard.type('oto');
     expect(await rectOf(title)).toEqual(titleRect);
-    await page.waitForTimeout(700);
+    await waitForSessionToSettle(page);
     const before = sent.length;
     await page.evaluate(() => { (window as unknown as { __taps: unknown[] }).__taps.length = 0; });
 
@@ -876,7 +974,7 @@ for (const device of ['phone', 'computer'] as const) test(`a double ${device ===
       await expect(card(page, text)).toBeVisible();
     }
     await field.blur();
-    await page.waitForTimeout(700);
+    await waitForSessionToSettle(page);
     const before = sent.length;
 
     // Newest first: the third card is on top, the second right under it.
@@ -933,7 +1031,7 @@ test('taps at a steady pace on the Delete that comes up under the finger delete 
       await expect(card(page, text)).toBeVisible();
     }
     await field.blur();
-    await page.waitForTimeout(700);
+    await waitForSessionToSettle(page);
     const before = sent.length;
     await page.evaluate(() => { (window as unknown as { __taps: unknown[] }).__taps.length = 0; });
 
@@ -995,11 +1093,14 @@ for (const device of ['phone', 'computer'] as const) test(`a double ${device ===
     await card(page, 'Card with remarks').getByTestId('ticket-comment-btn').click();
     const dialog = page.getByRole('dialog');
     for (const text of ['First remark', 'Second remark']) {
+      // A comment is a write the test reads back, and the heal of a lost
+      // write puts none back: each once the write before it is answered.
+      await waitForSessionToSettle(page);
       await dialog.getByTestId('add-comment-input').fill(text);
       await dialog.getByTestId('submit-comment-btn').click();
       await expect(dialog.getByText(text)).toBeVisible();
     }
-    await page.waitForTimeout(700);
+    await waitForSessionToSettle(page);
 
     // The first remark's Delete is drawn where its editor's Cancel was: the
     // point pressed lies in both, measured, never assumed.
@@ -1069,7 +1170,7 @@ test('a double tap past the browser’s count on a dialog’s backdrop deletes n
     await card(page, 'First card').getByTestId('ticket-comment-btn').click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await page.waitForTimeout(700);
+    await waitForSessionToSettle(page);
 
     // A card's Delete that the backdrop covers, outside the dialog's panel.
     const box = (await card(page, 'Second card').getByRole('button', { name: 'Delete ticket' }).boundingBox())!;
@@ -1133,7 +1234,7 @@ test('a double tap past the browser’s count on a card’s vote keeps the vote,
     await page.keyboard.press('Enter');
     await expect(card(page, 'Voted card')).toBeVisible();
     await field.blur();
-    await page.waitForTimeout(700);
+    await waitForSessionToSettle(page);
 
     const takeBack = card(page, 'Voted card').getByRole('button', { name: 'Take back one of your votes on this ticket' });
     await expect(takeBack).toHaveCount(0);
@@ -1322,13 +1423,17 @@ const expectCornerClear = async (page: Page, target: Locator, label: string) => 
   expect(corner!.commentsCentre, `${where}: what a press at the centre of Comments reaches`).toBe('Comments');
 };
 
+// A reaction and a comment are writes the next count reads, and the heal of a
+// lost write puts neither back: each once the write before it is answered.
 const addReaction = async (target: Locator, nth: number) => {
+  await waitForSessionToSettle(target.page());
   await target.getByTestId('add-reaction-btn').click();
   await target.getByTestId('emoji-option').nth(nth).click();
   await expect(target.getByTestId('ticket-reaction')).toHaveCount(nth + 1, { timeout: 5_000 });
 };
 
 const addComment = async (page: Page, target: Locator) => {
+  await waitForSessionToSettle(page);
   await target.getByTestId('ticket-comment-btn').click();
   await page.getByTestId('add-comment-input').fill('A comment');
   await page.getByTestId('submit-comment-btn').click();
@@ -1379,6 +1484,7 @@ for (const device of ['phone', 'computer'] as const) {
   test(`a Brainstorm card's corner Delete lies over none of its controls, whatever its foot row holds, on a ${device}`, async ({ browser }) => {
     const context = await cornerContext(browser, device);
     const page = await context.newPage();
+    recordSessionWrites(page);
     try {
       const teamName = `${TEAM_NAME}-corner-${device}`;
       await page.goto('/');
@@ -1392,9 +1498,15 @@ for (const device of ['phone', 'computer'] as const) {
       await dismissAnnouncementsIfPresent(page);
       await page.getByRole('button', { name: 'New Retrospective' }).click();
       await page.getByRole('dialog').getByTestId('retro-template-start_stop_continue').click();
+      // The Icebreaker's Start Session, then two Next Phase, to the Brainstorm.
+      // A phase change that loses its race is healed away whole: each leaves
+      // once the write before it is answered, Start Session included, which
+      // follows the session's own first write.
+      await waitForSessionToSettle(page);
       await page.getByRole('button', { name: 'Start Session' }).click();
-      // The Icebreaker, then the Welcome, then the Brainstorm.
+      await waitForSessionToSettle(page);
       await page.getByRole('button', { name: 'Next Phase' }).click();
+      await waitForSessionToSettle(page);
       await page.getByRole('button', { name: 'Next Phase' }).click();
       await expect(page.getByRole('heading', { name: 'Brainstorm' })).toBeVisible({ timeout: 10_000 });
 
@@ -1424,7 +1536,10 @@ for (const device of ['phone', 'computer'] as const) {
         await page.keyboard.press('Enter');
         await expect(card(page, text)).toBeVisible();
       }
-      // Grouped through the keyboard path, the same on both screens.
+      // Grouped through the keyboard path, the same on both screens, once the
+      // cards' writes are answered: the heal of a lost write puts the cards
+      // back, never a grouping.
+      await waitForSessionToSettle(page);
       await page.getByRole('button', { name: /Pick up the ticket Grouped card, plain/ }).focus();
       await page.keyboard.press('Enter');
       await page.getByRole('button', { name: /group the selected ticket with Grouped card, commented/ }).focus();
