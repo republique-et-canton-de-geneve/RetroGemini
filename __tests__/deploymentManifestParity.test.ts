@@ -1,4 +1,6 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { spawnSync } from 'child_process';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { dockerContextExcludes } from './helpers/dockerignore';
@@ -1531,6 +1533,88 @@ describe('the release builds its image from its own tag', () => {
     expect(decision.some((line) => /push_latest=true/.test(line))).toBe(true);
     expect(decision.some((line) => /push_latest=false/.test(line))).toBe(true);
     expect(decision.some((line) => /::notice::/.test(line)), 'nothing says why latest is not moved').toBe(true);
+  });
+
+  /**
+   * The step above, run rather than read: its own script under bash, as the
+   * runner runs it, with a stand-in `gh` first on PATH. The lines above show
+   * that it names `sort -V` and both answers; they stayed true with
+   * `head -n 1` for `tail -n 1`, an inverted comparison or swapped answers,
+   * which publish the newest release without `latest`.
+   *
+   * The stand-in answers the one call the step makes, `gh release list
+   * --json tagName --jq '.[].tagName'`, with one tag per line, and leaves the
+   * drafts out only when the step asks with `--exclude-drafts`.
+   */
+  const FAKE_GH = [
+    '#!/usr/bin/env bash',
+    'set -euo pipefail',
+    'if [ "${1:-} ${2:-}" != "release list" ]; then echo "unexpected gh call: $*" >&2; exit 2; fi',
+    'if [ -n "${FAKE_GH_FAILS:-}" ]; then echo "HTTP 502: Bad Gateway" >&2; exit 1; fi',
+    'drafts=true',
+    'for argument in "$@"; do if [ "$argument" = --exclude-drafts ]; then drafts=false; fi; done',
+    'while read -r tag kind; do',
+    '  if [ -z "$tag" ]; then continue; fi',
+    '  if [ "$kind" = draft ] && [ "$drafts" = false ]; then continue; fi',
+    '  printf \'%s\\n\' "$tag"',
+    'done <<< "${FAKE_RELEASES:-}"',
+    '',
+  ].join('\n');
+
+  /** A release `gh` lists: its tag, or a draft named like one. */
+  type ListedRelease = string | { draft: string };
+
+  const decideLatest = (version: string, releases: ListedRelease[], { ghFails = false } = {}) => {
+    const step = steps.find((candidate) => candidate.id === 'latest');
+    if (!step) throw new Error(`${caller} has no step with the id "latest"`);
+    const bin = mkdtempSync(join(tmpdir(), 'release-gh-'));
+    try {
+      const gh = join(bin, 'gh');
+      writeFileSync(gh, FAKE_GH);
+      chmodSync(gh, 0o755);
+      const output = join(bin, 'github-output');
+      writeFileSync(output, '');
+      const run = spawnSync('bash', ['-c', step.run], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH ?? ''}`,
+          VERSION: version,
+          GITHUB_REPOSITORY: 'owner/repository',
+          GITHUB_OUTPUT: output,
+          FAKE_RELEASES: releases.map((release) => (typeof release === 'string' ? release : `${release.draft} draft`)).join('\n'),
+          FAKE_GH_FAILS: ghFails ? '1' : '',
+        },
+      });
+      return { status: run.status, stdout: run.stdout, stderr: run.stderr, output: readFileSync(output, 'utf8') };
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  };
+
+  it.each<{ name: string; version: string; releases: ListedRelease[]; latest: boolean; newer?: string }>([
+    { name: 'the newest release, before the list shows it', version: '45.3', releases: ['45.2', '45.1', '44.9'], latest: true },
+    { name: 'the newest release, listed', version: '45.3', releases: ['45.3', '45.2'], latest: true },
+    { name: 'an older release beside a higher one', version: '45.2', releases: ['45.3', '45.2', '45.1'], latest: false, newer: '45.3' },
+    { name: '45.10 above 45.9, read as versions', version: '45.10', releases: ['45.9', '45.8'], latest: true },
+    { name: '45.9 below 45.10, read as versions', version: '45.9', releases: ['45.10', '45.8'], latest: false, newer: '45.10' },
+    { name: 'the first release', version: '45.3', releases: [], latest: true },
+    { name: 'a higher draft, left out', version: '45.3', releases: [{ draft: '46.0' }, '45.2'], latest: true },
+    { name: 'names that are not X.Y, left out', version: '45.3', releases: ['v99.0', 'latest', '46.0-rc.1', '45.2'], latest: true },
+  ])('decides whether latest moves, by running the step: $name', ({ version, releases, latest, newer }) => {
+    const run = decideLatest(version, releases);
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.output).toBe(`push_latest=${latest}\n`);
+    if (newer !== undefined) {
+      expect(run.stdout).toContain(`::notice::Release ${newer} is newer than ${version}`);
+    }
+  });
+
+  it('stops, with nothing decided, when the releases cannot be listed', () => {
+    const run = decideLatest('45.3', ['45.2'], { ghFails: true });
+    expect(run.status).not.toBe(0);
+    expect(run.output).toBe('');
+    expect(run.stdout).toContain('::error::The releases could not be listed');
   });
 
   it('stops at the first failure in every step from the release to the dispatch', () => {
