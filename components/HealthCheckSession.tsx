@@ -31,6 +31,7 @@ import SyncStalledBanner from './session/SyncStalledBanner';
 import { JOIN_DENIED_REVOKED, SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
 import { isSessionLive, useSessionRevoked } from './session/useSessionRevoked';
 import LanguageSwitcher from './common/LanguageSwitcher';
+import { motionAllowed } from './common/motion/effects';
 import { useTranslation } from '../i18n/I18nContext';
 import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
@@ -551,11 +552,13 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     setActiveDiscussDimension(session?.discussionFocusId ?? null);
   }, [session?.discussionFocusId]);
 
+  // As in the retrospective: a glide for a reader who allows motion, at once
+  // for one who asked for less.
   useEffect(() => {
     if (!activeDiscussDimension) return;
     const target = discussRefs.current[activeDiscussDimension];
     if (target) {
-      setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+      setTimeout(() => target.scrollIntoView({ behavior: motionAllowed() ? 'smooth' : 'auto', block: 'center' }), 50);
     }
   }, [activeDiscussDimension]);
 

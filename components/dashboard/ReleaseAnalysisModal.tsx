@@ -5,6 +5,7 @@ import { dataService } from '../../services/dataService';
 import { noteRevokedResponse } from '../../services/sessionRevocation';
 import MarkdownContent from '../common/MarkdownContent';
 import ModalDialog from '../common/ModalDialog';
+import { motionAllowed } from '../common/motion/effects';
 import { useTranslation } from '../../i18n/I18nContext';
 import { noticeText, type Notice } from '../../i18n/notice';
 import {
@@ -58,12 +59,13 @@ const ReleaseAnalysisModal: React.FC<Props> = ({ retrospectives, members = [], o
 
   // When a fresh analysis appears, scroll it into view inside the modal and
   // briefly flash a violet ring so it is impossible to miss when the user
-  // was looking at the prompt or selection panel above.
+  // was looking at the prompt or selection panel above. The scroll glides for
+  // a reader who allows motion and is at once for one who asked for less.
   useEffect(() => {
     if (!analysis || !resultRef.current) return;
     // scrollIntoView may be missing in test renderers (jsdom) — guard the call.
     if (typeof resultRef.current.scrollIntoView === 'function') {
-      resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      resultRef.current.scrollIntoView({ behavior: motionAllowed() ? 'smooth' : 'auto', block: 'start' });
     }
     setHighlightResult(true);
     const timer = window.setTimeout(() => setHighlightResult(false), 1800);

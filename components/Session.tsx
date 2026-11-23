@@ -1306,11 +1306,14 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.phase]);
 
+  // Brings the topic in focus into view: a glide for a reader who allows
+  // motion, at once for one who asked for less (a smooth scroll has no media
+  // query to stop it).
   useEffect(() => {
     if (!activeDiscussTicket) return;
     const target = discussRefs.current[activeDiscussTicket];
     if (target) {
-      setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+      setTimeout(() => target.scrollIntoView({ behavior: motionAllowed() ? 'smooth' : 'auto', block: 'center' }), 50);
     }
   }, [activeDiscussTicket]);
 

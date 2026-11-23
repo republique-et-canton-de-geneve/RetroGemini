@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import ReleaseAnalysisModal from '../components/dashboard/ReleaseAnalysisModal';
 import { dataService } from '../services/dataService';
 import { RetroSession } from '../types';
+import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 const baseSession = (overrides: Partial<RetroSession> = {}): RetroSession => ({
   id: 'r1',
@@ -52,6 +53,7 @@ describe('ReleaseAnalysisModal', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
+    restoreMotionPreference();
   });
 
   it('starts with no retro selected and the generate button disabled', () => {
@@ -188,7 +190,15 @@ describe('ReleaseAnalysisModal', () => {
     expect(body.additionalInstructions).toBeUndefined();
   });
 
-  it('scrolls the AI result into view when it is rendered', async () => {
+  // The scroll glides for a reader who allows motion and is at once for one
+  // who asked for less, or whose browser cannot say (`motionAllowed()`, the
+  // rule of every effect): a smooth scroll has no media query to stop it.
+  it.each([
+    ['who did not ask for less motion', () => prefersMotion('no-preference'), 'smooth'],
+    ['who asked for less motion', () => prefersMotion('reduce'), 'auto'],
+    ['whose browser cannot say (no matchMedia)', () => restoreMotionPreference(), 'auto'],
+  ] as const)('scrolls the AI result into view when it is rendered, for a reader %s', async (_who, prefer, behavior) => {
+    prefer();
     const user = userEvent.setup();
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -211,7 +221,7 @@ describe('ReleaseAnalysisModal', () => {
 
       expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
       expect(scrollIntoViewMock).toHaveBeenCalledWith(
-        expect.objectContaining({ behavior: 'smooth', block: 'start' })
+        expect.objectContaining({ behavior, block: 'start' })
       );
     } finally {
       (HTMLElement.prototype as any).scrollIntoView = originalScrollIntoView;

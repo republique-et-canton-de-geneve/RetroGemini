@@ -8,6 +8,7 @@ import {
   scrollToNeighbour,
   scrollToReveal
 } from './boardColumns';
+import { motionAllowed } from '../common/motion/effects';
 
 /**
  * Measures the board's columns (`[data-column-id]` children of the scroller)
@@ -52,11 +53,6 @@ const sameState = (a: typeof NOTHING, b: typeof NOTHING) =>
   && a.visibleIds.length === b.visibleIds.length
   && a.visibleIds.every((id, i) => id === b.visibleIds[i]);
 
-const prefersReducedMotion = () =>
-  typeof window !== 'undefined'
-  && typeof window.matchMedia === 'function'
-  && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
 export const useBoardColumnsInView = (
   scrollerRef: RefObject<HTMLElement | null>,
   /** Changes when the columns do: their ids, joined. */
@@ -97,7 +93,8 @@ export const useBoardColumnsInView = (
     const { scroll, columns } = measure(scroller);
     const left = pick(scroll, columns);
     if (typeof scroller.scrollTo === 'function') {
-      scroller.scrollTo({ left, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+      // The question every effect asks (a browser that cannot say gets no glide).
+      scroller.scrollTo({ left, behavior: motionAllowed() ? 'smooth' : 'auto' });
     } else {
       scroller.scrollLeft = left;
     }

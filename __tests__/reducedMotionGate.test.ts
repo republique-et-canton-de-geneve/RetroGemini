@@ -20,6 +20,11 @@ import ts from 'typescript';
  * picker's grow on hover. A transition of colours, a shadow or an opacity is
  * no motion and stays for everyone.
  *
+ * So is a smooth scroll, which glides the page for as long as it lasts, and
+ * which no media query stops: `behavior: 'smooth'` moves for every reader.
+ * Three did, to the topic of Discuss in both session types and to the result
+ * of a release analysis. Each one asks the reader first.
+ *
  * The classes are read from the string literals of every component, through
  * the TypeScript parser: a comment that names a utility is not a class.
  */
@@ -36,6 +41,8 @@ const walk = (dir: string, out: string[] = []): string[] => {
 };
 
 const SOURCES = [...walk(join(ROOT, 'components')), join(ROOT, 'App.tsx')];
+/** Every file of the application that could scroll a page: the components, and the code they call. */
+const APP_SOURCES = [...SOURCES, join(ROOT, 'index.tsx'), ...walk(join(ROOT, 'utils')), ...walk(join(ROOT, 'services'))];
 const CSS = readFileSync(join(ROOT, 'index.css'), 'utf8');
 
 const parse = (file: string, text: string) =>
@@ -124,6 +131,47 @@ const ungatedAnimations = (text: string): string[] =>
   tokens(text).filter((token) => {
     const { variants, utility } = parts(token);
     return /^animate-/.test(utility) && utility !== 'animate-none' && !gated(variants);
+  });
+
+/**
+ * Whether a `'smooth'` is the first branch of the one question every smooth
+ * scroll asks, `motionAllowed() ? 'smooth' : 'auto'`
+ * (components/common/motion/effects.ts): a reader who asked for less motion,
+ * or whose browser cannot say, is then taken there at once. Parentheses
+ * aside, no other shape is read as asking.
+ */
+const asksMotionFirst = (literal: ts.Node): boolean => {
+  let branch: ts.Node = literal;
+  while (branch.parent && ts.isParenthesizedExpression(branch.parent)) branch = branch.parent;
+  const question = branch.parent;
+  if (!question || !ts.isConditionalExpression(question) || question.whenTrue !== branch) return false;
+  let condition: ts.Expression = question.condition;
+  while (ts.isParenthesizedExpression(condition)) condition = condition.expression;
+  return ts.isCallExpression(condition)
+    && ts.isIdentifier(condition.expression)
+    && condition.expression.text === 'motionAllowed'
+    && condition.arguments.length === 0;
+};
+
+/** The lines of a file that write `'smooth'` without asking the reader first, whatever it is given to. */
+const unaskedSmoothScrolls = (file: string, text: string): number[] => {
+  const source = parse(file, text);
+  const lines: number[] = [];
+  const visit = (node: ts.Node) => {
+    if (isText(node) && node.text === 'smooth' && !asksMotionFirst(node)) {
+      lines.push(source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return lines;
+};
+
+/** Tailwind's `scroll-smooth` (`scroll-behavior: smooth`), when no reader's setting stops it. */
+const ungatedSmoothScrollClasses = (text: string): string[] =>
+  tokens(text).filter((token) => {
+    const { variants, utility } = parts(token);
+    return utility === 'scroll-smooth' && !gated(variants);
   });
 
 // Tailwind 4's property lists (node_modules/tailwindcss/dist/lib.js).
@@ -259,6 +307,12 @@ const unstoppedCssAnimations = (css: string): string[] => {
     .map(({ selector }) => selector);
 };
 
+/** The rules of a stylesheet that scroll smoothly for a reader who asked for less motion. */
+const smoothScrollRules = (css: string): string[] =>
+  cssRules(css)
+    .filter(({ body, within }) => !forReaders(within, 'no-preference') && /(?:^|;)\s*scroll-behavior\s*:\s*smooth\b/.test(body))
+    .map(({ selector }) => selector);
+
 describe('nothing animates for a reader who asked for less motion', () => {
   it('declares every animate-* utility of the components for readers who allow motion', () => {
     expect(SOURCES.length).toBeGreaterThan(100);
@@ -333,6 +387,46 @@ describe('nothing animates for a reader who asked for less motion', () => {
     ].join('\n');
     expect(movingCssTransitions(css)).toEqual(['.bar', '.any', '.eased', '.knob']);
     expect(unstoppedCssAnimations(css)).toEqual(['.blink']);
+  });
+
+  it('asks the reader before every smooth scroll, in the code, the classes and index.css', () => {
+    expect(APP_SOURCES.length).toBeGreaterThan(SOURCES.length);
+    const found = APP_SOURCES.flatMap((file) => {
+      const text = readFileSync(file, 'utf8');
+      return [
+        ...unaskedSmoothScrolls(file, text).map((line) => `${relative(ROOT, file)}:${line}`),
+        ...literals(file, text).flatMap((list) => ungatedSmoothScrollClasses(list).map((token) => `${relative(ROOT, file)}: ${token}`)),
+      ];
+    });
+    expect(found).toEqual([]);
+    expect(smoothScrollRules(CSS)).toEqual([]);
+  });
+
+  it('reads a smooth scroll that does not ask the reader, whatever it is given to, and leaves one that does', () => {
+    const asking = [
+      "el.scrollIntoView({ behavior: motionAllowed() ? 'smooth' : 'auto', block: 'center' });",
+      "el.scrollTo({ left, behavior: (motionAllowed()) ? ('smooth') : 'auto' });",
+    ].join('\n');
+    expect(unaskedSmoothScrolls('Probe.tsx', asking)).toEqual([]);
+    const unasked = [
+      "el.scrollIntoView({ behavior: 'smooth', block: 'center' });",
+      "el.scrollTo({ left, behavior: reduced() ? 'auto' : 'smooth' });",
+      'const behavior = `smooth`; el.scrollBy({ top: 10, behavior });',
+      "const list = <div style={{ scrollBehavior: 'smooth' }} />;",
+      "el.scrollIntoView({ behavior: motionAllowed ? 'smooth' : 'auto' });",
+      "el.scrollIntoView({ behavior: !motionAllowed() ? 'auto' : 'smooth' });",
+      "el.scrollIntoView({ behavior: motionAllowed() ? 'smooth' : 'smooth' });",
+      "// 'smooth', in a comment",
+    ].join('\n');
+    expect(unaskedSmoothScrolls('Probe.tsx', unasked)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(ungatedSmoothScrollClasses('overflow-y-auto scroll-smooth md:scroll-smooth')).toEqual(['scroll-smooth', 'md:scroll-smooth']);
+    expect(ungatedSmoothScrollClasses('motion-safe:scroll-smooth scroll-auto')).toEqual([]);
+    const css = [
+      'html { scroll-behavior: smooth; }',
+      '@media (prefers-reduced-motion: no-preference) { .list { scroll-behavior: smooth; } }',
+      '.x { color: red; scroll-behavior: auto; }',
+    ].join('\n');
+    expect(smoothScrollRules(css)).toEqual(['html']);
   });
 
   it('reads the classes a component writes and not the words of its comments', () => {
