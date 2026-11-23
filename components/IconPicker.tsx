@@ -41,8 +41,11 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
     }
   };
 
+  // Anchored to its column's row (the call site's `relative`), never wider
+  // than it: a fixed 600px ran past a phone's dialog, which then scrolled
+  // sideways with the close button out of view (e2e/template-pickers.spec.ts).
   return (
-    <div className="absolute z-50 bg-white rounded-lg shadow-2xl border border-slate-200 p-4 w-[600px] max-h-[600px] flex flex-col">
+    <div className="absolute z-50 left-0 w-full max-w-[600px] bg-white rounded-lg shadow-2xl border border-slate-200 p-4 max-h-[600px] flex flex-col">
       <div className="flex justify-between items-center mb-3">
         <span className="font-medium text-slate-700">{t('shared.iconPicker.title')}</span>
         {onClose && (
@@ -90,7 +93,8 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
 
       {/* Icon Grid */}
       <div className="flex-1 overflow-y-auto">
-        <div className="grid grid-cols-10 gap-2">
+        {/* As many 3rem columns as fit: ten on a computer, fewer on a phone. */}
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(3rem,1fr))] gap-2">
           {filteredIcons.map((icon) => (
             <button
               key={icon.name}

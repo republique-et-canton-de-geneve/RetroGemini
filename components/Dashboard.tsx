@@ -931,7 +931,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                           <div role="group" aria-labelledby="custom-template-columns-label">
                               <span id="custom-template-columns-label" className={`${FIELD_LABEL} mb-2`}>{t('dashboard.columns.label')}</span>
                               {customCols.map((c, idx) => (
-                                  <div key={c.id} className="flex gap-2 mb-3 items-center">
+                                  <div key={c.id} className="relative flex gap-2 mb-3 items-center">
                                       <ColumnMoveButtons
                                         index={idx}
                                         count={customCols.length}
@@ -940,8 +940,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                         nextLabel={t('dashboard.columns.moveDown', { number: idx + 1 })}
                                         onMove={(direction) => setCustomCols((current) => moveColumn(current, c.id, direction))}
                                       />
-                                      {/* Icon Picker Button */}
-                                      <div className="relative">
+                                      {/* Icon Picker Button. Both pickers are anchored to the
+                                          row (relative), so each fits its width on a phone. */}
+                                      <div>
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -974,7 +975,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                                       </div>
 
                                       {/* Color Picker Button */}
-                                      <div className="relative">
+                                      <div>
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -1284,7 +1285,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                 <span id="retro-template-columns-label" className={`${FIELD_LABEL} mb-2`}>{t('dashboard.columns.label')}</span>
                 {retroTemplateCols.map((c, idx) => {
                   return (
-                    <div key={c.id} className="flex gap-2 mb-3 items-center">
+                    <div key={c.id} className="relative flex gap-2 mb-3 items-center">
                       <ColumnMoveButtons
                         index={idx}
                         count={retroTemplateCols.length}
@@ -1293,8 +1294,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                         nextLabel={t('dashboard.columns.moveDown', { number: idx + 1 })}
                         onMove={(direction) => setRetroTemplateCols((current) => moveColumn(current, c.id, direction))}
                       />
-                      {/* Icon Picker Button */}
-                      <div className="relative">
+                      {/* Icon Picker Button. Both pickers are anchored to the row
+                          (relative), as in Create Custom Template. */}
+                      <div>
                         <button
                           type="button"
                           onClick={() => {
@@ -1327,7 +1329,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                       </div>
 
                       {/* Color Picker Button */}
-                      <div className="relative">
+                      <div>
                         <button
                           type="button"
                           onClick={() => {

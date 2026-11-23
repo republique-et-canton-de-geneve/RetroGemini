@@ -69,8 +69,10 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({ initialColor = '#6366F
   return (
     // The picker's own chrome follows the look (slate and the brand); the
     // seventeen colours above are data offered to the facilitator and stay
-    // as they are.
-    <div className="absolute z-50 bg-white rounded-xl shadow-xl border border-slate-200 p-4 w-64">
+    // as they are. Anchored to its column's row (the call site's `relative`),
+    // never wider than it: on a phone it starts at the row's edge, from sm
+    // under its button.
+    <div className="absolute z-50 max-sm:left-0 w-64 max-w-full bg-white rounded-xl shadow-xl border border-slate-200 p-4">
       <div className="flex justify-between items-center mb-3">
         <span className="font-semibold text-slate-900">{t('shared.colorPicker.title')}</span>
         {onClose && (
@@ -99,7 +101,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({ initialColor = '#6366F
       {/* Color Palette Grid. The chosen swatch carries a brand ring with a
           white gap, so it reads on every colour of the palette, and says it is
           chosen as a state (aria-pressed). Each is named by its colour. */}
-      <div className="grid grid-cols-6 gap-1.5">
+      <div className="grid grid-cols-[repeat(auto-fill,2rem)] gap-1.5">
         {COLORS.map((color) => {
           const name = t(COLOR_NAME_KEYS[color]);
           return (
