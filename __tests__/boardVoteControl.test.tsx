@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import BoardVoteControl from '../components/session/BoardVoteControl';
@@ -7,6 +7,7 @@ import { BOARD_VOTE_CLASSES } from '../components/session/voteControls';
 import { cardTones } from '../utils/cardTones';
 import { contrastRatio } from '../utils/colorUtils';
 import { effectivePair, themeValue } from './helpers/tailwindTheme';
+import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 /**
  * The open board's one-button vote control, restyled in place: its names,
@@ -37,10 +38,17 @@ const Harness: React.FC<{ budget: number; takeBackOnly?: boolean; start?: number
   );
 };
 
-const originalMatchMedia = window.matchMedia;
+// A case that wants an effect states the reader's preference with the helper,
+// whose two queries answer consistently; jsdom has no matchMedia at all.
+// What was drawn goes, and the clock runs dry, before the real clock comes
+// back (AGENTS.md → Testing Requirements): jsdom starts its rendering
+// interval on whatever clock is installed, and one left on a clock that is
+// gone never fires again for the rest of the file.
 afterEach(() => {
-  window.matchMedia = originalMatchMedia;
+  cleanup();
+  if (vi.isFakeTimers()) act(() => { vi.runOnlyPendingTimers(); });
   vi.useRealTimers();
+  restoreMotionPreference();
 });
 
 describe('BoardVoteControl', () => {
@@ -154,7 +162,7 @@ describe('BoardVoteControl', () => {
 
   it('springs in the dot a vote adds, answers the press, and leaves no class behind', () => {
     vi.useFakeTimers();
-    window.matchMedia = ((query: string) => ({ matches: query.includes('no-preference') })) as unknown as typeof window.matchMedia;
+    prefersMotion('no-preference');
     const onAdd = vi.fn();
     const { rerender } = render(<BoardVoteControl {...props({ mine: 1, onAdd })} />);
     expect(document.querySelector('[class*="fx-"]')).toBeNull();
@@ -173,7 +181,7 @@ describe('BoardVoteControl', () => {
   // the snapshot a reconnection brings back), a count that rises is drawn
   // without its spring; a press of the thumb still answers.
   it('springs nothing in while the board is quiet, unless its own thumb was just pressed', () => {
-    window.matchMedia = ((query: string) => ({ matches: query.includes('no-preference') })) as unknown as typeof window.matchMedia;
+    prefersMotion('no-preference');
     const quiet = () => true;
     const onAdd = vi.fn();
     const { rerender } = render(<BoardVoteControl {...props({ mine: 1, onAdd, motionQuiet: quiet })} />);

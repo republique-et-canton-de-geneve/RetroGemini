@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, renderHook } from '@testing-library/react';
+import { act, cleanup, renderHook } from '@testing-library/react';
 import { ARRIVAL_MS, POP_MS, PanelMotionInput, QUIET_MS, usePanelMotion } from '../components/session/usePanelMotion';
 import { RECONNECT_QUIET_MS } from '../components/session/useSessionMotion';
 import { QUIET_AFTER_LIVE_MS } from '../utils/sessionMotion';
@@ -36,7 +36,13 @@ beforeEach(() => {
   // A reader who did not ask for less motion, unless a case says otherwise.
   prefersMotion('no-preference');
 });
+// What was drawn goes, and the clock runs dry, before the real clock comes
+// back (AGENTS.md → Testing Requirements): jsdom starts its rendering
+// interval on whatever clock is installed, and one left on a clock that is
+// gone never fires again for the rest of the file.
 afterEach(() => {
+  cleanup();
+  act(() => { vi.runOnlyPendingTimers(); });
   vi.useRealTimers();
   restoreMotionPreference();
 });

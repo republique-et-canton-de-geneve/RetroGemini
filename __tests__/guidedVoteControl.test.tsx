@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import LanguageProvider from '../i18n/LanguageProvider';
@@ -8,6 +8,7 @@ import { GUIDED_VOTE_CLASSES, MAX_VOTE_DOTS } from '../components/session/voteCo
 import { cardTones } from '../utils/cardTones';
 import { contrastRatio } from '../utils/colorUtils';
 import { effectivePair, themeValue } from './helpers/tailwindTheme';
+import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 /**
  * The guided Vote phase's control of a card or group: markup only, the
@@ -37,10 +38,17 @@ const Harness: React.FC<{ kind?: 'ticket' | 'group'; start?: number; budget?: nu
   );
 };
 
-const originalMatchMedia = window.matchMedia;
+// A case that wants an effect states the reader's preference with the helper,
+// whose two queries answer consistently; jsdom has no matchMedia at all.
+// What was drawn goes, and the clock runs dry, before the real clock comes
+// back (AGENTS.md → Testing Requirements): jsdom starts its rendering
+// interval on whatever clock is installed, and one left on a clock that is
+// gone never fires again for the rest of the file.
 afterEach(() => {
-  window.matchMedia = originalMatchMedia;
+  cleanup();
+  if (vi.isFakeTimers()) act(() => { vi.runOnlyPendingTimers(); });
   vi.useRealTimers();
+  restoreMotionPreference();
 });
 
 describe('GuidedVoteControl', () => {
@@ -149,7 +157,7 @@ describe('GuidedVoteControl', () => {
 
   it('springs in the dot a vote adds and leaves no class behind, never on first draw', () => {
     vi.useFakeTimers();
-    window.matchMedia = ((query: string) => ({ matches: query.includes('no-preference') })) as unknown as typeof window.matchMedia;
+    prefersMotion('no-preference');
     const { rerender } = render(<GuidedVoteControl kind="ticket" mine={1} canAdd onAdd={vi.fn()} onRemove={vi.fn()} motionQuiet={notQuiet} />);
     expect(document.querySelector('.fx-pop')).toBeNull();
     rerender(<GuidedVoteControl kind="ticket" mine={2} canAdd onAdd={vi.fn()} onRemove={vi.fn()} motionQuiet={notQuiet} />);
@@ -160,7 +168,7 @@ describe('GuidedVoteControl', () => {
 
   it('answers a press of the plus, and only when it adds', () => {
     vi.useFakeTimers();
-    window.matchMedia = ((query: string) => ({ matches: query.includes('no-preference') })) as unknown as typeof window.matchMedia;
+    prefersMotion('no-preference');
     const onAdd = vi.fn();
     const { rerender } = render(<GuidedVoteControl kind="ticket" mine={0} canAdd={false} onAdd={onAdd} onRemove={vi.fn()} motionQuiet={notQuiet} />);
     const plus = screen.getByRole('button', { name: 'Add a vote to this ticket' });
@@ -185,7 +193,7 @@ describe('GuidedVoteControl', () => {
   // the snapshot a reconnection brings back), a count that rises is drawn
   // without its spring; a press of the plus still answers.
   it('springs nothing in while the board is quiet, unless its own plus was just pressed', () => {
-    window.matchMedia = ((query: string) => ({ matches: query.includes('no-preference') })) as unknown as typeof window.matchMedia;
+    prefersMotion('no-preference');
     const quiet = () => true;
     const onAdd = vi.fn();
     const { rerender } = render(<GuidedVoteControl kind="ticket" mine={1} canAdd onAdd={onAdd} onRemove={vi.fn()} motionQuiet={quiet} />);

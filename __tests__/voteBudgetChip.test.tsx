@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import LanguageProvider from '../i18n/LanguageProvider';
 import VoteBudget from '../components/session/VoteBudget';
@@ -13,6 +13,7 @@ import {
   voteFlightStart,
 } from '../components/session/voteControls';
 import { effectivePair, tokenContrast } from './helpers/tailwindTheme';
+import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 /**
  * The Vote bar's budget: the sentence the tests and the e2e suite read, and a
@@ -25,10 +26,17 @@ const notQuiet = () => false;
 const borderToken = (className: string) => /(?:^|\s)border-((?:slate|indigo)-\d+)(?:\s|$)/.exec(className)?.[1];
 const tokens = (container: HTMLElement) => [...container.querySelectorAll('[data-vote-token]')];
 
-const originalMatchMedia = window.matchMedia;
+// A case that wants an effect states the reader's preference with the helper,
+// whose two queries answer consistently; jsdom has no matchMedia at all.
+// What was drawn goes, and the clock runs dry, before the real clock comes
+// back (AGENTS.md → Testing Requirements): jsdom starts its rendering
+// interval on whatever clock is installed, and one left on a clock that is
+// gone never fires again for the rest of the file.
 afterEach(() => {
-  window.matchMedia = originalMatchMedia;
+  cleanup();
+  if (vi.isFakeTimers()) act(() => { vi.runOnlyPendingTimers(); });
   vi.useRealTimers();
+  restoreMotionPreference();
 });
 
 describe('VoteBudget', () => {
@@ -126,7 +134,7 @@ describe('VoteBudget', () => {
     const chip = container.querySelector(VOTE_BUDGET_HOOKS.chip)!;
     expect(shakeVoteBudget(container)).toBe(false);
     expect(chip.className).not.toContain('fx-nope');
-    window.matchMedia = ((query: string) => ({ matches: query.includes('no-preference') })) as unknown as typeof window.matchMedia;
+    prefersMotion('no-preference');
     expect(shakeVoteBudget(container)).toBe(true);
     expect(chip.classList.contains('fx-nope')).toBe(true);
     act(() => { vi.runAllTimers(); });
@@ -137,7 +145,7 @@ describe('VoteBudget', () => {
   // reconnection's snapshot brings back), the refilled token is drawn without
   // its spring; past the quiet, the next one springs in.
   it('springs no refilled token in while the board is quiet', () => {
-    window.matchMedia = ((query: string) => ({ matches: query.includes('no-preference') })) as unknown as typeof window.matchMedia;
+    prefersMotion('no-preference');
     const quiet = () => true;
     const { container, rerender } = render(<VoteBudget left={1} cast={2} budget={3} unlimited={false} motionQuiet={quiet} />);
     rerender(<VoteBudget left={2} cast={1} budget={3} unlimited={false} motionQuiet={quiet} />);
@@ -149,7 +157,7 @@ describe('VoteBudget', () => {
 
   it('springs in the token a vote taken back refills, never on first draw', () => {
     vi.useFakeTimers();
-    window.matchMedia = ((query: string) => ({ matches: query.includes('no-preference') })) as unknown as typeof window.matchMedia;
+    prefersMotion('no-preference');
     const { container, rerender } = render(<VoteBudget left={1} cast={2} budget={3} unlimited={false} motionQuiet={notQuiet} />);
     expect(container.querySelector('.fx-pop')).toBeNull();
     rerender(<VoteBudget left={2} cast={1} budget={3} unlimited={false} motionQuiet={notQuiet} />);

@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Group, RetroSession, Ticket } from '../types';
 import {
@@ -10,6 +10,7 @@ import {
   playLandedVote,
   useSessionMotion,
 } from '../components/session/useSessionMotion';
+import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 /**
  * The hook compares the session it showed with the one it shows and puts the
@@ -65,16 +66,6 @@ const Board: React.FC<{ session: RetroSession; isLive: boolean; pending: Readonl
   );
 };
 
-const originalMatchMedia = window.matchMedia;
-const stubMotion = (reduced = false) => {
-  window.matchMedia = vi.fn((query: string) => ({
-    matches: query.includes('no-preference') ? !reduced : reduced,
-    media: query,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-  })) as unknown as typeof window.matchMedia;
-};
-
 /** The board on its first state, live, past the quiet seconds of the connection. */
 const mount = (first: RetroSession, pending: ReadonlySet<string> = new Set()) => {
   const view = render(<Board session={first} isLive pending={pending} />);
@@ -89,15 +80,22 @@ const decorated = () => [...document.querySelectorAll('[class*="fx-"]')].map((el
 
 beforeEach(() => {
   vi.useFakeTimers();
-  stubMotion();
+  // A reader who did not ask for less motion, unless a case says otherwise.
+  prefersMotion('no-preference');
 });
 
+// What was drawn goes, and the clock runs dry, before the real clock comes
+// back (AGENTS.md → Testing Requirements): jsdom starts its rendering
+// interval on whatever clock is installed, and one left on a clock that is
+// gone never fires again for the rest of the file.
 afterEach(() => {
+  cleanup();
+  if (vi.isFakeTimers()) act(() => { vi.runOnlyPendingTimers(); });
   vi.useRealTimers();
   // A spy a test put on a prototype (the cards' boxes) never outlives it,
   // whether its assertions passed or not.
   vi.restoreAllMocks();
-  window.matchMedia = originalMatchMedia;
+  restoreMotionPreference();
 });
 
 describe('useSessionMotion', () => {
@@ -460,14 +458,14 @@ describe('useSessionMotion', () => {
   });
 
   it('plays nothing to a reader who asked for less motion, nor without matchMedia', () => {
-    stubMotion(true);
+    prefersMotion('reduce');
     const reduced = mount(session());
     reduced.show(session({ tickets: [ticket('t1'), ticket('t2')] }));
     expect(decorated()).toEqual([]);
     reduced.unmount();
 
     // jsdom's own state: no matchMedia
-    delete window.matchMedia;
+    restoreMotionPreference();
     const bare = mount(session());
     bare.show(session({ tickets: [ticket('t1'), ticket('t2')] }));
     expect(decorated()).toEqual([]);
