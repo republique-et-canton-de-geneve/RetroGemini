@@ -2,8 +2,9 @@ import React from 'react';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import AvatarArt from '../components/common/avatars/AvatarArt';
+import Avatar from '../components/common/Avatar';
 import {
   AVATAR_ART,
   AVATAR_ART_IDS,
@@ -14,7 +15,25 @@ import {
   type AvatarArtId,
   type AvatarShape,
 } from '../components/common/avatars/avatarArt';
+import { avatarColorClasses } from '../utils/participantColors';
 import { en, fr } from '../i18n/messages';
+
+// How many times each picture's shapes were read. AvatarArt reads
+// AVATAR_ART[id] once each time it draws, so the count says how often a
+// picture was built. The proxy only counts: every read answers as before.
+const artReads = vi.hoisted(() => new Map<string, number>());
+vi.mock('../components/common/avatars/avatarArt', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../components/common/avatars/avatarArt')>();
+  return {
+    ...original,
+    AVATAR_ART: new Proxy(original.AVATAR_ART, {
+      get(target, key, receiver) {
+        if (typeof key === 'string') artReads.set(key, (artReads.get(key) ?? 0) + 1);
+        return Reflect.get(target, key, receiver);
+      },
+    }),
+  };
+});
 
 /**
  * The avatar pictures are data (components/common/avatars/avatarArt.ts): every
@@ -150,6 +169,32 @@ describe('AvatarArt', () => {
       expect(container.innerHTML, unknown).toBe('');
       unmount();
     }
+  });
+
+  // The board draws every card again on each change of the session, and each
+  // card draws its author's avatar: rebuilt each time, the pictures of a
+  // thousand cards cost about 20 ms more per redraw. A picture depends on its
+  // id alone, so it is built once and kept while the id stays.
+  it('is not built again when its parent draws again with the same id, and a new id draws at once', () => {
+    const Card: React.FC<{ id: AvatarArtId; tick: number }> = ({ id, tick }) => (
+      <div data-tick={tick}>
+        <Avatar colorClasses={avatarColorClasses('bg-rose-500')} initials="RO" size={28} avatarId={id} />
+      </div>
+    );
+    artReads.clear();
+    const { container, rerender, unmount } = render(<Card id="owl" tick={0} />);
+    const built = artReads.get('owl') ?? 0;
+    expect(built, 'the first draw builds the picture').toBeGreaterThan(0);
+
+    rerender(<Card id="owl" tick={1} />);
+    rerender(<Card id="owl" tick={2} />);
+    expect(container.querySelector('[data-tick="2"] [data-avatar-art="owl"] svg')).not.toBeNull();
+    expect(artReads.get('owl'), 'redraws with the same id').toBe(built);
+
+    rerender(<Card id="cat" tick={3} />);
+    expect(container.querySelector('[data-avatar-art="cat"] svg circle, [data-avatar-art="cat"] svg path')).not.toBeNull();
+    expect(container.querySelector('[data-avatar-art="owl"]')).toBeNull();
+    unmount();
   });
 });
 

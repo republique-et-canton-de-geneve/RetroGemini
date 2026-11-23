@@ -25,14 +25,19 @@ const drawShape = (shape: AvatarShape, key: number): React.ReactElement | null =
  * name is said by whatever holds it, so the picture is hidden from assistive
  * technology. An id it does not know draws nothing: the id comes from a value
  * another client stored.
+ *
+ * Memoized on its one prop: the board draws every card again on each change
+ * of the session, and a picture rebuilt each time cost a thousand-card board
+ * about 20 ms per redraw. Its colours come from CSS, so nothing else can
+ * change what it draws.
  */
-const AvatarArt: React.FC<{ id: AvatarArtId }> = ({ id }) => {
+const AvatarArt = React.memo(function AvatarArt({ id }: { id: AvatarArtId }) {
   if (typeof id !== 'string' || !Object.prototype.hasOwnProperty.call(AVATAR_ART, id)) return null;
   return (
     <svg className="avatar-art" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
       {AVATAR_ART[id].map(drawShape)}
     </svg>
   );
-};
+});
 
 export default AvatarArt;
