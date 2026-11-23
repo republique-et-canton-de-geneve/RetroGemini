@@ -188,7 +188,7 @@ jobs:
       # below checks it out: the dispatch API takes a fully qualified ref, as
       # dispatches that pass `github.ref` do, while a short name is a branch's
       # as much as a tag's, and a branch named like the version, whose content
-      # the check above never compared, would be built in the tag's place.
+      # the check above never compared, could be built in the tag's place.
       - name: Publish matching Docker image
         env:
           GH_TOKEN: ${{ github.token }}

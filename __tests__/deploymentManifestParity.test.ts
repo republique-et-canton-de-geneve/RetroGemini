@@ -1417,7 +1417,7 @@ describe('the release builds its image from its own tag', () => {
   it('builds the image from the release tag, never from a branch', () => {
     // In full: the content check fetches `refs/tags/<version>` and the SBOM
     // checks it out, while a short name is a branch's as much as a tag's, and
-    // a branch named like the version would be built in the tag's place.
+    // a branch named like the version could be built in the tag's place.
     expect(
       publishes[0]?.ref,
       `${caller} dispatches docker-deploy.yml on ${publishes[0]?.ref ?? 'no --ref'}: `
