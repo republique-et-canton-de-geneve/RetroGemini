@@ -177,9 +177,15 @@ const visibleVoteChanges = (motion: SessionMotion, prev: RetroSession, next: Ret
   return drawn.filter((id) => votesOf(before.get(id), viewerId) !== votesOf(after.get(id), viewerId));
 };
 
-/** The card or group of this id under `root` (ids are compared, never put in a selector). */
+/** The first element carrying `attribute` with this value, in document order (ids are compared, never put in a selector). */
+const firstWith = (root: Document | Element, attribute: string, value: string): Element | null => {
+  for (const element of root.querySelectorAll(`[${attribute}]`)) if (element.getAttribute(attribute) === value) return element;
+  return null;
+};
+
+/** The card or group of this id under `root`: no index of the board, for one item. */
 const itemOf = (root: Document | Element, id: string): Element | null =>
-  indexBy(root, MOTION_HOOKS.card).get(id)?.[0] ?? indexBy(root, MOTION_HOOKS.group).get(id)?.[0] ?? null;
+  firstWith(root, MOTION_HOOKS.card, id) ?? firstWith(root, MOTION_HOOKS.group, id);
 
 /**
  * A vote of the viewer's has landed on a card or a group, carried by a
@@ -218,23 +224,40 @@ export function playSessionMotion(
   viewerId: string,
   heldVotes: ReadonlySet<string> = new Set(),
 ): void {
-  const cards = indexBy(root, MOTION_HOOKS.card);
-  const groups = indexBy(root, MOTION_HOOKS.group);
-  const first = (index: Map<string, Element[]>, id: string) => index.get(id)?.[0] ?? null;
+  // What plays is read from the two states before the page is searched. A
+  // vote the screen does not draw, or keeps from this viewer (a teammate's in
+  // the guided Vote phase), and one a flight carries come to nothing, and
+  // every client meets each teammate's vote: on a board of a thousand cards,
+  // two indexes of the board for nothing, before paint.
+  const votes = visibleVoteChanges(motion, prev, next, viewerId).filter((id) => !heldVotes.has(id));
+  const onItems = motion.revealedCards.length + motion.arrivedCards.length + motion.ownCards.length + motion.reactions.length + votes.length;
+  if (onItems === 0 && motion.columns.length === 0) return;
+
+  // Each index is built once, and only for an effect that plays on its elements.
+  const lazyIndex = (attribute: string) => {
+    let index: Map<string, Element[]> | null = null;
+    return (id: string): Element | null => {
+      if (!index) index = indexBy(root, attribute);
+      return index.get(id)?.[0] ?? null;
+    };
+  };
+  const cardOf = lazyIndex(MOTION_HOOKS.card);
+  const groupOf = lazyIndex(MOTION_HOOKS.group);
+  const columnCountOf = lazyIndex(MOTION_HOOKS.columnCount);
 
   // Measured before any effect is put on: a class written first would have
   // the browser lay the page out again for each box read after it.
   const shown: Element[] = [];
   for (const id of motion.revealedCards) {
     if (shown.length >= MAX_REVEALED_AT_ONCE) break;
-    const card = first(cards, id);
+    const card = cardOf(id);
     if (!card || !inWindow(card)) continue;
     const text = partOf(card, CARD_TEXT_SELECTOR);
     if (text) shown.push(text);
   }
 
   for (const id of [...motion.arrivedCards, ...motion.ownCards]) {
-    const card = first(cards, id);
+    const card = cardOf(id);
     if (!card) continue;
     playEffect(card, 'fx-card-in');
     playEffect(card, 'fx-ring', ringOptions(card));
@@ -248,7 +271,7 @@ export function playSessionMotion(
     const split = key.lastIndexOf(':');
     const ticketId = key.slice(0, split);
     const emoji = key.slice(split + 1);
-    const card = first(cards, ticketId);
+    const card = cardOf(ticketId);
     if (!card) continue;
     const chip = [...card.querySelectorAll(`[${MOTION_HOOKS.reaction}]`)].find(
       (element) => element.getAttribute(MOTION_HOOKS.reaction) === emoji && ownerOf(element) === card,
@@ -257,14 +280,10 @@ export function playSessionMotion(
     playEffect(chip, reactionCount(prev, ticketId, emoji) > 0 ? 'fx-bump' : 'fx-pop');
   }
 
-  if (motion.columns.length) {
-    const counts = indexBy(root, MOTION_HOOKS.columnCount);
-    for (const colId of motion.columns) playEffect(first(counts, colId), 'fx-bump');
-  }
+  for (const colId of motion.columns) playEffect(columnCountOf(colId), 'fx-bump');
 
-  for (const id of visibleVoteChanges(motion, prev, next, viewerId)) {
-    if (heldVotes.has(id)) continue;
-    const item = first(cards, id) ?? first(groups, id);
+  for (const id of votes) {
+    const item = cardOf(id) ?? groupOf(id);
     if (!item) continue;
     playEffect(partOf(item, `[${MOTION_HOOKS.voteCount}]`), 'fx-bump');
     playEffect(item, 'fx-ring', ringOptions(item));

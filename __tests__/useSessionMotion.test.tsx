@@ -298,6 +298,45 @@ describe('useSessionMotion', () => {
     expect(decorated()).toEqual([]);
   });
 
+  // What plays is read from the two states before the page is searched: a
+  // vote the screen does not draw, or keeps from this viewer, comes to
+  // nothing, and every client meets each teammate's vote, on a board of a
+  // thousand cards (review finding F43).
+  const boardSearches = (search: { mock: { calls: unknown[][] } }) =>
+    search.mock.calls.map(([selector]) => String(selector)).filter((selector) => /data-(ticket|group)-id/.test(selector));
+
+  it.each([
+    ['a teammate’s vote in the guided Vote phase', { phase: 'VOTE' }, 'bob'],
+    ['a teammate’s vote on a board whose counts are hidden', { phase: 'OPEN_BOARD', settings: { revealBrainstorm: true, voteCountHidden: true } }, 'bob'],
+    ['the viewer’s vote on a board that draws no vote', { phase: 'OPEN_BOARD', settings: { revealBrainstorm: true, votingDisabled: true, voteCountHidden: true } }, 'me'],
+  ])('searches the board for no card and no group for %s', (_case, over, voter) => {
+    const base = over as Partial<RetroSession>;
+    const { show } = mount(session({ ...base, tickets: [ticket('t1'), ticket('t2')] }));
+    const search = vi.spyOn(document, 'querySelectorAll');
+    show(session({ ...base, tickets: [ticket('t1', { votes: [voter] }), ticket('t2')] }));
+    expect(boardSearches(search)).toEqual([]);
+    expect(decorated()).toEqual([]);
+  });
+
+  it('searches the board for no card for the viewer’s vote a flight carries', () => {
+    const held = new Set(['t1']);
+    const view = render(<Board session={session({ phase: 'VOTE', tickets: [ticket('t1')] })} isLive pending={new Set()} held={held} />);
+    act(() => { vi.advanceTimersByTime(RECONNECT_QUIET_MS + 1); });
+    const search = vi.spyOn(document, 'querySelectorAll');
+    view.rerender(<Board session={session({ phase: 'VOTE', tickets: [ticket('t1', { votes: ['me'] })] })} isLive pending={new Set()} held={held} />);
+    expect(boardSearches(search)).toEqual([]);
+    expect(decorated()).toEqual([]);
+  });
+
+  it('searches for no card or group when only a column’s count moves, and bumps it', () => {
+    const { show } = mount(session({ tickets: [ticket('t1'), ticket('t2')] }));
+    const search = vi.spyOn(document, 'querySelectorAll');
+    // A card moved to the other column: two counts change, no card arrives.
+    show(session({ tickets: [ticket('t1'), ticket('t2', { colId: 'stop' })] }));
+    expect(boardSearches(search)).toEqual([]);
+    expect(decorated().sort()).toEqual(['start:fx-bump', 'stop:fx-bump']);
+  });
+
   it('leaves a vote a flight carries to the screen, which plays it where the token lands', () => {
     const held = new Set(['t2']);
     const view = render(<Board session={session({ phase: 'VOTE', tickets: [ticket('t1'), ticket('t2')] })} isLive pending={new Set()} held={held} />);
