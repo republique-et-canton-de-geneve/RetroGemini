@@ -188,8 +188,13 @@ describe('the edge of every field clears 3:1 on its fill', () => {
 
 /** The input types that take no text: the `readonly` attribute does not apply to them, and `:read-only` always matches them. */
 const UNTYPED_INPUT_TYPES = /^(checkbox|radio|file|range|hidden|color|submit|button|image|reset)$/;
-/** A class whose variant names the `:read-only` pseudo-class: `read-only:…`, `md:read-only:…`, `[&:read-only]:…`. */
-const READ_ONLY_VARIANT = /(^|:)read-only:|:read-only\b/;
+/**
+ * A class whose variant names the field's own `:read-only` pseudo-class:
+ * `read-only:…` or `not-read-only:…`, after a variant or not, and `:read-only`
+ * inside an arbitrary variant (`[&:read-only]:…`, `[&:not(:read-only)]:…`).
+ * `group-read-only:` and `peer-read-only:` read another element's.
+ */
+const READ_ONLY_VARIANT = /(^|:)(not-)?read-only:|:read-only\b/;
 
 describe('a field that cannot be typed in is never styled as read-only', () => {
   // `:read-only` matches every element that cannot be typed in, so a select,
@@ -216,10 +221,20 @@ describe('a field that cannot be typed in is never styled as read-only', () => {
     expect(styledAsReadOnly).toEqual([]);
   });
 
-  it('knows a read-only variant however it is written', () => {
+  it('knows read-only: and not-read-only:, after a variant or not, and :read-only in an arbitrary variant', () => {
     // Under a utility no theme has (`bg-locked`): Tailwind scans these files
     // too, and a real class written here would add a rule to the build.
-    for (const token of ['read-only:bg-locked', 'md:read-only:bg-locked', '[&:read-only]:bg-locked', '[&:not(:read-only)]:bg-locked']) {
+    // `not-read-only:` is Tailwind's own spelling of `[&:not(:read-only)]:`:
+    // a select never matches it, so `bg-slate-50 not-read-only:bg-white`
+    // leaves every select grey at rest.
+    for (const token of [
+      'read-only:bg-locked',
+      'md:read-only:bg-locked',
+      '[&:read-only]:bg-locked',
+      '[&:not(:read-only)]:bg-locked',
+      'not-read-only:bg-locked',
+      'md:not-read-only:bg-locked',
+    ]) {
       expect(READ_ONLY_VARIANT.test(token), token).toBe(true);
     }
     // The attribute a field made read-only carries is not the pseudo-class.

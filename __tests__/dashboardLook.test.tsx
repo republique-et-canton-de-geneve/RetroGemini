@@ -109,20 +109,24 @@ describe('the recipes, measured', () => {
       throw new Error(`FIELD_BOX fills a field under "${variant}": say here which fields that is`);
     });
 
-    it('is drawn on a text field or a textarea made read-only, never on a select or a file input', () => {
+    it('is drawn on a text field or a textarea made read-only, never on a select, a file input or a disabled field', () => {
       // `:read-only` is not "made read-only": it matches every element that
       // cannot be typed in, every select and every file input among them,
-      // disabled or not (jsdom and Chromium agree; e2e/dashboard-actions-tab.spec.ts
-      // measures what Chromium paints on the Actions tab's select). Given so,
-      // the fill drew the selects and the feedback image field of these
-      // screens at rest as the Feedback Hub draws a draft locked while it is
-      // sent. The locked draft keeps its fill.
+      // disabled or not, and a disabled text field or textarea (jsdom and
+      // Chromium agree; e2e/dashboard-actions-tab.spec.ts measures what
+      // Chromium paints on the Actions tab's select). Given so, the fill drew
+      // the selects and the feedback image field of these screens at rest as
+      // the Feedback Hub draws a draft locked while it is sent. The locked
+      // draft keeps its fill. The recipe has no disabled look: a disabled
+      // field takes its own `disabled:` colours, measured where it is drawn.
       expect(stateFills.length).toBeGreaterThan(0);
       document.body.innerHTML = `
         <input data-case="a text field made read-only" type="text" readonly>
         <textarea data-case="a textarea made read-only" readonly></textarea>
         <input data-case="a text field" type="text">
         <textarea data-case="a textarea"></textarea>
+        <input data-case="a disabled text field" type="text" disabled>
+        <textarea data-case="a disabled textarea" disabled></textarea>
         <select data-case="a select"><option>One</option></select>
         <select data-case="a disabled select" disabled><option>One</option></select>
         <input data-case="a file input" type="file">
