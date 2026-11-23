@@ -30,7 +30,7 @@ const createTeam = async (page: Page, teamName: string) => {
 const startRetro = async (page: Page, { anonymous = false } = {}) => {
   await page.getByRole('button', { name: 'New Retrospective' }).click();
   const dialog = page.getByRole('dialog');
-  if (anonymous) await dialog.getByRole('button', { name: /anonymous/i }).first().click();
+  if (anonymous) await dialog.getByRole('switch', { name: /anonymous/i }).click();
   await dialog.getByTestId('retro-template-start_stop_continue').click();
   await expect(page.getByTestId('icebreaker-question-input')).toBeVisible({ timeout: 10_000 });
 };

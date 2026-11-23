@@ -841,6 +841,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                             <p className="text-xs text-slate-600 mt-0.5">{t('dashboard.newRetro.anonymousHint')}</p>
                           </div>
                           <button
+                            type="button"
+                            role="switch"
+                            aria-checked={isAnonymous}
                             onClick={() => setIsAnonymous(!isAnonymous)}
                             className={`${SWITCH_TRACK} ${isAnonymous ? SWITCH_ON : SWITCH_OFF}`}
                             aria-label={t('dashboard.form.toggleAnonymous')}
@@ -1091,6 +1094,9 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
                   <p className="text-xs text-slate-600 mt-0.5">{t('dashboard.newHealthCheck.anonymousHint')}</p>
                 </div>
                 <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isHealthCheckAnonymous}
                   onClick={() => setIsHealthCheckAnonymous(!isHealthCheckAnonymous)}
                   className={`${SWITCH_TRACK} ${isHealthCheckAnonymous ? SWITCH_ON : SWITCH_OFF}`}
                   aria-label={t('dashboard.form.toggleAnonymous')}

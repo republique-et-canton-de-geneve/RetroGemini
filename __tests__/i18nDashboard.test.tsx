@@ -200,7 +200,7 @@ describe('Dashboard in French', () => {
     expect(within(dialog).getByLabelText('Nom de la session')).toBeInTheDocument();
     expect(within(dialog).getByText('Mode anonyme')).toBeInTheDocument();
     expect(within(dialog).getByText('Masquer le nom des auteurs sur les cartes de cette rétro.')).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Activer ou désactiver le mode anonyme' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('switch', { name: 'Activer ou désactiver le mode anonyme' })).toHaveAttribute('aria-checked', 'false');
     expect(within(dialog).getByText('Modèles enregistrés')).toBeInTheDocument();
     // A saved template's name is content.
     expect(within(dialog).getByRole('button', { name: 'Our format' })).toBeInTheDocument();
