@@ -19,8 +19,8 @@ interface Props {
   /** The number of unread release notes, or `null` when everything has been read. */
   unreadCount: number | null;
   onOpenAnnouncements: () => void;
-  /** Absent where the screen offers its own way out. */
-  onLogout?: () => void;
+  /** Signs the team out: the bar always offers it. */
+  onLogout: () => void;
   /** The viewer's picture, `memberAvatarId(team, currentUser.id)`, or null for initials. */
   avatarId?: string | null;
   /** The stored choice the picker marks. */
@@ -141,17 +141,15 @@ const AppHeader: React.FC<Props> = ({
               ref={avatarHint.openerRef}
             />
           </div>
-          {onLogout && (
-            <button
-              type="button"
-              onClick={onLogout}
-              className="-ml-1 sm:ml-0 p-1.5 rounded-lg text-slate-500 hover:text-rose-700 hover:bg-rose-50 transition-colors"
-              title={t('app.logoutTeam')}
-              aria-label={t('app.logoutTeam')}
-            >
-              <span className="material-symbols-outlined" aria-hidden="true">logout</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onLogout}
+            className="-ml-1 sm:ml-0 p-1.5 rounded-lg text-slate-500 hover:text-rose-700 hover:bg-rose-50 transition-colors"
+            title={t('app.logoutTeam')}
+            aria-label={t('app.logoutTeam')}
+          >
+            <span className="material-symbols-outlined" aria-hidden="true">logout</span>
+          </button>
         </div>
         <AvatarPicker
           open={pickerOpen}

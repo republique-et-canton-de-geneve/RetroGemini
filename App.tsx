@@ -720,7 +720,7 @@ const App: React.FC = () => {
   }
 
   // Common Header Logic
-  const renderHeader = (isSession: boolean) => {
+  const renderHeader = () => {
     if (!currentUser || !currentTeam) return null;
     return (
         <AppHeader
@@ -730,7 +730,7 @@ const App: React.FC = () => {
             announcementsAvailable={!!versionInfo}
             unreadCount={hasUnreadAnnouncements ? unreadAnnouncements.reduce((acc, a) => acc + a.items.length, 0) : null}
             onOpenAnnouncements={handleOpenAnnouncements}
-            onLogout={isSession ? undefined : handleLogout}
+            onLogout={handleLogout}
             avatarId={memberAvatarId(currentTeam, currentUser.id)}
             avatarChoice={memberAvatar(currentTeam, currentUser.id)?.id ?? null}
             // A cleared choice is a choice: the one-time avatar hint shows only to someone who never used the picker.
@@ -748,7 +748,7 @@ const App: React.FC = () => {
     <div className="h-screen flex flex-col text-slate-700 overflow-hidden bg-slate-50">
         {view === 'DASHBOARD' && (
             <>
-                {renderHeader(false)}
+                {renderHeader()}
                 {sessionRevoked && <DashboardRevokedBanner onLogInAgain={handleSessionExpired} />}
                 <Dashboard
                     team={currentTeam}

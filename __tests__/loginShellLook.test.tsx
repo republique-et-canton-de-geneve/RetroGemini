@@ -399,11 +399,10 @@ describe('the top bar', () => {
     expect(stay).not.toHaveBeenCalled();
   });
 
-  it('shows the viewer as a named avatar, and no Logout or badge when not asked', () => {
-    header({ onLogout: undefined, unreadCount: null });
+  it('shows the viewer as a named avatar, and no badge once every note is read', () => {
+    header({ unreadCount: null });
     // The avatar opens the picker; named by the person, the name beside it being hidden on a phone.
     expect(screen.getByRole('button', { name: 'CL, Claire Dubois, choose my avatar' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Logout Team' })).toBeNull();
     expect(screen.getByRole('button', { name: "What's New" })).toBeInTheDocument();
   });
 
