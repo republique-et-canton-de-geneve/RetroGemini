@@ -64,7 +64,7 @@ describe('the column navigator', () => {
         onReveal={() => {}}
       />,
     );
-    // Off: the arrow still says where the board ends (slate-400 measured 2.6:1).
+    // Off: the arrow still says where the board ends (slate-500 on its white button, 5.41:1).
     expect(effectivePair(screen.getByRole('button', { name: 'Show the previous columns' })).ratio).toBeGreaterThanOrEqual(3);
     expect(effectivePair(screen.getByRole('button', { name: 'Show the next columns' })).ratio).toBeGreaterThanOrEqual(3);
     for (const id of ['a', 'b']) {

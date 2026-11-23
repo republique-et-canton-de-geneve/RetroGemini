@@ -1371,9 +1371,10 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
 
   // Contrast is decided by the surface a token lands on (audit H42): muted
   // text is `text-slate-500` on the white cards (5.41:1 with the 45.0 tokens)
-  // and `text-slate-600` on this grey page and on tinted panels (slate-500
-  // measures 4.66:1 on the page and 4.33:1 on slate-200, the disabled
-  // buttons' fill). No dark surface here carries muted text. The whole page is
+  // and `text-slate-600` on this grey page and on tinted panels. slate-500
+  // would read on the page (5.01:1 on slate-50) and on slate-100 (4.66:1), but
+  // not on slate-200, the disabled buttons' fill (4.33:1, where slate-600
+  // measures 5.44:1). No dark surface here carries muted text. The whole page is
   // audited per tab by e2e/admin-console-accessibility.spec.ts, and what that
   // audit skips (disabled buttons, an empty list) by
   // __tests__/superAdminLook.test.tsx.
@@ -1390,7 +1391,7 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
               <span className="material-symbols-outlined mr-3 text-indigo-600" aria-hidden="true">shield_person</span>
               {t('admin.header.title')}
             </h1>
-            {/* slate-600: this line sits on the page's grey, where slate-500 falls under 4.5:1. */}
+            {/* slate-600 on the page's grey (slate-50), 6.29:1: a step darker than it needs, as slate-500 reads there too (5.01:1). */}
             <p className="text-slate-600 text-sm mt-1">{t('admin.header.subtitle')}</p>
           </div>
           <div className="flex items-center gap-3 ml-auto">
@@ -1744,8 +1745,9 @@ const SuperAdmin: React.FC<Props> = ({ sessionToken, onExit }) => {
         </div>
 
         {/* Tabs: the dashboard's (`.dash-tab.active` in index.css draws the
-            current one in the brand colour); the others are slate-600, which
-            reads on the page's grey where slate-500 does not. */}
+            current one in the brand colour); the others are slate-600, 6.29:1
+            on the page's grey (slate-50), where slate-500 would read too
+            (5.01:1). */}
         <div className="flex gap-1 border-b border-slate-200 mb-6 overflow-x-auto">
           <button onClick={() => setTab('TEAMS')} className={tabClass('TEAMS')}>
             <span className={TAB_ICON} aria-hidden="true">groups</span>

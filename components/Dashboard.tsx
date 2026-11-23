@@ -1418,7 +1418,7 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
           <div className="min-w-0">
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 break-words">{t('dashboard.header.title', { name: team.name })}</h1>
-            {/* slate-600: this line sits on the page's grey, where slate-500 falls under 4.5:1. */}
+            {/* slate-600 on the page's grey (slate-50), 6.29:1: a step darker than it needs, as slate-500 reads there too (5.01:1). */}
             <p className="text-slate-600 mt-1">{t('dashboard.header.subtitle')}</p>
           </div>
           {isAdmin && (

@@ -46,8 +46,8 @@ const BoardColumnNavigator: React.FC<Props> = ({
   const shown = columns.filter((column) => visible.has(column.id)).length;
 
   const arrowClass = (enabled: boolean) =>
-    // Off, its arrow is still drawn at 3:1 (slate-400 measured 2.6:1): a
-    // control that says where the board ends.
+    // Off, its arrow is still drawn at 3:1 or more, a control that says where
+    // the board ends: slate-500 on its white button measures 5.41:1.
     `shrink-0 w-8 h-8 flex items-center justify-center rounded-full border transition-colors ${
       enabled
         ? 'border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs'

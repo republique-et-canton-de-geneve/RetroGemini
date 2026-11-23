@@ -24,10 +24,10 @@ const DashboardTabs: React.FC<Props> = ({ activeTab, onChange }) => {
   const { t } = useTranslation();
   return (
     // The current tab is drawn by `.dash-tab.active` in index.css (the brand
-    // colour and its underline); the others are slate-600, which reads on the
-    // page's grey where slate-500 does not. No negative margin on a tab: the
-    // strip scrolls sideways, so it clips at its padding box and a tab that
-    // hangs past it gives the strip a vertical scrollbar.
+    // colour and its underline); the others are slate-600, 6.29:1 on the page's
+    // grey (slate-50), where slate-500 would read too (5.01:1). No negative
+    // margin on a tab: the strip scrolls sideways, so it clips at its padding
+    // box and a tab that hangs past it gives the strip a vertical scrollbar.
     <div className="flex gap-1 border-b border-slate-200 mb-6 overflow-x-auto">
       {TABS.map((tab) => (
         <button

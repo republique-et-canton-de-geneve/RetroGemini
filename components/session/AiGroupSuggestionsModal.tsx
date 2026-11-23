@@ -245,8 +245,9 @@ const AiGroupSuggestionsModal: React.FC<Props> = ({
                             onClick={() => handleAccept(index, suggestion)}
                             disabled={!canAccept}
                             title={canAccept ? undefined : t('session.aiGroups.needTwoTicketsTitle')}
-                            // White on indigo-500 measured 4.46:1. Both states
-                            // are colours a test can measure, not an opacity.
+                            // The brand, indigo-600, as on every primary button
+                            // (white on it 6.36:1). Both states are colours a
+                            // test can measure, not an opacity.
                             className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition ${
                               canAccept
                                 ? 'bg-indigo-600 text-white hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800'

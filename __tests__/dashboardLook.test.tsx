@@ -183,7 +183,8 @@ describe('the recipes, measured', () => {
     // A section label and a setting's title sit on white cards and dialogs.
     expect(tokenContrast(tokenOf(look.SECTION_LABEL, 'text-'), 'white')).toBeGreaterThanOrEqual(TEXT);
     // The muted text of these screens is slate-600 where it lies on the
-    // page's grey: slate-500 does not clear 4.5:1 there.
+    // page's grey (slate-50): a step darker than it needs, since slate-500
+    // reads there too (lookTokens.test.ts).
     expect(tokenContrast('slate-600', 'slate-50')).toBeGreaterThanOrEqual(TEXT);
   });
 });
