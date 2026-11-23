@@ -4158,7 +4158,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                             }}
                                         >
                                             {isGroupDragTarget && (
-                                                <div className="absolute inset-0 bg-indigo-50/80 z-20 flex items-center justify-center rounded-[14px] pointer-events-none">
+                                                // The group's radius less its 2px border: the overlay fills its inner curve.
+                                                <div className="absolute inset-0 bg-indigo-50/80 z-20 flex items-center justify-center rounded-[calc(var(--radius-2xl)-2px)] pointer-events-none">
                                                      <div className="text-indigo-800 font-semibold bg-white px-3 py-1.5 rounded-lg shadow-sm">{tr('session.group.addToGroup')}</div>
                                                 </div>
                                             )}

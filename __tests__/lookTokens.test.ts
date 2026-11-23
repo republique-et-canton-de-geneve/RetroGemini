@@ -189,6 +189,39 @@ describe('one source for a colour', () => {
 });
 
 /**
+ * A radius the look's steps do not name is written from them, never as its
+ * result: an overlay inside a bordered box takes the box's radius less the
+ * border. Written as a number of pixels, the group's drop overlay kept stock
+ * Tailwind's 2xl (16px) less its 2px border after 45.0 had made 2xl 18px, so
+ * its corners were squarer than the curve they sat in.
+ */
+describe('one source for a radius', () => {
+  /** Every arbitrary radius class in a text, after a variant or not, on one side or all. */
+  const arbitraryRadii = (text: string): string[] => text.match(/(?<![\w-])rounded(?:-[a-z]{1,2})?-\[[^\]\s]+\]/g) ?? [];
+  const fromToken = (radius: string) => /var\(--radius-(?:xs|sm|md|lg|xl|2xl|3xl|4xl)\)/.test(radius);
+
+  it("derives every arbitrary radius of the screens from the look's radius tokens", () => {
+    const files = [...walk(join(ROOT, 'components'), /\.tsx?$/), join(ROOT, 'App.tsx')];
+    const literal = files.flatMap((file) =>
+      arbitraryRadii(readFileSync(file, 'utf8'))
+        .filter((radius) => !fromToken(radius))
+        .map((radius) => `${relative(ROOT, file)}: ${radius}`),
+    );
+    expect(literal).toEqual([]);
+  });
+
+  it('reads a radius after a variant and on one side, and knows one built from a token', () => {
+    // Built from parts: Tailwind scans this file, and a class written whole
+    // here would add a rule to the build.
+    const radius = (side: string, value: string) => ['rounded', side, `[${value}]`].filter(Boolean).join('-');
+    const literal = `md:${radius('', '14px')}`;
+    const derived = radius('t', 'calc(var(--radius-xl)-1px)');
+    expect(arbitraryRadii(`rounded-xl ${literal} ${derived} rounded-full`)).toEqual([literal.slice(3), derived]);
+    expect([literal.slice(3), derived].map(fromToken)).toEqual([false, true]);
+  });
+});
+
+/**
  * A rule whose class no screen applies is a look nobody sees, kept in step by
  * hand: 45.0 re-tokenised the colours of `.drag-over`, a scaled drop target no
  * element had carried for several releases (a drop target is ringed, never

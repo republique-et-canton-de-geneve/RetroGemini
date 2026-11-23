@@ -33,7 +33,7 @@ const TicketGroupingBanner: React.FC<{ variant: TicketGroupingBannerVariant }> =
     <div
       // The card's radius less its 1px border, so the banner fills its top
       // corners. The brand colour, under white words: 4.5:1 at 12px.
-      className={`-mx-3 -mt-3 mb-2 ${className} flex items-center justify-center rounded-t-[13px] font-semibold text-white text-xs py-1 pointer-events-none`}
+      className={`-mx-3 -mt-3 mb-2 ${className} flex items-center justify-center rounded-t-[calc(var(--radius-xl)-1px)] font-semibold text-white text-xs py-1 pointer-events-none`}
     >
       <span className="material-symbols-outlined text-sm! leading-none mr-1" aria-hidden="true">{icon}</span> {t(label)}
     </div>
