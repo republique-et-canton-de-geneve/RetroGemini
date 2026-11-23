@@ -2670,11 +2670,11 @@ The following files MUST be included in the Docker image (check `.dockerignore`)
 builder copies the whole context (`COPY . .`):
 
 - `.claude/worktrees/` holds whole checkouts of the repository, often older
-  ones, and Tailwind's scan in the builder would read their components.
-  `.dockerignore` drops the root `.gitignore` that names them, because its
-  `.gitignore` pattern is anchored at the root: a directory's own `.gitignore`
-  stays in the context, and a worktree's own copy of that file does not name
-  its own components.
+  ones, and Tailwind's scan in the builder would read their components. The
+  scan skips what a `.gitignore` names, and the file that names them, the root
+  `.gitignore`, is the one `.dockerignore` drops (its `.gitignore` pattern is
+  anchored at the root). A directory's own `.gitignore` stays in the context,
+  but a worktree's own copy of that file does not name its own components.
 - `.gstack/` is gstack's state: its browser's access token (`browse.json`),
   its cookies and storage when session persistence is on
   (`session-state.json`), the logs of the pages and requests it made
