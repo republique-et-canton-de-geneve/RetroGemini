@@ -52,8 +52,23 @@ const CSS = readFileSync(join(ROOT, 'index.css'), 'utf8');
 const scriptKind = (file: string): ts.ScriptKind =>
   file.endsWith('.tsx') ? ts.ScriptKind.TSX : file.endsWith('.js') ? ts.ScriptKind.JS : ts.ScriptKind.TS;
 
-const parse = (file: string, text: string) =>
-  ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file));
+/**
+ * Each file is parsed once for the whole suite: four scans read the same
+ * sources, and parsing them again in each made the scans the slowest tests of
+ * the file (one passed 5 s under CI's coverage run, its default timeout). The
+ * visitors only read the tree, so a parsed file is shared safely.
+ */
+const parsed = new Map<string, { text: string; source: ts.SourceFile }>();
+const parse = (file: string, text: string): ts.SourceFile => {
+  const known = parsed.get(file);
+  if (known && known.text === text) return known.source;
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind(file));
+  parsed.set(file, { text, source });
+  return source;
+};
+
+/** What a scan of every source may take on a loaded runner: it parses about three hundred files. */
+const SCAN_TIMEOUT_MS = 30_000;
 
 const isText = (node: ts.Node): node is ts.StringLiteral | ts.NoSubstitutionTemplateLiteral =>
   ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node);
@@ -335,7 +350,7 @@ describe('nothing animates for a reader who asked for less motion', () => {
       literals(file, readFileSync(file, 'utf8')).flatMap((text) => ungatedAnimations(text).map((token) => `${relative(ROOT, file)}: ${token}`))
     );
     expect(found).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it('reads an animation that turns for everyone, whatever stands before it, and leaves one behind motion-safe', () => {
     expect(ungatedAnimations('w-4 h-4 animate-spin')).toEqual(['animate-spin']);
@@ -353,7 +368,7 @@ describe('nothing animates for a reader who asked for less motion', () => {
       )
     );
     expect(found).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it('declares every transition of index.css that moves or resizes a box, and stops every animation, for a reader who asked for less motion', () => {
     expect(cssRules(CSS).length).toBeGreaterThan(20);
@@ -415,7 +430,7 @@ describe('nothing animates for a reader who asked for less motion', () => {
     });
     expect(found).toEqual([]);
     expect(smoothScrollRules(CSS)).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it('reads every module of the screens and of the code they call, the .js rules included', () => {
     const everyFile = (dir: string): string[] =>
