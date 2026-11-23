@@ -94,7 +94,10 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
           {filteredIcons.map((icon) => (
             <button
               key={icon.name}
+              type="button"
               onClick={() => handleIconSelect(icon.name)}
+              // The chosen icon says so as a state, not only by its border.
+              aria-pressed={selectedIcon === icon.name}
               className={`
                 p-3 rounded-lg transition-all hover:bg-indigo-50 border-2
                 ${selectedIcon === icon.name

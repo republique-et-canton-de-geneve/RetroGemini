@@ -326,4 +326,16 @@ describe('IconPicker and ColorPicker in French', () => {
     expect(screen.getByRole('button', { name: 'Fermer le sélecteur de couleur' })).toBeInTheDocument();
     expect(screen.queryByText('Pick a color')).not.toBeInTheDocument();
   });
+
+  it('names each colour of the colour picker in French, the chosen one pressed', () => {
+    inFrench(<ColorPicker initialColor="#4f46e5" onChange={vi.fn()} onClose={vi.fn()} />);
+
+    const swatches = screen.getAllByRole('button').filter((button) => button.hasAttribute('style'));
+    expect(swatches.map((swatch) => swatch.getAttribute('aria-label'))).toEqual([
+      'Rouge', 'Framboise', 'Rose', 'Fuchsia', 'Pourpre', 'Violet', 'Indigo', 'Bleu', 'Bleu ciel',
+      'Cyan', 'Bleu canard', 'Émeraude', 'Vert', 'Vert citron', 'Jaune', 'Orange', 'Gris ardoise',
+    ]);
+    expect(screen.getByRole('button', { name: 'Indigo' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Rouge' })).toHaveAttribute('aria-pressed', 'false');
+  });
 });
