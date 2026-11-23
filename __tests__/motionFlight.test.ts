@@ -92,6 +92,15 @@ describe('fly', () => {
     vi.advanceTimersByTime(FLIGHT_OUT_MS + 300);
     expect(layers()).toHaveLength(0);
     expect(arrived).toHaveBeenCalledTimes(1);
+    // A tab in the background: its animation still ends, or is cancelled,
+    // once the tab is shown again. The token has arrived, and arrives no
+    // second time: the session lets go of its counted hold on the card once
+    // per token, and a second release let a second token's marks play before
+    // it landed.
+    animations[0].onfinish?.();
+    animations[0].oncancel?.();
+    expect(arrived).toHaveBeenCalledTimes(1);
+    expect(layers()).toHaveLength(0);
   });
 
   it('starts and ends on the centres of two elements', () => {
