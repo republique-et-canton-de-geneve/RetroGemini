@@ -128,12 +128,20 @@ jobs:
             echo "The tag ${VERSION} points at ${TAG_COMMIT}, another commit with the same content as this run's commit ${GITHUB_SHA}. The image is built from the tag."
           fi
 
-      # `latest` is what render.yaml and the README pull, so it moves to the
-      # newest release only: a re-run of an older release's run, or a release
-      # of an older line, publishes that version under its own tag alone. The
-      # releases are listed once this run's release exists, drafts left out
-      # (they publish nothing), and this run's version is counted in by hand in
-      # case the list does not show a release created a moment ago.
+      # `latest` is what render.yaml and the README pull, so it moves only to
+      # the release that is the newest when its image is dispatched: a re-run
+      # of an older release's run (one whose commit carries this step), or a
+      # release of an older line, publishes that version under its own tag
+      # alone. The releases are listed once this run's release exists, drafts
+      # left out (they publish nothing), and this run's version is counted in
+      # by hand in case the list does not show a release created a moment ago.
+      # The answer is only as fresh as that list: when two VERSION bumps are
+      # merged within one build's few minutes and the lower run lists before
+      # the higher release exists, both pass here, and the build that finishes
+      # last holds `latest`, possibly the lower one. Neither workflow has a
+      # concurrency group, and one would not cure it: GitHub keeps a single
+      # pending run per group and cancels the others, so a release's build
+      # could be dropped.
       - name: Decide whether this release is the newest
         id: latest
         env:
