@@ -236,6 +236,44 @@ describe('the avatar hint', () => {
     }
   });
 
+  // A browser shared by a whole team (a meeting-room laptop) keeps, under the
+  // hint's own key, the fifty people who dismissed it most recently: the
+  // newest is kept last, and the oldest, pushed out, is shown it once more.
+  it('keeps the fifty most recent members, the newest last, and shows it again to the one pushed out', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from({ length: 50 }, (_, i) => `u${i}`)));
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    const list = seen() as string[];
+    expect(list).toHaveLength(50);
+    expect(list[49]).toBe('ada');
+    expect(list).not.toContain('u0');
+    cleanup();
+
+    render(<Harness user={{ ...ada, id: 'u0' }} />);
+    expect(screen.getByRole('note', { name: HINT })).toBeInTheDocument();
+    cleanup();
+    render(<Harness user={{ ...ada, id: 'u1' }} />);
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  // What another tab or another release left under the key is data: a value
+  // that is not a list reads as nobody, so the hint shows, and of a list only
+  // the string ids count, which a dismissal keeps.
+  it('reads a stored value that is not a list as nobody, and keeps only the string ids of a list', () => {
+    for (const value of ['{not json', '{"ada":true}', '"ada"']) {
+      localStorage.setItem(STORAGE_KEY, value);
+      render(<Harness />);
+      expect(screen.getByRole('note', { name: HINT }), value).toBeInTheDocument();
+      cleanup();
+    }
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([42, null, { id: 'ada' }, 'bob']));
+    render(<Harness />);
+    expect(screen.getByRole('note', { name: HINT })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    expect(seen()).toEqual(['bob', 'ada']);
+  });
+
   // Nothing that changes while people work moves the board: the band is drawn
   // with the screen or not at all, and once it has gone it stays gone.
   it('appears only with the screen, and never comes back in the same mount', () => {
