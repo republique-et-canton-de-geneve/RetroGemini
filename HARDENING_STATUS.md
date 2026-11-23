@@ -700,6 +700,18 @@ below, run the cheap probe that would settle it.
     request that bumps the major, since D7 deleted the auto-commit step, so
     lagging by the `Y` bumps since the last retag is normal and correct) and
     checks that every kustomize overlay patches names that exist in `k8s/base`.
+    The retag names the version that major's merge publishes, which is
+    `VERSION` as it is merged: `X.Y`, not `X.0`, when the branch was deployed
+    and bumped `Y` before its merge, because main publishes only the merged
+    `VERSION`, so each further `Y` bump on a deployed major branch retags the
+    line again before the merge. The test checks the major only and cannot see
+    a tag left at `X.0`: on the branch, that tag and main's normal lag after a
+    later `Y` bump both read as the current major with an older `Y`. That limit
+    is the residual, and the slip happened at least five times: the manifest
+    named 35.0, 36.0, 41.0 and 42.0 when main first published 35.5, 36.2, 41.4
+    and 42.2 (none of those four has a GitHub release; Docker Hub holds no
+    35.0, 36.0 or 41.0, and its 42.0 is a branch's test build), and 45.0 on
+    45.x's branch, retagged to 45.3 before its merge.
     Adding a knob or renaming a base resource fails the suite until the surfaces
     follow; do not weaken the contract to make a change pass — add the exemption
     *and its reason*.
@@ -1610,23 +1622,26 @@ that accepts the team password verifies it too: `POST /api/team/:teamId` and
 its sub-routes (`authenticateTeam(teamId, password)` → `invalid_password`,
 `401`), `/api/feedbacks/*` and the Jira team routes. Those are metered only by
 the general per-IP request limiters — team reads 120/min, team writes 300/min,
-feedback 120 + 60/min, Jira 120 + 60 + 60/min — which are independent
-instances, so their budgets add up, and each is counted per pod. Team ids are
-public (`GET /api/team/list`, anonymous). `SECURITY.md` → *Team Passwords*
-stated the login limiter as "the only brake on guessing", and D18's rationale
-for the 8-character minimum rests on that bound. Found while reviewing D3b,
-which neither widens nor narrows it.
+the template routes 300/min and the avatar route 300/min with limiters of
+their own, feedback 120 + 60/min, Jira 120 + 60 + 60/min — which are
+independent instances, so their budgets add up (1 440/min), and each is
+counted per pod. Team ids are public (`GET /api/team/list`, anonymous).
+`SECURITY.md` → *Team Passwords* stated the login limiter as "the only brake
+on guessing", and D18's rationale for the 8-character minimum rests on that
+bound. Found while reviewing D3b, which neither widens nor narrows it.
 
 - **Files:** `server/routes/teamRoutes.js` (the limiters, `/api/team/:teamId`
-  and its sub-routes), `server/routes/feedbackRoutes.js`,
-  `server/routes/jiraRoutes.js`, `server/services/teamService.js`
-  (`authenticateTeam`).
+  and its sub-routes), `server/routes/teamTemplateRoutes.js` and
+  `server/routes/teamAvatarRoutes.js` (a limiter each),
+  `server/routes/feedbackRoutes.js`, `server/routes/jiraRoutes.js`,
+  `server/services/teamService.js` (`authenticateTeam`).
 - **Failure scenario:** an anonymous caller who can reach the deployment reads
   a team id from `/api/team/list` and posts guesses to `POST
-  /api/team/:teamId` and the other routes: hundreds a minute from one address,
-  where the login route allows 20 per quarter hour. Eight random lowercase
-  characters still take centuries; a password from before the minimum (four
-  characters, H39) falls within a day.
+  /api/team/:teamId` and the other routes: over a thousand a minute from one
+  address, where the login route allows 20 per quarter hour. Eight random
+  lowercase characters still take some seventy years on average at two
+  replicas; a password from before the minimum (four characters, H39) falls
+  within a day.
 - **Acceptance:** D24 answered. Option 1: a rejected password (`401
   invalid_password` only, never a refused token, never a success) on any route
   that verifies one is counted against the same key as the login route (IP and
@@ -1852,9 +1867,10 @@ Keep visible so nobody "rediscovers" them as bugs:
   separate, later decision. The `npm run build` warning about the 500 kB
   threshold is expected output, not a regression to chase.
   **Note (2026-10-22, performance series item 9):** the bundle now crosses the
-  wire compressed — precompressed at build time, 1.24 MB of JS and CSS to
-  312 KB — and its hashed files are cached immutably for a year, so a returning
-  phone downloads it once per release (AGENTS.md → *Compression and caching*).
+  wire compressed — precompressed at build time, 1.48 MB of JS and CSS to
+  373 KB at 45.3 — and its hashed files are cached immutably for a year, so a
+  returning phone downloads it once per release (AGENTS.md → *Compression and
+  caching*).
   A cross-pod asset miss during a rollout is now a `no-store` text 404 instead
   of the SPA page served as JavaScript; it is still a blank page until a reload.
   Code splitting stays an accepted residual, with its reopening condition
@@ -2054,7 +2070,8 @@ closed in §3 with what would reopen them. **D22 is the one that was answered
 Blocks H53. The login route meters rejected passwords (20 per 15 minutes per
 IP and team, per pod); every other route that verifies the team password is
 bounded only by the general per-IP request limiters, whose budgets add up to
-hundreds of attempts a minute from one address. Two options:
+over a thousand attempts a minute from one address (1 440 per pod). Two
+options:
 
 1. **Meter rejected passwords everywhere.** A `401 invalid_password` on any
    `/api/team/:teamId/*`, `/api/feedbacks/*` or Jira team route counts against

@@ -68,11 +68,11 @@ Team passwords are **hashed at rest** (scrypt via Node's crypto module — memor
 
 **The minimum length is 8 characters, and it is the whole policy.** Every path that *sets* a password — team creation, the team's own password change, the emailed password reset and the super-admin override — enforces the same rule from a single module (`utils/passwordPolicy.js`), which the React forms read too, so the screens and the routes cannot drift apart. There is still **no complexity, dictionary or reuse check, and no account lockout**: character-class rules are no longer recommended by either NIST SP 800-63B or OWASP ASVS, and a breached-password check would need an external service that is out of scope for an air-gapped deployment.
 
-**Why 8 and not ASVS 2.1.1's 12.** A deliberate choice, not an oversight. The team password is a *shared* secret — read aloud or written on a whiteboard, then typed by a dozen people on phone keyboards — whereas ASVS's 12 assumes a personal password held in a password manager. The security difference on the reachable axis is nil: with `loginLimiter` allowing 20 failed attempts per 15 minutes per IP and team name (~3 800 guesses a day at two replicas), four lowercase characters fall in about two months while eight take on the order of 10⁴ years. Those figures are the login route's; the other routes that verify the password are bounded more loosely (below, pending decision D24), where eight random lowercase characters still take centuries but four fall within a day. Online guessing is already out of reach at 8 — the limiter binds, not the entropy — and the remaining gap to 12 only matters against an *offline* attack on stolen scrypt hashes, which implies a compromise with worse consequences than a guessed team password. The defect this closes was never the search space: four characters force `1234`, the team name or the sprint number, which are guessed on the first attempt and which no rate limiter can defend against.
+**Why 8 and not ASVS 2.1.1's 12.** A deliberate choice, not an oversight. The team password is a *shared* secret — read aloud or written on a whiteboard, then typed by a dozen people on phone keyboards — whereas ASVS's 12 assumes a personal password held in a password manager. The security difference on the reachable axis is nil: with `loginLimiter` allowing 20 failed attempts per 15 minutes per IP and team name (~3 800 guesses a day at two replicas), four lowercase characters fall in about two months while eight take on the order of 10⁴ years. Those figures are the login route's; the other routes that verify the password are bounded more loosely (below, pending decision D24), where eight random lowercase characters still take some seventy years on average at two replicas but four fall within a day. Online guessing is already out of reach at 8 — the limiter binds, not the entropy — and the remaining gap to 12 only matters against an *offline* attack on stolen scrypt hashes, which implies a compromise with worse consequences than a guessed team password. The defect this closes was never the search space: four characters force `1234`, the team name or the sprint number, which are guessed on the first attempt and which no rate limiter can defend against.
 
 **The rule binds on write, never on verification.** A team whose password predates it keeps logging in with the short one indefinitely; it becomes compliant the next time the password is changed. This is deliberate — refusing to verify would lock every existing team out of its own history, and an availability cost is a security property too. The consequence to state plainly: **raising the minimum does not retroactively strengthen the passwords already in use**, so an operator who wants the floor to apply everywhere has to ask teams to rotate.
 
-Guessing is braked differently depending on the route. `/api/team/login` meters it: **20 rejected attempts per fifteen minutes, keyed on the client IP together with the team name, and counted per pod** — so a two-replica deployment admits roughly 3 800 guesses a day there from one address against one team. (`AUTH_RATE_LIMIT_MAX`, documented elsewhere as 5, governs team creation and session restore, neither of which verifies a guessed password.) **Every other team route that accepts the password does not** — `POST /api/team/:teamId` and its sub-routes, `/api/feedbacks/*` and the Jira team routes are bounded only by general per-IP request limiters, counted per pod (team reads 120 a minute, team writes 300, feedback 120 + 60, Jira 120 + 60 + 60). Those are independent instances whose budgets add up, and team ids are public (`/api/team/list`), so a guesser gets hundreds of attempts a minute from one address against one team. Whether to meter a rejected password on those routes the way the login route does is open as decision D24 (`HARDENING_STATUS.md` → H53). A team password is a *shared* secret protecting that team's entire history.
+Guessing is braked differently depending on the route. `/api/team/login` meters it: **20 rejected attempts per fifteen minutes, keyed on the client IP together with the team name, and counted per pod** — so a two-replica deployment admits roughly 3 800 guesses a day there from one address against one team. (`AUTH_RATE_LIMIT_MAX`, documented elsewhere as 5, governs team creation and session restore, neither of which verifies a guessed password.) **Every other team route that accepts the password does not** — `POST /api/team/:teamId` and its sub-routes, `/api/feedbacks/*` and the Jira team routes are bounded only by general per-IP request limiters, counted per pod (team reads 120 a minute, team writes 300, the template routes 300 and the avatar route 300 with limiters of their own, feedback 120 + 60, Jira 120 + 60 + 60). Those are independent instances whose budgets add up, to 1 440 a minute per pod, and team ids are public (`/api/team/list`), so a guesser gets over a thousand attempts a minute from one address against one team. Whether to meter a rejected password on those routes the way the login route does is open as decision D24 (`HARDENING_STATUS.md` → H53). A team password is a *shared* secret protecting that team's entire history.
 
 What the browser and invite links hold:
 
@@ -258,8 +258,10 @@ by one route, `POST /api/team/:teamId/member/avatar`.
   session, as it already can a name or a colour. The team's own record is out
   of its reach (only the route writes it), nothing but a picture of the list
   is ever drawn, and no other session or screen shows what was planted. A
-  later choice of the person replaces it: any choice, when the planted time
-  is not ahead of that choice; and for a time planted ahead of the clock, a
+  later choice of the person replaces it: any choice, a first "My initials"
+  included (a clear is stored dated, like a picture, and stamped into the
+  session it was made in), when the planted time is not ahead of that
+  choice; and for a time planted ahead of the clock, a
   choice made in that session, where the route's stamp replaces a time more
   than five minutes ahead of the server's clock (no choice wrote it). A time
   planted less than five minutes ahead stands until it has passed: that is
@@ -482,7 +484,15 @@ tell the two apart without reading workflow files:
   developer machine, the token is scoped to this repository alone, and every
   resulting change still arrives through a reviewed pull request against a
   protected branch. It affects development tooling only — nothing in it reaches
-  the runtime image.
+  the runtime image. A checkout's `.gstack/`, gstack's state, can hold
+  credentials of gstack's browser: its access token (`browse.json`), its
+  cookies and localStorage and sessionStorage when session persistence is on
+  (`session-state.json`), and the logs of the pages and requests it made,
+  whose URLs gstack writes with their query values redacted. git ignores the
+  directory, through its own `*` `.gitignore` or, for `.gstack/tmp/`,
+  `.git/info/exclude`, and `.dockerignore` keeps it out of the Docker build
+  context too (`__tests__/deploymentManifestParity.test.ts` → *Docker build
+  context (.dockerignore)*).
 
 ## Version Support
 
