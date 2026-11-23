@@ -194,7 +194,7 @@ describe('the phase bars of both session headers', () => {
     expect(marks(phaseButtons())).toEqual([['BRAINSTORM', null], ['GROUP', null], ['VOTE', 'step']]);
   });
 
-  const healthCheck = (phase: string): HealthCheckSessionType => ({
+  const healthCheck = (phase: HealthCheckSessionType['phase']): HealthCheckSessionType => ({
     id: 'hc-1',
     teamId: 'team-1',
     name: 'Team Health',
