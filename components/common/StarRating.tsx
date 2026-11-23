@@ -28,7 +28,7 @@ import React, { useId } from 'react';
  * because no amber dark enough to read as gold clears 3:1 against the pale grey
  * a "not filled" star wants to be. Where the stars give a score or a scale,
  * callers say it in text as well: the score beside a rollup's stars, the
- * scale's word under the rating's choices, "Favourites" beside the heading's
+ * scale's word beside the rating's choices, "Favourites" beside the heading's
  * star. The login screen's favourite toggle draws its star alone, so its shape
  * is the only drawing of the state, which assistive technology reads from the
  * switch's `aria-checked`. The outline itself is slate-400, the lightest grey
