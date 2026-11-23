@@ -15,7 +15,7 @@
 
 import { isValidRaterId } from './actionImpact.js';
 
-const family =(id, avatars) => Object.freeze({ id, avatars: Object.freeze(avatars) });
+const family = (id, avatars) => Object.freeze({ id, avatars: Object.freeze(avatars) });
 
 /** The six families in the order the picker shows them, twenty avatars each. */
 export const AVATAR_FAMILIES = Object.freeze([
