@@ -301,6 +301,21 @@ describe('App — the avatar hint on the dashboard', () => {
     expect(await screen.findByRole('note', { name: HINT })).toBeInTheDocument();
   });
 
+  // A key's "Got it" hands the keyboard on to the first drawn control after
+  // the band: the dashboard's own, here its stub's refresh button.
+  it('hands the keyboard to the dashboard when a key presses "Got it", and is remembered', async () => {
+    await openDashboard();
+    const note = screen.getByRole('note', { name: HINT });
+    const gotIt = within(note).getByRole('button', { name: 'Got it' });
+    act(() => { gotIt.focus(); });
+    // A key's click: Enter or Space sends one with no count.
+    fireEvent.click(gotIt, { detail: 0 });
+    expect(screen.queryByRole('note', { name: HINT })).toBeNull();
+    expect(opener().querySelector('[data-avatar-hint-dot]')).toBeNull();
+    expect(JSON.parse(localStorage.getItem(HINT_KEY) ?? 'null')).toEqual(['fac-1']);
+    expect(screen.getByRole('button', { name: 'Refresh the team' })).toHaveFocus();
+  });
+
   // The person found the picker on their own, from the top bar's avatar:
   // remembered, and the band does not come back when the picker closes.
   it("goes, remembered, when the picker opens from the top bar's avatar, and closing the picker does not bring it back", async () => {
