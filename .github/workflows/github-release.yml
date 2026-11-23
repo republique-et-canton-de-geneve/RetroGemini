@@ -183,8 +183,12 @@ jobs:
       # tag once the check above has found this run's content in it: the same
       # content, but a new build, which may take a newer base image and newer
       # Alpine packages, and the version tag moves to it (and `latest`, when
-      # the step above found the release the newest). `--ref` names the tag by
-      # its short name, which the dispatch API takes for a branch or a tag.
+      # the step above found the release the newest). `--ref` names the tag in
+      # full, refs/tags/<version>, as the check above fetches it and the SBOM
+      # below checks it out: the dispatch API takes a fully qualified ref, as
+      # dispatches that pass `github.ref` do, while a short name is a branch's
+      # as much as a tag's, and a branch named like the version, whose content
+      # the check above never compared, would be built in the tag's place.
       - name: Publish matching Docker image
         env:
           GH_TOKEN: ${{ github.token }}
@@ -201,7 +205,7 @@ jobs:
           esac
           gh workflow run docker-deploy.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --ref "$VERSION" \
+            --ref "refs/tags/$VERSION" \
             -f image_tag="$VERSION" \
             -f push_latest="$PUSH_LATEST"
 
