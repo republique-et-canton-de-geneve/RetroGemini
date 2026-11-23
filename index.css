@@ -92,7 +92,7 @@
   /* Shadows carry the ink's colour and stay thin; only dialogs and popovers
      (xl, 2xl) are deep. The ink is slate-900, named and mixed with
      transparent, which in srgb keeps its channels and sets its alpha alone
-     (6% is rgb(23 26 43 / 0.06)): a retune of slate-900 reaches every shadow.
+     (6% is an alpha of 0.06): a retune of slate-900 reaches every shadow.
      A bare `shadow` is the small one; named rather than copied, it takes no
      shadow colour utility (nothing writes one). */
   --shadow-2xs: 0 1px color-mix(in srgb, var(--color-slate-900) 5%, transparent);
