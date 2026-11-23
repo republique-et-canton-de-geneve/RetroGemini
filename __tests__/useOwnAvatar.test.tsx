@@ -281,7 +281,10 @@ describe('useOwnAvatar, the own entry', () => {
 
     it('leaves no timer behind when the screen goes during the wait', async () => {
       const { unmount, updateSession } = await pickInSession();
+      // Counted at once: past the wait, a timer the unmount left would have fired and gone.
+      expect(vi.getTimerCount()).toBe(1);
       unmount();
+      expect(vi.getTimerCount()).toBe(0);
       act(() => { vi.advanceTimersByTime(SERVER_STAMP_WAIT_MS * 3); });
       expect(updateSession).not.toHaveBeenCalled();
       expect(vi.getTimerCount()).toBe(0);
