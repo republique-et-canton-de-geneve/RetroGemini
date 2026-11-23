@@ -6,8 +6,10 @@ import { defineConfig, devices } from '@playwright/test';
  * no-preference`, so the default project (reduced motion) sees none of them;
  * these are the specs whose touch timings, box measurements and axe audits an
  * animation can actually change, plus the spec that proves the animations run.
- * A name that matches no file is no error: `session-motion.spec.ts` joins the
- * project the day it is written.
+ * A name that matches no file is no error to Playwright, which fails only a run
+ * that finds no test at all: a spec renamed without its entry would leave this
+ * project silently. `__tests__/playwrightMotionProject.test.ts` checks that each
+ * name is a spec of e2e/, and that every motion-only spec is listed here.
  */
 const MOTION_SPECS = [
   'retro-touch-card-controls.spec.ts',
