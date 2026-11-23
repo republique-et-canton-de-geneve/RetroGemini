@@ -37,8 +37,8 @@ const openActionsTab = async (page: Page, teamName: string) => {
   await page.getByRole('button', { name: 'Create & Join' }).click();
   await expect(page.getByText(`${teamName} Dashboard`)).toBeVisible({ timeout: 10_000 });
   await dismissAnnouncementsIfPresent(page);
-  // A Dashboard tab's accessible name starts with its icon's ligature, so it is found by its class and words.
-  await page.locator('.dash-tab', { hasText: 'Actions' }).click();
+  // A Dashboard tab is named by its label alone: the icon beside it is aria-hidden.
+  await page.getByRole('button', { name: 'Actions', exact: true }).click();
   await expect(page.getByPlaceholder('What needs to be done?')).toBeVisible();
 };
 
