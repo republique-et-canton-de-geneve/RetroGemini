@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
+import ts from 'typescript';
 import { parsedColor, themeBlocks, tokenContrast } from './helpers/tailwindTheme';
 
 /**
@@ -118,6 +119,11 @@ describe("a person's tone", () => {
 });
 
 describe('one source for a colour', () => {
+  /** Pure white and pure black, the only colours written as they are. */
+  const pure = (colour: string) =>
+    /^#(?:f{3,4}|f{6}(?:[0-9a-f]{2})?|0{3,4}|0{6}(?:[0-9a-f]{2})?)$/i.test(colour) ||
+    /^rgba?\(\s*(?:255[\s,]+255[\s,]+255|0[\s,]+0[\s,]+0)\b/.test(colour);
+
   // Until 45.0 index.css repeated Tailwind's indigo and slate as hex in its own
   // rules: remapping the tokens would have left two brand colours on screen.
   it('index.css names no colour of the old palette outside its tokens', () => {
@@ -139,10 +145,114 @@ describe('one source for a colour', () => {
       ...outsideTheme.matchAll(/rgba?\([^)]*\)/g),
       ...outsideTheme.matchAll(/hsla?\([^)]*\)/g),
     ].map((match) => match[0]);
-    const pure = (colour: string) =>
-      /^#(?:f{3,4}|f{6}(?:[0-9a-f]{2})?|0{3,4}|0{6}(?:[0-9a-f]{2})?)$/i.test(colour) ||
-      /^rgba?\(\s*(?:255[\s,]+255[\s,]+255|0[\s,]+0[\s,]+0)\b/.test(colour);
     expect(written.filter((colour) => !pure(colour))).toEqual([]);
+  });
+
+  /**
+   * The colours the screens' code writes: in a string, a template or JSX text
+   * (comments are not read), as hex, `rgb()`, `rgba()`, `hsl()` or `hsla()`,
+   * those inside a class's arbitrary value included. A template stops at its
+   * first `${`, so a colour built around one is read up to there.
+   */
+  const colourLiterals = (file: string, text: string): string[] => {
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const found: string[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node) || ts.isJsxText(node)) {
+        const written = node.text.matchAll(
+          /(?<![&\w])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![\w-])|(?<![a-zA-Z])(?:rgba?|hsla?)\([^)]*\)?/g,
+        );
+        for (const match of written) found.push(match[0]);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    return found;
+  };
+
+  /**
+   * Where a colour is data, written as the screens store or read it: never a
+   * colour of the look, so a retune leaves it as it is.
+   */
+  const COLOUR_DATA: Record<string, { colours: string[]; why: string }> = {
+    'components/ColorPicker.tsx': {
+      colours: [
+        '#dc2626', '#e11d48', '#db2777', '#c026d3', '#9333ea', '#7c3aed', '#4f46e5', '#2563eb', '#0284c7',
+        '#0891b2', '#0d9488', '#059669', '#16a34a', '#65a30d', '#ca8a04', '#ea580c', '#475569', '#6366f1',
+      ],
+      why: "the colours a facilitator picks, stored on the column as `customColor` and read back by the board (`columnHue`), and the picker's start for a column with none",
+    },
+    'components/Dashboard.tsx': {
+      colours: ['#10b981', '#f43f5e', '#64748b', '#6366f1', '#34d399', '#fbbf24', '#f97316', '#dc2626'],
+      why: "a column's colour, written as `customColor` on a new template's columns or shown for a column with none; and the five steps of a health-check score's trend waves, a scale that encodes the votes",
+    },
+    'components/Session.tsx': {
+      colours: ['#64748b'],
+      why: 'the `customColor` of a column Edit Layout adds, written onto the session',
+    },
+  };
+
+  // The same rule for the screens' code. A colour of the look is a class or a
+  // `var(--color-…)`, mixed with `color-mix` when it must be translucent: the
+  // proposal row's wash kept Tailwind 3's emerald, slate and red as `rgba()`
+  // under a look whose slate-400 is its own.
+  it('the screens write no colour of their own, but pure white and black and the data above', () => {
+    const files = [...walk(join(ROOT, 'components'), /\.tsx?$/), join(ROOT, 'App.tsx')];
+    expect(files.length).toBeGreaterThan(100);
+    const written = files.flatMap((file) => {
+      const at = relative(ROOT, file);
+      const data = new Set(COLOUR_DATA[at]?.colours ?? []);
+      return colourLiterals(file, readFileSync(file, 'utf8'))
+        .filter((colour) => !pure(colour) && !data.has(colour.toLowerCase()))
+        .map((colour) => `${at}: ${colour}`);
+    });
+    expect(written).toEqual([]);
+  });
+
+  it('keeps every colour listed as data where it is still written', () => {
+    for (const [file, { colours, why }] of Object.entries(COLOUR_DATA)) {
+      expect(why.length, file).toBeGreaterThan(20);
+      const written = new Set(colourLiterals(file, readFileSync(join(ROOT, file), 'utf8')).map((colour) => colour.toLowerCase()));
+      for (const colour of colours) expect(written.has(colour), `${file}: ${colour}`).toBe(true);
+    }
+  });
+
+  it('reads a colour in a string, a template and JSX text, never in a comment or an entity', () => {
+    const probe = [
+      "// '#abcdef' in a comment",
+      "const a = '#AbCdEf';",
+      'const b = `x ${y} rgba(1, 2, 3, ${z}) z`;',
+      'const c = <p style={{ color: "hsl(1 2% 3%)" }}>&#8212; #fff</p>;',
+      "const d = 'drop-[0_1px_rgba(0,0,0,0.9)]';",
+    ].join('\n');
+    expect(colourLiterals('probe.tsx', probe)).toEqual(['#AbCdEf', 'rgba(1, 2, 3, ', 'hsl(1 2% 3%)', '#fff', 'rgba(0,0,0,0.9)']);
+    expect(['#fff', 'rgba(0,0,0,0.9)', '#AbCdEf'].map(pure)).toEqual([true, true, false]);
+  });
+
+  /** The templates of a file whose text stops in a variable's name, just before a `${`. */
+  const variablesBuiltFromParts = (file: string, text: string): string[] => {
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const found: string[] = [];
+    const visit = (node: ts.Node) => {
+      const head = ts.isTemplateHead(node) || ts.isTemplateMiddle(node) ? /--[\w-]*$/.exec(node.text) : null;
+      if (head) found.push(`${head[0]}\${…}`);
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+    return found;
+  };
+
+  // An inline style reads the theme by `var(--color-…)`, and Tailwind emits a
+  // theme variable only where the sources name it: a name built from parts is
+  // not found, and the style reads a variable the build never wrote.
+  it('names every theme variable a screen reads whole, never built from parts', () => {
+    const files = [...walk(join(ROOT, 'components'), /\.tsx?$/), join(ROOT, 'App.tsx')];
+    const built = files.flatMap((file) =>
+      variablesBuiltFromParts(file, readFileSync(file, 'utf8')).map((name) => `${relative(ROOT, file)}: ${name}`),
+    );
+    expect(built).toEqual([]);
+    const probe = 'const a = `var(--color-${hue}) var(--radius-${size}) ${whole} --x`; const b = `var(${variable})`;';
+    expect(variablesBuiltFromParts('probe.ts', probe)).toEqual(['--color-${…}', '--radius-${…}']);
   });
 
   // The test above cannot see inside @theme: 45.0 kept five `retro-*` aliases

@@ -5,6 +5,14 @@ import ProposalNumber from './ProposalNumber';
 import { participantColorClass } from '../../utils/participantColors';
 import { PRESS_KEY_ATTRIBUTE } from './doubleGestureGuard';
 
+/**
+ * A colour of the look at `alpha` of its strength, over whatever lies behind.
+ * The variable is named whole by the caller: Tailwind emits a theme variable
+ * only where the sources name it, and a name built from parts is not found.
+ */
+const wash = (variable: string, alpha: number): string =>
+  `color-mix(in srgb, var(${variable}) ${(alpha * 100).toFixed(1)}%, transparent)`;
+
 const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: number): React.CSSProperties => {
   const total = upVotes + neutralVotes + downVotes;
   if (total === 0) return {};
@@ -14,14 +22,18 @@ const getProposalRowStyle = (upVotes: number, neutralVotes: number, downVotes: n
   const downPct = downVotes / total;
   const upEnd = upPct * 100;
   const neutralEnd = upEnd + neutralPct * 100;
+  const up = wash('--color-emerald-500', 0.08 + upPct * 0.14);
+  const neutral = wash('--color-slate-400', 0.08 + neutralPct * 0.12);
+  const down = wash('--color-red-500', 0.07 + downPct * 0.13);
 
   return {
     // Soft bands (the 45.0 look keeps colour for content, and calm): every
-    // text of the row sits on a pale wash of green, grey or red. An image
-    // over the row's own fill (white on a light surface, none on a dark one):
-    // the `background` shorthand set the colour too, to transparent, and a
-    // row holding votes lost its white.
-    backgroundImage: `linear-gradient(to right, rgba(16, 185, 129, ${0.08 + upPct * 0.14}) 0%, rgba(16, 185, 129, ${0.08 + upPct * 0.14}) ${upEnd}%, rgba(148, 163, 184, ${0.08 + neutralPct * 0.12}) ${upEnd}%, rgba(148, 163, 184, ${0.08 + neutralPct * 0.12}) ${neutralEnd}%, rgba(239, 68, 68, ${0.07 + downPct * 0.13}) ${neutralEnd}%, rgba(239, 68, 68, ${0.07 + downPct * 0.13}) 100%)`
+    // text of the row sits on a pale wash of green, grey or red, mixed from
+    // the look's tokens so a retune moves them with the chips around them.
+    // An image over the row's own fill (white on a light surface, none on a
+    // dark one): the `background` shorthand set the colour too, to
+    // transparent, and a row holding votes lost its white.
+    backgroundImage: `linear-gradient(to right, ${up} 0%, ${up} ${upEnd}%, ${neutral} ${upEnd}%, ${neutral} ${neutralEnd}%, ${down} ${neutralEnd}%, ${down} 100%)`
   };
 };
 
