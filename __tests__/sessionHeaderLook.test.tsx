@@ -1,4 +1,6 @@
 import React from 'react';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import SessionHeader from '../components/session/SessionHeader';
@@ -113,6 +115,19 @@ describe('the phase bar', () => {
     expect(current.ratio).toBeGreaterThanOrEqual(4.5);
     const other = effectivePair(screen.getByRole('button', { name: 'GROUP' }));
     expect(other.ratio, `${other.fg} on ${other.bg}`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // What the test above measures is what the browser draws: a rule of
+  // index.css outside every layer beats Tailwind's utilities, so one that
+  // painted the pill as well would draw over any change made to its classes.
+  // Both session headers write the same pill (healthCheckLook.test.tsx).
+  it("leaves the pill's colour, fill and weight to its classes", () => {
+    const css = readFileSync(join(__dirname, '..', 'index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const rules = [...css.matchAll(/([^{}]*\.phase-nav-btn[^{}]*)\{([^{}]*)\}/g)];
+    expect(rules.length).toBeGreaterThan(0);
+    for (const [, selector, body] of rules) {
+      expect(body, selector.trim()).not.toMatch(/(?:^|[;\s])(?:color|background(?:-color)?|font-weight)\s*:/);
+    }
   });
 
   it('shows a participant phases they cannot press as disabled, without opacity', () => {

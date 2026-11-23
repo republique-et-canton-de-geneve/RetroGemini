@@ -127,8 +127,8 @@ const SessionHeader: React.FC<Props> = ({
             // did nothing: a control that looks live and is not.
             disabled={!isFacilitator}
             // Each phase is a pill centred in the bar; the current one is filled
-            // (index.css styles `.phase-nav-btn.active`; its colours are
-            // repeated as classes so the contrast tests measure them). A phase
+            // (its classes alone paint it: no rule of index.css styles the pill's
+            // colours, so the contrast tests measure what is drawn). A phase
             // a participant cannot press is greyer: it is disabled, which the
             // audit does not hold to the text floor, and stays readable.
             className={`phase-nav-btn h-8 shrink-0 whitespace-nowrap px-1.5 2xl:px-2.5 text-[13px] leading-none ${

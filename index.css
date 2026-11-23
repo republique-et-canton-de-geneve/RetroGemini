@@ -217,17 +217,13 @@ body {
   outline: none;
 }
 
-/* Phase navigation: the current phase sits on a soft pill of the brand colour. */
+/* Phase navigation: each phase is a pill. The current one's soft fill of the
+   brand colour is written as classes by both session headers, where the
+   contrast tests measure it: a rule here would paint over them. */
 .phase-nav-btn {
   position: relative;
   border-radius: 9px;
   transition: color 0.2s, background-color 0.2s;
-}
-
-.phase-nav-btn.active {
-  color: var(--color-indigo-700);
-  background-color: var(--color-indigo-100);
-  font-weight: 700;
 }
 
 /* The phase bar had no focus indicator at all — computed `outline-width: 0`
