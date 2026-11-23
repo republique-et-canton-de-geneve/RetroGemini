@@ -266,6 +266,19 @@ describe('Session — the vote pieces, mounted', () => {
 });
 
 describe('Session — the vote’s flight', () => {
+  // Past three dots the pill draws one dot and the number, and a vote's token
+  // lands on the number, which bumps, never on a dot. A card the viewer already
+  // gave four votes or more keeps the number drawn before and after each vote.
+  const pastThreeDots = (mine = 4, settings: Partial<RetroSession['settings']> = {}) => createSession({
+    tickets: [{ id: 't1', colId: 'col-1', text: 'Great teamwork', authorId: 'p1', groupId: null, votes: Array.from({ length: mine }, () => 'facilitator-1') }],
+    groups: [],
+  }, { maxVotes: 8, ...settings });
+  const theCount = () => within(card('t1')).getByTestId('my-guided-votes');
+  const countBumped = () => theCount().classList.contains('fx-bump');
+  const plusOf = () => within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' });
+  const minusOf = () => within(card('t1')).getByRole('button', { name: 'Remove a vote from this ticket' });
+  const myVotesOn = (state: RetroSession | undefined) => state?.tickets.find((t) => t.id === 't1')?.votes.length;
+
   it('sends a token from the budget to the card once the vote is written, and marks the card where it lands', async () => {
     allowMotion();
     await renderSession(createSession());
@@ -402,6 +415,53 @@ describe('Session — the vote’s flight', () => {
     expect(document.querySelector('.fx-layer')).toBeNull();
   });
 
+  // The same past three dots: the number the vote would have raised neither
+  // moves nor bumps, and nothing holds the card, so the board marks its next
+  // news once the quiet seconds after the reconnection are over.
+  it('sends nothing flying, bumps nothing and holds nothing past three dots for a vote added while the session reconnects', async () => {
+    allowMotion();
+    let setConnected: ((connected: boolean) => void) | null = null;
+    vi.mocked(syncService.onConnectionChange).mockImplementation((callback) => {
+      setConnected = callback as (connected: boolean) => void;
+      return () => {};
+    });
+    const fromServer = captureServerStates();
+    const start = pastThreeDots();
+    await renderSession(start);
+    pastTheQuietSeconds();
+    const writes = vi.mocked(syncService.updateSession).mock.calls.length;
+
+    // The connection drops and the click lands before the screen is drawn again.
+    const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    environment.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      setConnected!(false);
+    } finally {
+      environment.IS_REACT_ACT_ENVIRONMENT = true;
+    }
+    fireEvent.click(plusOf());
+    expect(vi.mocked(syncService.updateSession).mock.calls.length).toBe(writes);
+    expect(document.querySelector('.fx-layer')).toBeNull();
+    expect(theCount().textContent).toBe('4');
+    expect(countBumped()).toBe(false);
+
+    act(() => { setConnected!(true); });
+    act(() => { fromServer({ ...JSON.parse(JSON.stringify(start)), _rev: 7, finishedUsers: ['p1'] }); });
+    expect(document.querySelector('.fx-layer')).toBeNull();
+    expect(theCount().textContent).toBe('4');
+    expect(countBumped()).toBe(false);
+    expect(card('t1').classList.contains('fx-ring')).toBe(false);
+
+    // Past the quiet seconds, the viewer takes a vote back from their other
+    // browser: news the board marks, since no flight holds the card.
+    vi.mocked(Date.now).mockReturnValue(Date.now() + 5_000);
+    const tookOneBack = JSON.parse(JSON.stringify(start)) as RetroSession;
+    tookOneBack.tickets[0].votes = ['facilitator-1', 'facilitator-1', 'facilitator-1'];
+    act(() => { fromServer({ ...tookOneBack, _rev: 8, finishedUsers: ['p1'] }); });
+    expect(within(card('t1')).getByText('You gave it 3 votes')).toBeTruthy();
+    expect(card('t1').classList.contains('fx-ring')).toBe(true);
+  });
+
   // A flight that cannot be drawn (an end outside the window, a browser that
   // cannot animate) arrives at once: nothing waits for a token that will
   // never land. The vote's marks play where they stand and its hold is let
@@ -442,6 +502,29 @@ describe('Session — the vote’s flight', () => {
       withoutBudget(fromServer, 5);
       await userEvent.click(within(card('t1')).getByRole('button', { name: 'Add a vote to this ticket' }));
       expect(lastWrite()?.tickets.find((t) => t.id === 't1')?.votes).toEqual(['facilitator-1', 'facilitator-1']);
+      expect(card('t1').classList.contains('fx-ring')).toBe(true);
+    });
+
+    it('bumps the count and rings the card at once past three dots, and holds nothing', async () => {
+      allowMotion();
+      const fromServer = captureServerStates();
+      await renderSession(pastThreeDots());
+      pastTheQuietSeconds();
+      offScreen();
+
+      await userEvent.click(plusOf());
+      expect(myVotesOn(lastWrite())).toBe(5);
+      expect(theCount().textContent).toBe('5');
+      expect(animations).toHaveLength(0);
+      expect(document.querySelector('.fx-layer')).toBeNull();
+      expect(countBumped()).toBe(true);
+      expect(card('t1').classList.contains('fx-ring')).toBe(true);
+
+      // Nothing is held: a later vote on this card that does not fly is marked by the board itself.
+      card('t1').classList.remove('fx-ring');
+      withoutBudget(fromServer, 5);
+      await userEvent.click(plusOf());
+      expect(myVotesOn(lastWrite())).toBe(6);
       expect(card('t1').classList.contains('fx-ring')).toBe(true);
     });
 
@@ -517,6 +600,39 @@ describe('Session — the vote’s flight', () => {
       expect(ring()).toBe(true);
     });
 
+    // Past three dots both tokens land on the number: it bumps, with a ring,
+    // where each token lands and never before the first.
+    it('bumps the count where each of two quick votes past three dots lands, and keeps the card held until the second', async () => {
+      allowMotion();
+      const fromServer = captureServerStates();
+      await renderSession(pastThreeDots());
+      pastTheQuietSeconds();
+      await userEvent.click(plusOf());
+      await userEvent.click(plusOf());
+      expect(theCount().textContent).toBe('6');
+      expect(animations).toHaveLength(2);
+      expect(countBumped()).toBe(false);
+      expect(ring()).toBe(false);
+
+      landOne();
+      expect(countBumped()).toBe(true);
+      expect(ring()).toBe(true);
+      clearRing();
+      theCount().classList.remove('fx-bump');
+      // The server agrees with both votes, then says the viewer took one back
+      // from their other browser: news the board would mark, if the card were
+      // not held for the token still on its way.
+      serverSays(fromServer, 5, 6);
+      serverSays(fromServer, 6, 5);
+      expect(theCount().textContent).toBe('5');
+      expect(ring()).toBe(false);
+      expect(countBumped()).toBe(false);
+
+      landOne();
+      expect(countBumped()).toBe(true);
+      expect(ring()).toBe(true);
+    });
+
     it('keeps the card held until the second of two votes taken back is home', async () => {
       allowMotion();
       const fromServer = captureServerStates();
@@ -577,6 +693,40 @@ describe('Session — the vote’s flight', () => {
       // Both tokens are in: the card is let go, and the next news is marked.
       serverSays(fromServer, 7, 2);
       expect(within(card('t1')).getByText('You gave it 2 votes')).toBeTruthy();
+      expect(ring()).toBe(true);
+    });
+
+    // The same past three dots, where the add's token would land on the
+    // number: it lands on nothing, so the number does not bump for it.
+    it('bumps and rings nothing past three dots for a vote taken back before its token lands, and holds the card until both tokens are in', async () => {
+      allowMotion();
+      const fromServer = captureServerStates();
+      await renderSession(pastThreeDots(5));
+      pastTheQuietSeconds();
+      await userEvent.click(plusOf());
+      await userEvent.click(minusOf());
+      expect(myVotesOn(lastWrite())).toBe(5);
+      expect(theCount().textContent).toBe('5');
+      expect(animations).toHaveLength(2);
+      const [out, home] = animations.splice(0);
+
+      // Home first. The add's token still flies: the card stays held, and a
+      // vote the viewer takes back from their other browser is not marked.
+      act(() => { home.onfinish?.(); });
+      serverSays(fromServer, 5, 5);
+      serverSays(fromServer, 6, 4);
+      expect(theCount().textContent).toBe('4');
+      expect(ring()).toBe(false);
+      expect(countBumped()).toBe(false);
+
+      // It lands on nothing, on a number still drawn: no bump, no ring.
+      act(() => { out.onfinish?.(); });
+      expect(document.querySelector('.fx-layer')).toBeNull();
+      expect(countBumped()).toBe(false);
+      expect(ring()).toBe(false);
+
+      // Both tokens are in: the card is let go, and the next news is marked.
+      serverSays(fromServer, 7, 5);
       expect(ring()).toBe(true);
     });
 
@@ -666,6 +816,63 @@ describe('Session — the vote’s flight', () => {
     expect(document.querySelector('[data-vote-tokens]')).toBeNull();
     expect(document.querySelector('.fx-layer')).toBeNull();
     expect(within(card('t1')).getByTestId('my-guided-votes').lastElementChild!.classList.contains('fx-pop')).toBe(true);
+  });
+
+  // Past three dots the same: no token and no hold, and the number bumps in
+  // place, answered by its own plus. Nothing lands on it, so nothing rings
+  // for the click: before the server's first state the board marks nothing,
+  // and a ring there could only be a landing's.
+  it('flies nothing past ten votes a person past three dots: the count bumps in place, and nothing holds the card', async () => {
+    allowMotion();
+    const fromServer = captureServerStates();
+    await renderSession(pastThreeDots(4, { maxVotes: 12 }));
+    pastTheQuietSeconds();
+    await userEvent.click(plusOf());
+    expect(document.querySelector('[data-vote-tokens]')).toBeNull();
+    expect(document.querySelector('.fx-layer')).toBeNull();
+    expect(animations).toHaveLength(0);
+    expect(theCount().textContent).toBe('5');
+    expect(countBumped()).toBe(true);
+    expect(card('t1').classList.contains('fx-ring')).toBe(false);
+
+    // Nothing holds the card: once the server's state is drawn and its quiet
+    // seconds are over, the board marks the vote the viewer takes back from
+    // their other browser.
+    const drawn = JSON.parse(JSON.stringify(lastWrite())) as RetroSession;
+    act(() => { fromServer({ ...drawn, _rev: 3 }); });
+    vi.mocked(Date.now).mockReturnValue(Date.now() + 5_000);
+    const tookOneBack = JSON.parse(JSON.stringify(drawn)) as RetroSession;
+    tookOneBack.tickets[0].votes = tookOneBack.tickets[0].votes.slice(1);
+    act(() => { fromServer({ ...tookOneBack, _rev: 4 }); });
+    expect(theCount().textContent).toBe('4');
+    expect(card('t1').classList.contains('fx-ring')).toBe(true);
+  });
+
+  // A vote taken back where no token flies is left to the board: once it is
+  // live, the board marks the total that moved, as it marks any (a bump and
+  // a ring), and nothing holds the card for a flight that never starts.
+  it('leaves a vote taken back where no token flies to the board, which marks the total that moved', async () => {
+    allowMotion();
+    const fromServer = captureServerStates();
+    const start = createSession({
+      tickets: [{ id: 't1', colId: 'col-1', text: 'Great teamwork', authorId: 'p1', groupId: null, votes: ['facilitator-1', 'facilitator-1'] }],
+      groups: [],
+    }, { maxVotes: 12 });
+    await renderSession(start);
+    act(() => { fromServer({ ...JSON.parse(JSON.stringify(start)), _rev: 3 }); });
+    // Past the quiet seconds that follow the server's first state.
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5_000);
+
+    await userEvent.click(minusOf());
+    expect(myVotesOn(lastWrite())).toBe(1);
+    expect(document.querySelector('[data-vote-tokens]')).toBeNull();
+    expect(document.querySelector('.fx-layer')).toBeNull();
+    expect(animations).toHaveLength(0);
+    // The count changes in place: one dot left.
+    expect(theCount().children).toHaveLength(1);
+    expect(within(card('t1')).getByText('You gave it 1 vote')).toBeTruthy();
+    expect(countBumped()).toBe(true);
+    expect(card('t1').classList.contains('fx-ring')).toBe(true);
   });
 
   it('plays nothing at all for a reader who asked for less motion', async () => {
