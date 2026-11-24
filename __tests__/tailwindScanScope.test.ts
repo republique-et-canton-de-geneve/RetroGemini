@@ -21,7 +21,7 @@ import { describe, expect, it } from 'vitest';
  */
 const css = readFileSync(resolve(__dirname, '..', 'index.css'), 'utf8');
 
-const excluded = [...css.matchAll(/^@source\s+not\s+'([^']+)';/gm)].map((match) => match[1]);
+const excluded = [...css.matchAll(/^@source\s+not\s+(['"])([^'"]+)\1;/gm)].map((match) => match[2]);
 
 describe("Tailwind's scan reads the application only", () => {
   it.each([

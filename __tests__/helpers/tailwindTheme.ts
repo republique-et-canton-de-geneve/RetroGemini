@@ -92,11 +92,6 @@ const themeColors = (): Map<string, string> => {
   return themeCache;
 };
 
-/** The hues Tailwind's theme defines (`red`, `slate`, …), read from theme.css. */
-export const TAILWIND_HUES: readonly string[] = [
-  ...new Set([...themeColors().keys()].filter((key) => /-500$/.test(key)).map((key) => key.replace(/-500$/, ''))),
-];
-
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Every colour token the build knows, longest first so a prefix never wins. */

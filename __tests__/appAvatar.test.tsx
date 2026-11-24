@@ -368,3 +368,53 @@ describe('App — the avatar hint on the dashboard', () => {
     expect(localStorage.getItem(HINT_KEY)).toBeNull();
   });
 });
+
+describe("App — a What's New put off for later", () => {
+  const originalFetch = global.fetch;
+  const WHATS_NEW = { name: "What's New" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    clearSessionRevoked();
+    window.history.replaceState({}, '', '/');
+    vi.mocked(dataService.getTeam).mockReturnValue(team);
+    // A release the facilitator has not read yet: the note opens by itself.
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        current: '45.3',
+        announcements: [{ version: '45.0', date: '2026-11-19', items: [{ type: 'feature', description: 'A new look' }] }]
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    ) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  // The note opened itself whenever the open team changed object. A pick puts
+  // a new team on screen (the answered map, merged on a new object), so each
+  // pick brought back the note just put off, over the picker still open.
+  it('stays closed when an avatar pick puts a new team object on screen', async () => {
+    vi.mocked(dataService.setMemberAvatar).mockResolvedValue({ 'fac-1': { id: 'cat', at: 500 } });
+    await openDashboard();
+    const note = await screen.findByRole('dialog', WHATS_NEW);
+    fireEvent.click(within(note).getByRole('button', { name: 'Later' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', WHATS_NEW)).toBeNull());
+
+    pickCat();
+    await waitFor(() => expect(screen.getByTestId('dashboard-stub').dataset.avatars).toContain('cat'));
+    // The commit that drew the new team has run its effects.
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole('dialog', WHATS_NEW)).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Choose my avatar' })).toBeInTheDocument();
+  });
+
+  it('still opens by itself when the facilitator comes back to the dashboard', async () => {
+    await openDashboard();
+    expect(await screen.findByRole('dialog', WHATS_NEW)).toBeInTheDocument();
+  });
+});

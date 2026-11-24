@@ -142,8 +142,10 @@ system asks for reduced motion gets none of it: each of these animations,
 like every spinner and every transition that moves or resizes a box, is
 declared for readers who have not asked, a smooth scroll glides for them
 alone, and nothing animates on the way out, so a dialog gives the focus back
-at once. No animation changes the size or place
-of a control a click aims at. *Avatars*: each person can choose a
+at once. Apart from a card that arrives, which rises 14 pixels into its
+own place for half a second, and a participant's row that slides in
+sideways, no animation changes the size or place of a control a click aims
+at. *Avatars*: each person can choose a
 picture in place of their initials. The picture is decoration: an avatar is
 named by the person ("Alice Roux"), never by its picture, and the picker's
 opener is a button named "Alice Roux, choose my avatar" (its initials first

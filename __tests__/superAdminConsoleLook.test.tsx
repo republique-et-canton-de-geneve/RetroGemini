@@ -149,7 +149,8 @@ describe('the console in the dashboard vocabulary', () => {
   // either: its colour is a blend no contrast check reads. Disabled states are
   // drawn in colours of their own, as the dashboard's recipes do.
   it.each(sources().map(({ file, text }) => [file, text]))('paints no gradient and fades nothing in %s', (_file, text) => {
-    expect(text).not.toMatch(/\bbg-(linear|radial|conic)-/);
+    // bg-gradient-to-* is Tailwind 3's spelling, which 4 still builds.
+    expect(text).not.toMatch(/\bbg-(linear|radial|conic|gradient)-|gradient\(/);
     expect(text).not.toMatch(/(^|[\s"'`:])opacity-\d/m);
   });
 

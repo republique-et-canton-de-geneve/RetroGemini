@@ -165,18 +165,23 @@ const App: React.FC = () => {
     fetchVersionInfo();
   }, []);
 
-  // Auto-show announcements popup when user reaches dashboard with unread announcements
+  // Auto-show announcements popup when user reaches dashboard with unread announcements.
+  // It reads the team's id and the viewer's role, never the objects: the open
+  // team is replaced by a new object whenever a save or an avatar pick lands,
+  // and each replacement brought back a note the facilitator had just put off.
+  const announcementTeamId = currentTeam?.id;
+  const announcementRole = currentUser?.role;
   useEffect(() => {
-    if (!versionInfo || !currentTeam || !currentUser) return;
+    if (!versionInfo || !announcementTeamId || !announcementRole) return;
     // Only show announcements to facilitators
-    if (currentUser.role !== 'facilitator') return;
+    if (announcementRole !== 'facilitator') return;
     // Only show on dashboard view
     if (view !== 'DASHBOARD') return;
 
     if (hasUnreadAnnouncements) {
       setShowAnnouncements(true);
     }
-  }, [versionInfo, currentTeam, currentUser, view, hasUnreadAnnouncements]);
+  }, [versionInfo, announcementTeamId, announcementRole, view, hasUnreadAnnouncements]);
 
   const handleOpenAnnouncements = () => {
     setShowAnnouncements(true);

@@ -77,7 +77,7 @@ export const LIST_ROW = 'bg-white border border-slate-200 rounded-xl shadow-xs h
 export const DIALOG_OVERLAY = 'fixed inset-0 bg-slate-900/45 z-100 flex items-center justify-center p-4';
 export const DIALOG_PANEL = 'bg-white rounded-2xl shadow-2xl border border-slate-200 w-full';
 
-/** A dialog's title and its close cross. */
+/** A dialog's title. Its close cross is written at the call site, as `${ICON_BUTTON} -mr-2`. */
 export const DIALOG_TITLE = 'text-xl font-bold text-slate-900 tracking-tight';
 
 /** The title of one setting in the Settings card, and its decorative icon. */

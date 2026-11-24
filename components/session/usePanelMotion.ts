@@ -31,7 +31,7 @@ import { EFFECT_LENGTH_MS, motionAllowed } from '../common/motion/effects';
  *   follows (`motionAllowed`).
  */
 
-/** How long after the mount, or after the viewer's own reconnection, nothing plays: the board's seconds too. */
+/** How long nothing plays after the first roster since the session was last live, or after the viewer's own reconnection: the board's seconds too. */
 export const QUIET_MS = QUIET_AFTER_LIVE_MS;
 /**
  * How long a row wears the arrival (ms): its longest piece, the presence dot's

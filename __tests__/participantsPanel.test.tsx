@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, fireEvent, screen, within } from '@testing-library/react';
+import { act, cleanup, render, fireEvent, screen, within } from '@testing-library/react';
 import React from 'react';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -1140,7 +1140,12 @@ describe('ParticipantsPanel - motion', () => {
   const classesOf = (element: Element | null | undefined) => element?.className.split(/\s+/) ?? [];
 
   beforeEach(() => { vi.useFakeTimers(); prefersMotion('no-preference'); });
-  afterEach(() => { vi.useRealTimers(); restoreMotionPreference(); });
+  afterEach(() => {
+    cleanup();
+    act(() => { vi.runOnlyPendingTimers(); });
+    vi.useRealTimers();
+    restoreMotionPreference();
+  });
 
   it('slides a guest in with a wash of their own tone, springs their avatar and pulses their dot', () => {
     const view = render(renderAt(['fac', 'a']));

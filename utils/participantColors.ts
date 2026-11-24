@@ -59,11 +59,11 @@ const HUE: Readonly<Record<ParticipantColorClass, string>> = {
 const NEUTRAL_HUE = 'neutral';
 
 export interface ParticipantTone {
-  /** The pastel body: an avatar's background, a colour-by-author card. */
+  /** The pastel body: an avatar's background, the wash of an arriving row. */
   bg: string;
   /** The dark ink of the same hue: initials, dots, outlines. */
   ink: string;
-  /** The brighter accent of an avatar picture. */
+  /** The brighter accent: of an avatar picture, and the hue a colour-by-author card is tinted from (`utils/cardHue.ts`). */
   pop: string;
 }
 

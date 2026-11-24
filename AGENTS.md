@@ -1013,8 +1013,8 @@ Every icon control shown at rest, hover or not, must be seen too: the card's
 *Add reaction*, a comment's edit and delete, and an action row's done circle
 (open and checked) and trash, in Review, Open Actions, the health check's
 Review and the Dashboard's Actions tab, were slate-300 on white (1.49:1) or a
-check in emerald-500 (2.54:1); they are slate-500 and emerald-600, and the
-tests measure what each paints (`effectivePair`), never a class refused:
+check in emerald-500 (2.54:1); they are slate-500 and emerald-600 (emerald-700
+on the Dashboard's Actions tab), and the tests measure what each paints (`effectivePair`), never a class refused:
 slate-400, 2.63:1, passed a check that only refused slate-300. (Those numbers
 are Tailwind's slate, before 45.0; the look's slate-500 measures 5.41:1 on
 white and its slate-400 3.41:1, an edge's value and still no text colour.)
