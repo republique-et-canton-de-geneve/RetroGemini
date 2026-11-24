@@ -261,15 +261,17 @@ by one route, `POST /api/team/:teamId/member/avatar`.
   picture planted with the very time of the person's stored choice is not
   drawn either by a browser whose copy of the team holds that choice. A later
   choice of the person replaces it: any choice, the picture already stored
-  picked again and a first "My initials" included (each is stored dated, at
-  least a millisecond after any choice it replaces, like a new picture, and
-  stamped into the session it was made in), when the planted time is older
-  than that choice; and for a time planted ahead of the clock, a
-  choice made in that session, where the route's stamp replaces a time more
-  than five minutes ahead of the server's clock (no choice wrote it). A time
-  planted less than five minutes ahead stands until it has passed: that is
-  how far two servers' clocks are allowed to differ. A choice made elsewhere
-  does not reach that session while a planted time is ahead of it. The browsers compare the two times and never judge one by
+  picked again and a first "My initials" included (each is stored dated like
+  a new picture, at least a millisecond after the choice it replaces, or by
+  the server's clock alone after the largest date a number counts exactly,
+  which has no next one, and stamped into the session it was made in), when
+  the planted time is older than that choice; and for a time planted ahead of
+  the clock, a choice made in that session, where the route's stamp replaces
+  a time more than five minutes ahead of the server's clock (no choice wrote
+  it). A time planted less than five minutes ahead stands until it has
+  passed: that is how far two servers' clocks are allowed to differ. A
+  choice made elsewhere does not reach that session while a planted time is
+  ahead of it. The browsers compare the two times and never judge one by
   their own clock: a browser whose clock is wrong would otherwise write over
   a newer choice made in the person's other browser, and the two would undo
   each other without end.

@@ -259,12 +259,14 @@ components. A component keeps its Tailwind classes (`bg-slate-50`,
 `text-indigo-600`, `rounded-xl`, `shadow-xs`) and the block gives those names
 their values, so every screen changes at once and none can be left behind in
 another look. Tailwind builds that stylesheet from the class names of the
-files it scans, and the `@source not` lines at the top of `index.css` keep the
-scan to the application's own sources: the documents, the workflow files and
-the directories that are not the application (the tests and specs, the
-scripts, the load test, `k8s/`, the tooling's) name classes the screens never
-draw, and those had become 99 dead rules of the shipped stylesheet, about
-13 kB of 110 kB. A class named only in a document is therefore no longer
+files it scans, and the `@source not` lines at the top of `index.css` keep out
+of the scan the Markdown and YAML files, the workflow files and the
+directories that are not the application (the tests and specs, the scripts,
+the load test, `k8s/`, the tooling's): they name classes the screens never
+draw, and those had become about a hundred dead rules of the shipped
+stylesheet (103 utility classes, counted by building with and without the
+exclusions), about 13 kB of 110 kB. The configuration files at the root are
+still read. A class named only in a Markdown document is therefore no longer
 built (`__tests__/tailwindScanScope.test.ts`, which also refuses an exclusion
 that reaches a directory of the application). And `index.css` styles no class
 the screens do not apply (`__tests__/lookTokens.test.ts` → *what index.css
@@ -322,10 +324,11 @@ styles*; `.drag-over` and `.scrollbar-hide` went in 45.3). Ten rules:
   is text in two cases only: a placeholder inside a slate-900 field (5.05:1:
   the Icebreaker's question and the ROTI follow-up), and the label of a
   disabled control, which 1.4.3 does not hold to the text floor (3.41:1 on
-  white): the phases a participant cannot press, in both session headers
-  (`disabled:text-slate-400`; `__tests__/sessionHeaderLook.test.tsx` → *shows
-  a participant phases they cannot press as disabled, without opacity*), and
-  the timer's +30s and +1m while the session is not live.
+  white): the phases a participant cannot press, the current one aside, in
+  both session headers (`disabled:text-slate-400`;
+  `__tests__/sessionHeaderLook.test.tsx` → *shows a participant phases they
+  cannot press as disabled, without opacity*), and the timer's +30s and +1m
+  while the session is not live.
   Retune a value in that test first, then in the block.
 - **The contrast helper measures what is painted.**
   `__tests__/helpers/tailwindTheme.ts` reads Tailwind's `theme.css` and then
@@ -769,13 +772,14 @@ rules:
 - **A spinner, a pulse and a transition that moves a box are gated like the
   effects.** Tailwind's `animate-*` utilities carry no media query, so each is
   written behind `motion-safe:` (`motion-safe:animate-spin`). So is a
-  transition that moves or resizes a box: the participants panel's width, a
-  bar's height or width, a switch's knob (`SWITCH_KNOB`, `adminSwitchKnob`),
-  the timer's ring and the reaction picker's grow on hover (which, for a
-  reader who asked for less motion, snaps to its size). `.bar-anim` in
-  `index.css` is gated too, under `no-preference` in a block after the
-  effects block (`lookTokens.test.ts` reads everything before that block's
-  start). The duration goes behind the gate with its transition:
+  transition that moves or resizes a box, or draws a line that moves: the
+  participants panel's width, a bar's height or width, a switch's knob
+  (`SWITCH_KNOB`, `adminSwitchKnob`), the timer's ring and the reaction
+  picker's grow on hover (which, for a reader who asked for less motion,
+  snaps to its size). `.bar-anim` in `index.css` is gated too, under
+  `no-preference` in a block after the effects block (`lookTokens.test.ts`
+  reads everything before that block's start). The duration goes behind the
+  gate with its transition:
   `transition-property` starts as `all`, so a `duration-*` left alone
   animates every change of the box. A mixed transition is gated whole; a
   transition of colours, a shadow or an opacity stays for everyone. One
@@ -2245,13 +2249,15 @@ rendering it under `<LanguageProvider initialLanguage="fr">`.
 
 **Test runs emulate reduced motion, and one project turns motion back on.**
 Every animation of the look is declared under `prefers-reduced-motion:
-no-preference`, and many specs measure a box or audit contrast right after an
-element appears, so all four Playwright configs pin `reducedMotion: 'reduce'`
-beside the locale. `playwright.config.ts` has a second project, `motion`, which
-runs the specs an animation can actually change (`retro-touch-card-controls`,
-`retro-full-flow`, `retro-wide-board`, `accessibility-audit`) with motion on,
-plus `session-motion.spec.ts`, which runs only there and proves the animations
-play once and leave nothing behind. Playwright says nothing of a listed name
+no-preference`, but for the typing cue's dots, declared for every reader and
+stopped under `reduce`; many specs measure a box or audit contrast right after
+an element appears, so all four Playwright configs pin
+`reducedMotion: 'reduce'` beside the locale. `playwright.config.ts` has a
+second project, `motion`, which runs the specs an animation can actually
+change (`retro-touch-card-controls`, `retro-full-flow`, `retro-wide-board`,
+`accessibility-audit`) with motion on, plus `session-motion.spec.ts`, which
+runs only there and proves the animations play once and leave nothing
+behind. Playwright says nothing of a listed name
 that matches no file, so `__tests__/playwrightMotionProject.test.ts` checks
 that each is a spec of `e2e/` and that the motion-only spec is among them;
 `__tests__/playwrightDualUrlFlows.test.ts` does the same for the two full
@@ -3088,7 +3094,7 @@ that take a team credential (`/api/send-invite`, `/api/wifi-config`,
 | `/api/team/:teamId/action` | POST | Persist a global action update. **Additive, not a replace** (`utils/actionImpact.js` → `mergeActionImpactState`): it folds the incoming action onto the stored one so `impactRatings`, `closedAt` and `impactDeferredBy` survive a caller that never read them. Without that, a facilitator renaming an action from a client loaded before anyone voted wipes the whole rating round. It also stamps `closedAt` when *it* is what closes the action, which is what keeps the field correct through a rolling update where an older pod closes an action without stamping — but it never invents one for an action already stored as closed without a stamp, because those are the pre-feature closures and dating them would drag the entire historical backlog into the next rating round. Its `jira` comes from the record only (`withRecordedJiraLink`: the stored copy's value, else another copy's, else none), so a caller can neither drop a link nor plant one |
 | `/api/team/:teamId/action/impact` | POST | Record one participant's impact vote on one closed action (`{ actionId, userId, vote }`; `vote: 1 \| 2 \| 3 \| 'abstain' \| null`, `null` clears the caller's own vote). **Deliberately narrow, for the same reason `/retrospective/:retroId/name` is**: `impactRatings` is the first per-user data on the team record and it has one writer per participant, so sending a whole action would make two people voting in the same second race, with the loser's vote vanishing silently. This writes exactly `impactRatings[userId]` inside `atomicTeamUpdate`, so concurrent voters never contend for the same key. Carries no revision, touches no other field, and takes no retro/health-check hint — it scans all three homes, because a hint would be a second way to locate an action that could disagree with the scan. Answers `404 action_not_found` (after the write, never from a preliminary read) and `400 invalid_vote` for anything off the scale, refused rather than coerced. **`{ actionId, reset: true }` drops the whole map for one action** — what a *later* retrospective does when it puts a postponed action back to the team, because "Rate later" promises the question is asked again and a vote left in place is pre-filled next time, so the early answerer is never re-asked. It lives on this route rather than a new one because `impactRatings` is owned here and nowhere else (the whole-action route deliberately cannot touch it), and a clear written elsewhere would be a second owner. The reset is performed at **re-presentation**, never at the deferral: that is what keeps the "Rate later" toggle lossless, so a mis-click stays undoable and the votes only go when the round that would have shown them really reopens. `reset` must be a literal `true`; anything else falls through to the ordinary vote path and its validation |
 | `/api/team/:teamId/members` | POST | Update the member roster. Member emails are **cleaned, never refused** by the shared email rule (`cleanRosterEmails`, the function the heal pass uses): a value that does not parse is stored as sent, and so is one whose cleaned form another member already holds — a roster write carries joins, and member emails are identities on the client. Answers `{ success: true }`: it used to return the whole team, which no client read, so every join paid for a second copy of the history |
-| `/api/team/:teamId/member/avatar` | POST | Set or clear one member's avatar `{ memberId, avatar: <id> \| null, sessionId? }` (`server/routes/teamAvatarRoutes.js`). Credential first (`401`); `400 invalid_member` unless `memberId` is a plausible member id (`isValidRaterId`); `400 invalid_avatar` unless `avatar` is `null` or an id the release accepts (`isAcceptedAvatarId` in `utils/avatars.js`: the offered ids, and those accepted one release ahead of being offered): refused, never coerced, because an id this pod does not know may be one a later release offers. Under the row lock it writes `memberAvatars[memberId] = { id, at }`, with `at` the server's clock in ms and never before the entry it replaces, and a clear stored as `{ id: null, at }` (so a clear too is newer than every copy of the choice it replaces). It rebuilds the map from its valid entries, so junk heals (an entry whose `at` is not a date, `isAvatarTime`, is junk: nothing could be dated after it), and caps it at 500 entries (ids on neither roster list go first, then the oldest; never the one just written), where a first clear takes its place like any choice. Every pick is written dated: a repeat of the stored picture, or a clear of a cleared choice, is dated again (at least one millisecond after the entry it replaces, by the clock alone after the largest date, which has no next one), so its stamp replaces a newer copy on that member's session entry (a copy dated less than five minutes ahead of the server's clock stands until that time has passed, as for any pick); a first clear, with no valid entry stored before it (none, or junk the same write drops: an entry that is not `{ id, at }`, or whose `at` is no date, or whose `id` is not of the stored shape, `isMemberAvatarEntry`), is stored as `{ id: null, at }`, dated by the clock, and stamped into the session like any choice. Answers `{ success: true, memberAvatars }` after the write. With a `sessionId`, after the answer and best-effort, it stamps that live session's participant entry with `avatar` and `avatarAt` through `liveSessionPatch`: only the team's own session, only a participant it already holds, only when the stored stamp is older (or dated far ahead of the server's clock: a participant entry is data, and no pick wrote such a stamp). `/update` ignores `memberAvatars`. The client calls it through `dataService.setMemberAvatar`, which retries an older pod's HTML 404 across a rollout, takes the route's own refusals as final (a value refused, the team gone, the credential refused, the limiter's 429: sent again, they took seven seconds to be said to someone watching "Saving…"), never posts the roster, and merges the answered map into the cached team's member by member (`mergeMemberAvatars`: the newer entry of each, the answered one on a tie, the largest date ranking below every other), because the answer is the map at that pick's write and a refresh answered first may hold another member's later choice; it resolves with the merged map |
+| `/api/team/:teamId/member/avatar` | POST | Set or clear one member's avatar `{ memberId, avatar: <id> \| null, sessionId? }` (`server/routes/teamAvatarRoutes.js`). Credential first (`401`); `400 invalid_member` unless `memberId` is a plausible member id (`isValidRaterId`); `400 invalid_avatar` unless `avatar` is `null` or an id the release accepts (`isAcceptedAvatarId` in `utils/avatars.js`: the offered ids, and those accepted one release ahead of being offered): refused, never coerced, because an id this pod does not know may be one a later release offers. Under the row lock it writes `memberAvatars[memberId] = { id, at }`, with `at` the server's clock in ms and never before the entry it replaces (but for the largest date, which has no next one: see below), and a clear stored as `{ id: null, at }` (so a clear too is newer than every copy of the choice it replaces). It rebuilds the map from its valid entries, so junk heals (an entry whose `at` is not a date, `isAvatarTime`, is junk: nothing could be dated after it), and caps it at 500 entries (ids on neither roster list go first, then the oldest; never the one just written), where a first clear takes its place like any choice. Every pick is written dated: a repeat of the stored picture, or a clear of a cleared choice, is dated again (at least one millisecond after the entry it replaces, by the clock alone after the largest date, which has no next one), so its stamp replaces a newer copy on that member's session entry (a copy dated less than five minutes ahead of the server's clock stands until that time has passed, as for any pick); a first clear, with no valid entry stored before it (none, or junk the same write drops: an entry that is not `{ id, at }`, or whose `at` is no date, or whose `id` is not of the stored shape, `isMemberAvatarEntry`), is stored as `{ id: null, at }`, dated by the clock, and stamped into the session like any choice. Answers `{ success: true, memberAvatars }` after the write. With a `sessionId`, after the answer and best-effort, it stamps that live session's participant entry with `avatar` and `avatarAt` through `liveSessionPatch`: only the team's own session, only a participant it already holds, only when the stored stamp is older (or dated far ahead of the server's clock: a participant entry is data, and no pick wrote such a stamp). `/update` ignores `memberAvatars`. The client calls it through `dataService.setMemberAvatar`, which retries an older pod's HTML 404 across a rollout, takes the route's own refusals as final (a value refused, the team gone, the credential refused, the limiter's 429: sent again, they took seven seconds to be said to someone watching "Saving…"), never posts the roster, and merges the answered map into the cached team's member by member (`mergeMemberAvatars`: the newer entry of each, the answered one on a tie, the largest date ranking below every other), because the answer is the map at that pick's write and a refresh answered first may hold another member's later choice; it resolves with the merged map, with the cache's map unchanged when the answer carries no map it can read, and with the answer as it came when the cache no longer holds that team (signed out, or another team logged in while the write ran) |
 | `/api/team/:teamId/invite-credential` | POST | Derive the team's current invite credential for embedding in invite links (revoked by password rotation) |
 | `/api/team/:teamId/password` | POST | Change the team password (password-only; also bumps the invite epoch, revoking outstanding invite links). **Revokes every session token of the team** (decision D3b): the same transaction gives the team a new session epoch, and the answer is `{ success, sessionToken }`, a token under the new epoch for the caller, so the facilitator who changed it keeps working (a 41.0 client ignores it and keeps authenticating by the new password it holds). After the answer, best-effort, the team's live sockets are cut on this pod and the others (`sessionRevocation.js`). Recorded as `team.password-change` with `detail.sessionsRevoked: true` |
 | `/api/team/:teamId/delete` | POST | Delete a team (its feedbacks are preserved as orphaned; its Jira token, `team-secret:{teamId}`, is deleted before the record). The Dashboard waits for the answer: a failure keeps the team signed in and says so, and `team_not_found` (already deleted — a lost answer, another tab, the super admin) counts as done |
