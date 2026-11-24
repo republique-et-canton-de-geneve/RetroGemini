@@ -425,7 +425,8 @@ const expands = (line: string, name: string) => line.includes(`$${name}`) || lin
 const SURFACES = {
   envExample: '.env.example',
   readme: 'README.md',
-  agents: 'AGENTS.md',
+  // The agent guide's Environment Variables list (moved out of AGENTS.md).
+  agents: 'docs/agents/deployment.md',
   manifest: 'k8s/base/deployment.yaml',
   k8sReadme: 'k8s/README.md',
   k8sSecrets: 'k8s/secrets-templates',
