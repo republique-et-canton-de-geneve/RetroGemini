@@ -395,13 +395,12 @@ describe('one source for a radius', () => {
   });
 
   it('reads a radius after a variant and on one side, and knows one built from a token', () => {
-    // Built from parts: Tailwind scans this file, and a class written whole
-    // here would add a rule to the build.
-    const radius = (side: string, value: string) => ['rounded', side, `[${value}]`].filter(Boolean).join('-');
-    const literal = `md:${radius('', '14px')}`;
-    const derived = radius('t', 'calc(var(--radius-xl)-1px)');
-    expect(arbitraryRadii(`rounded-xl ${literal} ${derived} rounded-full`)).toEqual([literal.slice(3), derived]);
-    expect([literal.slice(3), derived].map(fromToken)).toEqual([false, true]);
+    // Written whole: Tailwind does not scan the tests
+    // (`__tests__/tailwindScanScope.test.ts`), so a probe adds no rule to the build.
+    const literal = 'rounded-[14px]';
+    const derived = 'rounded-t-[calc(var(--radius-xl)-1px)]';
+    expect(arbitraryRadii(`rounded-xl md:${literal} ${derived} rounded-full`)).toEqual([literal, derived]);
+    expect([literal, derived].map(fromToken)).toEqual([false, true]);
   });
 });
 

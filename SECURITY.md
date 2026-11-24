@@ -262,7 +262,7 @@ by one route, `POST /api/team/:teamId/member/avatar`.
   drawn either by a browser whose copy of the team holds that choice. A later
   choice of the person replaces it: any choice, the picture already stored
   picked again and a first "My initials" included (each is stored dated like
-  a new picture, at least a millisecond after the choice it replaces, or by
+  a new picture, at least a millisecond after any choice it replaces, or by
   the server's clock alone after the largest date a number counts exactly,
   which has no next one, and stamped into the session it was made in), when
   the planted time is older than that choice; and for a time planted ahead of

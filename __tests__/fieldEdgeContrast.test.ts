@@ -248,8 +248,8 @@ describe('a field that cannot be typed in is never styled as read-only', () => {
   });
 
   it('knows read-only: and not-read-only:, after a variant or not, and :read-only in an arbitrary variant', () => {
-    // Under a utility no theme has (`bg-locked`): Tailwind scans these files
-    // too, and a real class written here would add a rule to the build.
+    // Under a utility no theme has (`bg-locked`): the rule reads the variant,
+    // whatever the utility after it.
     // `not-read-only:` is Tailwind's own spelling of `[&:not(:read-only)]:`:
     // a select never matches it, so `bg-slate-50 not-read-only:bg-white`
     // leaves every select grey at rest.

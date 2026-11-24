@@ -19,9 +19,10 @@ build
 # AI agents' working directories, which the image needs none of. The builder
 # copies the whole context (COPY . .):
 # - .claude/worktrees/ holds whole checkouts of the repository, often older
-#   ones, and Tailwind's scan there would read their components: this file
+#   ones. Until 45.3 Tailwind's scan there read their components (this file
 #   drops the .gitignore that names them, at the root only, and a checkout's
-#   own copy of it does not name its own components.
+#   own copy of it does not name its own components); index.css now keeps
+#   them out of the scan, and leaving them out here keeps the context small.
 # - .gstack/ is gstack's state: its browser's access token, cookies and
 #   storage, the logs of the pages and requests it made, and the probes of /qa
 #   and /review. Left out, none of it is sent to the builder or kept in the

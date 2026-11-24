@@ -191,11 +191,12 @@ const unaskedSmoothScrolls = (file: string, text: string): number[] => {
 
 /**
  * The classes that set `scroll-behavior: smooth`: Tailwind's utility, and the
- * same property written as an arbitrary one. Named from parts, as the probes
- * below are: Tailwind scans this file, and a class written whole here would
- * add a rule to the build.
+ * same property written as an arbitrary one. Written whole, as the probes
+ * below are: Tailwind does not scan the tests
+ * (`__tests__/tailwindScanScope.test.ts`), so naming them adds no rule to the
+ * build.
  */
-const SMOOTH_SCROLL_UTILITIES = [['scroll', 'smooth'].join('-'), `[${['scroll-behavior', 'smooth'].join(':')}]`];
+const SMOOTH_SCROLL_UTILITIES = ['scroll-smooth', '[scroll-behavior:smooth]'];
 
 /** The classes of a list that scroll smoothly when no reader's setting stops them. */
 const ungatedSmoothScrollClasses = (text: string): string[] =>
@@ -462,11 +463,9 @@ describe('nothing animates for a reader who asked for less motion', () => {
       "// 'smooth', in a comment",
     ].join('\n');
     expect(unaskedSmoothScrolls('Probe.tsx', unasked)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-    // Built from parts: Tailwind scans this file, and a class written whole
-    // here would add a rule to the build.
-    const smooth = ['scroll', 'smooth'].join('-');
-    const instant = ['scroll', 'auto'].join('-');
-    const arbitrary = `[${['scroll-behavior', 'smooth'].join(':')}]`;
+    const smooth = 'scroll-smooth';
+    const instant = 'scroll-auto';
+    const arbitrary = '[scroll-behavior:smooth]';
     expect(ungatedSmoothScrollClasses(`overflow-y-auto ${smooth} md:${smooth} md:${arbitrary}`)).toEqual([smooth, `md:${smooth}`, `md:${arbitrary}`]);
     expect(ungatedSmoothScrollClasses(`motion-safe:${smooth} motion-safe:${arbitrary} ${instant}`)).toEqual([]);
     const css = [

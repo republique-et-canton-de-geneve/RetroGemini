@@ -719,23 +719,25 @@ describe('base deployment manifest (audit H7.1)', () => {
  * last one that matches decides, so the file's text alone misleads.
  *
  * The builder stage copies the whole context (`COPY . .`) and builds the
- * bundle there, and Tailwind's source scan reads every file of it that no
- * `.gitignore` names. The root `.gitignore`, the one that names
+ * bundle there, and until 45.3 Tailwind's source scan read every file of it
+ * that no `.gitignore` names. The root `.gitignore`, the one that names
  * `.claude/worktrees/`, is not in the context (`.dockerignore` drops it, at
  * the root only), and a worktree's own copy of it does not name the
  * worktree's components. An agent's checkout there (a whole copy of the
  * repository, often an older one) therefore put its components' classes into
  * the bundle's CSS, and every checkout made the context larger (113 MB in the
  * checkout where it was found). CI builds from a clean checkout and never saw
- * it.
+ * it. Since 45.3 `index.css` keeps both directories out of the scan wherever
+ * the build runs (`__tests__/tailwindScanScope.test.ts`); this file still
+ * keeps them out of the context, for its size and for what `.gstack/` holds.
  *
  * `.gstack/` is left out for what it holds: gstack's state, with its
  * browser's access token (`browse.json`), its cookies and storage when it
  * keeps them (`session-state.json`), the logs of the pages and requests it
  * made, and the probes and reports of `/qa` and `/review`. `COPY . .` put all
- * of it in the builder stage's layer. Tailwind's scan skips the directory
- * when it holds gstack's own `.gitignore` (`*`), which only the browser
- * writes: the review tools keep `.gstack/tmp/` out of git through
+ * of it in the builder stage's layer. Until 45.3 Tailwind's scan skipped the
+ * directory only when it held gstack's own `.gitignore` (`*`), which only the
+ * browser writes: the review tools keep `.gstack/tmp/` out of git through
  * `.git/info/exclude`, which the context does not carry, so where only they
  * ran, the classes their probes name reached the bundle's CSS too.
  */
@@ -794,7 +796,7 @@ describe('Docker build context (.dockerignore)', () => {
 
   it("leaves the agents' working directories out of it", () => {
     // Claude Code's settings and agents' checkouts of the repository, often
-    // older ones, whose components Tailwind's scan reads.
+    // older ones, whose components Tailwind's scan read until 45.3.
     const claudeFiles = [
       '.claude/worktrees/agent-a1b2c3/components/Session.tsx',
       '.claude/worktrees/agent-a1b2c3/index.css',
@@ -813,7 +815,7 @@ describe('Docker build context (.dockerignore)', () => {
     ];
     expect(
       claudeFiles.filter((path) => !leftOut(path)),
-      "these reach the builder's COPY . ., where Tailwind's scan reads a stale checkout's components and puts their classes into the bundle",
+      "these reach the builder's COPY . ., which copies whole checkouts of the repository, often stale ones, into the build context",
     ).toEqual([]);
     expect(
       gstackFiles.filter((path) => !leftOut(path)),

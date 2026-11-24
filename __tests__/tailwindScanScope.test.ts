@@ -9,8 +9,8 @@ import { describe, expect, it } from 'vitest';
  * Those name classes the application never draws, often on purpose (a guard's
  * counter-example such as `opacity-40`, an ungated `animate-spin`, a `read-only:`
  * variant the field guard refuses, `text-[#555]` in AGENTS.md), and each one
- * became a rule of the shipped CSS: 99 of them, about 13 kB of 110 kB, measured
- * by building with and without these exclusions. None of them was drawn,
+ * became a rule of the shipped CSS: 103 utility classes, about 13 kB of 110 kB,
+ * measured by building with and without these exclusions. None of them was drawn,
  * because the application writes its classes whole in its own sources
  * (AGENTS.md → The look: a recipe is a full class string), and a column's
  * stored classes are read as data (`utils/columnHue.ts`), never applied.
