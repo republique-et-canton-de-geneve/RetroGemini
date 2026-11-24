@@ -1,7 +1,7 @@
 import { appFetch } from '../services/publicPath';
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension, TeamFeedback as TeamFeedbackType } from '../types';
+import { Team, User, RetroSession, Column, HealthCheckSession, HealthCheckTemplate, HealthCheckDimension } from '../types';
 import { dataService } from '../services/dataService';
 import {
   PASSWORD_MIN_LENGTH,
@@ -655,23 +655,6 @@ const Dashboard: React.FC<Props> = ({ team, currentUser, onOpenSession, onOpenHe
       }
     });
     return distribution;
-  };
-
-  // Get score color - distinct colors for each rating level
-  const getScoreColor = (score: number) => {
-    if (score >= 4.5) return 'bg-emerald-600';  // 5: dark green
-    if (score >= 3.5) return 'bg-emerald-400';  // 4: light green
-    if (score >= 2.5) return 'bg-amber-400';    // 3: amber
-    if (score >= 1.5) return 'bg-orange-500';   // 2: orange-red
-    return 'bg-rose-600';                       // 1: red
-  };
-
-  const getScoreTextColor = (score: number) => {
-    if (score >= 4.5) return 'text-emerald-700';
-    if (score >= 3.5) return 'text-emerald-700';
-    if (score >= 2.5) return 'text-amber-600';
-    if (score >= 1.5) return 'text-orange-600';
-    return 'text-rose-700';
   };
 
   return (

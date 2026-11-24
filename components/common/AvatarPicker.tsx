@@ -99,6 +99,16 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
   chosenRef.current = chosen;
   const inFlight = useRef(false);
   const waiting = useRef<{ choice: Choice } | null>(null);
+  // Whether the picker is still on screen. A sign-out unmounts every opener,
+  // and `onPick` names no team: the write goes to the team signed in when it
+  // runs. A pick that waited is not written once the picker is gone.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const onPickRef = useRef(onPick);
   onPickRef.current = onPick;
   const tabRefs = useRef<Partial<Record<AvatarFamilyId, HTMLButtonElement | null>>>({});
@@ -180,9 +190,16 @@ const AvatarPicker: React.FC<AvatarPickerProps> = ({
     // A pick that waited is dropped only when it is what this write just
     // stored (a double click). After a refusal nothing was stored, and the
     // mark is back on this browser's copy of the choice: the pick is written
-    // whatever it is, the marked picture included.
+    // whatever it is, the marked picture included. Unless the picker is gone:
+    // its person signed out, or left the screen, while this write ran, and
+    // another team may be signed in by now, which would take the pick under
+    // the old member's id (the review of 45.3).
     const next = waiting.current;
     waiting.current = null;
+    if (!mounted.current) {
+      inFlight.current = false;
+      return;
+    }
     if (next && !(stored && next.choice === choice)) {
       void write(next.choice);
       return;

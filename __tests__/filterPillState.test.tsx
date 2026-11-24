@@ -1,6 +1,6 @@
 import React from 'react';
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
-import { dirname, join, relative, resolve } from 'path';
+import { readdirSync, statSync } from 'fs';
+import { join, relative } from 'path';
 import ts from 'typescript';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,7 @@ import DashboardActionsTab from '../components/dashboard/DashboardActionsTab';
 import TeamFeedback from '../components/TeamFeedback';
 import SuperAdmin from '../components/SuperAdmin';
 import type { Team, TeamFeedback as TeamFeedbackType, User } from '../types';
+import { declarationOf, sourceOf } from './helpers/sourceDeclarations';
 
 /**
  * A filter pill says which filter is on as a state, not only as a colour
@@ -37,46 +38,6 @@ const walk = (dir: string, out: string[] = []): string[] => {
 };
 
 const FILES = [...walk(join(ROOT, 'components')), join(ROOT, 'App.tsx')];
-
-const sources = new Map<string, ts.SourceFile>();
-const sourceOf = (file: string): ts.SourceFile => {
-  let source = sources.get(file);
-  if (!source) {
-    source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-    sources.set(file, source);
-  }
-  return source;
-};
-
-/** The initializer of a `const name = …` in a file, or of the export a relative import names. */
-const declarationOf = (name: string, file: string, depth = 0): { expression: ts.Expression; file: string } | null => {
-  if (depth > 4) return null;
-  const source = sourceOf(file);
-  let found: { expression: ts.Expression; file: string } | null = null;
-  const visit = (node: ts.Node) => {
-    if (found) return;
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name && node.initializer) {
-      found = { expression: node.initializer, file };
-      return;
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-  if (found) return found;
-  for (const statement of source.statements) {
-    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
-    const specifier = statement.moduleSpecifier.text;
-    if (!specifier.startsWith('.')) continue;
-    const bindings = statement.importClause?.namedBindings;
-    if (!bindings || !ts.isNamedImports(bindings)) continue;
-    const element = bindings.elements.find((e) => e.name.text === name);
-    if (!element) continue;
-    const base = resolve(dirname(file), specifier);
-    const target = ['.ts', '.tsx', '/index.ts'].map((ext) => base + ext).find((candidate) => existsSync(candidate));
-    if (target) return declarationOf(element.propertyName?.text ?? name, target, depth + 1);
-  }
-  return null;
-};
 
 const PILL_ON = declarationOf('FILTER_PILL_ON', join(ROOT, 'components/dashboard/dashboardLook.ts'))!.expression;
 

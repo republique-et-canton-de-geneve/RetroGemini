@@ -1414,7 +1414,8 @@ const cornerOfCard = (target: Locator) =>
 /** The card's corner Delete lies over none of its controls, and Comments takes a press at its centre. */
 const expectCornerClear = async (page: Page, target: Locator, label: string) => {
   await target.scrollIntoViewIfNeeded();
-  // A reaction that just landed springs in, past its size and back.
+  // A reaction that just landed rings its chip: measured once every finite
+  // animation has ended.
   await waitForFiniteAnimations(page);
   const corner = await cornerOfCard(target);
   expect(corner, `${label}: the card's Delete and its Comments`).not.toBeNull();

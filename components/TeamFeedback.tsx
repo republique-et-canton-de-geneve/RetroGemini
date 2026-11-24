@@ -1,6 +1,6 @@
 import { appFetch } from '../services/publicPath';
 import React, { useState, useEffect, useRef } from 'react';
-import { TeamFeedback as TeamFeedbackType, FeedbackComment } from '../types';
+import { TeamFeedback as TeamFeedbackType } from '../types';
 import { useTranslation } from '../i18n/I18nContext';
 import type { MessageKey } from '../i18n/translate';
 import { commentAuthorName } from '../utils/feedbackCommentAuthor';

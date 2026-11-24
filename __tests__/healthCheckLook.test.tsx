@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import HealthCheckSession from '../components/HealthCheckSession';
 import SessionHeader from '../components/session/SessionHeader';
+import ClosePhase from '../components/session/ClosePhase';
 import { HealthCheckSession as HealthCheckSessionType, RetroSession, Team, User } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
@@ -492,6 +493,51 @@ describe('Close (a dark screen)', () => {
       expect((bar as HTMLElement).style.opacity).toBe('');
     }
   });
+
+  // The retrospective's close drew the same histogram with an empty score in
+  // the bars' indigo, faded to 0.2 by an inline opacity, where this one keeps
+  // a stub in a dark token. One score, one drawing, on both close screens.
+  it("draws an empty score as the retrospective's close does", () => {
+    const roti = { fac: 4, a: 2 };
+    const emptyBars = () =>
+      [...document.querySelectorAll<HTMLElement>('[style*="height"]')]
+        .filter((bar) => bar.style.height === '4px')
+        .map((bar) => ({ className: bar.className, opacity: bar.style.opacity }));
+
+    renderSession(createSession({ phase: 'CLOSE', roti, settings: { isAnonymous: false, revealRoti: true, showParticipantVotes: false } }));
+    const healthCheck = emptyBars();
+    cleanup();
+    const retro = {
+      id: 'r-1', teamId: 'team-1', name: 'Retro', date: '', status: 'CLOSED', phase: 'CLOSE',
+      participants: [facilitator, alice], columns: [], tickets: [], groups: [], actions: [], happiness: {}, roti,
+      settings: { isAnonymous: false, maxVotes: 5, oneVotePerTicket: false, revealBrainstorm: true, revealHappiness: false, revealRoti: true },
+      leftUsers: [], finishedUsers: [],
+    } as unknown as RetroSession;
+    render(
+      <ClosePhase
+        session={retro}
+        currentUser={facilitator}
+        participantsCount={2}
+        isFacilitator
+        updateSession={vi.fn()}
+        assignableMembers={[facilitator, alice]}
+        handleVoteProposal={vi.fn()}
+        handleAcceptProposal={vi.fn()}
+        handleDeleteProposal={vi.fn()}
+        handleAddProposal={vi.fn()}
+        handleDirectAddAction={vi.fn()}
+        handleAssignAction={vi.fn()}
+        closeProposalText=""
+        setCloseProposalText={vi.fn()}
+        handleExit={vi.fn()}
+      />
+    );
+
+    // Scores 1, 3 and 5 are empty on both.
+    expect(healthCheck).toHaveLength(3);
+    expect(emptyBars()).toEqual(healthCheck);
+    expect(healthCheck.every((bar) => bar.opacity === '')).toBe(true);
+  });
 });
 
 describe('the source', () => {
@@ -529,5 +575,23 @@ describe("the participants' count in the header", () => {
     fireEvent.click(count);
     expect(screen.getByRole('button', { name: 'Expand panel' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Collapse panel' })).toBeNull();
+  });
+
+  // As in the retrospective's header (sessionHeaderLook.test.tsx): below 2xl
+  // the caption is out of sight, never out of the accessibility tree, so the
+  // count is read in words, starting with the number it shows (WCAG 2.5.3).
+  it.each([800, 1280])('reads in words at %ipx, starting with the number it shows', (width) => {
+    atWidth(width);
+    renderSession(createSession(), alice);
+    const [number, caption, ...rest] = [...chip().children].filter((child) => child.getAttribute('aria-hidden') !== 'true');
+    expect(rest).toEqual([]);
+    // The survey counts who finished, "N/M finished".
+    expect(number.textContent).toMatch(/^\d+\/\d+$/);
+    expect(caption).toHaveTextContent(/^finished$/);
+    expect(caption.className.split(/\s+/)).not.toContain('hidden');
+    expect(caption.className.split(/\s+/)).toEqual(expect.arrayContaining(['sr-only', '2xl:not-sr-only']));
+    for (let el: Element | null = caption; el; el = el.parentElement) {
+      expect(el).not.toHaveAttribute('aria-hidden', 'true');
+    }
   });
 });

@@ -314,7 +314,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
   // The dashboard's recipes, so this card draws its buttons and fields as its neighbours do.
   const primaryButton = `${PRIMARY_BUTTON} px-4 py-2 text-sm aria-disabled:cursor-wait aria-disabled:opacity-70`;
   const secondaryButton = `${SECONDARY_BUTTON} px-4 py-2 text-sm aria-disabled:cursor-wait aria-disabled:opacity-70`;
-  const inputClass = `${FIELD} text-sm aria-invalid:border-red-600`;
+  const inputClass = `${FIELD} text-sm aria-invalid:border-rose-600`;
 
   const removeControls = isFacilitatorView && token.configured && !replacing && (
     <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -322,7 +322,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
         <>
           <p id={ids.removeQuestion} className="basis-full text-sm text-slate-700">{t('jira.settings.removeConfirm')}</p>
           {removeError && (
-            <p id={ids.removeError} role="alert" className="basis-full text-xs text-red-700">{noticeText(removeError, t)}</p>
+            <p id={ids.removeError} role="alert" className="basis-full text-xs text-rose-700">{noticeText(removeError, t)}</p>
           )}
           <button
             ref={confirmRemoveRef}
@@ -424,7 +424,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
               }}
               className={inputClass}
             />
-            {tokenError && <p id={ids.tokenError} role="alert" className="text-xs text-red-700">{noticeText(tokenError, t)}</p>}
+            {tokenError && <p id={ids.tokenError} role="alert" className="text-xs text-rose-700">{noticeText(tokenError, t)}</p>}
           </div>
           <div className="flex flex-col gap-1">
             <label htmlFor={ids.email} className="text-sm font-medium text-slate-700">{t('jira.settings.emailLabel')}</label>
@@ -443,7 +443,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
               }}
               className={inputClass}
             />
-            {emailError && <p id={ids.emailError} role="alert" className="text-xs text-red-700">{noticeText(emailError, t)}</p>}
+            {emailError && <p id={ids.emailError} role="alert" className="text-xs text-rose-700">{noticeText(emailError, t)}</p>}
           </div>
           <div id={ids.tokenHelp} className="flex flex-col gap-1 text-xs text-slate-600">
             <p>{t('jira.settings.tokenHelp')}</p>
@@ -499,7 +499,7 @@ const JiraTeamSettings: React.FC<Props> = ({ team, isFacilitatorView = true, cla
               idPrefix={`${baseId}-target`}
             />
           )}
-          {targetError && <p role="alert" className="text-xs text-red-700">{noticeText(targetError, t)}</p>}
+          {targetError && <p role="alert" className="text-xs text-rose-700">{noticeText(targetError, t)}</p>}
           <div className="flex flex-wrap gap-2">
             <button
               ref={targetSaveRef}

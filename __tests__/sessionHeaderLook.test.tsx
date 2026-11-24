@@ -264,4 +264,23 @@ describe("the participants' count", () => {
     expect(tokens(count).filter((token) => token === 'cursor-pointer' || token.startsWith('hover:'))).toEqual([]);
     expect(within(count).getByText('0/2')).toBeInTheDocument();
   });
+
+  // Below 2xl the caption steps out of sight to leave the room to the phase
+  // bar, and the icon is aria-hidden: taken out by `display: none`, the
+  // caption left a screen reader the number alone, "0/2". It stays in the
+  // accessibility tree after the number it qualifies, so what is read starts
+  // with what is seen, in words (WCAG 2.5.3), at every width.
+  it.each([800, 1280])('reads in words at %ipx, starting with the number it shows', (width) => {
+    atWidth(width);
+    renderHeader(facilitator, { localParticipantsPanelCollapsed: true });
+    const [number, caption, ...rest] = [...chip().children].filter((child) => child.getAttribute('aria-hidden') !== 'true');
+    expect(rest).toEqual([]);
+    expect(number).toHaveTextContent(/^0\/2$/);
+    expect(caption).toHaveTextContent(/^finished$/);
+    expect(tokens(caption)).not.toContain('hidden');
+    expect(tokens(caption)).toEqual(expect.arrayContaining(['sr-only', '2xl:not-sr-only']));
+    for (let el: Element | null = caption; el; el = el.parentElement) {
+      expect(el).not.toHaveAttribute('aria-hidden', 'true');
+    }
+  });
 });

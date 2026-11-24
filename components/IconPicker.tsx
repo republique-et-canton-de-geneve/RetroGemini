@@ -70,7 +70,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({ initialIcon = 'star', on
             placeholder={t('shared.iconPicker.searchPlaceholder')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-slate-400 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-hidden"
+            className="w-full pl-10 pr-4 py-2 border border-slate-400 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-600 outline-hidden"
             // eslint-disable-next-line jsx-a11y/no-autofocus -- the picker opens on demand and searching is what it is for
             autoFocus
           />

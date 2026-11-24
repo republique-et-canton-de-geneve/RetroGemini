@@ -440,7 +440,7 @@ const JiraBatchDialog: React.FC<Props> = ({
                   <JiraTargetFields teamId={teamId} value={draft} onChange={setDraft} idPrefix={`${baseId}-override`} />
                 </fieldset>
               )}
-              {targetError && <p role="alert" className="text-xs text-red-700">{noticeText(targetError, t)}</p>}
+              {targetError && <p role="alert" className="text-xs text-rose-700">{noticeText(targetError, t)}</p>}
             </section>
 
             {subtaskMode && (

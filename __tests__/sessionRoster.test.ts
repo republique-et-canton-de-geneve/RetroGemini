@@ -123,6 +123,56 @@ describe('mergeRosterIntoParticipants', () => {
     expect(merged).toEqual([{ ...alice, id: 'u-alice', name: 'Alice' }]);
   });
 
+  // Every client writes the participant list, and the server stores its
+  // entries as they come: an entry that is not an object with a string id and
+  // name is data no person stands behind. The merge passes it through where it
+  // is, matches nobody against it and adds nobody for it, and must not throw:
+  // both screens merge every roster event the server sends.
+  it('passes an entry that is not a person through untouched, and matches nobody against it', () => {
+    const notPeople = [null, undefined, 'Alice', 42, { id: 'u-bob' }, { name: 'alice' }, { id: 7, name: 'Bob' }, { id: 'u-x', name: 7 }];
+    const participants = deepFreeze([...notPeople, alice] as unknown as User[]);
+
+    const merged = mergeRosterIntoParticipants(participants, [
+      { id: 'u-bob', name: 'Bob' },
+      { id: 'u-alice-new-device', name: 'alice' },
+    ], [bob]);
+
+    expect(merged).toEqual([
+      ...notPeople,
+      { ...alice, id: 'u-alice-new-device', name: 'alice' },
+      bob,
+    ]);
+  });
+
+  it('answers null for a roster that only names the people already listed beside entries that are not people', () => {
+    const participants = deepFreeze([null, { id: 'u-bob' }, alice] as unknown as User[]);
+
+    expect(mergeRosterIntoParticipants(participants, [{ id: 'u-alice', name: 'Alice' }], [])).toBeNull();
+  });
+
+  it('gives a newcomer the pool colour that follows the people listed, not the entries that are not people', () => {
+    const merged = mergeRosterIntoParticipants([null, alice] as unknown as User[], [{ id: 'guest', name: 'Guest' }], []);
+
+    expect(merged?.[2]).toEqual({
+      id: 'guest',
+      name: 'Guest',
+      color: PARTICIPANT_COLOR_POOL[1 % PARTICIPANT_COLOR_POOL.length],
+      role: 'participant',
+    });
+  });
+
+  // The roster is built from what each client sent when it joined, and the
+  // server checks no more than that the id and the name are set
+  // (`buildSessionRoster`): an entry is always an object, but its name or its
+  // id may be something other than a string.
+  it('skips a roster entry whose id or name is not a string', () => {
+    const roster = [{ id: 'u-x', name: {} }, { id: 5, name: 'Five' }, { id: 'u-y', name: true }, { id: 'guest', name: 'Guest' }];
+
+    const merged = mergeRosterIntoParticipants([alice], roster as unknown as { id: string; name: string }[], []);
+
+    expect(merged?.map((p) => p.id)).toEqual(['u-alice', 'guest']);
+  });
+
   it('never mutates the participants it was given (they belong to the rendered state)', () => {
     // Frozen: an in-place rename throws in strict mode instead of silently
     // editing the state React is still rendering.
@@ -211,6 +261,25 @@ describe('sessionParticipants', () => {
   it('lists the viewer alone when the session’s list is not a list', () => {
     expect(sessionParticipants({} as unknown as User[], claire)).toEqual([claire]);
     expect(sessionParticipants('Alice' as unknown as User[], claire)).toEqual([claire]);
+  });
+
+  // The same data, read by both screens on every render: an entry that is not
+  // an object with a string id and name made both of them throw for everyone
+  // in the room. It is skipped, and it neither stands for the viewer nor takes
+  // the name of the person listed after it.
+  it('skips an entry that is not a person, and lists everyone else', () => {
+    const notPeople = [null, undefined, 'Alice', 42, { id: 'u-x' }, { name: 'Bob' }, { id: 7, name: 'Seven' }, { id: 'u-y', name: 7 }];
+    const listed = deepFreeze([...notPeople, alice, bob] as unknown as User[]);
+
+    expect(sessionParticipants(listed, claire)).toEqual([alice, bob, claire]);
+  });
+
+  it('lists the viewer when only an entry that is not a person carries their id', () => {
+    expect(sessionParticipants([{ id: 'u-claire' }] as unknown as User[], claire)).toEqual([claire]);
+  });
+
+  it('lists a person whose name an entry that is not a person carries before them', () => {
+    expect(sessionParticipants([{ id: 7, name: 'Alice' }, alice] as unknown as User[], bob)).toEqual([alice, bob]);
   });
 
   it('lists each id once, the first entry kept', () => {

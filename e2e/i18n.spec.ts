@@ -354,8 +354,12 @@ test.describe('headers fit in both languages', () => {
       await guest.goto(inviteUrl);
       await guest.waitForLoadState('networkidle');
       const notInList = guest.getByRole('button', { name: "I'm not in the list" });
-      if (await notInList.isVisible({ timeout: 5_000 }).catch(() => false)) await notInList.click();
-      await guest.getByPlaceholder('e.g. John Doe').fill('Guest Avatar');
+      const nameField = guest.getByPlaceholder('e.g. John Doe');
+      // isVisible() answers at once, whatever its timeout: wait for the form to
+      // draw one of its two ways in, then choose (__tests__/e2eVisibilityWaits.test.ts).
+      await expect(notInList.or(nameField).first()).toBeVisible({ timeout: 10_000 });
+      if (await notInList.isVisible()) await notInList.click();
+      await nameField.fill('Guest Avatar');
       await guest.getByRole('button', { name: 'Join Retrospective' }).click();
       await expect(guest.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 15_000 });
       await assertPickerOpens(guest, 'retro, participant', [320, 390]);

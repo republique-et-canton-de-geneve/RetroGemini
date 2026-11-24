@@ -34,7 +34,8 @@ styles*; `.drag-over` and `.scrollbar-hide` went in 45.3). Ten rules:
   an overlay inside a bordered box takes the box's radius less the border
   (`rounded-[calc(var(--radius-2xl)-2px)]`; `__tests__/lookTokens.test.ts` →
   *one source for a radius*, which reads every arbitrary radius of
-  `components/` and `App.tsx`).
+  `components/` and `App.tsx`, and every `border-radius` of `index.css`: the
+  phase pills' 9px is `calc(var(--radius-lg) - 1px)`, a literal until 45.3).
 - **A colour of the look is written once.** Outside `@theme`, `index.css` and
   the components name tokens (a class, `var(--color-indigo-600)`, mixed as
   `color-mix(in srgb, var(--color-…) N%, transparent)` when it must be
@@ -155,7 +156,15 @@ styles*; `.drag-over` and `.scrollbar-hide` went in 45.3). Ten rules:
   darker in the recipe (`FIELD_BOX`'s `hover:border-slate-500`), never to the
   colour it rests on: the open board's search and sort and *Colour by* hovered
   to their own slate-400 until 45.3, so hovering them changed nothing (→ *a
-  field's hover moves its edge*). A native checkbox or radio stays native and
+  field's hover moves its edge*). At focus a field on white takes the
+  recipe's indigo-600 (6.36:1), never an edge lighter than the one it rests
+  on: the icon picker's search took indigo-400 (2.79:1) until 45.3, under an
+  indigo-200 ring (1.37:1) that does not make up for it (→ *the icon picker's
+  search field keeps a 3:1 edge on white, at rest and at focus*). A dark
+  phase's field takes indigo-400, the light edge its slate-900 fill needs.
+  Only that one field's focus edge is measured: the suite joins the branches
+  of a conditional class, and a rule over every field would pair the
+  proposal row's dark focus edge with its light fill. A native checkbox or radio stays native and
   its edge is not measured, but it takes the brand's accent,
   `accent-indigo-600`, which the same suite requires of every one (→ *every
   native checkbox and radio takes the brand accent*); that check also refuses

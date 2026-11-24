@@ -239,12 +239,12 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
   else if (types && types.length === 0) typeStatus = t('jira.target.noTypes');
 
   const keyField = value.mode === 'parent' ? 'parentKey' : 'projectKey';
-  const inputClass = 'w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-600 focus:outline-hidden focus:ring-4 focus:ring-indigo-600/15 aria-invalid:border-red-600';
+  const inputClass = 'w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-600 focus:outline-hidden focus:ring-4 focus:ring-indigo-600/15 aria-invalid:border-rose-600';
   // A stored type stays selectable (by its id) until the list of its key is
   // read; a change of key has already forgotten it. Each select on its own.
   const keepStoredType = !!value.issueTypeId && !types?.some(type => type.id === value.issueTypeId);
   const keepStoredParentType = !!value.parentIssueTypeId && !parentIssueTypes?.some(type => type.id === value.parentIssueTypeId);
-  const statusClass = current?.phase === 'error' ? 'text-xs text-red-700' : 'text-xs text-slate-600';
+  const statusClass = current?.phase === 'error' ? 'text-xs text-rose-700' : 'text-xs text-slate-600';
 
   return (
     <div className="flex flex-col gap-3">
@@ -306,7 +306,7 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
           }}
           className={inputClass}
         />
-        {keyError && <p id={ids.keyError} className="text-xs text-red-700">{noticeText(keyError, t)}</p>}
+        {keyError && <p id={ids.keyError} className="text-xs text-rose-700">{noticeText(keyError, t)}</p>}
       </div>
 
       {isSessionParent && (
@@ -387,7 +387,7 @@ const JiraTargetFields: React.FC<Props> = ({ teamId, value, onChange, idPrefix }
           className={inputClass}
         />
         <p id={ids.labelsHint} className="text-xs text-slate-600">{t('jira.target.labelsHint')}</p>
-        {labelsError && <p id={ids.labelsError} className="text-xs text-red-700">{noticeText(labelsError, t)}</p>}
+        {labelsError && <p id={ids.labelsError} className="text-xs text-rose-700">{noticeText(labelsError, t)}</p>}
       </div>
     </div>
   );

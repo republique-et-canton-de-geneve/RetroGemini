@@ -24,7 +24,7 @@ import {
   PendingCreation
 } from './session/mergeRemoteSession';
 import { getAssignableMembers } from './session/assignableMembers';
-import { memberJoinedChange, mergeRosterIntoParticipants, sessionParticipants } from './session/sessionRoster';
+import { listedPeople, memberJoinedChange, mergeRosterIntoParticipants, sessionParticipants } from './session/sessionRoster';
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import { useDoubleGestureGuard } from './session/doubleGestureGuard';
 import SyncStalledBanner from './session/SyncStalledBanner';
@@ -154,9 +154,13 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // same module (pass 17 of 42.1). A double click on a proposal's Cancel
   // deleted it, one on its Delete deleted the next one too, for everyone.
   useDoubleGestureGuard();
-  const [session, setSession] = useState<HealthCheckSessionType | undefined>(
-    team.healthChecks?.find(h => h.id === sessionId)
-  );
+  // Every session this screen takes in has its participant list read as data
+  // (sessionRoster.ts → listedPeople): an entry that is not a person threw as
+  // it opened (`entersWriting`), and in every write, for everyone in the room.
+  const [session, setSession] = useState<HealthCheckSessionType | undefined>(() => {
+    const opened = team.healthChecks?.find(h => h.id === sessionId);
+    return opened && { ...opened, participants: listedPeople(opened.participants) };
+  });
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
   // The panel's rows come from the cached session until the server's roster:
   // its motion compares nothing before it (usePanelMotion). Per connection,
@@ -302,7 +306,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       if (!baseSession) return prevSession;
 
       const newSession = JSON.parse(JSON.stringify(baseSession));
-      if (!newSession.participants) newSession.participants = [];
+      // The team record's copy may hold an entry that is not a person.
+      newSession.participants = listedPeople(newSession.participants);
 
       const existingIds = new Set(newSession.participants.map((p: User) => p.id));
       participants.forEach(m => {
@@ -418,8 +423,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
       // The server's session record is the authority for every facilitator-only
       // field, the name included: never overwrite one from the local team
-      // record — see Session.tsx (incident ISS).
-      const normalizedSession = { ...updatedSession };
+      // record — see Session.tsx (incident ISS). Its participant list is read
+      // as data, as in the state this screen opened with.
+      const normalizedSession = { ...updatedSession, participants: listedPeople(updatedSession.participants) };
 
       // Merge strategy: re-apply the current user's own data (ratings, ROTI,
       // proposal votes) on top of the incoming authoritative state, and
@@ -605,13 +611,6 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     return { average, ratings, comments, distribution, count: ratings.length };
   };
 
-  // Get color class based on score
-  const getScoreColor = (score: number) => {
-    if (score >= 4) return 'bg-emerald-500';
-    if (score >= 3) return 'bg-amber-500';
-    return 'bg-rose-500';
-  };
-
   const getScoreBgColor = (score: number) => {
     if (score >= 4) return 'bg-emerald-100';
     if (score >= 3) return 'bg-amber-100';
@@ -624,12 +623,6 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     if (score >= 4) return 'text-emerald-800';
     if (score >= 3) return 'text-amber-800';
     return 'text-rose-800';
-  };
-
-  // Check if current user has completed survey
-  const hasCompletedSurvey = () => {
-    const userRatings = session.ratings[currentUser.id] || {};
-    return session.dimensions.every(d => userRatings[d.id]?.rating != null);
   };
 
   // Count finished participants
@@ -978,8 +971,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               }
             </span>
             {/* The caption waits for 2xl, as in the retro header: below it the
-                timer and then the phase bar need the room. */}
-            <span className="text-xs text-slate-500 hidden 2xl:inline">
+                timer and then the phase bar need the room. Out of sight only,
+                as there: read after the number at every width. */}
+            <span className="text-xs text-slate-500 sr-only 2xl:not-sr-only">
               {session.phase === 'SURVEY'
                 ? t('healthCheck.header.finishedLabel')
                 : session.phase === 'CLOSE'

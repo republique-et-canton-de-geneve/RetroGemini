@@ -173,12 +173,17 @@ describe('useSessionMotion', () => {
     expect(Math.max(...delays)).toBeLessThanOrEqual(REVEAL_CAP_MS);
   });
 
-  it('pops a new reaction and bumps one that gained a person', () => {
+  // A reaction chip is a button: the spring, which overshoots, never goes on
+  // a box people click (docs/agents/motion.md), and a scale moves the box the
+  // pointer aims at. A new reaction, and one that gained a person, ring the
+  // chip instead, on a pseudo-element that moves nothing.
+  it('rings a new reaction and one that gained a person, and springs neither', () => {
     const { show } = mount(session({ tickets: [ticket('t1', { reactions: { '👍': ['ana'] } })] }));
     show(session({ tickets: [ticket('t1', { reactions: { '👍': ['ana', 'bob'], '🎉': ['bob'] } })] }));
     const chip = (emoji: string) => [...card('t1').querySelectorAll(`[${MOTION_HOOKS.reaction}]`)].find((el) => el.getAttribute(MOTION_HOOKS.reaction) === emoji)!;
-    expect(chip('👍').classList.contains('fx-bump')).toBe(true);
-    expect(chip('🎉').classList.contains('fx-pop')).toBe(true);
+    for (const emoji of ['👍', '🎉']) {
+      expect([...chip(emoji).classList].filter((name) => name.startsWith('fx-')), emoji).toEqual(['fx-ring']);
+    }
   });
 
   it('bumps a changed vote total on a board and rings its card or group', () => {

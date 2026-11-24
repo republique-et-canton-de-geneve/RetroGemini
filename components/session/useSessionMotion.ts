@@ -134,12 +134,6 @@ const inWindow = (element: Element): boolean => {
 const votesOf = (votes: unknown, voterId: string): number =>
   Array.isArray(votes) ? votes.filter((id) => id === voterId).length : 0;
 
-const reactionCount = (session: RetroSession, ticketId: string, emoji: string): number => {
-  const ticket = Array.isArray(session.tickets) ? session.tickets.find((entry) => entry.id === ticketId) : undefined;
-  const users = ticket?.reactions && typeof ticket.reactions === 'object' ? (ticket.reactions as Record<string, unknown>)[emoji] : undefined;
-  return Array.isArray(users) ? users.length : 0;
-};
-
 /**
  * Whose vote totals may be marked: only where the screen draws a vote. The
  * guided Vote phase and the open board draw one on a card or a group, but a
@@ -276,8 +270,12 @@ function playSessionMotion(
     const chip = [...card.querySelectorAll(`[${MOTION_HOOKS.reaction}]`)].find(
       (element) => element.getAttribute(MOTION_HOOKS.reaction) === emoji && ownerOf(element) === card,
     );
-    // A new reaction springs in; one that gained a person answers with a bump.
-    playEffect(chip, reactionCount(prev, ticketId, emoji) > 0 ? 'fx-bump' : 'fx-pop');
+    // A new reaction, and one that gained a person, ring the chip in its
+    // card's colour. A chip is a button: the spring of fx-pop and fx-bump
+    // overshoots, which the look keeps off a box people click, and a scale
+    // moves the box the pointer aims at; the ring is drawn on the chip's
+    // pseudo-element and moves nothing.
+    playEffect(chip, 'fx-ring', ringOptions(card));
   }
 
   for (const colId of motion.columns) playEffect(columnCountOf(colId), 'fx-bump');

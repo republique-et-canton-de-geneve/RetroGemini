@@ -132,7 +132,7 @@ import {
 } from './session/mergeRemoteSession';
 import { effectiveSessionStatus } from '../utils/sessionStatus';
 import { recordInvitees } from './session/sessionInvitees';
-import { memberJoinedChange, mergeRosterIntoParticipants, sessionParticipants } from './session/sessionRoster';
+import { listedPeople, memberJoinedChange, mergeRosterIntoParticipants, sessionParticipants } from './session/sessionRoster';
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import SyncStalledBanner from './session/SyncStalledBanner';
 import { jiraLinkFields, sameJiraLink, withJiraLinkFrom } from './jira/jiraLinkMerge';
@@ -237,8 +237,10 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     // Also reconcile participants with current team member data (name, email, color)
     const allMembers = [...currentTeam.members, ...(currentTeam.archivedMembers || [])];
     const memberMap = new Map(allMembers.map(m => [m.id, m]));
+    // Read as data first (sessionRoster.ts → listedPeople): an entry that is
+    // not a person threw here, as the screen opened, for everyone in the room.
     const reconcileParticipantsList = (participants: User[] | undefined) =>
-      participants?.map(p => {
+      listedPeople(participants).map(p => {
         const member = memberMap.get(p.id);
         return member ? { ...p, name: member.name, email: member.email, color: member.color } : p;
       });
@@ -1078,8 +1080,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
       // old name with every write — a facilitator-only change the server
       // refused, cards included (incident ISS). A rename now reaches the live
       // session through the server. A shallow copy, because the first-state
-      // reconcile below assigns into it.
-      const normalizedSession = { ...updatedSession };
+      // reconcile below assigns into it. Its participant list is read as data
+      // (sessionRoster.ts → listedPeople), here as in every write below.
+      const normalizedSession = { ...updatedSession, participants: listedPeople(updatedSession.participants) };
 
       // On initial load from server, reconcile action and participant states with
       // team data so stale persisted session state doesn't override Dashboard changes.
@@ -1570,7 +1573,8 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
     if(!baseSession) return null;
 
     const newSession = JSON.parse(JSON.stringify(baseSession));
-    if (!newSession.participants) newSession.participants = [];
+    // The team record's copy may hold an entry that is not a person.
+    newSession.participants = listedPeople(newSession.participants);
 
     const existingIds = new Set(newSession.participants.map(p => p.id));
     const baselineMembers = getParticipants();
@@ -3429,7 +3433,9 @@ const Session: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeam
                                     }
                                 });
                             }}
-                            className={`inline-flex items-center gap-1 h-7 px-2 rounded-full border text-sm transition-colors ${users.includes(currentUser.id) ? 'bg-indigo-50 border-indigo-300 text-indigo-800' : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'}`}
+                            // Positioned: a change rings the chip on its own
+                            // pseudo-element (useSessionMotion.ts).
+                            className={`relative inline-flex items-center gap-1 h-7 px-2 rounded-full border text-sm transition-colors ${users.includes(currentUser.id) ? 'bg-indigo-50 border-indigo-300 text-indigo-800' : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'}`}
                         >
                             {emoji} <span className="text-xs font-bold tabular-nums">{users.length}</span>
                         </button>

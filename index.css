@@ -244,10 +244,11 @@ body {
 
 /* Phase navigation: each phase is a pill. The current one's soft fill of the
    brand colour is written as classes by both session headers, where the
-   contrast tests measure it: a rule here would paint over them. */
+   contrast tests measure it: a rule here would paint over them. Its 9px
+   radius falls between two steps, so it is written from the step above. */
 .phase-nav-btn {
   position: relative;
-  border-radius: 9px;
+  border-radius: calc(var(--radius-lg) - 1px);
   transition: color 0.2s, background-color 0.2s;
 }
 
@@ -399,7 +400,8 @@ body {
     .fx-card-in {
       animation: fx-card-in 0.5s var(--ease-settle) backwards;
     }
-    /* A ring in the card's colour closes onto it: where a card arrived, or was voted on. */
+    /* A ring in the card's colour closes onto it: where a card arrived, or was
+       voted on, and on a reaction chip that changed (a button: no spring). */
     .fx-ring::after {
       content: '';
       position: absolute;

@@ -28,6 +28,23 @@
   and the `afterEach` of `useSessionMotion`, `panelMotion`,
   `guidedVoteControl`, `boardVoteControl` and `voteBudgetChip`).
 
+- **`locator.isVisible()` does not wait.** Playwright ignores the `timeout`
+  it still accepts, so `isVisible({ timeout })` reads a control drawn a moment
+  later as absent and takes the wrong way through a form. A spec waits for one
+  of the controls it chooses between (`expect(a.or(b).first()).toBeVisible()`)
+  and asks after. `__tests__/e2eVisibilityWaits.test.ts` counts, file by file,
+  the specs that still ask the old way (they predate 45.3): a count only goes
+  down, and a spec fixed leaves its table in the same change.
+
+- **A guard that follows a class list through constants looks a name up once
+  per file.** `__tests__/helpers/sourceDeclarations.ts` parses each file once
+  (`sourceOf`) and walks its tree once per file and name (`declarationOf`,
+  memoized; the depth it takes bounds the imports followed, never a lookup).
+  `fieldEdgeContrast.test.ts` and `filterPillState.test.tsx` carried copies
+  that walked the tree on every lookup, and the field-edge guard's slowest
+  case took 3.9 s of its 5 s in CI's coverage run
+  (`__tests__/sourceDeclarations.test.ts`).
+
 ### Regression coverage (leave a durable guard, not a throwaway)
 
 Every bug fix, refactor, or feature MUST leave behind at least one **committed**

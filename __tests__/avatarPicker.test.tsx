@@ -179,6 +179,33 @@ describe('AvatarPicker', () => {
     expect(panel.querySelector('[aria-busy="true"]')).toBeNull();
   });
 
+  // A pick that waits is written when the write before it settles, through
+  // an `onPick` that names no team: dataService writes to the team signed in
+  // when the write runs. Its person signed out meanwhile (a sign-out unmounts
+  // every opener) and another team signed in before the first write was
+  // answered (the ~7 s retry of a rolling update): the pick went to that team,
+  // under the old member's id. Once the picker is gone, the pick that waited
+  // is not written; the write already on its way ends where it was sent.
+  it.each([
+    ['answered', (write: ReturnType<typeof deferred>) => write.resolve()],
+    ['refused', (write: ReturnType<typeof deferred>) => write.reject(new Error(AVATAR_NOT_SAVED))],
+  ])('writes no pick that waited once it is unmounted, the write before it %s', async (_how, settle) => {
+    const first = deferred();
+    const onPick = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    const { unmount } = renderPicker({ onPick });
+    fireEvent.click(screen.getByRole('button', { name: 'Owl' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cat' }));
+    unmount();
+
+    await act(async () => {
+      settle(first);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(onPick).toHaveBeenCalledWith('owl');
+  });
+
   it.each([
     ['en', en, 'The avatar could not be saved.'],
     ['fr', fr, fr['errors.avatarNotSaved']],

@@ -124,6 +124,14 @@ describe.each(['BRAINSTORM', 'OPEN_BOARD'])('the reaction chips of a card, in %s
     expect(chip('👍')).toHaveAccessibleName('👍 1');
   });
 
+  // A change rings the chip (useSessionMotion.ts): its ring is drawn on the
+  // chip's own pseudo-element, which a chip that is not positioned would draw
+  // around the whole foot row instead.
+  it('are positioned, so the ring a change plays closes on the chip', () => {
+    renderBoard(phase, facilitator);
+    for (const element of chips()) expect(element.className.split(/\s+/)).toContain('relative');
+  });
+
   it('are the viewer’s own: what one person pressed is not pressed for another', () => {
     renderBoard(phase, alice);
     expect(chips().map((element) => element.getAttribute('aria-pressed'))).toEqual(['true', 'true']);

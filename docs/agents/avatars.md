@@ -190,7 +190,14 @@ Rules:
   latest pick made during a write (dropped only when it is the choice that
   write just stored, a double click; written whatever it is after a refusal),
   shows a choice only once it is stored, and keeps its error on screen when
-  the save fails. A click on the picture
+  the save fails. A pick that waited is never written once the picker is
+  gone: a sign-out unmounts every opener, `onPick` names no team, and
+  `setMemberAvatar` writes to the team signed in when it runs, so until 45.3
+  a pick still waiting when its person signed out went, if another team
+  signed in before the first write was answered (the rollout's retry), to
+  that team under the old member's id (`avatarPicker.test.tsx` → *writes no
+  pick that waited once it is unmounted*). The write already on its way ends
+  where it was sent. A click on the picture
   already marked is written too: the mark is this browser's copy of the
   choice and can be older than the server's (a pick made since in another
   browser, from the dashboard), and the server dates it again like any pick.

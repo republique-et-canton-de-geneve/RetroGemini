@@ -394,6 +394,15 @@ describe('one source for a radius', () => {
     expect(literal).toEqual([]);
   });
 
+  // The stylesheet's own rules too: the phase pills' radius was a literal 9px
+  // in index.css, between two steps, where the screens' guard above never
+  // looked. A radius there is inherited, a full round, or written from a step.
+  it("derives every radius index.css declares from the look's radius tokens", () => {
+    const declared = [...CSS.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/border(?:-[a-z]+)*-radius\s*:\s*([^;}]+)/g)].map((match) => match[1].trim());
+    expect(declared.length).toBeGreaterThan(2);
+    expect(declared.filter((value) => value !== 'inherit' && value !== '9999px' && !fromToken(value))).toEqual([]);
+  });
+
   it('reads a radius after a variant and on one side, and knows one built from a token', () => {
     // Written whole: Tailwind does not scan the tests
     // (`__tests__/tailwindScanScope.test.ts`), so a probe adds no rule to the build.

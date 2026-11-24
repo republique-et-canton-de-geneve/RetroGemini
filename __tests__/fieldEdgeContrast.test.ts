@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
-import { dirname, join, relative, resolve } from 'path';
+import { readFileSync, readdirSync, statSync } from 'fs';
+import { join, relative } from 'path';
 import ts from 'typescript';
+import { declarationOf, sourceOf } from './helpers/sourceDeclarations';
 import { tokenContrast } from './helpers/tailwindTheme';
 
 /**
@@ -35,46 +36,6 @@ const walk = (dir: string, out: string[] = []): string[] => {
 };
 
 const FILES = [...walk(join(ROOT, 'components')), join(ROOT, 'App.tsx')].filter((file) => file.endsWith('.tsx'));
-
-const sources = new Map<string, ts.SourceFile>();
-const sourceOf = (file: string): ts.SourceFile => {
-  let source = sources.get(file);
-  if (!source) {
-    source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-    sources.set(file, source);
-  }
-  return source;
-};
-
-/** The initializer of a top-level or local `const name = …` in a file, or of the export an import names. */
-const declarationOf = (name: string, file: string, depth = 0): { expression: ts.Expression; file: string } | null => {
-  if (depth > 4) return null;
-  const source = sourceOf(file);
-  let found: { expression: ts.Expression; file: string } | null = null;
-  const visit = (node: ts.Node) => {
-    if (found) return;
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name && node.initializer) {
-      found = { expression: node.initializer, file };
-      return;
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-  if (found) return found;
-  for (const statement of source.statements) {
-    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
-    const specifier = statement.moduleSpecifier.text;
-    if (!specifier.startsWith('.')) continue;
-    const bindings = statement.importClause?.namedBindings;
-    if (!bindings || !ts.isNamedImports(bindings)) continue;
-    const element = bindings.elements.find((e) => e.name.text === name);
-    if (!element) continue;
-    const base = resolve(dirname(file), specifier);
-    const target = ['.ts', '.tsx', '/index.ts'].map((ext) => base + ext).find((candidate) => existsSync(candidate));
-    if (target) return declarationOf(element.propertyName?.text ?? name, target, depth + 1);
-  }
-  return null;
-};
 
 /** Every class-list fragment an expression can produce, joined, so a token in any branch is seen. */
 const classTextOf = (expression: ts.Node | undefined, file: string, depth = 0): string => {
@@ -209,6 +170,40 @@ describe("a field's hover moves its edge", () => {
         .map((hover) => `${field.at} <${field.tag}> rests on and hovers to border-${hover}`),
     );
     expect(still).toEqual([]);
+  });
+});
+
+/** The edge colours a field takes at focus: `focus:border-indigo-600` → `indigo-600`. */
+const focusEdges = (classText: string): string[] =>
+  [...new Set(classText.split(/\s+/).flatMap((token) => {
+    const match = /^focus(?:-visible)?:border-([a-z]+-\d+)$/.exec(token);
+    return match ? [match[1]] : [];
+  }))];
+
+describe("the icon picker's search field keeps a 3:1 edge on white, at rest and at focus", () => {
+  // It rested on slate-400 (3.41:1 on white) and took indigo-400 at focus,
+  // 2.79:1: the edge went lighter at the moment it shows where typing goes,
+  // under a ring of indigo-200 (1.37:1) that does not make up for it. It takes
+  // the recipe's indigo-600 now (FIELD_BOX). The dark phases' fields keep
+  // indigo-400, the light edge their slate-900 fill needs. The field has no
+  // fill of its own: it shows the picker's white panel.
+  const search = fields.find((field) => field.at.startsWith('components/IconPicker.tsx') && field.tag === 'input');
+
+  it('is found, with no fill of its own', () => {
+    expect(search).toBeDefined();
+    expect(restingColours(search?.classText ?? '', 'bg')).toEqual([]);
+  });
+
+  it('rests on an edge that clears 3:1 on white', () => {
+    const edges = restingColours(search?.classText ?? '', 'border');
+    expect(edges).toEqual(['slate-400']);
+    for (const edge of edges) expect(tokenContrast(edge, 'white'), `border-${edge}`).toBeGreaterThanOrEqual(EDGE);
+  });
+
+  it('takes an edge at focus that clears 3:1 on white', () => {
+    const edges = focusEdges(search?.classText ?? '');
+    expect(edges).toHaveLength(1);
+    for (const edge of edges) expect(tokenContrast(edge, 'white'), `focus:border-${edge}`).toBeGreaterThanOrEqual(EDGE);
   });
 });
 

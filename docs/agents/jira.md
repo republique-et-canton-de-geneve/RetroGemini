@@ -324,6 +324,16 @@ Rules:
   parent (`parent_uncertain`, `parent_in_progress`, `parent_refused`) is said as "not sent", in its own
   words, and never as "may already be in Jira" (`jiraBatchResults`,
   `JiraActionControl`): it was not sent.
+- **An invalid field is rose on every Jira screen.** The team-side forms
+  (`JiraTeamSettings`, `JiraTargetFields`, `JiraParentField`) and the batch
+  dialog's line under its target fields mark an invalid field and say what is
+  wrong with it as the console's card does: `aria-invalid:border-rose-600`
+  (4.51:1 on the white field) and `text-rose-700` on the white card or dialog.
+  They drew it in red until 45.3, beside the console's rose
+  (`__tests__/jiraInvalidState.test.ts`, which reads every string of those
+  files with the TypeScript parser and measures both colours). The batch
+  dialog's results keep their own colours: a refused or not-saved outcome is
+  not an invalid field.
 
 Residuals, stated on purpose:
 

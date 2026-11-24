@@ -56,13 +56,18 @@ const join = async (page: Page, url: string) => {
   ]);
   if (entry === 'JOIN') {
     const member = page.getByRole('button', { name: new RegExp(GUEST) });
+    const notInList = page.getByRole('button', { name: "I'm not in the list" });
+    const nameField = page.getByPlaceholder('e.g. John Doe');
+    // count() and isVisible() answer at once: wait for the form to draw one of
+    // its ways in (the member list, or the name field) before choosing one
+    // (__tests__/e2eVisibilityWaits.test.ts).
+    await expect(member.or(notInList).or(nameField).first()).toBeVisible({ timeout: 10_000 });
     if (await member.count()) {
       await member.first().click();
       await page.getByRole('button', { name: 'Continue', exact: true }).click();
     } else {
-      const notInList = page.getByRole('button', { name: "I'm not in the list" });
-      if (await notInList.isVisible({ timeout: 2_000 }).catch(() => false)) await notInList.click();
-      await page.getByPlaceholder('e.g. John Doe').fill(GUEST);
+      if (await notInList.isVisible()) await notInList.click();
+      await nameField.fill(GUEST);
       await page.getByRole('button', { name: 'Join Retrospective' }).click();
     }
   }

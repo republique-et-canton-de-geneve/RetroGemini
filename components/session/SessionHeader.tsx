@@ -200,8 +200,10 @@ const SessionHeader: React.FC<Props> = ({
           </span>
           {/* The caption waits for 2xl: below it the timer shortcuts, the sync
               label and then the phase bar need the room ("ont terminé" is the
-              widest of them), and the count alone keeps the chip legible. */}
-          <span className="text-xs text-slate-500 hidden 2xl:inline">
+              widest of them), and the count alone keeps the chip legible. It
+              steps out of sight only: read after the number, it says in words
+              what the number counts, at every width (WCAG 2.5.3). */}
+          <span className="text-xs text-slate-500 sr-only 2xl:not-sr-only">
             {board
               ? t('phases.header.progressConnected')
               : session.phase === 'CLOSE' ? t('phases.header.progressVoted') : t('phases.header.progressFinished')}

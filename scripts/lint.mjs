@@ -19,8 +19,8 @@ import { evaluateLintBudget } from './lintBudget.mjs';
  * The number of warnings this repository currently tolerates. Lower it whenever
  * the count drops — never raise it without saying why in the pull request.
  *
- * Current composition (2026-11-23): **77 pre-existing** — 11 no-explicit-any,
- * 16 no-unused-vars, 14 no-non-null-assertion, 14 react-hooks/exhaustive-deps,
+ * Current composition (2026-11-24): **71 pre-existing** — 11 no-explicit-any,
+ * 10 no-unused-vars, 14 no-non-null-assertion, 14 react-hooks/exhaustive-deps,
  * 14 no-console, 7 no-alert, 1 unattributed — plus **11 accessibility**
  * findings surfaced by `eslint-plugin-jsx-a11y` (audit H42): 5
  * click-events-have-key-events, 5 no-static-element-interactions, 1
@@ -75,7 +75,11 @@ import { evaluateLintBudget } from './lintBudget.mjs';
 // 92 -> 88: the participants count in both session headers was a clickable
 // `<div>` (click-events-have-key-events and no-static-element-interactions
 // each); it is a status now, and the panel's rail opens the panel.
-const BUDGET = 88;
+// 88 -> 82: the six unused declarations CodeQL reported, two imports (the
+// Dashboard's TeamFeedbackType, the feedback board's FeedbackComment) and
+// four score helpers nothing called (the Dashboard's getScoreColor and
+// getScoreTextColor, the health check's getScoreColor and hasCompletedSurvey).
+const BUDGET = 82;
 
 const eslint = new ESLint();
 const results = await eslint.lintFiles(['.']);

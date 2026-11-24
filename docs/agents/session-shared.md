@@ -106,7 +106,13 @@ change to it lands in both.**
   it with its own button, which the keyboard reaches and which keeps the focus
   as it toggles (`__tests__/sessionHeaderLook.test.tsx` → *the participants'
   count*, `__tests__/healthCheckLook.test.tsx` → *the participants' count in
-  the header*). A count for narrow screens is not built. In French the votes chip may be cut after its number in a wide font
+  the header*). Below 2xl its caption ("finished", "voted", "connected",
+  "participants") steps out of sight, never out of the accessibility tree
+  (`sr-only 2xl:not-sr-only`, the same classes in both headers): the count is
+  read in words after the number it shows, so what is read starts with what
+  is seen (WCAG 2.5.3). Taken out by `display: none` until 45.3, it left a
+  screen reader "3/5" alone (→ *reads in words at 1280px, starting with the
+  number it shows*, in both files). A count for narrow screens is not built. In French the votes chip may be cut after its number in a wide font
   with a classic scrollbar; the count comes first and is never cut.
 
   **Nothing that changes while people work moves a row.** The line keeps one
@@ -135,7 +141,19 @@ change to it lands in both.**
   the list inline. Every client writes the participant list, so its value is
   data: one that is not a list reads as nobody, and the viewer is listed
   alone, as the screens' former copies read `{}` (`sessionRoster.test.ts` →
-  *lists the viewer alone when the session's list is not a list*).
+  *lists the viewer alone when the session's list is not a list*). An entry
+  that is not an object with a string id and a string name is not a person
+  (`isPerson`), and the server stores it as it comes: it made both screens
+  throw for everyone in the room. `sessionParticipants` skips it, and the
+  roster merge leaves it where it is, matched against nobody (as it ignores
+  such a roster entry). Both screens read every session they take in through
+  `listedPeople` — the one they open with, each one the server sends, the copy
+  each write starts from — so nothing they draw or write reads such an entry,
+  and their next write leaves it out of the stored list
+  (`__tests__/sessionParticipantsNotPeople.test.tsx`). A person's other
+  fields are data too: an email that is not a string is no address, and
+  `pendingInvitees` matches such a person against the invitees by id and
+  name alone (it threw in both panels until 45.3; `sessionInvitees.test.ts`).
   `__tests__/sessionParticipantsShared.test.ts` reads the screens with the
   TypeScript parser and fails when a screen's `getParticipants` is anything
   but that call, when a screen keys a person by a name of its own
@@ -253,4 +271,7 @@ What is deliberately **not** shared yet: the session headers themselves (the
 retro's carries the tips and counts different things, and both are pinned by the
 header-fit e2e at five widths) and the close screens. Both headers render the
 same `SessionTimer` and use the same breakpoints; bring the rest together with
-that test in hand.
+that test in hand. The two ROTI histograms draw an empty score alike, a
+4px stub in `bg-slate-600`, never a fade: the retrospective's faded its
+indigo bar to 0.2 until 45.3 (`healthCheckLook.test.tsx` → *draws an empty
+score as the retrospective's close does*).

@@ -21,7 +21,14 @@ rules:
   place (a card, a row, a dialog, a title), and `--ease-spring`, which
   overshoots on purpose, only for something small that is not aimed at (a dot,
   a count, a chosen avatar). The overshoot is the look's one flourish; it
-  never goes on a box people click.
+  never goes on a box people click. A reaction chip is such a box: a new
+  reaction, and one that gained a person, ring the chip in its card's colour
+  (`fx-ring`, on the chip's pseudo-element, which is why the chip is
+  `relative`), where until 45.3 the first popped in and the second bumped,
+  both on the spring and both scaling the box the pointer aims at
+  (`useSessionMotion.test.tsx` → *rings a new reaction and one that gained a
+  person, and springs neither*; `reactionChipState.test.tsx` → *are
+  positioned*).
 - **An effect follows something that happened, never an element being drawn.**
   A phase change remounts the whole board and a card remounts when it changes
   group or column, so an animation tied to a mount would replay each time.
