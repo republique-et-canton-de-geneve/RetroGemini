@@ -2,9 +2,14 @@ import React from 'react';
 import { useTranslation } from '../../i18n/I18nContext';
 import { RetroSession, User } from '../../types';
 import { getTicketOriginColumn } from '../../utils/retroGrouping';
+import { cardHue } from '../../utils/cardHue';
+import { cardTones } from '../../utils/cardTones';
+import { columnHue } from '../../utils/columnHue';
+import { columnIconName } from '../iconPickerIcons';
 import ProposalActionRow from './ProposalActionRow';
 import ProposalNumber from './ProposalNumber';
 import { numberTopicProposals } from './proposalNumbering';
+import { sessionParticipants } from './sessionRoster';
 import TicketOriginBadge from './TicketOriginBadge';
 
 interface DiscussItem {
@@ -92,16 +97,21 @@ const DiscussPhase: React.FC<Props> = ({
   // Participants marked as having left are excluded from every counter:
   // they are no longer expected to vote or to weigh in "move on" totals.
   const leftSet = new Set(session.leftUsers ?? []);
+  // The people the board lists, where it finds a card's author.
+  const people = sessionParticipants(session.participants, currentUser);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-50">
-      <div className="bg-white border-b px-6 py-3 flex justify-between items-center shadow-xs z-30 shrink-0">
-        <div className="flex items-center space-x-4">
-          <h2 className="font-bold text-slate-700 text-lg">{t('phases.discuss.title')}</h2>
+      {/* Spaced with gaps, never a rule: the bar wraps on a phone, and a rule
+          before "Show votes" then opened its own line (as the board's bar). */}
+      <div className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex flex-wrap justify-between items-center gap-x-4 gap-y-2 shadow-xs z-30 shrink-0">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{t('phases.discuss.title')}</h2>
           {isFacilitator && (
-            <label className="flex items-center space-x-1.5 cursor-pointer text-sm text-slate-600 border-l border-slate-200 pl-4">
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-slate-700">
               <input
                 type="checkbox"
+                className="w-4 h-4 accent-indigo-600"
                 checked={showVoteTypes}
                 onChange={(e) => updateSession((s) => { s.settings.showParticipantVotes = e.target.checked; })}
               />
@@ -112,7 +122,7 @@ const DiscussPhase: React.FC<Props> = ({
         {isFacilitator && (
           <button
             onClick={() => setPhase('REVIEW')}
-            className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 transition"
           >
             {t('phases.shared.nextPhase')}
           </button>
@@ -135,6 +145,23 @@ const DiscussPhase: React.FC<Props> = ({
           // the card already renders, so nothing is added to the session state:
           // nothing to sync, nothing to restore after a reconnect.
           const myVotes = ((item.ref?.votes ?? []) as string[]).filter((voterId) => voterId === currentUser.id).length;
+          // The topic is a card of the board, painted as the board paints it:
+          // a soft tint of its hue, the words in the dark ink
+          // (utils/cardTones.ts). A card takes the board's hue
+          // (utils/cardHue.ts): the column it was written in first, or its
+          // author's tone on a board coloured by author, never in an anonymous
+          // session; every topic is read here. A group has many authors and no
+          // column of origin: it takes its column's hue. None gives the white
+          // card.
+          const tones = cardTones(item.type === 'ticket'
+            ? cardHue(item.ref, {
+              columns: session.columns,
+              settings: session.settings,
+              author: people.find((person) => person.id === item.ref.authorId),
+              readable: true
+            })
+            : columnHue(itemColumn));
+          const isActive = activeDiscussTicket === item.id;
 
           return (
             <div
@@ -142,13 +169,15 @@ const DiscussPhase: React.FC<Props> = ({
                 discussRefs.current[item.id] = element;
               }}
               key={item.id}
-              className={`bg-white rounded-xl shadow-xs border-2 transition ${
-                activeDiscussTicket === item.id
-                  ? 'border-retro-primary ring-4 ring-indigo-50'
-                  : myVotes > 0
-                    ? 'border-indigo-200'
-                    : 'border-slate-200'
+              data-topic-id={item.id}
+              // The topic in focus takes the brand's edge and halo over its
+              // tint; the halo is a ring, so focusing a topic moves nothing.
+              className={`bg-white rounded-xl border shadow-xs transition-shadow ${
+                isActive
+                  ? 'border-indigo-600 ring-4 ring-indigo-600/15'
+                  : `border-slate-200 ${isFacilitator ? 'hover:shadow-md' : ''}`
               }`}
+              style={tones ? { backgroundColor: tones.tint, ...(isActive ? {} : { borderColor: tones.line }) } : undefined}
             >
               <div
                 className={`p-4 flex items-start ${isFacilitator ? 'cursor-pointer' : 'cursor-default'}`}
@@ -160,40 +189,42 @@ const DiscussPhase: React.FC<Props> = ({
                   setActiveDiscussTicket(activeDiscussTicket === item.id ? null : item.id);
                 }}
               >
-                <div className="grow">
-                  <div className="text-lg text-slate-800 font-medium mb-1 wrap-break-word">{item.text}</div>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-bold text-slate-500">
+                <div className="grow min-w-0">
+                  <div className="text-lg text-slate-900 font-medium mb-1 wrap-break-word">{item.text}</div>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-semibold text-slate-600">
                     {myVotes > 0 && (
                       <span
                         data-testid="topic-my-votes"
                         title={t('phases.discuss.myVotesTitle', { count: myVotes })}
-                        className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-indigo-600 px-2 py-0.5 text-[11px] font-bold text-white shadow-xs"
+                        // Wraps on a phone, where "2 votes de votre part" on one
+                        // line pushed the topic's controls out of its card.
+                        className="inline-flex items-center gap-1 sm:whitespace-nowrap rounded-lg sm:rounded-full bg-indigo-600 px-2.5 py-0.5 text-xs font-semibold text-white"
                       >
                         <span className="material-symbols-outlined text-[13px] leading-none" aria-hidden="true">how_to_vote</span>
                         {tp('phases.discuss.myVotes', myVotes)}
                       </span>
                     )}
-                    <span className="flex items-center text-indigo-600" data-testid="topic-total-votes">
-                      <span className="material-symbols-outlined text-sm mr-1">thumb_up</span> {tp('phases.discuss.totalVotes', item.votes)}
+                    <span className="flex items-center tabular-nums text-indigo-700" data-testid="topic-total-votes">
+                      <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">thumb_up</span> {tp('phases.discuss.totalVotes', item.votes)}
                     </span>
                     {!session.settings.oneVotePerTicket && (
                       <span
-                        className="flex items-center text-indigo-600"
+                        className="flex items-center tabular-nums text-indigo-700"
                         title={tp('phases.discuss.uniqueVotersTitle', uniqueVoters)}
                         data-testid="topic-unique-voters"
                       >
-                        <span className="material-symbols-outlined text-sm mr-1">group</span>
+                        <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">group</span>
                         {tp('phases.discuss.uniqueVoters', uniqueVoters)}
                       </span>
                     )}
                     {item.type === 'group' && (
                       <span className="flex items-center">
-                        <span className="material-symbols-outlined text-sm mr-1">layers</span> {t('phases.discuss.group')}
+                        <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">layers</span> {t('phases.discuss.group')}
                       </span>
                     )}
                     {itemColumn && (
                       <span className="flex items-center">
-                        <span className="material-symbols-outlined text-sm mr-1">{itemColumn.icon}</span>
+                        <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">{columnIconName(itemColumn.icon)}</span>
                         <span>{itemColumn.title}</span>
                       </span>
                     )}
@@ -201,11 +232,11 @@ const DiscussPhase: React.FC<Props> = ({
                   </div>
 
                   {item.type === 'group' && subItems.length > 0 && (
-                    <div className="mt-3 pl-3 border-l-2 border-slate-200">
+                    <div className="mt-3 pl-3 border-l-2 border-slate-300">
                       {subItems.map((sub) => {
                         const subOriginColumn = getTicketOriginColumn(sub, session.columns);
                         return (
-                          <div key={sub.id} className="text-sm text-slate-500 mb-1 wrap-break-word">
+                          <div key={sub.id} className="text-sm text-slate-600 mb-1 wrap-break-word">
                             {sub.text}
                             {subOriginColumn && <TicketOriginBadge column={subOriginColumn} className="ml-2 align-middle" />}
                           </div>
@@ -219,33 +250,36 @@ const DiscussPhase: React.FC<Props> = ({
                     event.stopPropagation();
                     handleToggleNextTopicVote(item.id);
                   }}
-                  className={`ml-4 flex items-center space-x-2 px-3 py-2 rounded-lg text-xs font-bold transition shrink-0 ${hasVotedNext ? 'bg-indigo-100 text-indigo-700 ring-2 ring-indigo-300' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  className={`ml-4 flex items-center space-x-2 px-3 py-2 rounded-lg border text-xs font-semibold transition shrink-0 ${hasVotedNext ? 'bg-indigo-100 text-indigo-800 border-indigo-600 ring-1 ring-indigo-600' : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}
                   title={t('phases.discuss.moveOnTitle', { voted: nextTopicVotesCount, total: participantsCount })}
+                  aria-pressed={hasVotedNext}
                 >
-                  <span className="material-symbols-outlined text-sm">fast_forward</span>
+                  <span className="material-symbols-outlined text-sm" aria-hidden="true">fast_forward</span>
                   <span>{t('phases.discuss.moveOn')}</span>
                   {nextTopicVotesCount > 0 && (
                     <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-bold ${hasVotedNext ? 'bg-indigo-200 text-indigo-800' : 'bg-slate-200 text-slate-700'}`}
+                      className={`px-2 py-0.5 rounded-full text-xs font-semibold tabular-nums ${hasVotedNext ? 'bg-indigo-200 text-indigo-800' : 'bg-slate-100 text-slate-700'}`}
                     >
                       {nextTopicVotesCount}/{participantsCount}
                     </span>
                   )}
                 </button>
                 <div className="flex flex-col items-center shrink-0 ml-2">
-                  <span className="material-symbols-outlined text-slate-300">
+                  <span className="material-symbols-outlined text-slate-600" aria-hidden="true">
                     {activeDiscussTicket === item.id ? 'expand_less' : 'expand_more'}
                   </span>
                   {activeDiscussTicket !== item.id && isFacilitator && (
-                    <span className="text-[10px] text-indigo-600 font-medium whitespace-nowrap">{t('phases.discuss.clickToDiscuss')}</span>
+                    // Wraps under the chevron on a phone, where one line ran
+                    // past the card's edge.
+                    <span className="text-xs leading-tight text-center text-indigo-700 font-medium max-w-20 sm:max-w-none sm:whitespace-nowrap">{t('phases.discuss.clickToDiscuss')}</span>
                   )}
                 </div>
               </div>
 
               {activeDiscussTicket === item.id && (
-                <div className="bg-slate-50 border-t border-slate-100 p-4 rounded-b-xl">
+                <div className="bg-slate-50 border-t border-slate-200 p-4 rounded-b-xl">
                   <div className="mb-4">
-                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">{t('phases.discuss.proposals')}</h4>
+                    <h4 className="text-xs font-semibold tracking-wide text-slate-600 uppercase mb-2">{t('phases.discuss.proposals')}</h4>
                     {/* Single list in creation order: accepting or rejecting keeps each row in place */}
                     {session.actions
                       .filter((action) => proposalNumbers.has(action.id))
@@ -256,21 +290,21 @@ const DiscussPhase: React.FC<Props> = ({
                             <div
                               key={action.id}
                               data-proposal-state="accepted"
-                              className="flex items-center justify-between text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 text-emerald-800 mb-2"
+                              className="flex items-center justify-between text-sm bg-emerald-50 p-2.5 rounded-lg border border-emerald-200 text-emerald-800 mb-2"
                             >
                               <span className="flex items-center min-w-0 wrap-break-word">
                                 {number !== undefined && <ProposalNumber number={number} />}
-                                <span className="material-symbols-outlined text-emerald-700 mr-2 text-sm shrink-0">check_circle</span>
+                                <span className="material-symbols-outlined text-emerald-700 mr-2 text-sm shrink-0" aria-hidden="true">check_circle</span>
                                 <span>{t('phases.discuss.accepted', { text: action.text })}</span>
                               </span>
                               {isFacilitator && (
                                 <button
                                   onClick={() => handleUndoAcceptProposal(action.id)}
-                                  className="ml-3 shrink-0 flex items-center text-emerald-700 hover:text-emerald-900 transition"
+                                  className="ml-3 shrink-0 flex items-center p-0.5 rounded-md text-emerald-700 hover:text-emerald-900 hover:bg-emerald-100 transition"
                                   title={t('phases.discuss.undoAcceptTitle')}
                                   aria-label={t('phases.discuss.undoAccept')}
                                 >
-                                  <span className="material-symbols-outlined text-sm">undo</span>
+                                  <span className="material-symbols-outlined text-sm" aria-hidden="true">undo</span>
                                 </button>
                               )}
                             </div>
@@ -282,11 +316,11 @@ const DiscussPhase: React.FC<Props> = ({
                             <div
                               key={action.id}
                               data-proposal-state="rejected"
-                              className="flex items-center justify-between text-sm bg-slate-100 p-2 rounded-sm border border-slate-200 text-slate-500 mb-2"
+                              className="flex items-center justify-between text-sm bg-slate-100 p-2.5 rounded-lg border border-slate-200 text-slate-600 mb-2"
                             >
                               <span className="flex items-center min-w-0 wrap-break-word">
                                 {number !== undefined && <ProposalNumber number={number} />}
-                                <span className="material-symbols-outlined text-slate-500 mr-2 text-sm shrink-0">block</span>
+                                <span className="material-symbols-outlined text-slate-600 mr-2 text-sm shrink-0" aria-hidden="true">block</span>
                                 <span>
                                   {tRich('phases.discuss.rejected', {
                                     text: <span className="line-through">{action.text}</span>
@@ -296,11 +330,11 @@ const DiscussPhase: React.FC<Props> = ({
                               {isFacilitator && (
                                 <button
                                   onClick={() => handleUndoRejectProposal(action.id)}
-                                  className="ml-3 shrink-0 flex items-center text-slate-500 hover:text-slate-700 transition"
+                                  className="ml-3 shrink-0 flex items-center p-0.5 rounded-md text-slate-600 hover:text-slate-800 hover:bg-slate-200 transition"
                                   title={t('phases.discuss.undoRejectTitle')}
                                   aria-label={t('phases.discuss.undoReject')}
                                 >
-                                  <span className="material-symbols-outlined text-sm">undo</span>
+                                  <span className="material-symbols-outlined text-sm" aria-hidden="true">undo</span>
                                 </button>
                               )}
                             </div>
@@ -331,10 +365,10 @@ const DiscussPhase: React.FC<Props> = ({
                         );
                       })}
                   </div>
-                  <div className="flex">
+                  <div className="flex gap-2">
                     <input
                       type="text"
-                      className="grow border border-slate-300 rounded-l p-2 text-sm outline-hidden focus:border-retro-primary bg-white text-slate-900"
+                      className="grow min-w-0 border border-slate-400 rounded-lg px-3 py-2 text-sm outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 bg-white text-slate-900 placeholder:text-slate-500"
                       placeholder={t('phases.discuss.proposePlaceholder')}
                       value={newProposalText}
                       onChange={(event) => {
@@ -347,18 +381,18 @@ const DiscussPhase: React.FC<Props> = ({
                     />
                     <button
                       onClick={() => handleAddProposal(item.id)}
-                      className="bg-slate-700 text-white px-3 font-bold text-sm hover:bg-slate-800 border-l border-slate-600"
+                      className="bg-indigo-600 text-white px-4 rounded-lg font-semibold text-sm hover:bg-indigo-700 btn-brand-glow transition shrink-0"
                     >
                       {t('phases.shared.propose')}
                     </button>
                     {isFacilitator && (
                       <button
                         onClick={() => handleDirectAddAction(item.id)}
-                        className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover"
+                        className="bg-white text-indigo-700 px-2.5 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition shrink-0 flex items-center"
                         title={t('phases.shared.directAccept')}
                         aria-label={t('phases.shared.directAccept')}
                       >
-                        <span className="material-symbols-outlined text-sm">check</span>
+                        <span className="material-symbols-outlined text-sm" aria-hidden="true">check</span>
                       </button>
                     )}
                   </div>

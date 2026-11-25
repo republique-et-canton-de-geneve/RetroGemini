@@ -1,20 +1,23 @@
 import React, { useId } from 'react';
 
 /**
- * Stars, for the impact rating and its rollups.
+ * Stars: the impact rating and its rollups, and the favourites of the login
+ * screen's team list (each team's toggle, and the heading above them).
  *
  * ## Why this is an inline SVG and not the icon font
  *
- * Every other icon in this product comes from the self-hosted
- * `public/fonts/material-symbols-outlined.woff2`, and the offline rule says to
- * keep it that way. This is the one control that cannot: that file is a
- * **static** cut with no `FILL` axis, and in it `star`, `star_border`,
- * `star_outline` and `grade` all resolve to the *same* outlined glyph — so the
- * font cannot draw a filled star at all, and a "rating" made of four identical
- * hollow stars says nothing.
+ * Every other icon in this product comes from the self-hosted Material
+ * Symbols font (`public/fonts/material-symbols-rounded.woff2` since 45.0), and
+ * the offline rule says to keep it that way. A star that must be filled is the
+ * one icon it cannot draw: that file is a **static** cut with no `FILL` axis,
+ * and in it `star`, `star_border`, `star_outline` and `grade` all resolve to
+ * the *same* outlined glyph — so the font cannot draw a filled star at all. A
+ * "rating" made of four identical hollow stars says nothing, and a favourite
+ * drawn like every other team is not marked. The exception is that glyph, for
+ * any control that needs it filled; every other icon stays in the font.
  *
  * Swapping in the variable font to recover `FILL` would replace a shared asset
- * every screen depends on, for one control. An inline path costs nothing, works
+ * every screen depends on, for one glyph. An inline path costs nothing, works
  * offline exactly like the font does, and is the only way to draw the partial
  * fill an average of 2.5 actually needs.
  *
@@ -23,8 +26,18 @@ import React, { useId } from 'react';
  * A filled star is solid; an empty one is an outline. That keeps the two states
  * distinguishable without relying on colour (WCAG 1.4.1), which matters here
  * because no amber dark enough to read as gold clears 3:1 against the pale grey
- * a "not filled" star wants to be. Callers pair the stars with the score or the
- * label in text as well.
+ * a "not filled" star wants to be. Most places that draw stars also write
+ * beside them what they stand for: the score beside a rollup's stars, the
+ * scale's word beside the rating's choices, "Favourites" beside the heading's
+ * star. Two do not. The impact result's spread chips
+ * (`components/session/ClosedActionsRating.tsx`) draw each score as that many
+ * filled stars beside the number of people who gave it, and only the name of
+ * the row that holds them (`role="img"`) says that score in words, as its word
+ * on the scale ("2 clear impact"). The login screen's favourite toggle draws
+ * its star alone, so its shape is the only drawing of the state, which
+ * assistive technology reads from the switch's `aria-checked`. The outline
+ * itself is slate-400, the lightest grey that draws an edge at 3:1 on white
+ * and on the results' amber chip (`__tests__/phaseScreensLook.test.tsx`).
  */
 
 /** Material's star, on the same 24×24 grid as every icon around it. */

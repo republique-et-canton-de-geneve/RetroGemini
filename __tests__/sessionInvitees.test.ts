@@ -66,6 +66,15 @@ describe('pendingInvitees', () => {
     expect(pendingInvitees([user('b', 'Bob')], malformed).map((u) => u.id)).toEqual(['c']);
     expect(pendingInvitees([user('b', 'Bob')], { not: 'a list' } as never)).toEqual([]);
   });
+
+  // The participants are session data too: a person's email that is not a
+  // string is no address, and is matched against nothing. Read as text, it
+  // threw in both participants panels, for everyone in the room.
+  it('matches a participant whose email is not a string by id and name alone, instead of throwing', () => {
+    const odd = [{ ...user('fresh-3', 'Cyril'), email: 5 }, { ...user('d', 'Dee'), email: {} }] as never;
+
+    expect(pendingInvitees(odd, invited).map((u) => u.id)).toEqual(['b', 'c']);
+  });
 });
 
 describe('restoreLostInvitees', () => {

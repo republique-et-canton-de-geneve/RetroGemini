@@ -40,9 +40,11 @@ const ImageGallery: React.FC<Props> = ({ images, altFor, className = 'flex flex-
             type="button"
             onClick={() => setOpenIndex(idx)}
             aria-haspopup="dialog"
-            className="rounded-sm hover:opacity-80 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-indigo-500"
+            // Hover deepens the shadow only: no fade (it hid what the
+            // thumbnail shows) and no lift (boxes do not move under a pointer).
+            className="rounded-lg shadow-xs hover:shadow-md transition-shadow focus:outline-hidden focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2"
           >
-            <img src={img} alt={altFor(idx + 1)} className="w-32 h-32 object-cover rounded-sm" />
+            <img src={img} alt={altFor(idx + 1)} className="block w-32 h-32 object-cover rounded-lg border border-slate-200" />
           </button>
         ))}
       </div>
@@ -51,13 +53,16 @@ const ImageGallery: React.FC<Props> = ({ images, altFor, className = 'flex flex-
         <ModalDialog
           label={openAlt}
           onClose={() => setOpenIndex(null)}
-          overlayClassName="fixed inset-0 bg-black/80 flex items-center justify-center z-100 p-4"
+          // The close button below is `fixed`: a transformed panel would carry
+          // it along while the dialog rises, so this one only fades in.
+          entrance="fade"
+          overlayClassName="fixed inset-0 bg-slate-900/85 flex items-center justify-center z-100 p-4"
           panelClassName="relative max-w-[95vw] max-h-[95vh] flex items-center justify-center"
         >
           <img
             src={openImage}
             alt={openAlt}
-            className="max-w-[95vw] max-h-[90vh] object-contain rounded-sm bg-white shadow-2xl"
+            className="max-w-[95vw] max-h-[90vh] object-contain rounded-xl bg-white shadow-2xl"
           />
           {/* Anchored to the screen corner, not the image: on a screenshot the
               top-right corner is often the detail the report is about. */}
@@ -65,7 +70,7 @@ const ImageGallery: React.FC<Props> = ({ images, altFor, className = 'flex flex-
             type="button"
             onClick={() => setOpenIndex(null)}
             aria-label={t('common.close')}
-            className="fixed top-4 right-4 bg-slate-900/80 text-white rounded-full w-11 h-11 flex items-center justify-center hover:bg-slate-900"
+            className="fixed top-4 right-4 bg-slate-900/80 text-white rounded-full w-11 h-11 flex items-center justify-center hover:bg-slate-900 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
           >
             <span className="material-symbols-outlined" aria-hidden="true">close</span>
           </button>

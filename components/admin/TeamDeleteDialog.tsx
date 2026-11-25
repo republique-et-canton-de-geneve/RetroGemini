@@ -4,6 +4,7 @@ import { useTranslation } from '../../i18n/I18nContext';
 import { Notice, noticeText } from '../../i18n/notice';
 import type { MessageKey, Translator } from '../../i18n/translate';
 import type { Team } from '../../types';
+import { DANGER_BUTTON, DIALOG_TITLE, ERROR_NOTICE, SECONDARY_BUTTON } from '../dashboard/dashboardLook';
 import { deleteTeamAsAdmin, DeleteReason, SourceChange } from './teamAdminApi';
 
 /**
@@ -153,14 +154,14 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
     <ModalDialog
       labelledBy={titleId}
       onClose={busy ? undefined : onClose}
-      overlayClassName="fixed inset-0 bg-black/50 z-100 flex items-center justify-center p-4"
-      panelClassName="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto"
+      overlayClassName="fixed inset-0 bg-slate-900/45 z-100 flex items-center justify-center p-4"
+      panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 max-w-md w-full max-h-[90vh] overflow-y-auto"
     >
       <div className="text-center mb-4">
-        <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-3">
+        <div className="w-14 h-14 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center mx-auto mb-3">
           <span className="material-symbols-outlined text-3xl" aria-hidden="true">warning</span>
         </div>
-        <h2 id={titleId} className="text-xl font-bold text-slate-800 mb-2 wrap-anywhere">
+        <h2 id={titleId} className={`${DIALOG_TITLE} mb-2 wrap-anywhere`}>
           {t('adminTeamMerge.deleteDialog.title', { name: team.name })}
         </h2>
         <p className="text-sm text-slate-600">{t('adminTeamMerge.deleteDialog.warning')}</p>
@@ -168,7 +169,7 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
       </div>
 
       {error && (
-        <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">{noticeText(error, t)}</div>
+        <div role="alert" className={`${ERROR_NOTICE} mb-4`}>{noticeText(error, t)}</div>
       )}
 
       {confirmation && (
@@ -179,8 +180,8 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
         </div>
       )}
 
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-        <label htmlFor={inputId} className="block text-sm text-red-800 mb-2">
+      <div className="bg-rose-50 border border-rose-200 rounded-lg p-4 mb-4">
+        <label htmlFor={inputId} className="block text-sm text-rose-800 mb-2">
           {tRich('adminTeamMerge.deleteDialog.confirmLabel', { name: <strong className="break-all">{team.name}</strong> })}
         </label>
         <input
@@ -189,7 +190,7 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
           value={confirmText}
           onChange={(e) => { setConfirmText(e.target.value); setConfirmation(null); }}
           autoComplete="off"
-          className="w-full border border-red-300 rounded-lg p-2 bg-white text-slate-900 outline-hidden focus:border-red-500 focus:ring-1 focus:ring-red-500"
+          className="w-full border border-rose-500 rounded-lg px-3 py-2 bg-white text-slate-900 outline-hidden focus:border-rose-600 focus:ring-4 focus:ring-rose-600/15 transition"
         />
       </div>
 
@@ -197,14 +198,14 @@ const TeamDeleteDialog: React.FC<Props> = ({ team, mergedInto, sessionToken, onC
         <button
           onClick={onClose}
           disabled={busy}
-          className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg font-bold hover:bg-slate-200 disabled:opacity-50"
+          className={`${SECONDARY_BUTTON} flex-1 py-2`}
         >
           {t('common.cancel')}
         </button>
         <button
           onClick={remove}
           disabled={!matches || busy}
-          className="flex-1 bg-red-600 text-white py-2 rounded-lg font-bold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className={`${DANGER_BUTTON} flex-1 py-2`}
         >
           {busy
             ? t('adminTeamMerge.deleteDialog.deleting')

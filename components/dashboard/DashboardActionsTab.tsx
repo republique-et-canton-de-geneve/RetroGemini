@@ -9,6 +9,16 @@ import { ROTI_FOLLOW_UP_LINK_ID } from '../session/retroConstants';
 import JiraActionControl from '../jira/JiraActionControl';
 import JiraBatchButton from '../jira/JiraBatchButton';
 import type { JiraActionKind } from '../jira/jiraAvailability';
+import {
+  CARD,
+  CHIP,
+  FIELD_BOX,
+  FILTER_PILL,
+  FILTER_PILL_OFF,
+  FILTER_PILL_ON,
+  PRIMARY_BUTTON,
+  SECTION_LABEL
+} from './dashboardLook';
 
 interface DashboardAction extends ActionItem {
   originRetro: string;
@@ -95,13 +105,13 @@ const DashboardActionsTab: React.FC<Props> = ({
 
   return (
   <div className="max-w-4xl mx-auto">
-    <form onSubmit={onCreateAction} className="mb-6 p-4 bg-white rounded-lg border border-slate-200 shadow-xs">
-      <h3 className="text-xs font-bold text-slate-500 uppercase mb-2">{t('dashboard.actions.createTitle')}</h3>
+    <form onSubmit={onCreateAction} className={`${CARD} mb-6 p-4`}>
+      <h3 className={`${SECTION_LABEL} mb-2`}>{t('dashboard.actions.createTitle')}</h3>
       <div className="flex flex-col md:flex-row gap-2">
         <input
           type="text"
           placeholder={t('dashboard.actions.newPlaceholder')}
-          className="grow px-3 py-2 rounded-sm border border-slate-300 focus:border-retro-primary outline-hidden bg-white text-slate-900"
+          className={`${FIELD_BOX} grow min-w-0`}
           value={newActionText}
           onChange={(e) => onNewActionTextChange(e.target.value)}
         />
@@ -109,7 +119,7 @@ const DashboardActionsTab: React.FC<Props> = ({
           aria-label={t('dashboard.actions.newAssignee')}
           value={newActionAssignee}
           onChange={(e) => onNewActionAssigneeChange(e.target.value)}
-          className="px-3 py-2 rounded-sm border border-slate-300 bg-white text-slate-900 outline-hidden text-sm min-w-[150px]"
+          className={`${FIELD_BOX} text-sm min-w-[150px]`}
         >
           <option value="">{t('dashboard.actions.unassigned')}</option>
           {team.members.map((member) => (
@@ -121,7 +131,7 @@ const DashboardActionsTab: React.FC<Props> = ({
         <button
           type="submit"
           disabled={!newActionText.trim()}
-          className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold hover:bg-retro-primaryHover disabled:opacity-50 transition"
+          className={`${PRIMARY_BUTTON} px-5 py-2`}
         >
           {t('dashboard.actions.add')}
         </button>
@@ -140,7 +150,8 @@ const DashboardActionsTab: React.FC<Props> = ({
           <button
             key={filter}
             onClick={() => onActionFilterChange(filter)}
-            className={`px-3 py-1.5 rounded-full border transition ${actionFilter === filter ? 'bg-indigo-50 border-retro-primary text-retro-primary' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}
+            aria-pressed={actionFilter === filter}
+            className={`${FILTER_PILL} ${actionFilter === filter ? FILTER_PILL_ON : FILTER_PILL_OFF}`}
           >
             {t(`dashboard.actions.filter.${filter}`)}
           </button>
@@ -159,90 +170,99 @@ const DashboardActionsTab: React.FC<Props> = ({
       />
     </div>
 
-    <div className="bg-white rounded-lg shadow-xs border border-slate-200 overflow-hidden">
+    <div className={`${CARD} overflow-hidden`}>
       {filteredActions.length === 0 ? (
-        <div className="text-center text-slate-500 py-10">{t('dashboard.actions.empty')}</div>
+        <div className="text-center text-slate-600 py-10">{t('dashboard.actions.empty')}</div>
       ) : (
         filteredActions.map((action) => (
-          <div key={action.id} className="flex items-center p-4 border-b border-slate-100 last:border-0 hover:bg-slate-50 group">
-            <button
-              onClick={() => onToggleAction(action.id)}
-              className={`mr-4 transition ${action.done ? 'text-emerald-600' : 'text-slate-500 hover:text-emerald-600'}`}
-              aria-label={action.done ? t('dashboard.actions.markNotDone') : t('dashboard.actions.markDone')}
-            >
-              <span className="material-symbols-outlined text-2xl">
-                {action.done ? 'check_circle' : 'radio_button_unchecked'}
-              </span>
-            </button>
-            <div className="grow mr-4">
-              <input
-                // Fixed text, never the action: the value says which one.
-                aria-label={t('dashboard.actions.textLabel')}
-                defaultValue={action.text}
-                onBlur={(e) => onUpdateActionText(action.id, e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') e.currentTarget.blur();
-                }}
-                className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-sm px-2 py-1 focus:bg-white focus:border-retro-primary outline-hidden transition font-medium ${action.done ? 'line-through text-slate-500' : 'text-slate-700'}`}
-              />
-              <div className="flex items-center text-xs mt-1">
-                {action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID && (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full mr-2 border border-amber-200 bg-amber-50 text-amber-700 font-semibold">
-                    {t('dashboard.actions.retroImprovement')}
-                  </span>
-                )}
-                {action.originRetro !== 'Dashboard' && (
-                  // slate-600: slate-500 on this slate-100 chip measured 4.34:1.
-                  <span className="text-slate-600 px-1 bg-slate-100 rounded-sm mr-2">{action.originRetro}</span>
-                )}
-                {action.contextText && (
-                  <span className="text-indigo-600 italic truncate max-w-[200px]" title={action.contextText}>
-                    {t('dashboard.actions.context', { text: action.contextText })}
-                  </span>
-                )}
-                {/* What the team said this action was worth. Only on a closed
-                    action that was actually rated: an open action has not been
-                    put to anyone, and a closed one with no votes must show
-                    nothing rather than a zero. `role="img"` so the pill is one
-                    phrase to a screen reader instead of a star row plus a loose
-                    number. */}
-                {(() => {
-                  if (!ratingEnabled || !action.done) return null;
-                  const score = actionImpactScore(action);
-                  if (score == null) return null;
-                  const votes = actionImpactVoteCount(action);
-                  const rounded = localizeDecimal(String(Math.round(score * 10) / 10), locale);
-                  return (
-                    <span
-                      role="img"
-                      aria-label={tp('dashboard.actions.impactAria', votes, { score: rounded })}
-                      data-testid="action-impact-score"
-                      title={tp('dashboard.actions.impactTitle', votes)}
-                      className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 ml-2"
-                    >
-                      <StarRating value={score} starClassName="w-3 h-3" />
-                      <span className="font-semibold text-slate-700">{rounded}/3</span>
-                    </span>
-                  );
-                })()}
-              </div>
-              {/* The action's issue, or "Create in Jira" for a facilitator.
-                  Hidden when the control renders nothing. */}
-              <div className="mt-1 empty:hidden">
-                <JiraActionControl
-                  action={action}
-                  status={jiraStatus}
-                  teamId={team.id}
-                  isFacilitator={isFacilitator}
-                  kind={jiraKindOf(action.id)}
-                  requestedBy={requestedBy}
-                  team={team}
-                  onCreated={() => onJiraChanged?.()}
-                  onStatusStale={onJiraStatusStale}
+          <div key={action.id} className="flex flex-wrap sm:flex-nowrap items-center gap-y-2 px-4 py-3.5 border-b border-slate-200 last:border-0 hover:bg-slate-50 group">
+            {/* The done toggle and the text are one item of the row, which
+                never wraps, so the toggle stays on its action's line. At
+                least 16rem together (12rem of text), or the row's whole width
+                on a narrower screen: on a phone the assignee goes under the
+                text rather than squeeze it. With 12rem on the text alone, the
+                text did not fit beside the toggle below about 338px either,
+                and the toggle took a line of its own above it. */}
+            <div className="flex items-center flex-1 min-w-[min(16rem,100%)]">
+              <button
+                onClick={() => onToggleAction(action.id)}
+                className={`mr-3 inline-flex items-center justify-center w-9 h-9 shrink-0 rounded-lg hover:bg-emerald-50 transition ${action.done ? 'text-emerald-700' : 'text-slate-500 hover:text-emerald-700'}`}
+                aria-label={action.done ? t('dashboard.actions.markNotDone') : t('dashboard.actions.markDone')}
+              >
+                <span className="material-symbols-outlined text-2xl" aria-hidden="true">
+                  {action.done ? 'check_circle' : 'radio_button_unchecked'}
+                </span>
+              </button>
+              <div className="flex-1 min-w-0 mr-4">
+                <input
+                  // Fixed text, never the action: the value says which one.
+                  aria-label={t('dashboard.actions.textLabel')}
+                  defaultValue={action.text}
+                  onBlur={(e) => onUpdateActionText(action.id, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur();
+                  }}
+                  className={`w-full bg-transparent border border-transparent hover:border-slate-300 rounded-md px-2 py-1 focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 outline-hidden transition font-medium ${action.done ? 'line-through text-slate-500' : 'text-slate-900'}`}
                 />
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs mt-1 px-2 empty:hidden">
+                  {action.linkedTicketId === ROTI_FOLLOW_UP_LINK_ID && (
+                    <span className={`${CHIP} bg-amber-50 text-amber-800`}>
+                      {t('dashboard.actions.retroImprovement')}
+                    </span>
+                  )}
+                  {action.originRetro !== 'Dashboard' && (
+                    // slate-700 on this slate-100 chip: 8.64:1 (slate-500 would read there too, at 4.66:1).
+                    <span className={`${CHIP} bg-slate-100 text-slate-700`}>{action.originRetro}</span>
+                  )}
+                  {action.contextText && (
+                    <span className="text-indigo-700 italic truncate max-w-[200px]" title={action.contextText}>
+                      {t('dashboard.actions.context', { text: action.contextText })}
+                    </span>
+                  )}
+                  {/* What the team said this action was worth. Only on a closed
+                      action that was actually rated: an open action has not been
+                      put to anyone, and a closed one with no votes must show
+                      nothing rather than a zero. `role="img"` so the pill is one
+                      phrase to a screen reader instead of a star row plus a loose
+                      number. */}
+                  {(() => {
+                    if (!ratingEnabled || !action.done) return null;
+                    const score = actionImpactScore(action);
+                    if (score == null) return null;
+                    const votes = actionImpactVoteCount(action);
+                    const rounded = localizeDecimal(String(Math.round(score * 10) / 10), locale);
+                    return (
+                      <span
+                        role="img"
+                        aria-label={tp('dashboard.actions.impactAria', votes, { score: rounded })}
+                        data-testid="action-impact-score"
+                        title={tp('dashboard.actions.impactTitle', votes)}
+                        className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5"
+                      >
+                        <StarRating value={score} starClassName="w-3 h-3" />
+                        <span className="font-semibold tabular-nums text-slate-700">{rounded}/3</span>
+                      </span>
+                    );
+                  })()}
+                </div>
+                {/* The action's issue, or "Create in Jira" for a facilitator.
+                    Hidden when the control renders nothing. */}
+                <div className="mt-1 px-2 empty:hidden">
+                  <JiraActionControl
+                    action={action}
+                    status={jiraStatus}
+                    teamId={team.id}
+                    isFacilitator={isFacilitator}
+                    kind={jiraKindOf(action.id)}
+                    requestedBy={requestedBy}
+                    team={team}
+                    onCreated={() => onJiraChanged?.()}
+                    onStatusStale={onJiraStatusStale}
+                  />
+                </div>
               </div>
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center ml-12 sm:ml-0">
               {action.assigneeId && !team.members.some((member) => member.id === action.assigneeId) && (
                 (() => {
                   const archived = knownMembers.find((member) => member.id === action.assigneeId);
@@ -252,7 +272,7 @@ const DashboardActionsTab: React.FC<Props> = ({
                       aria-label={t('dashboard.actions.assigneeFor', { text: action.text })}
                       value={action.assigneeId || ''}
                       onChange={(e) => onUpdateAssignee(action.id, e.target.value || null)}
-                      className="text-xs border border-slate-200 rounded-sm p-1.5 bg-amber-50 text-amber-700 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden"
+                      className="max-w-[12rem] text-xs font-medium border border-amber-600 rounded-lg px-2 py-1.5 bg-amber-50 text-amber-800 hover:border-amber-700 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 outline-hidden transition"
                     >
                       <option value={archived.id}>{t('dashboard.actions.removedMember', { name: archived.name })}</option>
                       {team.members.map((member) => (
@@ -270,7 +290,7 @@ const DashboardActionsTab: React.FC<Props> = ({
                   aria-label={t('dashboard.actions.assigneeFor', { text: action.text })}
                   value={action.assigneeId || ''}
                   onChange={(e) => onUpdateAssignee(action.id, e.target.value || null)}
-                  className="text-xs border border-slate-200 rounded-sm p-1.5 bg-white text-slate-600 focus:border-retro-primary focus:ring-1 focus:ring-indigo-100 outline-hidden"
+                  className="max-w-[12rem] text-xs font-medium border border-slate-400 rounded-lg px-2 py-1.5 bg-white text-slate-700 hover:border-slate-500 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 outline-hidden transition"
                 >
                   <option value="">{t('dashboard.actions.unassigned')}</option>
                   {team.members.map((member) => (

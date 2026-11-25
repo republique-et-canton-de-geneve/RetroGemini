@@ -15,6 +15,14 @@ export default [
       'coverage/**',
       '*.config.js',
       'vite.config.ts',
+      // A Claude Code agent's isolated checkout is a second copy of this whole
+      // repository inside it: linted, it doubles every warning of the budget.
+      '.claude/worktrees/**',
+      // gstack's working directory (the probe scripts `/qa` and `/review`
+      // write, their notes): local artefacts of the tooling, never source,
+      // and not versioned. Linted, a probe script fails the build of whoever
+      // ran one of those commands last.
+      '.gstack/**',
     ],
   },
   {

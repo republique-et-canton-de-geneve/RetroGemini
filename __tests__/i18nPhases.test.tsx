@@ -72,7 +72,6 @@ const renderHeader = (session: RetroSession) =>
       setPhase={vi.fn()}
       updateSession={vi.fn()}
       localParticipantsPanelCollapsed={false}
-      setLocalParticipantsPanelCollapsed={vi.fn()}
       participantsCount={2}
       currentUser={facilitator}
       onInvite={vi.fn()}

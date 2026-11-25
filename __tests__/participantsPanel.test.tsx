@@ -1,10 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent, screen, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, cleanup, render, fireEvent, screen, within } from '@testing-library/react';
 import React from 'react';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import ParticipantsPanel from '../components/session/ParticipantsPanel';
 import { ParticipantActivity, RetroSession, Ticket, User } from '../types';
+import { participantToneHex } from '../utils/participantColors';
+import { prefersMotion, restoreMotionPreference } from './helpers/motionPreference';
 
 const makeUser = (overrides: Partial<User> = {}): User => ({
   id: 'u-' + Math.random().toString(36).slice(2, 7),
@@ -1064,13 +1066,18 @@ describe('ParticipantsPanel - who is typing, above the list', () => {
     expect(icon.getAttribute('aria-hidden')).toBe('true');
   });
 
+  // A first card turns its author's "no tickets" into a dot: both lines hold
+  // one reserved height (the same min-h-* and margin), and the words' line box
+  // is no taller than it (leading-none), so the row keeps its size.
   it('draws the contribution line at one height, with or without cards', () => {
     const { container } = renderTyping({}, { tickets: [ticket('a'), ticket('a')] });
 
     const noTickets = screen.getAllByText('no tickets')[0];
     expect(classesOf(noTickets)).toContain('leading-none');
-    expect(classesOf(noTickets.closest('[title="No tickets added yet"]'))).toContain('min-h-2.5');
-    expect(classesOf(container.querySelector('[title="2 tickets added"]'))).toContain('min-h-2.5');
+    const reserved = (element: Element | null) => classesOf(element).filter((token) => /^(min-h-|h-|mt-|my-|py-|pt-|pb-)/.test(token)).sort();
+    const without = reserved(noTickets.closest('[title="No tickets added yet"]'));
+    expect(without.some((token) => token.startsWith('min-h-'))).toBe(true);
+    expect(reserved(container.querySelector('[title="2 tickets added"]'))).toEqual(without);
   });
 
   it('keeps the typing dots still for a reader who asked for less motion', () => {
@@ -1110,6 +1117,147 @@ describe('ParticipantsPanel - who is typing, above the list', () => {
 // typing rule read it with `.includes`, which threw on every render of a guided
 // Brainstorm or Discuss: with no error boundary, every screen of the room went
 // blank, and the stored state blanked it again after a reload.
+// 45.0: the panel's motion as the rows wear it (components/session/usePanelMotion.ts
+// decides who; __tests__/panelMotion.test.tsx holds those rules). Every effect is a
+// class of index.css put on for one animation and taken off, and nothing moves a
+// row's y or height: the row only slides sideways and washes behind its content.
+describe('ParticipantsPanel - motion', () => {
+  const everyone = [facilitator, alice, bob];
+  const session = makeSession({ participants: everyone });
+
+  const renderAt = (connected: string[], props: Partial<React.ComponentProps<typeof ParticipantsPanel>> = {}, overrides: Partial<RetroSession> = {}) => (
+    <ParticipantsPanel
+      {...baseProps}
+      session={{ ...session, ...overrides }}
+      participants={everyone}
+      connectedUsers={new Set(connected)}
+      activityUsers={{}}
+      {...props}
+    />
+  );
+
+  const afterTheQuiet = () => act(() => { vi.advanceTimersByTime(3100); });
+  const classesOf = (element: Element | null | undefined) => element?.className.split(/\s+/) ?? [];
+
+  beforeEach(() => { vi.useFakeTimers(); prefersMotion('no-preference'); });
+  afterEach(() => {
+    cleanup();
+    act(() => { vi.runOnlyPendingTimers(); });
+    vi.useRealTimers();
+    restoreMotionPreference();
+  });
+
+  it('slides a guest in with a wash of their own tone, springs their avatar and pulses their dot', () => {
+    const view = render(renderAt(['fac', 'a']));
+    afterTheQuiet();
+    view.rerender(renderAt(['fac', 'a', 'b']));
+
+    const row = rowOf('Bob');
+    expect(classesOf(row)).toEqual(expect.arrayContaining(['fx-person-in', 'relative', 'isolate']));
+    // The wash takes the person's own tone (emerald), not the brand's.
+    expect(row.style.getPropertyValue('--av-bg')).toBe(participantToneHex('bg-emerald-500').bg);
+    expect(row.querySelector('.fx-pop')?.textContent).toBe('BO');
+    expect(classesOf(row.querySelector('[data-presence-dot]'))).toContain('fx-halo');
+    // Nobody else moves.
+    expect(classesOf(rowOf('Alice'))).not.toContain('fx-person-in');
+    // The head's count did not change (Bob was listed offline): no bump.
+    expect(screen.getByText('Participants (3)').className).not.toMatch(/\bfx-bump\b/);
+
+    act(() => { vi.advanceTimersByTime(2300); });
+    expect(classesOf(rowOf('Bob'))).not.toContain('fx-person-in');
+    expect(rowOf('Bob').style.getPropertyValue('--av-bg')).toBe('');
+    expect(rowOf('Bob').querySelector('.fx-pop, .fx-halo')).toBeNull();
+  });
+
+  it('plays nothing on first paint', () => {
+    render(renderAt(['fac', 'a', 'b']));
+    expect(document.querySelector('.fx-person-in, .fx-pop, .fx-halo, .fx-bump')).toBeNull();
+  });
+
+  it('plays nothing on the render that expands the panel', () => {
+    const view = render(renderAt(['fac', 'a'], { isCollapsed: true }));
+    afterTheQuiet();
+    view.rerender(renderAt(['fac', 'a', 'b'], { isCollapsed: true }));
+    view.rerender(renderAt(['fac', 'a', 'b'], { isCollapsed: false }));
+    expect(document.querySelector('.fx-person-in, .fx-pop, .fx-halo')).toBeNull();
+  });
+
+  it('plays nothing in the three seconds after the viewer\'s own reconnection', () => {
+    const view = render(renderAt(['fac', 'a'], { isLive: true }));
+    afterTheQuiet();
+    view.rerender(renderAt(['fac'], { isLive: false }));
+    view.rerender(renderAt(['fac'], { isLive: true }));
+    view.rerender(renderAt(['fac', 'a', 'b'], { isLive: true }));
+    expect(document.querySelector('.fx-person-in')).toBeNull();
+  });
+
+  it('springs in the check of someone who just finished, and only theirs', () => {
+    const vote = { phase: 'VOTE' as const };
+    const view = render(renderAt(['fac', 'a', 'b'], {}, { ...vote, finishedUsers: ['b'] }));
+    afterTheQuiet();
+    view.rerender(renderAt(['fac', 'a', 'b'], {}, { ...vote, finishedUsers: ['b', 'a'] }));
+
+    const aliceCheck = within(rowOf('Alice')).getByRole('img', { name: 'Finished' });
+    expect(classesOf(aliceCheck)).toContain('fx-pop');
+    expect(classesOf(within(rowOf('Bob')).getByRole('img', { name: 'Finished' }))).not.toContain('fx-pop');
+    act(() => { vi.advanceTimersByTime(600); });
+    expect(classesOf(within(rowOf('Alice')).getByRole('img', { name: 'Finished' }))).not.toContain('fx-pop');
+  });
+
+  it('bumps the title when its count changes', () => {
+    const view = render(renderAt(['fac', 'a', 'b']));
+    afterTheQuiet();
+    view.rerender(renderAt(['fac', 'a', 'b'], {}, { leftUsers: ['b'] }));
+    expect(screen.getByText('Participants (2)').className).toMatch(/\bfx-bump\b/);
+    act(() => { vi.advanceTimersByTime(600); });
+    expect(screen.getByText('Participants (2)').className).not.toMatch(/\bfx-bump\b/);
+  });
+
+  it('moves the pencil of the writing line while someone writes, and only then', () => {
+    const view = render(renderAt(['fac', 'a', 'b']));
+    const pencil = () => screen.getByTestId('typing-now').parentElement?.querySelector('.material-symbols-outlined');
+    expect(classesOf(pencil())).not.toContain('fx-write');
+    view.rerender(renderAt(['fac', 'a', 'b'], { activityUsers: { a: 'brainstorm' } }));
+    expect(classesOf(pencil())).toContain('fx-write');
+    // The row's cue keeps its three typing dots, still for a reader who asked for less motion.
+    expect(rowOf('Alice').querySelectorAll('.typing-dot')).toHaveLength(3);
+  });
+
+  it('gives a reader who asked for less motion no effect class at all, the pencil included', () => {
+    prefersMotion('reduce');
+    const view = render(renderAt(['fac', 'a']));
+    afterTheQuiet();
+    view.rerender(renderAt(['fac', 'a', 'b'], { activityUsers: { a: 'brainstorm' } }));
+    expect(document.querySelector('[class*="fx-"]')).toBeNull();
+    // The words still say it: the pencil keeps its colour, the line its names.
+    const pencil = screen.getByTestId('typing-now').parentElement?.querySelector('.material-symbols-outlined');
+    expect(classesOf(pencil)).toContain('text-indigo-700');
+  });
+
+  // "Connectés en ce moment (3)" is wider than the head: cut, it lost its count.
+  it('wraps the title rather than cutting off its count', () => {
+    render(renderAt(['fac', 'a', 'b']));
+    const title = screen.getByText('Participants (3)');
+    expect(classesOf(title)).not.toEqual(expect.arrayContaining(['truncate']));
+    expect(title.className).not.toMatch(/\b(line-clamp-\d|whitespace-nowrap|text-ellipsis)\b/);
+  });
+
+  it('never lets a sliding row scroll the list sideways', () => {
+    render(renderAt(['fac', 'a', 'b']));
+    const list = rowOf('Alice').parentElement;
+    expect(classesOf(list)).toEqual(expect.arrayContaining(['overflow-y-auto', 'overflow-x-hidden']));
+  });
+
+  it('animates nothing that changes a row\'s box: no vertical motion, height or margin classes', () => {
+    const view = render(renderAt(['fac', 'a']));
+    afterTheQuiet();
+    view.rerender(renderAt(['fac', 'a', 'b']));
+    for (const row of screen.getAllByTestId('participant-row')) {
+      expect(row.className).not.toMatch(/\b(transition-all|animate-|translate-y|scale-)/);
+    }
+  });
+});
+
 describe('ParticipantsPanel - a left list another client wrote as null', () => {
   const everyone = [facilitator, alice, bob];
   const leftUsers = null as unknown as string[];

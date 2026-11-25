@@ -26,14 +26,19 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: container
-          # Retagged by hand in the pull request that bumps VERSION's major:
-          # decision D7 deleted the deploy workflow's sed + auto-commit, which
-          # had never once run. It had drifted 17 majors behind VERSION, i.e. it
-          # advertised an image predating many user-visible releases;
-          # __tests__/deploymentManifestParity.test.ts now fails when the majors
-          # diverge again. No overlay retags it: the only image an overlay
-          # changes is PostgreSQL's (k8s/overlays/openshift).
-          image: jpfroud/retrogemini:44.0
+          # Retagged by hand in the pull request that bumps VERSION's major, to
+          # the version that pull request's merge publishes: VERSION as it is
+          # merged, X.Y rather than X.0 when the branch was deployed and bumped
+          # Y before its merge (main never publishes the branch's earlier
+          # numbers). Decision D7 deleted the deploy workflow's sed +
+          # auto-commit, which had never once run. It had drifted 17 majors
+          # behind VERSION, i.e. it advertised an image predating many
+          # user-visible releases; __tests__/deploymentManifestParity.test.ts
+          # now fails when the majors diverge again, and cannot tell a tag left
+          # at X.0 from the lag of a later Y bump on main. No overlay retags it:
+          # the only image an overlay changes is PostgreSQL's
+          # (k8s/overlays/openshift).
+          image: jpfroud/retrogemini:45.3
           imagePullPolicy: Always
           ports:
             - containerPort: 8080

@@ -117,4 +117,27 @@ describe('TeamLogin — the invite-join screen keeps the user\'s choice', () => 
     expect(screen.getByLabelText('Your Name')).toBeTruthy();
     expect(screen.queryByRole('group', { name: 'Select Your Name' })).toBeNull();
   });
+
+  it('says which member is selected, not only by its look (aria-pressed)', async () => {
+    // The check mark beside the chosen member is hidden from assistive
+    // technology, so the button itself carries the state (WCAG 4.1.2).
+    // Two participants, so the one not chosen can be read too.
+    vi.mocked(dataService.importTeam).mockImplementationOnce(async () => ({
+      ...fullTeam,
+      members: [...fullTeam.members, { id: 'u3', name: 'Carol', color: 'bg-rose-500', role: 'participant' }],
+    }) as Team);
+    render(<TeamLogin onLogin={vi.fn()} onJoin={vi.fn()} inviteData={inviteData} />);
+    const bob = await screen.findByRole('button', { name: /Bob/ });
+    const carol = screen.getByRole('button', { name: /Carol/ });
+    expect(bob).toHaveAttribute('aria-pressed', 'false');
+    expect(carol).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(bob);
+    expect(screen.getByRole('button', { name: /Bob/, pressed: true })).toBe(bob);
+    expect(carol).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(carol);
+    expect(carol).toHaveAttribute('aria-pressed', 'true');
+    expect(bob).toHaveAttribute('aria-pressed', 'false');
+  });
 });

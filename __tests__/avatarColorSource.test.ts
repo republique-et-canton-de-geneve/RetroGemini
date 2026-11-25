@@ -15,15 +15,16 @@ import { COLOR_TOKEN_PATTERN } from './helpers/tailwindTheme';
  * `text-white`, which fails WCAG 1.4.3 on seven of the eight palette colours;
  * and any string a participant wrote into their own `color` landed in
  * everyone's `className` (`fixed inset-0 z-50` is a full-screen overlay).
- * `avatarColorClasses` picks the initials' colour by measured contrast and
- * turns an unknown value neutral; `participantColorClass` is its background-only
- * twin for the non-text dots.
+ * `avatarColorClasses` hands out a tone whose initials are measured and turns
+ * an unknown value neutral; `participantColorClass` is its background-only
+ * twin for the non-text dots; `participantToneHex` gives the same tone as hex,
+ * for a surface painted with a `style`.
  *
- * Four rules, checked on the TypeScript AST (a regex over JSX miscounts, see
+ * Five rules, checked on the TypeScript AST (a regex over JSX miscounts, see
  * `iconButtonNames.test.tsx`) of `App.tsx` and every `.ts`/`.tsx` file under
  * `components/`:
  *  1. In any JSX attribute but `style` and `key`, a `.color` property is read
- *     only inside a call to one of the two functions. Every attribute, not just
+ *     only inside a call to one of the three functions. Every attribute, not just
  *     `className`: the contribution dots take theirs through a `colorClass`
  *     prop, which a `className`-only guard never saw.
  *  2. A `className` that calls `avatarColorClasses` adds no text colour, no
@@ -35,22 +36,32 @@ import { COLOR_TOKEN_PATTERN } from './helpers/tailwindTheme';
  *     at all — that function is for dots, and `text-white` beside it would
  *     bring the defect straight back.
  *  4. Outside JSX attributes, a `.color` read is one of four shapes: inside a
- *     call to one of the two functions; a roster copy (`color: member.color`,
+ *     call to one of the three functions; a roster copy (`color: member.color`,
  *     with an optional `||`/`??` fallback); a key into a colour map; or an
  *     exemption below. Building the class in a local variable and interpolating
  *     the variable reads `.color` outside any attribute, which rule 1 alone
  *     never saw.
+ *  5. Since 45.0 every person is drawn by `<Avatar>`, which takes the classes
+ *     as `colorClasses`. That prop is the module's word and nothing else: a
+ *     call to `avatarColorClasses`, one of its two constants, or a choice
+ *     between those. A string or a template there would be rule 2's override
+ *     under another name, and `Avatar` itself declares no `className`. The
+ *     avatar picker takes the same prop under the same rule and hands it on
+ *     to the avatars it draws: the one place a forwarded value is accepted.
  *
- * Deliberately outside what this guards: `Session.tsx`'s `TAILWIND_COLOR_MAP`
- * reads the colour as a key (rule 4) to paint the colour-by-author card
- * background as a hex `style` (design A6). An unknown key gives the default
- * card, and that card's text colour is measured by `bestTextColorOn`. And two
- * spellings no AST rule here follows: destructuring (`const { color } = user`)
- * and an element access (`user['color']`).
+ * The colour-by-author card reads its author's tone through
+ * `participantToneHex` (rule 1 and 4), and `utils/cardTones.ts` turns it into
+ * the card's tint and inks, painted as a hex `style`; an unknown colour gives
+ * the neutral tone. (`Session.tsx`'s `TAILWIND_COLOR_MAP`, the map key rule 4
+ * still allows, went with 45.0's card colours.) Deliberately outside what this
+ * guards: two spellings no AST rule here follows, destructuring
+ * (`const { color } = user`) and an element access (`user['color']`).
  */
 
 const REPO_ROOT = join(__dirname, '..');
-const COLOR_FUNCTIONS = new Set(['avatarColorClasses', 'participantColorClass']);
+const COLOR_FUNCTIONS = new Set(['avatarColorClasses', 'participantColorClass', 'participantToneHex']);
+/** What an `<Avatar>`'s `colorClasses` may be, beside a call to `avatarColorClasses`. */
+const AVATAR_CLASS_CONSTANTS = new Set(['DEPARTED_AVATAR_CLASSES', 'NEUTRAL_AVATAR_CLASSES']);
 
 /** `.color` reads that are not a person's colour, each with its reason. */
 const EXEMPTIONS: ReadonlyArray<{ file: string; expression: string; reason: string }> = [
@@ -156,9 +167,30 @@ const isColorMapKey = (read: ts.Node): boolean =>
 const isTextColor = (token: string) => COLOR_TOKEN_PATTERN.exec(token)?.[1] === 'text';
 const isFading = (token: string) => token === 'grayscale' || /^opacity-\d+$/.test(token);
 
+/** Is `node` the module's word for an avatar: its function, one of its constants, or a choice between those? */
+const isAvatarClassesExpression = (node: ts.Expression): boolean => {
+  if (ts.isParenthesizedExpression(node)) return isAvatarClassesExpression(node.expression);
+  if (ts.isConditionalExpression(node)) return isAvatarClassesExpression(node.whenTrue) && isAvatarClassesExpression(node.whenFalse);
+  if (ts.isCallExpression(node)) return calleeName(node) === 'avatarColorClasses';
+  return ts.isIdentifier(node) && AVATAR_CLASS_CONSTANTS.has(node.text);
+};
+
+const jsxTagOf = (attribute: ts.JsxAttribute) => attribute.parent.parent.tagName.getText();
+
+/**
+ * The tags whose `colorClasses` must be the module's word: `Avatar`, and the
+ * avatar picker, which hands its own `colorClasses` prop on to the avatars it
+ * draws. That one forwarding is legal only inside the picker's file, so the
+ * classes are still checked where the picker is mounted.
+ */
+const AVATAR_CLASS_TAGS = new Set(['Avatar', 'AvatarPicker']);
+const FORWARDING_FILE = 'components/common/AvatarPicker.tsx';
+const isForwardedAvatarClasses = (file: string, tag: string, expression: ts.Expression) =>
+  file === FORWARDING_FILE && tag === 'Avatar' && ts.isIdentifier(expression) && expression.text === 'colorClasses';
+
 interface Offence {
   where: string;
-  rule: 'raw-color' | 'avatar-override' | 'dot-text-color';
+  rule: 'raw-color' | 'avatar-override' | 'dot-text-color' | 'avatar-classes';
   detail: string;
 }
 
@@ -188,6 +220,14 @@ const scan = (sources: ReadonlyArray<{ file: string; text: string }>) => {
           offences.push({ where: `${file}:${lineOf(sourceFile, inner)}`, rule: 'raw-color', detail: `${attribute}={… ${inner.getText(sourceFile)} …}` });
         }
       });
+
+      if (AVATAR_CLASS_TAGS.has(jsxTagOf(node)) && (attribute === 'colorClasses' || attribute === 'className')) {
+        const expression = ts.isJsxExpression(initializer) ? initializer.expression : undefined;
+        const forwarded = !!expression && isForwardedAvatarClasses(file, jsxTagOf(node), expression);
+        if (attribute === 'className' || !expression || (!forwarded && !isAvatarClassesExpression(expression))) {
+          offences.push({ where: `${file}:${lineOf(sourceFile, node)}`, rule: 'avatar-classes', detail: node.getText(sourceFile) });
+        }
+      }
 
       if (attribute !== 'className') return;
       const calls = callsIn(initializer);
@@ -220,8 +260,21 @@ describe('a participant colour reaches a class only through utils/participantCol
   const report = (rule: Offence['rule']) =>
     offences.filter((offence) => offence.rule === rule).map((offence) => `${offence.where} ${offence.detail}`);
 
-  it('reads `.color` only through avatarColorClasses or participantColorClass (or a style, a roster copy, a colour-map key)', () => {
+  it('reads `.color` only through the three colour functions (or a style, a roster copy, a colour-map key)', () => {
     expect(report('raw-color')).toEqual([]);
+  });
+
+  it("gives an <Avatar> the module's classes and nothing beside them", () => {
+    expect(report('avatar-classes')).toEqual([]);
+  });
+
+  // The other half of that rule: with no `className` on the component, nothing
+  // can be added to a disc from outside.
+  it('keeps <Avatar> without a className prop', () => {
+    const source = readFileSync(join(REPO_ROOT, 'components/common/Avatar.tsx'), 'utf8');
+    const props = /interface AvatarProps \{([^}]*)\}/.exec(source)?.[1] ?? '';
+    expect(props).toContain('colorClasses');
+    expect(props).not.toMatch(/\bclassName\b/);
   });
 
   it('adds no text colour, opacity or grayscale beside avatarColorClasses', () => {
@@ -285,20 +338,57 @@ describe('what the guard catches, on fixtures', () => {
     expect(rulesIn('const A = ({ u }) => <Dots colorClass={u.color} />;')).toEqual(['raw-color']);
   });
 
+  it("reports an <Avatar> whose classes are not the module's word", () => {
+    expect(rulesIn('const A = ({ u }) => <Avatar colorClasses="bg-slate-600 text-white" initials="AB" size={32} />;')).toEqual(['avatar-classes']);
+    expect(rulesIn('const A = ({ u }) => <Avatar colorClasses={`${avatarColorClasses(u.color)} opacity-50`} initials="AB" size={32} />;')).toEqual(['avatar-classes']);
+    expect(rulesIn('const A = ({ u, c }) => <Avatar colorClasses={c} initials="AB" size={32} />;')).toEqual(['avatar-classes']);
+    expect(rulesIn('const A = ({ u }) => <Avatar colorClasses={avatarColorClasses(u.color)} className="opacity-50" initials="AB" size={32} />;')).toEqual(['avatar-classes']);
+  });
+
+  it("checks the picker's colorClasses where it is mounted, and lets the picker alone forward its own", () => {
+    expect(rulesIn('const A = ({ c }) => <AvatarPicker colorClasses={c} initials="AB" />;')).toEqual(['avatar-classes']);
+    expect(rulesIn('const A = ({ u }) => <AvatarPicker colorClasses={avatarColorClasses(u.color)} initials="AB" />;')).toEqual([]);
+    const forwarding = 'const P = ({ colorClasses }) => <Avatar colorClasses={colorClasses} initials="AB" size={40} />;';
+    expect(rulesIn(forwarding, 'components/common/AvatarPicker.tsx')).toEqual([]);
+    expect(rulesIn(forwarding, 'components/OtherPicker.tsx')).toEqual(['avatar-classes']);
+  });
+
+  it("accepts an <Avatar> in the person's tone, the neutral one, or a choice between them", () => {
+    const text = `
+      const Row = ({ u, hasLeft }) => (
+        <>
+          <Avatar colorClasses={avatarColorClasses(u.color)} initials="AB" size={32} />
+          <Avatar colorClasses={hasLeft ? DEPARTED_AVATAR_CLASSES : avatarColorClasses(u?.color)} initials="AB" size={32} />
+          <Avatar colorClasses={(NEUTRAL_AVATAR_CLASSES)} initials="AB" size={32} />
+        </>
+      );`;
+    expect(rulesIn(text)).toEqual([]);
+  });
+
+  it('accepts a tone taken as hex for a style', () => {
+    expect(rulesIn('const tone = participantToneHex(author.color);')).toEqual([]);
+  });
+
   // Every shape below exists in the components today. Each must stay legal,
   // or the guard would be switched off rather than kept.
-  it('accepts the colour functions, a style or key, a roster copy and a colour-map lookup', () => {
+  it('accepts the colour functions, a style or key and a roster copy', () => {
     const text = `
       const measured = avatarColorClasses(currentUser.color);
       const merged = { ...p, name: member.name, email: member.email, color: member.color };
       const seeded = { id, color: member?.color || PARTICIPANT_COLOR_POOL[0] };
       const kept = { id, color: member.color ?? PARTICIPANT_COLOR_POOL[0] };
-      const cardBgHex = TAILWIND_COLOR_MAP[author.color] || null;
       const Row = ({ layer, u }) => (
         <div key={layer.color} style={{ backgroundColor: layer.color }} className={avatarColorClasses(u.color)}>
           <Dots colorClass={participantColorClass(u.color)} />
         </div>
       );`;
     expect(rulesIn(text)).toEqual([]);
+  });
+
+  // Rule 4's map key. No component writes one since 45.0 (the board's map of
+  // card colours went with the tints), and the shape stays legal: a colour
+  // used to look a value up reaches no class by itself.
+  it('accepts a colour used as the key of a map', () => {
+    expect(rulesIn('const cardBgHex = TONES_BY_COLOUR[author.color] || null;')).toEqual([]);
   });
 });

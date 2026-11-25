@@ -240,4 +240,21 @@ describe('the backup archive contract', () => {
     });
     expect(restored.jiraParentClaims).toEqual(archivedClaims);
   });
+
+  // Each member's avatar is team data like the roster: an archive carries the
+  // map with the record, and a whole-store restore is a faithful replace, so
+  // it puts the archive's choices back over the current ones. (The
+  // single-team restore keeps the current map: `KEPT_FROM_CURRENT`.)
+  it('carries each member\'s avatar, and the whole-store restore puts the archive\'s map back', async () => {
+    const archived = { u1: { id: 'fox', at: 10 } };
+    await store.saveTeam('t1', { ...makeTeam('t1', 'Equipe Bilan'), memberAvatars: archived });
+    await store.saveTeamIndex(new Map([['equipe bilan', 't1']]));
+    const archive = JSON.parse(JSON.stringify(await store.loadPersistedData()));
+    expect(archive.teams[0].memberAvatars).toEqual(archived);
+
+    await store.saveTeam('t1', { ...makeTeam('t1', 'Equipe Bilan'), memberAvatars: { u1: { id: 'owl', at: 90 }, u2: { id: 'cat', at: 95 } } });
+
+    await store.savePersistedData(archive, { mode: 'replace' });
+    expect((await store.loadTeam('t1')).memberAvatars).toEqual(archived);
+  });
 });

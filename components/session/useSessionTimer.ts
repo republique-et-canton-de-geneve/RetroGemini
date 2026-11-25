@@ -196,6 +196,9 @@ export const useSessionTimer = ({ settings, phase, fallbackSeconds, isLive, upda
 
   return {
     remaining,
+    // The run's length, for the ring around the time (a view only: nothing
+    // is written for it).
+    initial: state.initial,
     running,
     alarmPending,
     canStart: canStartTimer(state),

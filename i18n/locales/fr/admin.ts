@@ -40,8 +40,6 @@ const admin: Record<keyof typeof en, string> = {
   'admin.notifications.newTeamDescription':
     'Recevez un e-mail lorsqu’une nouvelle équipe est créée. Nécessite une adresse e-mail d’administrateur et une configuration SMTP.',
   'admin.notifications.newTeamNeedsEmail': 'Définissez d’abord une adresse e-mail d’administrateur',
-  'admin.notifications.newTeamDisable': 'Désactiver les notifications de nouvelle équipe',
-  'admin.notifications.newTeamEnable': 'Activer les notifications de nouvelle équipe',
   'admin.notifications.newTeamEnabled': 'Notifications de nouvelle équipe activées',
   'admin.notifications.newTeamDisabled': 'Notifications de nouvelle équipe désactivées',
   'admin.notifications.newTeamFailed': 'La mise à jour du paramètre de notification a échoué',
@@ -50,8 +48,6 @@ const admin: Record<keyof typeof en, string> = {
   'admin.ai.title': 'Assistant IA',
   'admin.ai.description':
     'Connectez un LLM compatible OpenAI pour activer les suggestions automatiques de titres de groupe et la génération de synthèses de rétrospective.',
-  'admin.ai.disable': 'Désactiver les fonctionnalités d’IA',
-  'admin.ai.enable': 'Activer les fonctionnalités d’IA',
   'admin.ai.apiUrlLabel': 'URL de l’API',
   'admin.ai.apiUrlPlaceholder': 'https://api.openai.com/v1',
   'admin.ai.apiUrlHint': 'URL de base de l’API compatible OpenAI (p. ex. https://api.openai.com/v1)',
@@ -66,8 +62,6 @@ const admin: Record<keyof typeof en, string> = {
   'admin.ai.selfSignedTitle': 'Autoriser les certificats auto-signés',
   'admin.ai.selfSignedDescription':
     'Activez cette option pour les serveurs internes dotés de certificats TLS auto-signés ou d’entreprise.',
-  'admin.ai.selfSignedDisable': 'Désactiver la prise en charge des certificats auto-signés',
-  'admin.ai.selfSignedEnable': 'Autoriser les certificats auto-signés',
   'admin.ai.testing': 'Test en cours…',
   'admin.ai.test': 'Tester la connexion',
   'admin.ai.save': 'Enregistrer les paramètres',

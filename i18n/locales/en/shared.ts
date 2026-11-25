@@ -21,6 +21,25 @@ const shared = {
   'shared.colorPicker.title': 'Pick a color',
   'shared.colorPicker.close': 'Close the colour picker',
   'shared.colorPicker.selected': 'Selected',
+  // Each colour the picker offers, named in words: a swatch is named by its
+  // colour, never by its code.
+  'shared.colorPicker.color.red': 'Red',
+  'shared.colorPicker.color.rose': 'Rose',
+  'shared.colorPicker.color.pink': 'Pink',
+  'shared.colorPicker.color.fuchsia': 'Fuchsia',
+  'shared.colorPicker.color.purple': 'Purple',
+  'shared.colorPicker.color.violet': 'Violet',
+  'shared.colorPicker.color.indigo': 'Indigo',
+  'shared.colorPicker.color.blue': 'Blue',
+  'shared.colorPicker.color.sky': 'Sky blue',
+  'shared.colorPicker.color.cyan': 'Cyan',
+  'shared.colorPicker.color.teal': 'Teal',
+  'shared.colorPicker.color.emerald': 'Emerald',
+  'shared.colorPicker.color.green': 'Green',
+  'shared.colorPicker.color.lime': 'Lime',
+  'shared.colorPicker.color.yellow': 'Yellow',
+  'shared.colorPicker.color.orange': 'Orange',
+  'shared.colorPicker.color.slate': 'Slate grey',
 
   // IconPicker — icon ligature names are data and are never translated.
   'shared.iconPicker.title': 'Pick an icon',

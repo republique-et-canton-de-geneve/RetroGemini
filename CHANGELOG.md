@@ -5,6 +5,11 @@ All notable changes to RetroGemini will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Version follows `X.Y` format where X increments for new features and Y for bug fixes.
 
+## [45.0] - 2026-11-19
+
+### Added
+- Enjoy a brand-new look on every screen, with softly tinted cards, a new typeface, rounder icons and gentle animations when someone joins, a card arrives or a vote is cast; and choose your own avatar from 120 drawings, shown on your cards and in the participants panel
+
 ## [44.0] - 2026-11-18
 
 ### Added

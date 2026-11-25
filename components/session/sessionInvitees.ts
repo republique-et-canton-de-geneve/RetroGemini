@@ -51,7 +51,9 @@ export const pendingInvitees = (
   participants.forEach((p) => {
     joinedKeys.add(p.id);
     joinedKeys.add(p.name.trim().toLowerCase());
-    if (p.email) joinedKeys.add(p.email.trim().toLowerCase());
+    // Session data, as the invitees are: an email that is not a string is no
+    // address, and threw here for everyone in the room.
+    if (typeof p.email === 'string' && p.email) joinedKeys.add(p.email.trim().toLowerCase());
   });
   return (Array.isArray(invitedUsers) ? invitedUsers : []).filter(
     (invitee) =>

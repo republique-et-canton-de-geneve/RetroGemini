@@ -110,17 +110,22 @@ test.describe('template language', () => {
  *    in both languages, and below that the current phase stays in view, also
  *    after a resize or a language switch.
  *
- * The app asks for Inter, which a developer machine may have and CI does not:
- * CI fell back to a wider font and overflowed by a pixel where this machine
- * had 19 to spare. The test therefore renders in DejaVu Sans, the wide font
- * Linux falls back to, so it measures the same thing everywhere and a header
- * that fits it has room for the narrower fonts phones and laptops use.
+ * The app serves its own typeface (Geist, since 45.0), which falls back to the
+ * system font while its file is on its way or when it is blocked. The test
+ * therefore renders in DejaVu Sans, the wide font Linux falls back to: it
+ * measures the worst case, the same everywhere, and a header that fits it has
+ * room for the narrower fonts phones and laptops use. (Until 45.0 the app
+ * asked for Inter, which CI did not have: CI's fallback overflowed by a pixel
+ * where a developer's machine had 19 to spare.)
  */
 test.describe('headers fit in both languages', () => {
   const WIDTHS = [320, 390, 768, 1024, 1280];
 
+  // The fonts are awaited first (AGENTS.md, *Headers are measured*): a header measured in the
+  // fallback font before Geist arrives says nothing about the one people see.
   const measure = (page: Page) =>
-    page.evaluate(() => {
+    page.evaluate(async () => {
+      await document.fonts.ready;
       const header = document.querySelector('header')!;
       const width = window.innerWidth;
       const inView = (el: Element | null | undefined) => {
@@ -145,8 +150,21 @@ test.describe('headers fit in both languages', () => {
         const b = bar!.getBoundingClientRect();
         activeInView = a.left >= b.left - 0.5 && a.right <= b.right + 0.5;
       }
+      // The viewer's own avatar (45.0), where the avatar picker opens: null
+      // where the header does not draw it at this width.
+      const avatar = header.querySelector('[data-viewer-avatar]');
+      const avatarShown = !!avatar && avatar.getBoundingClientRect().width > 0;
+      // The one-time avatar hint, a band right under the header for whoever
+      // never chose an avatar: null where it is not drawn (a facilitator's
+      // in a session below 360px, with their avatar).
+      const hint = document.querySelector('[data-avatar-hint]');
+      const hintShown = !!hint && hint.getBoundingClientRect().height > 0;
       return {
         overflow: header.scrollWidth - header.clientWidth,
+        hint: hintShown ? inView(hint) && [...hint!.querySelectorAll('button')].every(inView) : null,
+        hintOverflow: hintShown ? hint!.scrollWidth - hint!.clientWidth : null,
+        pageOverflow: document.documentElement.scrollWidth - width,
+        avatar: avatarShown ? inView(avatar) : null,
         switcher: inView(header.querySelector('[data-testid="language-switcher"]')),
         logout: back ? null : inView(button('logout')),
         invite: back ? inView(button('qr_code_2')) : null,
@@ -196,12 +214,30 @@ test.describe('headers fit in both languages', () => {
         const where = `${screen}${state === 'live' ? '' : `, ${state}`} at ${width}px (${language})`;
         expect(m.overflow, `header overflow, ${where}`).toBe(0);
         expect(m.switcher, `language switcher in view, ${where}`).toBe(true);
+        // The avatar hint under the header (nobody here has chosen an
+        // avatar): wherever it is drawn, it and its buttons fit, and nothing
+        // pushes the page sideways.
+        if (m.hint !== null) {
+          expect(m.hint, `avatar hint and its buttons in view, ${where}`).toBe(true);
+          expect(m.hintOverflow, `avatar hint overflow, ${where}`).toBe(0);
+        }
+        expect(m.pageOverflow, `page overflow, ${where}`).toBeLessThanOrEqual(0);
         if (screen === 'dashboard') {
           expect(m.logout, `logout in view, ${where}`).toBe(true);
+          // The dashboard's top bar draws the viewer's avatar at every width.
+          expect(m.avatar, `own avatar in view, ${where}`).toBe(true);
+          // And the hint with it: the facilitator here never chose one, so
+          // the measurement above is never vacuous.
+          expect(m.hint, `avatar hint drawn, ${where}`).not.toBeNull();
         } else {
           expect(m.invite, `invite in view, ${where}`).toBe(true);
           expect(m.timer, `timer play button in view, ${where}`).toBe(true);
           expect(m.backTappable, `back arrow is what a tap hits, ${where}`).toBe(true);
+          // A facilitator's header shows their avatar from 360px (AGENTS.md, *Avatars*;
+          // a participant's at every width), and wherever it is drawn it fits.
+          // The health check's header follows the same rule.
+          if (width >= 360) expect(m.avatar, `own avatar in view, ${where}`).toBe(true);
+          else if (m.avatar !== null) expect(m.avatar, `own avatar in view, ${where}`).toBe(true);
           if (state === 'chip shown') {
             if (width >= 400) expect(m.chip, `sync chip in view, ${where}`).toBe(true);
             else expect(m.banner, `sync banner in view instead of the chip, ${where}`).toBe(true);
@@ -269,6 +305,68 @@ test.describe('headers fit in both languages', () => {
     }
     await page.setViewportSize({ width: 1280, height: 900 });
   };
+
+  // The viewer's own avatar opens the avatar picker (AGENTS.md, *Avatars*): asserted in
+  // French, the longer language, where a phone has the least room.
+  const assertPickerOpens = async (page: Page, where: string, widths: readonly number[]) => {
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.getByTestId('language-option-fr').click();
+      await expect(page.locator('html')).toHaveAttribute('lang', 'fr');
+      const opener = page.locator('header [data-viewer-avatar]');
+      await expect(opener, `own avatar shown, ${where} at ${width}px`).toBeVisible();
+      expect((await measure(page)).avatar, `own avatar in view, ${where} at ${width}px`).toBe(true);
+      await expect(opener).toHaveAccessibleName(/, choisir mon avatar$/);
+      await opener.click();
+      const picker = page.getByRole('dialog', { name: 'Choisir mon avatar' });
+      await expect(picker, `picker opens, ${where} at ${width}px`).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(picker).toHaveCount(0);
+      await expect(opener).toBeFocused();
+    }
+    await page.getByTestId('language-option-en').click();
+    await page.setViewportSize({ width: 1280, height: 900 });
+  };
+
+  test('the viewer\'s avatar opens the picker on a phone, for a participant too', async ({ page, browser }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    const teamName = `E2E-I18n-Avatar-${Date.now()}`;
+    await createTeam(page, teamName);
+    await assertPickerOpens(page, 'dashboard', [320, 390]);
+
+    await page.getByRole('button', { name: 'New Retrospective' }).click();
+    await page.getByTestId('retro-template-start_stop_continue').click();
+    await expect(page.getByTestId('icebreaker-question-input')).toBeVisible({ timeout: 10_000 });
+    // A facilitator's header shows the avatar from 360px.
+    await assertPickerOpens(page, 'retro, facilitator', [390]);
+
+    await page.locator('button[title="Invite / Join"]').click();
+    await page.getByRole('button', { name: 'CODE & LINK' }).click();
+    const link = page.locator('code').first();
+    await expect(link).toContainText('?join=', { timeout: 10_000 });
+    const inviteUrl = (await link.textContent()) ?? '';
+    await page.getByRole('button', { name: 'Done' }).click();
+
+    const guestContext = await browser.newContext({ viewport: { width: 320, height: 844 } });
+    try {
+      const guest = await guestContext.newPage();
+      await guest.goto(inviteUrl);
+      await guest.waitForLoadState('networkidle');
+      const notInList = guest.getByRole('button', { name: "I'm not in the list" });
+      const nameField = guest.getByPlaceholder('e.g. John Doe');
+      // isVisible() answers at once, whatever its timeout: wait for the form to
+      // draw one of its two ways in, then choose (__tests__/e2eVisibilityWaits.test.ts).
+      await expect(notInList.or(nameField).first()).toBeVisible({ timeout: 10_000 });
+      if (await notInList.isVisible()) await notInList.click();
+      await nameField.fill('Guest Avatar');
+      await guest.getByRole('button', { name: 'Join Retrospective' }).click();
+      await expect(guest.getByRole('heading', { name: 'Icebreaker' })).toBeVisible({ timeout: 15_000 });
+      await assertPickerOpens(guest, 'retro, participant', [320, 390]);
+    } finally {
+      await guestContext.close();
+    }
+  });
 
   test('dashboard and session headers keep every control on screen', async ({ page }) => {
     // Icons keep their own font: only the inherited text font is replaced.

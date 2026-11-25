@@ -94,8 +94,9 @@ const openDialog = (label: string) => {
   return screen.getByRole('dialog');
 };
 
+// A switch, which says whether it is on (`aria-checked`), not only by its track's colour.
 const anonymousToggle = (dialog: HTMLElement) =>
-  within(dialog).getByRole('button', { name: 'Toggle anonymous mode' });
+  within(dialog).getByRole('switch', { name: 'Toggle anonymous mode' });
 const isOn = (toggle: HTMLElement) => toggle.className.includes('bg-indigo-600');
 
 describe('Start New Retrospective — board type', () => {
@@ -276,5 +277,37 @@ describe('Session lists — the status reads at 4.5:1', () => {
     renderDashboard({ ...buildTeam(), healthChecks: [healthCheck] }, 'en', 'HEALTH_CHECKS');
 
     expect(effectivePair(screen.getByText('IN PROGRESS')).ratio).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe('the anonymity switches', () => {
+  // Each says whether the session will be anonymous as a state (role
+  // "switch", aria-checked), as the console's switches do: by the colour of
+  // its track alone, a screen reader heard "Toggle anonymous mode, button"
+  // and never whether it was on (WCAG 4.1.2).
+  it('says in the new retrospective dialog whether the retro will be anonymous', () => {
+    renderDashboard(buildTeam());
+    const dialog = openDialog('New Retrospective');
+
+    const toggle = anonymousToggle(dialog);
+    expect(toggle).toHaveAttribute('type', 'button');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(toggle);
+    expect(anonymousToggle(dialog)).toHaveAttribute('aria-checked', 'true');
+    expect(isOn(anonymousToggle(dialog))).toBe(true);
+    fireEvent.click(anonymousToggle(dialog));
+    expect(anonymousToggle(dialog)).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('says it in the new health check dialog too', () => {
+    renderDashboard(buildTeam(), 'en', 'HEALTH_CHECKS');
+    const dialog = openDialog('START HEALTH CHECK');
+
+    const toggle = anonymousToggle(dialog);
+    expect(toggle).toHaveAttribute('type', 'button');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(toggle);
+    expect(anonymousToggle(dialog)).toHaveAttribute('aria-checked', 'true');
+    expect(isOn(anonymousToggle(dialog))).toBe(true);
   });
 });

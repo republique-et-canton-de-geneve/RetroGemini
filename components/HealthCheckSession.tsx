@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Team, User, HealthCheckSession as HealthCheckSessionType, ActionItem, JiraLink } from '../types';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
+import { Team, User, HealthCheckSession as HealthCheckSessionType, HealthCheckDimension, ActionItem, JiraLink, MemberAvatarChoice } from '../types';
 import { dataService } from '../services/dataService';
 import { syncService } from '../services/syncService';
 import { randomId } from '../utils/randomId';
@@ -24,13 +24,14 @@ import {
   PendingCreation
 } from './session/mergeRemoteSession';
 import { getAssignableMembers } from './session/assignableMembers';
-import { memberJoinedChange, mergeRosterIntoParticipants } from './session/sessionRoster';
+import { listedPeople, memberJoinedChange, mergeRosterIntoParticipants, sessionParticipants } from './session/sessionRoster';
 import { useHoldOwnStateWhileStalled } from './session/useHoldOwnStateWhileStalled';
 import { useDoubleGestureGuard } from './session/doubleGestureGuard';
 import SyncStalledBanner from './session/SyncStalledBanner';
 import { JOIN_DENIED_REVOKED, SessionConnectionBanner, SessionSyncChip } from './session/SessionConnectionStatus';
 import { isSessionLive, useSessionRevoked } from './session/useSessionRevoked';
 import LanguageSwitcher from './common/LanguageSwitcher';
+import { motionAllowed } from './common/motion/effects';
 import { useTranslation } from '../i18n/I18nContext';
 import { localizeDecimal } from '../i18n/formatNumber';
 import type { MessageKey } from '../i18n/translate';
@@ -43,6 +44,12 @@ import JiraParentLine from './jira/JiraParentLine';
 import { withJiraLinkFrom } from './jira/jiraLinkMerge';
 import { useJiraStatus } from './jira/useJiraStatus';
 import { avatarColorClasses } from '../utils/participantColors';
+import AvatarPicker from './common/AvatarPicker';
+import ViewerAvatarButton from './session/ViewerAvatarButton';
+import { useOwnAvatar } from './session/useOwnAvatar';
+import { isAnonymousSession, sessionAvatarOf, stampOwnAvatarEntry, viewerInitials } from './session/sessionAvatars';
+import AvatarDiscoveryHint from './common/AvatarDiscoveryHint';
+import { useAvatarDiscoveryHint } from './common/useAvatarDiscoveryHint';
 
 interface Props {
   team: Team;
@@ -54,6 +61,9 @@ interface Props {
   // expired or belongs to another team, so the only way out is the login
   // screen (audit H12). Falls back to `onExit` when the host does not wire it.
   onSessionExpired?: () => void;
+  // Shows the avatar map the viewer's pick resolved with (the server's
+  // answer merged into the cached team's).
+  onTeamAvatars?: (teamId: string, memberAvatars: Record<string, MemberAvatarChoice>) => void;
 }
 
 const PHASES = ['SURVEY', 'DISCUSS', 'REVIEW', 'CLOSE'] as const;
@@ -85,10 +95,10 @@ const AcceptedActionRow: React.FC<{
   };
 
   return (
-    <div className="flex items-center text-sm bg-emerald-50 p-2 rounded-sm border border-emerald-200 mb-2" data-proposal-state="accepted">
+    <div className="flex flex-wrap items-center gap-2 text-sm bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-200 mb-2" data-proposal-state="accepted">
       {number !== undefined && <ProposalNumber number={number} />}
-      <span className="material-symbols-outlined text-emerald-700 mr-2 text-sm">check_circle</span>
-      <span className="text-emerald-700 font-medium text-xs mr-2">{t('healthCheck.discuss.accepted')}</span>
+      <span className="material-symbols-outlined text-emerald-700 text-base! leading-none" aria-hidden="true">check_circle</span>
+      <span className="text-emerald-800 font-semibold text-xs">{t('healthCheck.discuss.accepted')}</span>
       {isFacilitator ? (
         <input
           type="text"
@@ -101,26 +111,28 @@ const AcceptedActionRow: React.FC<{
               handleUpdateAction();
             }
           }}
-          className="grow bg-white border border-emerald-300 rounded-sm px-2 py-1 text-slate-700 focus:outline-hidden focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+          className="grow basis-40 min-w-0 bg-white border border-slate-400 rounded-lg px-2.5 py-1.5 text-slate-900 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 transition"
         />
       ) : (
-        <span className="grow text-emerald-800">{action.text}</span>
+        <span className="grow min-w-0 text-slate-900 wrap-break-word">{action.text}</span>
       )}
       {isFacilitator && (
-        <div className="ml-2">
+        <div className="shrink-0">
           {!confirmingDelete ? (
+            // Shown at rest, so it reads at 3:1 on the green row (emerald-400
+            // measured 1.9:1); the hover says what it does.
             <button
               onClick={() => setConfirmingDelete(true)}
-              className="text-emerald-400 hover:text-red-500 transition"
+              className="grid place-items-center w-8 h-8 rounded-lg text-emerald-800 hover:bg-rose-50 hover:text-rose-700 transition"
               aria-label={t('healthCheck.discuss.deleteAction')}
             >
-              <span className="material-symbols-outlined text-sm">delete</span>
+              <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">delete</span>
             </button>
           ) : (
-            <div className="flex items-center space-x-2 text-xs bg-white border border-slate-200 rounded-sm px-2 py-1 shadow-xs">
-              <span className="text-slate-500">{t('healthCheck.discuss.confirmDelete')}</span>
-              <button className="text-rose-700 font-bold" onClick={onDelete}>{t('common.yes')}</button>
-              <button className="text-slate-500" onClick={() => setConfirmingDelete(false)}>{t('common.no')}</button>
+            <div className="flex items-center gap-2 text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1 shadow-xs">
+              <span className="text-slate-600">{t('healthCheck.discuss.confirmDelete')}</span>
+              <button className="text-rose-700 font-semibold rounded-md px-1.5 py-0.5 hover:bg-rose-50" onClick={onDelete}>{t('common.yes')}</button>
+              <button className="text-slate-600 font-semibold rounded-md px-1.5 py-0.5 hover:bg-slate-100" onClick={() => setConfirmingDelete(false)}>{t('common.no')}</button>
             </div>
           )}
         </div>
@@ -135,20 +147,33 @@ const isHealthCheckSession = (session: unknown): session is HealthCheckSessionTy
   return !!candidate.templateId && Array.isArray(candidate.dimensions);
 };
 
-const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired }) => {
+const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onExit, onTeamUpdate, onSessionExpired, onTeamAvatars }) => {
   const { t, tp, locale } = useTranslation();
   // The next press of a double click, or the next tap of a double tap, presses
   // nothing on another control than the first: the retrospective's guard, the
   // same module (pass 17 of 42.1). A double click on a proposal's Cancel
   // deleted it, one on its Delete deleted the next one too, for everyone.
   useDoubleGestureGuard();
-  const [session, setSession] = useState<HealthCheckSessionType | undefined>(
-    team.healthChecks?.find(h => h.id === sessionId)
-  );
+  // Every session this screen takes in has its participant list read as data
+  // (sessionRoster.ts → listedPeople): an entry that is not a person threw as
+  // it opened (`entersWriting`), and in every write, for everyone in the room.
+  const [session, setSession] = useState<HealthCheckSessionType | undefined>(() => {
+    const opened = team.healthChecks?.find(h => h.id === sessionId);
+    return opened && { ...opened, participants: listedPeople(opened.participants) };
+  });
   const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set([currentUser.id]));
+  // The panel's rows come from the cached session until the server's roster:
+  // its motion compares nothing before it (usePanelMotion). Per connection,
+  // as in a retrospective: put down whenever the session stops being live
+  // (setIsLive below), so the roster a reconnection brings back is no news.
+  const [rosterReceived, setRosterReceived] = useState(false);
   // Optimistic by default: pause editing only after a confirmed disconnect (see
   // Session.tsx) so the initial connecting window and tests still allow edits.
-  const [isLive, setIsLive] = useState<boolean>(true);
+  const [isLive, setLiveState] = useState<boolean>(true);
+  const setIsLive = useCallback((live: boolean) => {
+    setLiveState(live);
+    if (!live) setRosterReceived(false);
+  }, []);
   const isLiveRef = useRef<boolean>(true);
   // Set when the server refuses the join (audit H12). Unlike a disconnection
   // this never heals on its own, so it must survive a later `connect` event.
@@ -242,24 +267,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     setReadJiraParents({ base: team.jiraParents, read: cached?.jiraParents ?? team.jiraParents });
   };
 
-  // Get participants
-  const getParticipants = () => {
-    const roster = session?.participants?.length ? [...session.participants] : [];
-    if (!roster.some(p => p.id === currentUser.id)) {
-      roster.push(currentUser);
-    }
-    const deduped: typeof roster = [];
-    const seen = new Set<string>();
-    const seenNames = new Set<string>();
-    roster.forEach((p) => {
-      const nameKey = p.name.trim().toLowerCase();
-      if (seen.has(p.id) || seenNames.has(nameKey)) return;
-      seen.add(p.id);
-      seenNames.add(nameKey);
-      deduped.push(p);
-    });
-    return deduped;
-  };
+  // The people this screen lists: one rule with the retrospective
+  // (sessionRoster.ts).
+  const getParticipants = () => sessionParticipants(session?.participants, currentUser);
 
   const participants = getParticipants();
   const assignableMembers = getAssignableMembers(team);
@@ -275,7 +285,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     const anonymous = getAnonymizedLabel(member.id);
     const displayName = anonymous || member.name;
     const initials = displayName.substring(0, 2).toUpperCase();
-    return { displayName, initials };
+    // None in an anonymous session: the resolver says so.
+    const avatarId = sessionAvatarOf(session, team, member.id);
+    return { displayName, initials, avatarId };
   };
 
   // Update session helper
@@ -294,7 +306,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       if (!baseSession) return prevSession;
 
       const newSession = JSON.parse(JSON.stringify(baseSession));
-      if (!newSession.participants) newSession.participants = [];
+      // The team record's copy may hold an entry that is not a person.
+      newSession.participants = listedPeople(newSession.participants);
 
       const existingIds = new Set(newSession.participants.map((p: User) => p.id));
       participants.forEach(m => {
@@ -308,6 +321,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       }
 
       updater(newSession);
+      // The viewer's own entry carries their avatar from the write that adds
+      // them (see the same call in Session.tsx).
+      stampOwnAvatarEntry(newSession, team, currentUser.id);
       // Declare the own-data slices this write changed before it goes out —
       // see the same call in Session.tsx.
       registerOwnHealthCheckChanges(ownChangesRef.current, baseSession, newSession, currentUser.id);
@@ -318,6 +334,42 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       return newSession;
     });
   };
+
+  // Whether entering this session sends a write (the effect further down): the
+  // viewer is not listed yet, or comes back marked as having left.
+  const entersWriting = (entered: HealthCheckSessionType) =>
+    !entered.participants?.length
+    || !entered.participants.some(p => p.id === currentUser.id)
+    || !!entered.leftUsers?.includes(currentUser.id);
+  // The session that effect has already run for.
+  const enteredSessionRef = useRef<string | null>(null);
+
+  // The avatars as in a retrospective (useOwnAvatar): who is drawn with which,
+  // the own entry kept as new as the team's choice, and the picker.
+  const ownAvatar = useOwnAvatar({
+    session: session ?? null,
+    team,
+    currentUser,
+    updateSession,
+    canWrite: isLive && !deniedReason,
+    onTeamAvatars,
+    // The entering write carries the entry, when there is one to come. Sent
+    // in a write of its own just before, the entry left from the same
+    // revision as that write, and the server refused the second: the one
+    // that takes the "has left" mark off, which nothing sends again.
+    entersWithAWrite: () => !!session && enteredSessionRef.current !== session.id && entersWriting(session),
+  });
+
+  // The one-time hint that the avatar can be changed, by the retrospective's
+  // rule (useAvatarDiscoveryHint).
+  const avatarHint = useAvatarDiscoveryHint({
+    userId: currentUser.id,
+    hasChoice: ownAvatar.hasChoice,
+    anonymous: isAnonymousSession(session),
+    blocked: !!deniedReason,
+    pickerOpen: ownAvatar.pickerOpen,
+    openPicker: ownAvatar.openPicker,
+  });
 
   // The status follows the phase, as in a retrospective: opening Close ends the
   // health check with the facilitator's own phase write, rather than waiting
@@ -371,8 +423,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
       // The server's session record is the authority for every facilitator-only
       // field, the name included: never overwrite one from the local team
-      // record — see Session.tsx (incident ISS).
-      const normalizedSession = { ...updatedSession };
+      // record — see Session.tsx (incident ISS). Its participant list is read
+      // as data, as in the state this screen opened with.
+      const normalizedSession = { ...updatedSession, participants: listedPeople(updatedSession.participants) };
 
       // Merge strategy: re-apply the current user's own data (ratings, ROTI,
       // proposal votes) on top of the incoming authoritative state, and
@@ -423,6 +476,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     const unsubRoster = syncService.onRoster((roster) => {
       if (syncService.getCurrentSessionId() !== sessionId) return;
       setConnectedUsers(new Set(roster.map(r => r.id)));
+      setRosterReceived(true);
       mergeRoster(roster);
     });
 
@@ -485,9 +539,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
   // re-opening the session while marked as "left" brings them back.
   useEffect(() => {
     if (!session) return;
-    const hasCurrentUser = session.participants?.some(p => p.id === currentUser.id);
-    const markedLeft = session.leftUsers?.includes(currentUser.id);
-    if (!hasCurrentUser || !session.participants?.length || markedLeft) {
+    enteredSessionRef.current = session.id;
+    if (entersWriting(session)) {
       updateSession(s => {
         if (!s.participants) s.participants = [];
         if (!s.participants.some(p => p.id === currentUser.id)) {
@@ -505,11 +558,13 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     setActiveDiscussDimension(session?.discussionFocusId ?? null);
   }, [session?.discussionFocusId]);
 
+  // As in the retrospective: a glide for a reader who allows motion, at once
+  // for one who asked for less.
   useEffect(() => {
     if (!activeDiscussDimension) return;
     const target = discussRefs.current[activeDiscussDimension];
     if (target) {
-      setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+      setTimeout(() => target.scrollIntoView({ behavior: motionAllowed() ? 'smooth' : 'auto', block: 'center' }), 50);
     }
   }, [activeDiscussDimension]);
 
@@ -556,23 +611,18 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     return { average, ratings, comments, distribution, count: ratings.length };
   };
 
-  // Get color class based on score
-  const getScoreColor = (score: number) => {
-    if (score >= 4) return 'bg-emerald-500';
-    if (score >= 3) return 'bg-amber-500';
-    return 'bg-rose-500';
-  };
-
   const getScoreBgColor = (score: number) => {
     if (score >= 4) return 'bg-emerald-100';
     if (score >= 3) return 'bg-amber-100';
     return 'bg-rose-100';
   };
 
-  // Check if current user has completed survey
-  const hasCompletedSurvey = () => {
-    const userRatings = session.ratings[currentUser.id] || {};
-    return session.dimensions.every(d => userRatings[d.id]?.rating != null);
+  // The score's ink on its tile: the 800 of each hue reads at 4.5:1 or more
+  // (amber-600 on amber-100 did not; __tests__/healthCheckLook.test.tsx).
+  const getScoreTextColor = (score: number) => {
+    if (score >= 4) return 'text-emerald-800';
+    if (score >= 3) return 'text-amber-800';
+    return 'text-rose-800';
   };
 
   // Count finished participants
@@ -855,10 +905,14 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           element, and a tap meant for "back" that lands on it would pause
           everyone's timer. */}
       <div className="flex items-center h-full min-w-9">
-        <button onClick={handleExit} aria-label={t('healthCheck.header.leave')} className="shrink-0 mr-2 sm:mr-3 text-slate-500 hover:text-slate-700">
-          <span className="material-symbols-outlined">arrow_back</span>
+        <button
+          onClick={handleExit}
+          aria-label={t('healthCheck.header.leave')}
+          className="grid place-items-center shrink-0 w-8 h-8 sm:w-9 sm:h-9 mr-0.5 sm:mr-2 rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+        >
+          <span className="material-symbols-outlined" aria-hidden="true">arrow_back</span>
         </button>
-        <div className="hidden lg:flex h-full items-center space-x-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
+        <div className="hidden lg:flex h-full items-center min-w-0 overflow-x-auto [scrollbar-width:none]">
           {PHASES.map(p => (
             <button
               key={p}
@@ -867,11 +921,19 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               // SessionHeader): enabling this for participants of a closed one
               // offered a click that did nothing.
               disabled={!isFacilitator}
-              className={`phase-nav-btn h-full shrink-0 whitespace-nowrap px-2 text-[10px] font-bold uppercase ${
-                session.phase === p ? 'active' : 'text-slate-500 disabled:opacity-50'
+              // The current phase says so as a state, as the retrospective's does.
+              aria-current={session.phase === p ? 'step' : undefined}
+              // The retrospective's pill, class for class (SessionHeader):
+              // __tests__/healthCheckLook.test.tsx compares the two headers.
+              className={`phase-nav-btn h-8 shrink-0 whitespace-nowrap px-1.5 2xl:px-2.5 text-[13px] leading-none ${
+                session.phase === p
+                  ? 'active bg-indigo-100 text-indigo-700 font-bold'
+                  : 'font-medium text-slate-600 enabled:hover:bg-slate-100 enabled:hover:text-slate-900 disabled:text-slate-400'
               }`}
             >
-              {t(`common.phase.${p}` as MessageKey)}
+              {/* The dictionary's capitals stay the accessible name; the bar
+                  draws them in mixed case. */}
+              <span className="inline-block lowercase first-letter:uppercase">{t(`common.phase.${p}` as MessageKey)}</span>
             </button>
           ))}
         </div>
@@ -887,21 +949,20 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
       />
       {/* The right-hand cluster uses the retro header's breakpoints, which make
           room for the timer down to 320px (e2e/i18n.spec.ts measures both). */}
-      <div className="flex shrink-0 justify-end items-center space-x-1 sm:space-x-3">
+      <div className="flex shrink-0 justify-end items-center gap-1 sm:gap-2">
         {/* Real-time sync indicator. As in the retro header, the reassuring
             "live" chip steps aside on the narrowest phones; a lost connection,
             a refused join or a stalled sync always shows (the chip decides). */}
         <SessionSyncChip isLive={isLive} joinDeniedReason={deniedReason} />
 
-        {/* Participant progress - shown when panel is collapsed or on smaller screens */}
+        {/* Participant progress, shown when the panel is collapsed or on
+            smaller screens. A count, never a control, as in the retro header:
+            below lg the panel is not drawn, and from lg its rail has its own
+            button. */}
         {(participantsPanelCollapsed || window.innerWidth < 1024) && (
-          <div
-            className="flex items-center bg-slate-100 px-1.5 sm:px-3 py-1 rounded-sm cursor-pointer hover:bg-slate-200 transition"
-            onClick={() => setParticipantsPanelCollapsed(false)}
-            title={t('healthCheck.header.expandParticipants')}
-          >
-            <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
-            <span className="text-xs font-bold text-slate-700">
+          <div className="flex items-center gap-0.5 sm:gap-1 h-8 rounded-full border border-slate-200 bg-white px-1.5 sm:px-2.5">
+            <span className="material-symbols-outlined text-lg! leading-none text-slate-600" aria-hidden="true">groups</span>
+            <span className="text-xs font-semibold tabular-nums text-slate-700">
               {session.phase === 'SURVEY'
                 ? `${getFinishedCount()}/${activeParticipants.length}`
                 : session.phase === 'CLOSE'
@@ -910,8 +971,9 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               }
             </span>
             {/* The caption waits for 2xl, as in the retro header: below it the
-                timer and then the phase bar need the room. */}
-            <span className="text-[10px] text-slate-500 ml-1 hidden 2xl:inline">
+                timer and then the phase bar need the room. Out of sight only,
+                as there: read after the number at every width. */}
+            <span className="text-xs text-slate-500 sr-only 2xl:not-sr-only">
               {session.phase === 'SURVEY'
                 ? t('healthCheck.header.finishedLabel')
                 : session.phase === 'CLOSE'
@@ -922,25 +984,54 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         )}
 
         {isFacilitator && (
-          <button onClick={() => setShowInvite(true)} className="flex items-center text-slate-500 hover:text-retro-primary" title={t('healthCheck.header.invite')} aria-label={t('healthCheck.header.invite')}>
-            <span className="material-symbols-outlined text-xl">qr_code_2</span>
+          <button
+            onClick={() => setShowInvite(true)}
+            className="grid place-items-center shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-indigo-700"
+            title={t('healthCheck.header.invite')}
+            aria-label={t('healthCheck.header.invite')}
+          >
+            <span className="material-symbols-outlined" aria-hidden="true">qr_code_2</span>
           </button>
         )}
         {/* Guests switch language here too: an invite link lands them straight
             in the session, past every other screen that carries the switcher. */}
         <LanguageSwitcher className="shrink-0" />
-        {/* The name waits for 2xl and the initials for sm, as in the retro
-            header: the timer and the phase bar need the room, and the
-            participants panel names everyone anyway. */}
-        <div className="hidden 2xl:flex flex-col items-end mr-2 min-w-0">
-          <span className="text-[10px] font-bold text-slate-500 uppercase">{t('healthCheck.header.user')}</span>
-          <span className="max-w-32 truncate text-sm font-bold text-slate-700" title={currentUser.name}>{currentUser.name}</span>
+        {/* The name waits for 2xl, as in the retro header: the timer and the
+            phase bar need the room, and the participants panel names everyone
+            anyway. */}
+        <div className="hidden 2xl:flex flex-col items-end min-w-0 leading-tight">
+          <span className="text-xs font-medium text-slate-500">{t('healthCheck.header.user')}</span>
+          <span className="max-w-32 truncate text-sm font-semibold text-slate-900" title={currentUser.name}>{currentUser.name}</span>
         </div>
-        <div className={`w-8 h-8 shrink-0 rounded-full ${avatarColorClasses(currentUser.color)} hidden sm:flex items-center justify-center text-xs font-bold shadow-md`}>
-          {currentUser.name.substring(0, 2).toUpperCase()}
-        </div>
+        {/* The viewer's own avatar opens the avatar picker, by the retro
+            header's rule (AGENTS.md, *Avatars*): at every width for a participant,
+            from 360px for a facilitator, whose header also carries the
+            invite button and play. */}
+        <ViewerAvatarButton
+          user={currentUser}
+          avatarId={ownAvatar.avatarIdOf(currentUser.id)}
+          onClick={ownAvatar.openPicker}
+          visibilityClass={isFacilitator ? 'hidden min-[360px]:flex' : 'flex'}
+          marked={avatarHint.shown}
+          ref={avatarHint.openerRef}
+        />
       </div>
     </header>
+  );
+
+  // A dimension's two poles, as the survey and Discuss show them: a soft tint
+  // of their meaning, the word in its dark ink, the template's text in ink.
+  const renderDimensionDescriptions = (dimension: HealthCheckDimension) => (
+    <>
+      <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
+        <span className="text-rose-800 font-semibold">{t('healthCheck.dimension.bad')}</span>
+        <span className="text-slate-700 ml-2">{dimension.badDescription}</span>
+      </div>
+      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+        <span className="text-emerald-800 font-semibold">{t('healthCheck.dimension.good')}</span>
+        <span className="text-slate-700 ml-2">{dimension.goodDescription}</span>
+      </div>
+    </>
   );
 
   // Render Survey Phase
@@ -949,17 +1040,17 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
     return (
       <div className="flex flex-col h-full bg-slate-50">
-        <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
-          <div>
-            <h2 className="font-bold text-slate-700 text-lg">{t('healthCheck.survey.title')}</h2>
-            <span className="text-slate-500 text-sm ml-4">
+        <div className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex flex-wrap justify-between items-center gap-x-4 gap-y-2 shadow-xs shrink-0 z-30">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{t('healthCheck.survey.title')}</h2>
+            <span className="text-slate-500 text-sm tabular-nums">
               {t('healthCheck.survey.finishedCount', { finished: getFinishedCount(), total: activeParticipants.length })}
             </span>
           </div>
           {isFacilitator && (
             <button
               onClick={() => setPhase('DISCUSS')}
-              className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 transition"
             >
               {t('healthCheck.survey.next')}
             </button>
@@ -968,8 +1059,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
         <div className="grow overflow-auto p-6">
           <div className="max-w-3xl mx-auto">
-            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-6">
-              <p className="text-indigo-700 text-center text-sm">
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 mb-6 flex items-center justify-center gap-2">
+              <span className="material-symbols-outlined text-lg! leading-none text-indigo-700" aria-hidden="true">
+                {session.settings.isAnonymous ? 'visibility_off' : 'visibility'}
+              </span>
+              <p className="text-indigo-800 text-center text-sm font-medium">
                 {session.settings.isAnonymous
                   ? t('healthCheck.survey.anonymousNotice')
                   : t('healthCheck.survey.visibleNotice')}
@@ -986,28 +1080,25 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   : myComment;
 
                 return (
-                  <div key={dimension.id} className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
-                    <h3 className="text-xl font-bold text-slate-800 mb-3">{dimension.name}</h3>
-                    <div className="grid md:grid-cols-2 gap-4 mb-4 text-sm">
-                      <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
-                        <span className="text-rose-700 font-bold">{t('healthCheck.dimension.bad')}</span>
-                        <span className="text-slate-600 ml-2">{dimension.badDescription}</span>
-                      </div>
-                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                        <span className="text-emerald-700 font-bold">{t('healthCheck.dimension.good')}</span>
-                        <span className="text-slate-600 ml-2">{dimension.goodDescription}</span>
-                      </div>
+                  <div key={dimension.id} className="bg-white border border-slate-200 rounded-xl p-6 max-sm:p-4 shadow-xs">
+                    <h3 className="text-lg font-semibold tracking-tight text-slate-900 mb-3">{dimension.name}</h3>
+                    <div className="grid md:grid-cols-2 gap-3 mb-5 text-sm">
+                      {renderDimensionDescriptions(dimension)}
                     </div>
 
-                    <div className="flex items-center justify-center space-x-3 mb-4">
+                    {/* The chosen score is pressed (aria-pressed) and filled; an
+                        unchosen one is a white disc whose edge reaches 3:1. A
+                        ring marks the choice, so nothing grows under the finger. */}
+                    <div className="flex items-center justify-center gap-2 sm:gap-3 mb-2">
                       {[1, 2, 3, 4, 5].map(rating => (
                         <button
                           key={rating}
                           onClick={() => handleRating(dimension.id, rating)}
-                          className={`w-12 h-12 rounded-full font-bold text-lg transition ${
+                          aria-pressed={myRating === rating}
+                          className={`w-11 h-11 sm:w-12 sm:h-12 rounded-full font-bold text-lg tabular-nums border transition ${
                             myRating === rating
-                              ? 'bg-retro-primary text-white scale-110 shadow-lg'
-                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                              ? 'bg-indigo-600 border-indigo-600 text-white ring-4 ring-indigo-600/15'
+                              : 'bg-white border-slate-400 text-slate-700 hover:bg-slate-50 hover:border-slate-500'
                           }`}
                         >
                           {rating}
@@ -1015,7 +1106,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                       ))}
                     </div>
 
-                    <div className="flex justify-between text-[10px] text-slate-500 uppercase px-2 mb-4">
+                    <div className="flex justify-between gap-2 text-xs text-slate-500 px-1 mb-4">
                       <span>{t('healthCheck.survey.scale.stronglyDisagree')}</span>
                       <span>{t('healthCheck.survey.scale.neutral')}</span>
                       <span>{t('healthCheck.survey.scale.stronglyAgree')}</span>
@@ -1026,12 +1117,12 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         placeholder={t('healthCheck.survey.commentPlaceholder')}
                         value={displayComment}
                         onChange={(e) => handleComment(dimension.id, e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-slate-700 text-sm resize-none h-20 focus:outline-hidden focus:border-retro-primary focus:ring-1 focus:ring-indigo-100"
+                        className="w-full bg-white border border-slate-400 rounded-lg px-3 py-2.5 pb-7 text-slate-900 text-sm placeholder:text-slate-500 resize-none h-20 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 transition"
                       />
                       {myRating && (
-                        <span className="absolute bottom-3 right-3 text-emerald-500 text-xs font-bold flex items-center">
-                          <span className="material-symbols-outlined text-sm mr-1">check_circle</span>
-                          {t('healthCheck.survey.saved')}
+                        <span className="absolute bottom-2.5 right-3 text-emerald-700 text-xs font-semibold flex items-center gap-1 pointer-events-none">
+                          <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">check_circle</span>
+                          <span>{t('healthCheck.survey.saved')}</span>
                         </span>
                       )}
                     </div>
@@ -1077,13 +1168,16 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
     return (
       <div className="flex flex-col h-full bg-slate-50">
-        <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
-          <div className="flex items-center space-x-4">
-            <h2 className="font-bold text-slate-700 text-lg">{t('healthCheck.discuss.title')}</h2>
+        <div className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex flex-wrap justify-between items-center gap-x-4 gap-y-2 shadow-xs shrink-0 z-30">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{t('healthCheck.discuss.title')}</h2>
             {isFacilitator && (
-              <label className="flex items-center space-x-1.5 cursor-pointer text-sm text-slate-600 border-l border-slate-200 pl-4">
+              // No rule before it: the bar wraps on a phone, and the rule then
+              // opened the label's own line. The gaps space it (as the board's bar).
+              <label className="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-slate-700">
                 <input
                   type="checkbox"
+                  className="w-4 h-4 accent-indigo-600"
                   checked={showVoteTypes}
                   onChange={(event) => updateSession((draft) => { draft.settings.showParticipantVotes = event.target.checked; })}
                 />
@@ -1094,7 +1188,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           {isFacilitator && (
             <button
               onClick={() => setPhase('REVIEW')}
-              className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 transition"
             >
               {t('healthCheck.discuss.next')}
             </button>
@@ -1104,9 +1198,13 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         <div className="grow overflow-auto p-6">
           <div className="max-w-5xl mx-auto">
             {/* Radar Chart */}
-            <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6 shadow-xs">
+            <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-6 mb-6 shadow-xs">
               <div className="flex justify-center">
-                <svg width="400" height="400" viewBox="0 0 400 400">
+                {/* Drawn in the theme's tokens, so the brand and the hairlines
+                    follow the look; scaled down on a phone rather than cut. The
+                    outermost labels may reach past the drawing into the card's
+                    padding, so the drawing does not clip them. */}
+                <svg width="400" height="400" viewBox="0 0 400 400" className="max-w-full h-auto overflow-visible">
                   {[1, 2, 3, 4, 5].map(level => (
                     <circle
                       key={level}
@@ -1114,7 +1212,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                       cy={centerY}
                       r={(level / 5) * maxRadius}
                       fill="none"
-                      stroke="#e2e8f0"
+                      className="stroke-slate-200"
                       strokeWidth="1"
                       strokeDasharray={level < 5 ? "4,4" : "none"}
                     />
@@ -1128,24 +1226,25 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         y1={centerY}
                         x2={point.x}
                         y2={point.y}
-                        stroke="#e2e8f0"
+                        className="stroke-slate-200"
                         strokeWidth="1"
                       />
                     );
                   })}
                   <path
                     d={averagePathD}
-                    fill="rgba(79, 70, 229, 0.2)"
-                    stroke="#4f46e5"
+                    className="fill-indigo-600/15 stroke-indigo-600"
                     strokeWidth="2"
+                    strokeLinejoin="round"
                   />
                   {averagePoints.map((point, i) => (
                     <circle
                       key={i}
                       cx={point.x}
                       cy={point.y}
-                      r="6"
-                      fill="#4f46e5"
+                      r="5"
+                      className="fill-indigo-600 stroke-white"
+                      strokeWidth="2"
                     />
                   ))}
                   {dimensions.map((d, i) => {
@@ -1158,7 +1257,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                           y={labelPoint.y}
                           textAnchor="middle"
                           dominantBaseline="middle"
-                          className="fill-slate-600 text-[10px] font-medium"
+                          className="fill-slate-600 text-xs font-medium"
                         >
                           {d.name.length > 12 ? d.name.substring(0, 12) + '...' : d.name}
                         </text>
@@ -1167,7 +1266,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                           y={labelPoint.y + 12}
                           textAnchor="middle"
                           dominantBaseline="middle"
-                          className="fill-indigo-600 text-xs font-bold"
+                          className="fill-indigo-700 text-xs font-bold tabular-nums"
                         >
                           {formatScore(stats.average, locale)}
                         </text>
@@ -1188,12 +1287,16 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   <div
                     key={dimension.id}
                     ref={(el) => { discussRefs.current[dimension.id] = el; }}
-                    className={`bg-white border-2 rounded-xl shadow-xs transition ${
-                      isActive ? 'border-retro-primary ring-4 ring-indigo-100' : 'border-slate-200'
+                    data-dimension-id={dimension.id}
+                    // The dimension in focus takes the brand edge and a ring
+                    // outside its box, so nothing below it moves; hover deepens
+                    // the shadow only.
+                    className={`bg-white border rounded-xl shadow-xs transition ${
+                      isActive ? 'border-indigo-600 ring-4 ring-indigo-600/15' : `border-slate-200 ${isFacilitator ? 'hover:shadow-md' : ''}`
                     }`}
                   >
                     <div
-                      className={`p-4 flex items-start ${isFacilitator ? 'cursor-pointer' : ''}`}
+                      className={`p-4 flex items-start gap-3 sm:gap-4 ${isFacilitator ? 'cursor-pointer' : ''}`}
                       onClick={() => {
                         if (!isFacilitator) return;
                         updateSession(s => {
@@ -1201,13 +1304,13 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         });
                       }}
                     >
-                      <div className={`w-16 h-16 rounded-xl ${getScoreBgColor(stats.average)} flex items-center justify-center mr-4 shrink-0`}>
-                        <span className={`text-2xl font-black ${stats.average >= 4 ? 'text-emerald-700' : stats.average >= 3 ? 'text-amber-600' : 'text-rose-700'}`}>
+                      <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-xl ${getScoreBgColor(stats.average)} flex items-center justify-center shrink-0`}>
+                        <span className={`text-2xl font-bold tabular-nums ${getScoreTextColor(stats.average)}`}>
                           {formatScore(stats.average, locale)}
                         </span>
                       </div>
-                      <div className="grow">
-                        <h3 className="text-lg font-bold text-slate-800 mb-1">{dimension.name}</h3>
+                      <div className="grow min-w-0">
+                        <h3 className="text-lg font-semibold tracking-tight text-slate-900 mb-0.5 wrap-break-word">{dimension.name}</h3>
                         <p className="text-slate-500 text-sm">
                           {tp('healthCheck.discuss.ratingCount', stats.count)}
                           {stats.comments.length > 0 && ` • ${tp('healthCheck.discuss.commentCount', stats.comments.length)}`}
@@ -1218,43 +1321,36 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                           e.stopPropagation();
                           setOpenDescriptions(prev => ({ ...prev, [dimension.id]: !prev[dimension.id] }));
                         }}
-                        className={`mr-2 shrink-0 flex items-center transition ${openDescriptions[dimension.id] ? 'text-retro-primary' : 'text-slate-500 hover:text-retro-primary'}`}
+                        className={`grid place-items-center shrink-0 w-9 h-9 -my-1 rounded-lg transition ${openDescriptions[dimension.id] ? 'bg-indigo-100 text-indigo-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
                         title={openDescriptions[dimension.id] ? t('healthCheck.discuss.hideDetails') : t('healthCheck.discuss.showDetails')}
                         aria-label={t('healthCheck.discuss.toggleDetails')}
                         aria-pressed={!!openDescriptions[dimension.id]}
                       >
-                        <span className="material-symbols-outlined">info</span>
+                        <span className="material-symbols-outlined" aria-hidden="true">info</span>
                       </button>
-                      <span className="material-symbols-outlined text-slate-500">
+                      <span className="material-symbols-outlined text-slate-600 shrink-0 mt-1" aria-hidden="true">
                         {isActive ? 'expand_less' : 'expand_more'}
                       </span>
                     </div>
 
                     {openDescriptions[dimension.id] && (
-                      <div className="border-t border-slate-200 px-4 py-3 bg-slate-50 grid md:grid-cols-2 gap-3 text-sm">
-                        <div className="bg-rose-50 border border-rose-200 rounded-lg p-3">
-                          <span className="text-rose-700 font-bold">{t('healthCheck.dimension.bad')}</span>
-                          <span className="text-slate-600 ml-2">{dimension.badDescription}</span>
-                        </div>
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-                          <span className="text-emerald-700 font-bold">{t('healthCheck.dimension.good')}</span>
-                          <span className="text-slate-600 ml-2">{dimension.goodDescription}</span>
-                        </div>
+                      <div className={`border-t border-slate-200 px-4 py-3 bg-slate-50 grid md:grid-cols-2 gap-3 text-sm ${isActive ? '' : 'rounded-b-xl'}`}>
+                        {renderDimensionDescriptions(dimension)}
                       </div>
                     )}
 
                     {isActive && (
-                      <div className="border-t border-slate-200 p-4 bg-slate-50">
+                      <div className="border-t border-slate-200 p-4 bg-slate-50 rounded-b-xl">
                         {/* Distribution */}
                         <div className="mb-4">
-                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">{t('healthCheck.discuss.voteDistribution')}</h4>
-                          <div className="flex items-end justify-between space-x-3 h-48">
+                          <h4 className="text-sm font-semibold text-slate-700 mb-2">{t('healthCheck.discuss.voteDistribution')}</h4>
+                          <div className="flex items-end justify-between gap-2 sm:gap-3 h-48">
                             {stats.distribution.map((count, i) => {
                               const rating = i + 1;
                               const heightPercent = stats.count > 0 ? (count / stats.count) * 100 : 0;
                               const heightPx = count > 0 ? Math.max((heightPercent / 100) * 100, 20) : 8;
                               const barColor = rating === 5 ? 'bg-emerald-600' : rating === 4 ? 'bg-emerald-400' : rating === 3 ? 'bg-amber-500' : rating === 2 ? 'bg-orange-500' : 'bg-rose-600';
-                              const badgeColor = rating === 5 ? 'bg-emerald-100 text-emerald-700' : rating === 4 ? 'bg-emerald-50 text-emerald-700' : rating === 3 ? 'bg-amber-100 text-amber-700' : rating === 2 ? 'bg-orange-100 text-orange-700' : 'bg-rose-100 text-rose-700';
+                              const badgeColor = rating === 5 ? 'bg-emerald-100 text-emerald-800' : rating === 4 ? 'bg-emerald-50 text-emerald-800' : rating === 3 ? 'bg-amber-100 text-amber-800' : rating === 2 ? 'bg-orange-100 text-orange-800' : 'bg-rose-100 text-rose-800';
 
                               // Collect voters for this rating (non-anonymous mode only)
                               const voters = !session.settings.isAnonymous
@@ -1268,9 +1364,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
                               return (
                                 <div key={rating} className="flex flex-col items-center flex-1 relative group">
-                                  <span className="text-sm font-bold text-slate-700 mb-2">{count}</span>
+                                  <span className="text-sm font-bold tabular-nums text-slate-700 mb-2">{count}</span>
+                                  {/* An empty rating keeps a stub in a neutral
+                                      token: its count above says 0. */}
                                   <div
-                                    className={`w-full rounded-t shadow-md transition-all duration-300 ${barColor} ${count === 0 ? 'opacity-30' : 'opacity-100'} ${voters.length > 0 ? 'cursor-help' : ''}`}
+                                    className={`w-full rounded-t-md motion-safe:transition-all motion-safe:duration-300 ${count === 0 ? 'bg-slate-200' : barColor} ${voters.length > 0 ? 'cursor-help' : ''}`}
                                     style={{ height: `${heightPx}px` }}
                                   />
                                   {voters.length > 0 && (
@@ -1283,7 +1381,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                                       </div>
                                     </div>
                                   )}
-                                  <span className={`mt-2 w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shadow-xs ${badgeColor}`}>
+                                  <span className={`mt-2 w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold tabular-nums ${badgeColor}`}>
                                     {rating}
                                   </span>
                                 </div>
@@ -1304,7 +1402,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
                         {/* Actions */}
                         <div>
-                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">{t('healthCheck.discuss.actions')}</h4>
+                          <h4 className="text-sm font-semibold text-slate-700 mb-2">{t('healthCheck.discuss.actions')}</h4>
                           {(() => {
                             const proposals = session.actions.filter(a => a.linkedTicketId === dimension.id && a.type === 'proposal');
                             const acceptedActions = session.actions.filter(a => a.linkedTicketId === dimension.id && a.type === 'new');
@@ -1359,24 +1457,32 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                             );
                           })()}
 
-                          <div className="flex">
+                          {/* The retrospective's Discuss row (DiscussPhase): the
+                              field, the primary Propose, and the facilitator's
+                              direct accept as a secondary button. */}
+                          <div className="flex gap-2">
                             <input
                               type="text"
                               placeholder={t('healthCheck.discuss.proposePlaceholder')}
                               value={newProposalText}
                               onChange={(e) => setNewProposalText(e.target.value)}
                               onKeyDown={(e) => e.key === 'Enter' && handleAddProposal(dimension.id)}
-                              className="grow bg-white border border-slate-200 rounded-l-lg p-2 text-slate-700 text-sm focus:outline-hidden focus:border-retro-primary"
+                              className="grow min-w-0 bg-white border border-slate-400 rounded-lg px-3 py-2 text-slate-900 text-sm placeholder:text-slate-500 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 transition"
                             />
                             <button
                               onClick={() => handleAddProposal(dimension.id)}
-                              className="bg-slate-700 text-white px-3 font-bold text-sm hover:bg-slate-800 border-l border-slate-600"
+                              className="bg-indigo-600 text-white px-4 rounded-lg font-semibold text-sm hover:bg-indigo-700 btn-brand-glow transition shrink-0"
                             >
                               {t('healthCheck.discuss.propose')}
                             </button>
                             {isFacilitator && (
-                              <button onClick={() => handleDirectAddAction(dimension.id)} className="bg-retro-primary text-white px-3 rounded-r font-bold text-sm hover:bg-retro-primaryHover" title={t('healthCheck.discuss.directAccept')} aria-label={t('healthCheck.discuss.directAccept')}>
-                                <span className="material-symbols-outlined text-sm">check</span>
+                              <button
+                                onClick={() => handleDirectAddAction(dimension.id)}
+                                className="bg-white text-indigo-700 px-2.5 rounded-lg border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition shrink-0 flex items-center"
+                                title={t('healthCheck.discuss.directAccept')}
+                                aria-label={t('healthCheck.discuss.directAccept')}
+                              >
+                                <span className="material-symbols-outlined text-sm" aria-hidden="true">check</span>
                               </button>
                             )}
                           </div>
@@ -1455,12 +1561,12 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
     return (
       <div className="flex flex-col h-full bg-slate-50">
-        <div className="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shadow-xs">
-          <h2 className="font-bold text-slate-700 text-lg">{t('healthCheck.review.title')}</h2>
+        <div className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex flex-wrap justify-between items-center gap-x-4 gap-y-2 shadow-xs shrink-0 z-30">
+          <h2 className="font-semibold tracking-tight text-slate-900 text-lg">{t('healthCheck.review.title')}</h2>
           {isFacilitator && (
             <button
               onClick={() => setPhase('CLOSE')}
-              className="bg-retro-primary text-white px-4 py-2 rounded-sm font-bold text-sm hover:bg-retro-primaryHover"
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap hover:bg-indigo-700 btn-brand-glow enabled:active:bg-indigo-800 transition"
             >
               {t('healthCheck.review.next')}
             </button>
@@ -1474,7 +1580,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
             </div>
             <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
               <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex flex-wrap items-start justify-between gap-3">
-                <span className="font-bold text-slate-700">{t('healthCheck.review.sessionActions', { count: newActions.length })}</span>
+                <span className="font-semibold text-slate-900">{t('healthCheck.review.sessionActions', { count: newActions.length })}</span>
                 {/* Its own reason line when the team cannot create yet (finding U-1). */}
                 <JiraBatchButton
                   actions={newActions}
@@ -1504,7 +1610,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               </div>
 
               {newActions.length === 0 ? (
-                <div className="p-8 text-center text-slate-500">
+                <div className="p-8 text-center text-sm text-slate-500">
                   {t('healthCheck.review.empty')}
                 </div>
               ) : (
@@ -1512,8 +1618,8 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                   const dimension = session.dimensions.find(d => d.id === key);
                   return (
                     <div key={key} className="border-b border-slate-200 last:border-0">
-                      <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
-                        <span className="text-sm font-bold text-slate-500">
+                      <div className="bg-slate-50 px-4 py-2 border-b border-slate-200">
+                        <span className="text-sm font-semibold text-slate-600">
                           {dimension ? dimension.name : t('healthCheck.review.general')}
                         </span>
                       </div>
@@ -1521,15 +1627,17 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                         <div key={action.id} data-action-id={action.id} className="px-4 py-3 flex items-center hover:bg-slate-50 gap-3">
                           <button
                             onClick={() => setReviewActionDone(action)}
-                            className={`shrink-0 ${action.done ? 'text-emerald-600' : 'text-slate-500 hover:text-emerald-600'}`}
+                            className={`grid place-items-center shrink-0 w-8 h-8 rounded-lg transition ${action.done ? 'text-emerald-600 hover:bg-emerald-50' : 'text-slate-500 hover:bg-slate-100 hover:text-emerald-600'}`}
                             aria-label={action.done ? t('healthCheck.review.markNotDone') : t('healthCheck.review.markDone')}
                           >
-                            <span className="material-symbols-outlined">
+                            <span className="material-symbols-outlined" aria-hidden="true">
                               {action.done ? 'check_circle' : 'radio_button_unchecked'}
                             </span>
                           </button>
                           <div className="grow min-w-0 flex flex-col">
-                            <div className={`text-slate-700 ${action.done ? 'line-through opacity-60' : ''}`}>
+                            {/* Done is crossed out in a quieter ink, never faded:
+                                a fade put the text under 4.5:1. */}
+                            <div className={`text-sm ${action.done ? 'line-through text-slate-600' : 'text-slate-900 font-medium'}`}>
                               <span className="wrap-break-word">
                                 {action.text}
                               </span>
@@ -1557,7 +1665,7 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
                             value={action.assigneeId || ''}
                             disabled={!isFacilitator}
                             onChange={(e) => setReviewActionAssignee(action, e.target.value || null)}
-                            className="shrink-0 text-xs bg-white border border-slate-200 rounded-sm p-1.5 text-slate-600 focus:border-retro-primary min-w-[120px]"
+                            className="shrink-0 text-xs bg-white border border-slate-400 rounded-lg px-2 py-1.5 text-slate-900 outline-hidden focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600 min-w-[120px]"
                           >
                             <option value="">{t('healthCheck.review.unassigned')}</option>
                             {assignableMembers.map(m => (
@@ -1593,21 +1701,24 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
     const maxVal = Math.max(...histogram, 1);
 
     return (
-      <div className="flex flex-col items-center h-full p-8 bg-slate-900 text-white overflow-y-auto">
-        <h1 className="text-3xl font-bold mb-2">{t('healthCheck.close.title')}</h1>
-        <p className="text-slate-300 mb-8">{t('healthCheck.close.thanks')}</p>
+      <div className="flex flex-col items-center h-full p-4 sm:p-8 bg-slate-900 text-white overflow-y-auto">
+        <h1 className="text-3xl font-semibold tracking-tight mb-2 text-center">{t('healthCheck.close.title')}</h1>
+        <p className="text-slate-300 mb-8 text-center">{t('healthCheck.close.thanks')}</p>
 
-        <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 max-w-5xl w-full text-center">
-          <h3 className="text-xl font-bold mb-6">{t('healthCheck.close.rotiTitle')}</h3>
-          <div className="flex justify-center space-x-2 mb-8">
+        <div className="bg-slate-800 p-6 sm:p-8 rounded-2xl border border-slate-700 max-w-5xl w-full text-center">
+          <h3 className="text-xl font-semibold mb-6">{t('healthCheck.close.rotiTitle')}</h3>
+          {/* The retrospective's ROTI scores (ClosePhase): the chosen one is
+              pressed and ringed on the dark card, and grows no more. */}
+          <div className="flex justify-center gap-2 mb-8">
             {[1, 2, 3, 4, 5].map(score => (
               <button
                 key={score}
                 onClick={() => updateSession(s => { s.roti[currentUser.id] = score; })}
-                className={`w-10 h-10 rounded-full font-bold transition ${
+                aria-pressed={myRoti === score}
+                className={`w-10 h-10 rounded-full font-bold tabular-nums transition ${
                   myRoti === score
-                    ? 'bg-retro-primary text-white scale-110'
-                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    ? 'bg-indigo-600 text-white ring-2 ring-indigo-300 ring-offset-2 ring-offset-slate-800'
+                    : 'bg-slate-700 text-slate-100 hover:bg-slate-600'
                 }`}
               >
                 {score}
@@ -1617,11 +1728,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
 
           {!session.settings.revealRoti ? (
             <div className="mb-4">
-              <div className="text-slate-300 font-bold mb-4">{t('healthCheck.close.votedCount', { voted: voterCount, total: totalMembers })}</div>
+              <div className="text-slate-300 font-semibold tabular-nums mb-4">{t('healthCheck.close.votedCount', { voted: voterCount, total: totalMembers })}</div>
               {isFacilitator && (
                 <button
                   onClick={() => updateSession(s => { s.settings.revealRoti = true; })}
-                  className="text-indigo-300 hover:text-white font-bold underline"
+                  className="text-indigo-300 hover:text-white font-semibold underline underline-offset-4 rounded-md"
                 >
                   {t('healthCheck.close.reveal')}
                 </button>
@@ -1632,18 +1743,19 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
               <div className="flex items-end justify-center h-24 space-x-3 mb-2">
                 {histogram.map((count, i) => (
                   <div key={i} className="flex flex-col items-center justify-end h-full">
-                    {count > 0 && <span className="text-xs font-bold text-slate-300 mb-1">{count}</span>}
+                    {count > 0 && <span className="text-xs font-bold tabular-nums text-slate-300 mb-1">{count}</span>}
+                    {/* An empty score keeps a stub in a dark token, not a fade. */}
                     <div
-                      className="w-8 bg-indigo-500 rounded-t relative transition-all duration-500"
-                      style={{ height: count > 0 ? `${(count / maxVal) * 100}%` : '4px', opacity: count > 0 ? 1 : 0.2 }}
+                      className={`w-8 rounded-t-md relative motion-safe:transition-all motion-safe:duration-500 ${count > 0 ? 'bg-indigo-400' : 'bg-slate-600'}`}
+                      style={{ height: count > 0 ? `${(count / maxVal) * 100}%` : '4px' }}
                     />
                   </div>
                 ))}
               </div>
-              <div className="flex justify-center space-x-3 text-xs text-slate-300 border-t border-slate-700 pt-1">
+              <div className="flex justify-center space-x-3 text-xs tabular-nums text-slate-300 border-t border-slate-700 pt-1">
                 {[1, 2, 3, 4, 5].map(i => <div key={i} className="w-8">{i}</div>)}
               </div>
-              <div className="mt-4 text-2xl font-black text-indigo-300">{average} / 5</div>
+              <div className="mt-4 text-2xl font-bold tabular-nums text-indigo-300">{average} / 5</div>
             </div>
           )}
 
@@ -1669,11 +1781,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         </div>
 
         {isFacilitator ? (
-          <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">
+          <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-semibold hover:bg-slate-100 transition">
             {t('healthCheck.close.returnToDashboard')}
           </button>
         ) : (
-          <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">
+          <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-semibold hover:bg-slate-100 transition">
             {t('healthCheck.close.leave')}
           </button>
         )}
@@ -1712,6 +1824,11 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
         onReturnToLogin={onSessionExpired ?? onExit}
       />
       <SyncStalledBanner />
+      <AvatarDiscoveryHint
+        user={currentUser}
+        hint={avatarHint}
+        visibilityClass={isFacilitator ? 'hidden min-[360px]:flex' : 'flex'}
+      />
       {showInvite && (
         <InviteModal
           team={team}
@@ -1749,8 +1866,21 @@ const HealthCheckSession: React.FC<Props> = ({ team, currentUser, sessionId, onE
           onInvite={() => setShowInvite(true)}
           onToggleLeft={handleToggleParticipantLeft}
           getMemberDisplay={getMemberDisplay}
+          isLive={isLive}
+          rosterReceived={rosterReceived}
+          motionScope={session.phase}
         />
       </div>
+      <AvatarPicker
+        open={ownAvatar.pickerOpen}
+        onClose={ownAvatar.closePicker}
+        colorClasses={avatarColorClasses(currentUser.color)}
+        initials={viewerInitials(currentUser)}
+        name={currentUser.name}
+        currentAvatarId={ownAvatar.currentChoice}
+        onPick={ownAvatar.pick}
+        disabled={!isLive || !!deniedReason}
+      />
     </div>
   );
 };

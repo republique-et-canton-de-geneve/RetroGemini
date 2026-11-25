@@ -68,11 +68,11 @@ Team passwords are **hashed at rest** (scrypt via Node's crypto module — memor
 
 **The minimum length is 8 characters, and it is the whole policy.** Every path that *sets* a password — team creation, the team's own password change, the emailed password reset and the super-admin override — enforces the same rule from a single module (`utils/passwordPolicy.js`), which the React forms read too, so the screens and the routes cannot drift apart. There is still **no complexity, dictionary or reuse check, and no account lockout**: character-class rules are no longer recommended by either NIST SP 800-63B or OWASP ASVS, and a breached-password check would need an external service that is out of scope for an air-gapped deployment.
 
-**Why 8 and not ASVS 2.1.1's 12.** A deliberate choice, not an oversight. The team password is a *shared* secret — read aloud or written on a whiteboard, then typed by a dozen people on phone keyboards — whereas ASVS's 12 assumes a personal password held in a password manager. The security difference on the reachable axis is nil: with `loginLimiter` allowing 20 failed attempts per 15 minutes per IP and team name (~3 800 guesses a day at two replicas), four lowercase characters fall in about two months while eight take on the order of 10⁴ years. Those figures are the login route's; the other routes that verify the password are bounded more loosely (below, pending decision D24), where eight random lowercase characters still take centuries but four fall within a day. Online guessing is already out of reach at 8 — the limiter binds, not the entropy — and the remaining gap to 12 only matters against an *offline* attack on stolen scrypt hashes, which implies a compromise with worse consequences than a guessed team password. The defect this closes was never the search space: four characters force `1234`, the team name or the sprint number, which are guessed on the first attempt and which no rate limiter can defend against.
+**Why 8 and not ASVS 2.1.1's 12.** A deliberate choice, not an oversight. The team password is a *shared* secret — read aloud or written on a whiteboard, then typed by a dozen people on phone keyboards — whereas ASVS's 12 assumes a personal password held in a password manager. The security difference on the reachable axis is nil: with `loginLimiter` allowing 20 failed attempts per 15 minutes per IP and team name (~3 800 guesses a day at two replicas), four lowercase characters fall in about two months while eight take on the order of 10⁴ years. Those figures are the login route's; the other routes that verify the password are bounded more loosely (below, pending decision D24), where eight random lowercase characters still take some seventy years on average at two replicas but four fall within a day. Online guessing is already out of reach at 8 — the limiter binds, not the entropy — and the remaining gap to 12 only matters against an *offline* attack on stolen scrypt hashes, which implies a compromise with worse consequences than a guessed team password. The defect this closes was never the search space: four characters force `1234`, the team name or the sprint number, which are guessed on the first attempt and which no rate limiter can defend against.
 
 **The rule binds on write, never on verification.** A team whose password predates it keeps logging in with the short one indefinitely; it becomes compliant the next time the password is changed. This is deliberate — refusing to verify would lock every existing team out of its own history, and an availability cost is a security property too. The consequence to state plainly: **raising the minimum does not retroactively strengthen the passwords already in use**, so an operator who wants the floor to apply everywhere has to ask teams to rotate.
 
-Guessing is braked differently depending on the route. `/api/team/login` meters it: **20 rejected attempts per fifteen minutes, keyed on the client IP together with the team name, and counted per pod** — so a two-replica deployment admits roughly 3 800 guesses a day there from one address against one team. (`AUTH_RATE_LIMIT_MAX`, documented elsewhere as 5, governs team creation and session restore, neither of which verifies a guessed password.) **Every other team route that accepts the password does not** — `POST /api/team/:teamId` and its sub-routes, `/api/feedbacks/*` and the Jira team routes are bounded only by general per-IP request limiters, counted per pod (team reads 120 a minute, team writes 300, feedback 120 + 60, Jira 120 + 60 + 60). Those are independent instances whose budgets add up, and team ids are public (`/api/team/list`), so a guesser gets hundreds of attempts a minute from one address against one team. Whether to meter a rejected password on those routes the way the login route does is open as decision D24 (`HARDENING_STATUS.md` → H53). A team password is a *shared* secret protecting that team's entire history.
+Guessing is braked differently depending on the route. `/api/team/login` meters it: **20 rejected attempts per fifteen minutes, keyed on the client IP together with the team name, and counted per pod** — so a two-replica deployment admits roughly 3 800 guesses a day there from one address against one team. (`AUTH_RATE_LIMIT_MAX`, documented elsewhere as 5, governs team creation and session restore, neither of which verifies a guessed password.) **Every other team route that accepts the password does not** — `POST /api/team/:teamId` and its sub-routes, `/api/feedbacks/*` and the Jira team routes are bounded only by general per-IP request limiters, counted per pod (team reads 120 a minute, team writes 300, the template routes 300 and the avatar route 300 with limiters of their own, feedback 120 + 60, Jira 120 + 60 + 60). Those are independent instances whose budgets add up, to 1 440 a minute per pod, and team ids are public (`/api/team/list`), so a guesser gets over a thousand attempts a minute from one address against one team. Whether to meter a rejected password on those routes the way the login route does is open as decision D24 (`HARDENING_STATUS.md` → H53). A team password is a *shared* secret protecting that team's entire history.
 
 What the browser and invite links hold:
 
@@ -237,6 +237,84 @@ Residuals, stated rather than discovered:
   actions again; for a team deleted from the console, restore its protected
   "Pre-delete snapshot", which holds every link. Each such issue repeats the
   action's content in Jira.
+
+### Avatars
+
+Each member can choose a picture in place of their initials (45.0). The choice
+is stored on the team record, `memberAvatars[memberId] = { id, at }`, written
+by one route, `POST /api/team/:teamId/member/avatar`.
+
+- **Any team credential can set any member's avatar.** The route checks the
+  credential (password or session token, an invitation-link login included),
+  the shape of the member id and the avatar id — not who is asking, which it
+  cannot know: a credential names a team, not a person. "Your own avatar" is a
+  rule of the screens. The harm is bounded to a picture from the list below,
+  shown beside a member's name, and the next choice replaces it.
+- **Inside a session, a participant can change the picture shown for another
+  participant there.** A live session's participant list is written by every
+  client of the session, like its cards, and each entry carries a copy of its
+  person's choice and of the time it was made. A client can therefore put any
+  picture of the list, with any time, on another person's entry in that
+  session, as it already can a name or a colour. The team's own record is out
+  of its reach (only the route writes it), nothing but a picture of the list
+  is ever drawn, and no other session or screen shows what was planted; a
+  picture planted with the very time of the person's stored choice is not
+  drawn either by a browser whose copy of the team holds that choice. A later
+  choice of the person replaces it: any choice, the picture already stored
+  picked again and a first "My initials" included (each is stored dated like
+  a new picture, at least a millisecond after any choice it replaces, or by
+  the server's clock alone after the largest date a number counts exactly,
+  which has no next one, and stamped into the session it was made in), when
+  the planted time is older than that choice; and for a time planted ahead of
+  the clock, a choice made in that session, where the route's stamp replaces
+  a time more than five minutes ahead of the server's clock (no choice wrote
+  it). A time planted less than five minutes ahead stands until it has
+  passed: that is how far two servers' clocks are allowed to differ. A
+  choice made elsewhere does not reach that session while a planted time is
+  ahead of it. The browsers compare the two times and never judge one by
+  their own clock: a browser whose clock is wrong would otherwise write over
+  a newer choice made in the person's other browser, and the two would undo
+  each other without end.
+- **The id is checked against a closed list and refused, never coerced.** An
+  avatar id is one of the application's own ids (`utils/avatars.js`), or `null`
+  for none; anything else is answered `400 invalid_avatar`. The map is rebuilt
+  from its valid entries on every write, so junk another path left heals, and
+  it is capped at 500 entries. A date is whole milliseconds that a number
+  counts exactly: a value nothing could be dated after (1e300) is not a date,
+  on the map or on a session's copy, so it cannot outrank every later choice.
+  During a rolling update, the update route of a server from before 45.0
+  accepts the whole map from any team credential (it keeps the keys it does
+  not know): the readers take it as data, the next choice through the route
+  rebuilds it, and the most it does is set a member's picture.
+- **A picture is drawn from data, never from markup or a URL.** Each picture is
+  a list of shapes in a closed vocabulary (eight SVG element types, seven
+  colour classes, a fixed list of attributes) compiled into the bundle, and the
+  screen draws it with React; a stored value only selects one of them, after it
+  has been checked against the list, and is never written into the page as
+  markup, an image source or a class. A value the client does not know draws
+  the initials. Nothing is fetched: there is no
+  upload and no remote image, so the CSP's `img-src` is not involved.
+- **An anonymous session shows no chosen avatar.** One resolver decides what a
+  session draws and answers nothing while the session is anonymous, because a
+  picture beside a card would say who wrote it; a source test refuses any other
+  read of an avatar in the components. This is what the screens show, like
+  the rest of an anonymous session: its data still carries each participant's
+  entry, avatar included, as it carries each card's author.
+- **Nothing of it is in a URL or a log.** The choice travels in the request
+  body, and the route logs no member id, avatar id or choice: a failure logs
+  the error alone. A choice is not a privileged action and writes no row to the
+  audit trail.
+
+### Fonts and icons
+
+The interface typeface (Geist, Geist Mono) and the icon font (Material Symbols)
+are served by the deployment itself, from `public/fonts/`, and the
+`font-src 'self'` directive of the CSP refuses any other origin. Nothing is
+loaded from a font service, so a browser on a network without internet access
+draws the same screens and tells no third party who opened them.
+`e2e-prod/production-csp.spec.ts` loads the built application under its
+production policy, checks that the text font and the icon font are each
+loaded by name, and fails on any request that leaves the application's origin.
 
 ### Database Security
 
@@ -411,7 +489,15 @@ tell the two apart without reading workflow files:
   developer machine, the token is scoped to this repository alone, and every
   resulting change still arrives through a reviewed pull request against a
   protected branch. It affects development tooling only — nothing in it reaches
-  the runtime image.
+  the runtime image. A checkout's `.gstack/`, gstack's state, can hold
+  credentials of gstack's browser: its access token (`browse.json`), its
+  cookies and localStorage and sessionStorage when session persistence is on
+  (`session-state.json`), and the logs of the pages and requests it made,
+  whose URLs gstack writes with their query values redacted. git ignores the
+  directory, through its own `*` `.gitignore` or, for `.gstack/tmp/`,
+  `.git/info/exclude`, and `.dockerignore` keeps it out of the Docker build
+  context too (`__tests__/deploymentManifestParity.test.ts` → *Docker build
+  context (.dockerignore)*).
 
 ## Version Support
 

@@ -7,7 +7,7 @@ const invite = {
   'invite.tab.email': 'EMAIL',
   'invite.tab.link': 'CODE & LINK',
   'invite.tab.wifi': 'WI-FI',
-  'invite.copy': 'COPY',
+  'invite.copy': 'Copy',
   'invite.testAnotherUser': 'Want to test as another user?',
   'invite.logoutAndCreate': 'Logout & Create New User',
   'invite.done': 'Done',

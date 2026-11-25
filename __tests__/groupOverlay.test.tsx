@@ -7,6 +7,8 @@ import {
   getTicketCardClassName,
   getTicketCardStyle
 } from '../components/session/ticketCardAppearance';
+import { cardTones } from '../utils/cardTones';
+import { pairContrast } from './helpers/tailwindTheme';
 
 /**
  * Group phase: the ticket text must stay visible while grouping.
@@ -19,7 +21,7 @@ import {
 const appearance = (overrides: Partial<TicketCardAppearance> = {}): TicketCardAppearance => ({
   isDragTarget: false,
   isSelected: false,
-  cardBgHex: '#ff8800',
+  tones: cardTones('#ff8800'),
   isDraggable: true,
   ...overrides
 });
@@ -28,7 +30,7 @@ const STATES: { name: string; value: TicketCardAppearance }[] = [
   { name: 'idle', value: appearance() },
   { name: 'drop target', value: appearance({ isDragTarget: true }) },
   { name: 'selected', value: appearance({ isSelected: true }) },
-  { name: 'idle without a custom colour', value: appearance({ cardBgHex: null }) },
+  { name: 'idle without a custom colour', value: appearance({ tones: null }) },
   { name: 'where the card cannot be picked up', value: appearance({ isDraggable: false }) }
 ];
 
@@ -56,6 +58,14 @@ describe('Group phase overlays — ticket text visibility', () => {
       expect(className).toContain('mb-2');
     });
 
+    // White words on the brand colour: 12px bold text, so 4.5:1 (blue-500
+    // measured 3.7:1 before the Clarté port).
+    it('writes its words at a contrast that can be read', () => {
+      const { container } = render(<TicketGroupingBanner variant={variant} />);
+
+      expect(pairContrast(container.firstElementChild?.className ?? '')).toBeGreaterThanOrEqual(4.5);
+    });
+
     it('never swallows the pointer events the card needs for grouping', () => {
       const { container } = render(<TicketGroupingBanner variant={variant} />);
 
@@ -76,13 +86,14 @@ describe('Group phase overlays — ticket text visibility', () => {
     it('keeps the card background colour whatever the drag state', () => {
       const style = getTicketCardStyle(value);
 
-      if (value.cardBgHex === null) {
-        // No custom colour: no inline style at all, the class list falls back
-        // to the default white card.
+      if (value.tones === null) {
+        // No hue: no inline style at all, the class list falls back to the
+        // default white card.
         expect(style).toBeUndefined();
         expect(getTicketCardClassName(value)).toContain('bg-white');
       } else {
-        expect(style?.backgroundColor).toBe(value.cardBgHex);
+        // A soft tint of the hue, never the saturated colour itself.
+        expect(style?.backgroundColor).toBe(value.tones.tint);
       }
     });
 
@@ -107,6 +118,23 @@ describe('Group phase overlays — ticket text visibility', () => {
     expect(getTicketCardStyle(selected)?.backgroundColor).toBe(
       getTicketCardStyle(appearance())?.backgroundColor
     );
+  });
+
+  it('draws a toned card in its tint, edged with its line, and leaves the ring states their border', () => {
+    const tones = cardTones('#ff8800')!;
+    expect(getTicketCardStyle(appearance())).toEqual({ backgroundColor: tones.tint, borderColor: tones.line });
+    expect(getTicketCardStyle(appearance({ isDragTarget: true }))?.borderColor).toBeUndefined();
+    expect(getTicketCardStyle(appearance({ isSelected: true }))?.borderColor).toBeUndefined();
+  });
+
+  // Boxes are measured (e2e wide-board, touch-card-controls): a hover deepens
+  // the shadow and moves nothing, and only the painted properties transition.
+  it('hovers with a shadow only, and transitions no layout', () => {
+    const tokens = getTicketCardClassName(appearance()).split(/\s+/);
+    expect(tokens).toContain('group');
+    expect(tokens).not.toContain('transition-all');
+    expect(tokens.some((token) => /translate|scale/.test(token))).toBe(false);
+    expect(tokens.some((token) => /hover:shadow/.test(token))).toBe(true);
   });
 
   it('only offers the grab cursor where cards can actually be dragged', () => {

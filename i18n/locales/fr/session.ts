@@ -122,6 +122,8 @@ const session: Record<keyof typeof en, string> = {
   'session.ticket.delete': 'Supprimer la carte',
   'session.ticket.hidden': 'Carte masquée',
   'session.ticket.comments': 'Commentaires',
+  'session.ticket.commentsCount_one': '{count} commentaire',
+  'session.ticket.commentsCount_other': '{count} commentaires',
   'session.ticket.removeVote': 'Retirer un vote de cette carte',
   'session.ticket.addVote': 'Ajouter un vote à cette carte',
   'session.ticket.voteTotal_one': '{count} vote au total',

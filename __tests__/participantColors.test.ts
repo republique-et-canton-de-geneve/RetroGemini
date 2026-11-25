@@ -3,20 +3,25 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   PARTICIPANT_PALETTE,
-  UNKNOWN_PARTICIPANT_COLOR,
+  NEUTRAL_AVATAR_CLASSES,
   DEPARTED_AVATAR_CLASSES,
   avatarColorClasses,
   isParticipantColor,
   participantColorClass,
+  participantToneHex,
 } from '../utils/participantColors';
 import { HEALTH_RATING_BADGE } from '../utils/healthRatingColors';
 import {
   axeCopies,
   classColor,
+  effectivePair,
+  mergeThemeColors,
   pairContrast,
   parsedColor,
+  themeBlocks,
   themeValue,
   tokenContrast,
+  unmeasurableColor,
 } from './helpers/tailwindTheme';
 
 /**
@@ -25,10 +30,11 @@ import {
  * facilitator's indigo passed, which is why ten audited single-user screens
  * never saw it.
  *
- * Every pair below is measured from `node_modules/tailwindcss/theme.css` with
- * axe-core's own colour engine — the gate's numbers, not a copy of them — so a
- * Tailwind bump that moves a colour fails here, at build time, before the
- * e2e audit or a user finds it.
+ * Every pair below is measured from the files the build reads (Tailwind's
+ * `theme.css`, then the `@theme` blocks of `index.css`) with axe-core's own
+ * colour engine — the gate's numbers, not a copy of them — so a Tailwind bump
+ * or a token redefined by the application fails here, at build time, before
+ * the e2e audit or a user finds it.
  */
 
 const REPO_ROOT = join(__dirname, '..');
@@ -40,9 +46,16 @@ describe('the measuring helper', () => {
     expect(measuredWith).toBe(injectedByGate);
   });
 
+  // Pinned on tokens the application does not redefine: Tailwind's own values.
   it('reads the theme and measures as axe does (a pin on the file and the engine)', () => {
     expect(parsedColor('lime-500').toHexString()).toBe('#7ccf00');
-    expect(tokenContrast('white', 'indigo-500')).toBeCloseTo(4.577, 3);
+    expect(tokenContrast('white', 'rose-600')).toBeCloseTo(4.51, 3);
+    expect(tokenContrast('black', 'lime-500')).toBeCloseTo(10.74, 3);
+  });
+
+  it('measures a token the application redefines at the application\'s value', () => {
+    expect(parsedColor('indigo-600').toHexString()).toBe('#4f3ff0');
+    expect(parsedColor('slate-900').toHexString()).toBe('#171a2b');
   });
 
   it('paints text-black and text-white as exactly #000 and #fff', () => {
@@ -56,13 +69,93 @@ describe('the measuring helper', () => {
     expect(classColor('bg-black/50 bg-linear-to-r', 'bg')).toBeNull();
     expect(() => classColor('text-white text-black', 'text')).toThrow(/2 text colours/);
   });
-});
 
-/** Rule A1: white when white clears the floor, otherwise the better of the two. */
-const ruleA1 = (bgToken: string): 'text-white' | 'text-black' => {
-  if (tokenContrast('white', bgToken) >= FLOOR) return 'text-white';
-  return tokenContrast('black', bgToken) > tokenContrast('white', bgToken) ? 'text-black' : 'text-white';
-};
+  it('knows the application\'s own tokens, not only Tailwind\'s', () => {
+    expect(classColor('bg-person-indigo text-white', 'bg')).toBe('person-indigo');
+  });
+
+  // Until 45.0 the helper read Tailwind's file alone: a colour the application
+  // redefined was painted by the browser and measured at its old value.
+  describe('reading a theme', () => {
+    const stock = '@theme default { --color-white: #fff; --color-slate-500: oklch(55.4% 0.046 257.417); --color-slate-600: #475569; --color-rose-500: #f00; }';
+
+    it('lets a later @theme declaration win, as the build does', () => {
+      const colors = mergeThemeColors(stock, '@theme { --color-slate-500: #676c85; }\n@theme inline { --color-slate-500: #111111; }');
+      expect(colors.get('slate-500')).toBe('#111111');
+      expect(colors.get('slate-600')).toBe('#475569');
+    });
+
+    it('adds the application\'s named tokens and follows a reference to another token', () => {
+      const colors = mergeThemeColors(stock, '@theme { --color-brand: var(--color-slate-600); --color-person-indigo-ink: #3a2fc0; }');
+      expect(colors.get('brand')).toBe('#475569');
+      expect(colors.get('person-indigo-ink')).toBe('#3a2fc0');
+    });
+
+    it('removes what the application resets', () => {
+      expect(mergeThemeColors(stock, '@theme { --color-slate-*: initial; }').has('slate-500')).toBe(false);
+      expect([...mergeThemeColors(stock, '@theme { --color-*: initial; --color-ink: #171a2b; }').keys()]).toEqual(['ink']);
+    });
+
+    it('reads a declaration only inside an @theme block, keyframes inside it included', () => {
+      const css = ':root { --color-slate-500: #000; }\n@theme {\n  --color-slate-500: #676c85;\n  @keyframes pop { 0% { transform: scale(0); } }\n  --color-rose-500: #e5484d;\n}\n.x { --color-rose-500: #000; }';
+      expect(themeBlocks(css)).toHaveLength(1);
+      const colors = mergeThemeColors(stock, css);
+      expect(colors.get('slate-500')).toBe('#676c85');
+      expect(colors.get('rose-500')).toBe('#e5484d');
+    });
+
+    it('refuses a reference it cannot follow', () => {
+      expect(() => mergeThemeColors(stock, '@theme { --color-brand: var(--color-nowhere); }')).toThrow(/cannot resolve/);
+    });
+  });
+
+  // A colour skipped is how a wrong pair passes: the text was then measured
+  // against whatever lay further up, or against white.
+  describe('a colour it cannot name', () => {
+    it('is told apart from a size or an alignment', () => {
+      expect(unmeasurableColor('text-[9px] text-center text-xs', 'text')).toBeNull();
+      expect(unmeasurableColor('bg-black/10', 'bg')).toBeNull();
+      expect(unmeasurableColor('text-slate-900/60', 'text')).toBe('text-slate-900/60');
+      expect(unmeasurableColor('bg-[#4f3ff0]', 'bg')).toBe('bg-[#4f3ff0]');
+      expect(unmeasurableColor('bg-(--card-tint)', 'bg')).toBe('bg-(--card-tint)');
+      expect(unmeasurableColor('bg-linear-to-r from-indigo-600', 'bg')).toBe('bg-linear-to-r');
+      expect(unmeasurableColor('text-transparent bg-clip-text', 'text')).toBe('text-transparent');
+      expect(unmeasurableColor('hover:bg-black/10 bg-white', 'bg')).toBeNull();
+    });
+
+    const tree = (outer: string, inner: string) => {
+      const parent = document.createElement('div');
+      parent.className = outer;
+      const child = document.createElement('span');
+      child.className = inner;
+      parent.append(child);
+      return child;
+    };
+
+    it('stops the measurement where it is the nearest background', () => {
+      expect(() => effectivePair(tree('bg-[#4f3ff0]', 'text-white'))).toThrow(/bg-\[#4f3ff0\], which cannot be measured/);
+      expect(() => effectivePair(tree('bg-linear-to-r from-slate-50 to-white', 'text-slate-900'))).toThrow(/cannot be measured/);
+      expect(() => effectivePair(tree('bg-white', 'text-slate-900/60'))).toThrow(/cannot be measured/);
+    });
+
+    // A done row is `bg-green-50/50`: skipped, its controls were measured on white.
+    it('blends a translucent background over the one behind it', () => {
+      const onWhite = effectivePair(tree('bg-white', 'text-slate-500'));
+      const veiled = effectivePair(tree('bg-white', 'bg-black/10 text-slate-500'));
+      expect(veiled.bg).toBe('black/10 over white');
+      expect(veiled.ratio).toBeLessThan(onWhite.ratio);
+      const half = effectivePair(tree('bg-slate-900', 'bg-white/50 text-black'));
+      const full = effectivePair(tree('bg-slate-900', 'bg-white text-black'));
+      expect(half.bg).toBe('white/50 over slate-900');
+      expect(half.ratio).toBeLessThan(full.ratio);
+      expect(half.ratio).toBeGreaterThan(1);
+    });
+
+    it('does not matter behind a background the text really sits on', () => {
+      expect(effectivePair(tree('bg-linear-to-r from-slate-50 to-white', 'bg-white text-slate-900')).bg).toBe('white');
+    });
+  });
+});
 
 const bgToken = (className: string) => {
   const token = classColor(className, 'bg');
@@ -70,37 +163,87 @@ const bgToken = (className: string) => {
   return token;
 };
 
+/** The hue a stored palette class names: `bg-lime-500` → `lime`. */
+const hueOf = (color: string) => color.replace(/^bg-/, '').replace(/-500$/, '');
+
+const NON_TEXT_FLOOR = 3;
+
+/**
+ * Since 45.0 a person is drawn in a tone of their own hue: a pastel body and
+ * initials in the dark ink of the same hue (`person-*` tokens of index.css),
+ * where until then the stored Tailwind class was painted as is with black or
+ * white initials. The stored value does not change; what it is drawn in does.
+ */
 describe('participant avatars', () => {
   it.each(PARTICIPANT_PALETTE.map((color) => [color]))('%s: the initials clear 4.5:1', (color) => {
     expect(pairContrast(avatarColorClasses(color))).toBeGreaterThanOrEqual(FLOOR);
   });
 
-  it.each(PARTICIPANT_PALETTE.map((color) => [color]))('%s: the initials colour follows the rule', (color) => {
-    expect(classColor(avatarColorClasses(color), 'text')).toBe(ruleA1(bgToken(color)).replace(/^text-/, ''));
+  it.each(PARTICIPANT_PALETTE.map((color) => [color]))('%s: drawn in its own hue, ink on body, with the tone for a picture', (color) => {
+    const hue = hueOf(color);
+    expect(avatarColorClasses(color)).toBe(`tone-${hue} bg-person-${hue} text-person-${hue}-ink`);
+    expect(bgToken(avatarColorClasses(color))).toBe(`person-${hue}`);
+    expect(classColor(avatarColorClasses(color), 'text')).toBe(`person-${hue}-ink`);
   });
 
-  it('keeps white on the facilitator\'s indigo, the one colour where white passes', () => {
-    expect(avatarColorClasses('bg-indigo-500')).toBe('bg-indigo-500 text-white');
-  });
-
-  it.each([[undefined], [null], [''], ['bg-sky-500'], ['fixed inset-0 z-50'], ['bg-lime-500 text-white']])(
+  it.each([[undefined], [null], [''], ['bg-sky-500'], ['fixed inset-0 z-50'], ['bg-lime-500 text-white'], ['__proto__']])(
     'renders %j as the neutral fallback, and nothing else',
     (value) => {
       const classes = avatarColorClasses(value as string | null | undefined);
-      expect(classes).toBe(`${UNKNOWN_PARTICIPANT_COLOR} text-white`);
+      expect(classes).toBe(NEUTRAL_AVATAR_CLASSES);
+      expect(classes).toBe('tone-neutral bg-person-neutral text-person-neutral-ink');
       expect(pairContrast(classes)).toBeGreaterThanOrEqual(FLOOR);
-      expect(participantColorClass(value as string | null | undefined)).toBe(UNKNOWN_PARTICIPANT_COLOR);
+      expect(participantColorClass(value as string | null | undefined)).toBe('bg-person-neutral-ink');
+      expect(participantToneHex(value as string | null | undefined)).toEqual(participantToneHex(undefined));
       expect(isParticipantColor(value)).toBe(false);
     },
   );
 
-  it('passes a palette colour through to the non-text dots unchanged', () => {
-    for (const color of PARTICIPANT_PALETTE) expect(participantColorClass(color)).toBe(color);
+  // The dots are a person's only mark beside their name in some places (the
+  // contribution line, the vote tooltip): WCAG 1.4.11, 3:1 on the surfaces
+  // they sit on — white, and the reader's own row, which the participants
+  // panel paints `bg-indigo-100` (read from the panel below, so the surface
+  // measured here is the one drawn).
+  it('the reader\'s own row is the surface the dots are measured on', () => {
+    const panel = readFileSync(join(__dirname, '..', 'components', 'session', 'SessionParticipantsPanel.tsx'), 'utf8');
+    expect(panel).toMatch(/isCurrentUser \? 'bg-indigo-100' :/);
   });
 
-  it('draws a departed participant in a neutral pair that clears 4.5:1', () => {
+  it.each([...PARTICIPANT_PALETTE.map((color) => [color]), [undefined]])('%s: its dot is the ink, 3:1 on white and on the reader\'s row', (color) => {
+    const dot = participantColorClass(color as string | undefined);
+    expect(dot).toBe(`bg-person-${color ? hueOf(color as string) : 'neutral'}-ink`);
+    for (const surface of ['white', 'indigo-100']) {
+      expect(tokenContrast(bgToken(dot), surface), `${dot} on ${surface}`).toBeGreaterThanOrEqual(NON_TEXT_FLOOR);
+    }
+  });
+
+  it('draws a departed participant in the neutral tone, never faded', () => {
+    expect(DEPARTED_AVATAR_CLASSES).toBe(NEUTRAL_AVATAR_CLASSES);
     expect(pairContrast(DEPARTED_AVATAR_CLASSES)).toBeGreaterThanOrEqual(FLOOR);
     expect(DEPARTED_AVATAR_CLASSES).not.toMatch(/opacity|grayscale/);
+  });
+
+  // The board paints a colour-by-author card from these: they must be the
+  // tokens the avatars are painted in, not a copy that drifts from them.
+  it('hands out as hex exactly the tone tokens index.css defines', () => {
+    for (const hue of [...PARTICIPANT_PALETTE.map(hueOf), 'neutral']) {
+      const tone = hue === 'neutral' ? participantToneHex('not a colour') : participantToneHex(`bg-${hue}-500`);
+      expect(tone.bg, `person-${hue}`).toBe(themeValue(`person-${hue}`));
+      expect(tone.ink, `person-${hue}-ink`).toBe(themeValue(`person-${hue}-ink`));
+      expect(tone.pop, `person-${hue}-pop`).toBe(themeValue(`person-${hue}-pop`));
+    }
+  });
+
+  it('every tone class a person can be given exists in index.css, with its three variables', () => {
+    const css = readFileSync(join(REPO_ROOT, 'index.css'), 'utf8');
+    for (const hue of [...PARTICIPANT_PALETTE.map(hueOf), 'neutral']) {
+      const rule = new RegExp(`\\.tone-${hue}\\s*\\{([^}]*)\\}`).exec(css);
+      expect(rule, `.tone-${hue}`).not.toBeNull();
+      for (const part of ['bg', 'ink', 'pop']) {
+        const token = part === 'bg' ? `person-${hue}` : `person-${hue}-${part}`;
+        expect(rule?.[1], `.tone-${hue} --av-${part}`).toContain(`--av-${part}: var(--color-${token})`);
+      }
+    }
   });
 
   it('is the palette the server hands the facilitator', () => {
@@ -129,11 +272,26 @@ describe('the health-check score tooltip', () => {
 });
 
 describe('what is measured is what is painted', () => {
-  it('index.css redefines none of the measured tokens, so theme.css is what the build paints', () => {
+  // The helper reads colour tokens from the `@theme` blocks of index.css. One
+  // declared anywhere else in that file (a `:root` rule, a class) would be
+  // painted by the browser and never measured.
+  it('index.css declares colour tokens only inside its @theme blocks', () => {
     const css = readFileSync(join(REPO_ROOT, 'index.css'), 'utf8');
-    const measured = new Set<string>(['white', 'black', 'slate-200', 'slate-600', 'slate-700']);
-    for (const color of PARTICIPANT_PALETTE) measured.add(bgToken(color));
-    for (const badge of Object.values(HEALTH_RATING_BADGE)) measured.add(bgToken(badge.bg));
-    for (const token of measured) expect(css, `index.css redefines --color-${token}`).not.toContain(`--color-${token}:`);
+    const declared = (text: string) => [...text.matchAll(/--color-[A-Za-z0-9-]+\s*:/g)].length;
+    const inTheme = themeBlocks(css).reduce((sum, block) => sum + declared(block), 0);
+    expect(declared(css)).toBe(inTheme);
+    expect(inTheme).toBeGreaterThan(0);
+  });
+
+  it('measures every token index.css defines at the value index.css gives it', () => {
+    const css = readFileSync(join(REPO_ROOT, 'index.css'), 'utf8');
+    const own = new Map<string, string>();
+    for (const block of themeBlocks(css)) {
+      for (const match of block.matchAll(/--color-([A-Za-z0-9-]+):\s*([^;]+);/g)) own.set(match[1], match[2].trim());
+    }
+    for (const [token, value] of own) {
+      if (value.startsWith('var(')) continue;
+      expect(themeValue(token), `--color-${token}`).toBe(value);
+    }
   });
 });

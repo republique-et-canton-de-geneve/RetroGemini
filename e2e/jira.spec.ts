@@ -126,9 +126,9 @@ const joinThroughInvite = async (page: Page, inviteUrl: string, teamName = TEAM_
   await expect(phaseHeading).toBeVisible({ timeout: 15_000 });
 };
 
-// A Dashboard tab. Its accessible name starts with its icon's ligature
-// ("settings Settings"), so it is found by its class and visible text.
-const dashboardTab = (page: Page, label: string) => page.locator('.dash-tab', { hasText: label });
+// A Dashboard tab, by its role and its label: the icon beside the label is
+// aria-hidden, so the label is the tab's whole name ("Settings").
+const dashboardTab = (page: Page, label: string) => page.getByRole('button', { name: label, exact: true });
 
 const discoveryNote = (page: Page) => page.getByRole('note', { name: 'New: create your actions in Jira' });
 

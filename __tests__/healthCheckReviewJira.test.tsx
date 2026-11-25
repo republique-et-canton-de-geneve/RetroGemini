@@ -161,9 +161,10 @@ describe('HealthCheckSession Review with Jira', () => {
     expect(within(note).getByText(/Your facilitator can send the actions to Jira\./)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Create in Jira/ })).toBeNull();
 
-    // Remembered for the person who read it, in this browser.
+    // Remembered for the person who read it, in this browser. (By name: the
+    // screen also shows the one-time avatar hint, a note of its own.)
     fireEvent.click(within(note).getByRole('button', { name: 'Got it' }));
-    expect(screen.queryByRole('note')).toBeNull();
+    expect(screen.queryByRole('note', { name: 'New: create your actions in Jira' })).toBeNull();
     expect(JSON.parse(window.localStorage.getItem(JIRA_NOTE_STORAGE_KEY) ?? '[]')).toEqual([alice.id]);
   });
 
@@ -180,7 +181,7 @@ describe('HealthCheckSession Review with Jira', () => {
     }), facilitator);
 
     expect(await screen.findByRole('link', { name: 'TEAM-6, open in Jira (new tab)' })).toBeInTheDocument();
-    expect(screen.queryByRole('note')).toBeNull();
+    expect(screen.queryByRole('note', { name: 'New: create your actions in Jira' })).toBeNull();
     expect(screen.queryByRole('button', { name: /Jira/ })).toBeNull();
     expect(screen.queryByText(/Settings → Jira/)).toBeNull();
   });

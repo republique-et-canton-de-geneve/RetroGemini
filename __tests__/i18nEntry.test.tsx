@@ -1,10 +1,12 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import TeamLogin from '../components/TeamLogin';
 import InviteModal from '../components/InviteModal';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { LANGUAGE_STORAGE_KEY } from '../i18n/languages';
+import { createPluralTranslator, createTranslator } from '../i18n/translate';
+import { dataService } from '../services/dataService';
 import { PASSWORD_MIN_LENGTH } from '../utils/passwordPolicy.js';
 import type { Team, TeamSummary } from '../types';
 
@@ -237,5 +239,79 @@ describe('InviteModal in French', () => {
     );
     expect(screen.queryByText(/email_not_configured/)).toBeNull();
     expect(screen.queryByText(/Email service not configured/)).toBeNull();
+  });
+
+  // A message on screen is stored as what to say, never as the sentence
+  // (AGENTS.md, *Internationalisation*). The dialog is modal, so the language
+  // reaches it from another tab of the app, which the provider follows: kept
+  // as a sentence, the status line stayed in the old language under the new
+  // screen, its count and each of its error lines included.
+  describe('words its status line in the language the reader switches to while it shows', () => {
+    const t = { en: createTranslator('en'), fr: createTranslator('fr') };
+    const tp = { en: createPluralTranslator('en'), fr: createPluralTranslator('fr') };
+    const switchTo = (language: 'en' | 'fr') =>
+      act(() => {
+        window.dispatchEvent(new StorageEvent('storage', { key: LANGUAGE_STORAGE_KEY, newValue: language }));
+      });
+    // What getByText compares: a node's text with each run of white space,
+    // the no-break ones before a French colon included, made one space.
+    const shown = (text: string) => text.replace(/\s+/g, ' ');
+    const renderIn = (language: 'en' | 'fr') =>
+      render(
+        <LanguageProvider initialLanguage={language}>
+          <InviteModal team={inviteTeam} onClose={vi.fn()} />
+        </LanguageProvider>
+      );
+
+    it('while the invites are on their way', async () => {
+      let answer!: (value: Awaited<ReturnType<typeof dataService.createMemberInvite>>) => void;
+      vi.mocked(dataService.createMemberInvite).mockImplementationOnce(
+        () => new Promise((resolve) => { answer = resolve; })
+      );
+      renderIn('fr');
+      fireEvent.click(await screen.findByRole('button', { name: t.fr('invite.email.send') }));
+      expect(await screen.findByText(shown(t.fr('invite.email.sendingStatus')))).toBeInTheDocument();
+
+      switchTo('en');
+
+      expect(screen.getByText(t.en('invite.email.sendingStatus'))).toBeInTheDocument();
+      expect(screen.queryByText(shown(t.fr('invite.email.sendingStatus')))).toBeNull();
+      await act(async () => {
+        answer({ user: { id: 'u1', name: 'Alice', email: 'alice@example.com' }, inviteLink: 'https://retro.example/?join=alice' } as never);
+      });
+    });
+
+    it('with the count of the invites ready, in each language’s plural', async () => {
+      vi.mocked(dataService.sendInviteEmail).mockResolvedValueOnce(undefined as never).mockResolvedValueOnce(undefined as never);
+      renderIn('en');
+      fireEvent.click(await screen.findByRole('button', { name: t.en('invite.email.send') }));
+      expect(await screen.findByText(tp.en('invite.email.readyCount', 2))).toBeInTheDocument();
+
+      switchTo('fr');
+
+      expect(screen.getByText(shown(tp.fr('invite.email.readyCount', 2)))).toBeInTheDocument();
+      expect(screen.queryByText(tp.en('invite.email.readyCount', 2))).toBeNull();
+    });
+
+    it('with each address’s error, a code from the mail and a sentence from the data layer alike', async () => {
+      vi.mocked(dataService.createMemberInvite)
+        .mockImplementationOnce(async (_teamId: string, email: string) => ({
+          user: { id: 'u1', name: 'Alice', email },
+          inviteLink: 'https://retro.example/?join=alice'
+        }) as never)
+        .mockRejectedValueOnce(new Error('Unable to generate an invite link'));
+      const line = (language: 'en' | 'fr') => shown([
+        t[language]('invite.email.errorLine', { email: 'alice@example.com', message: t[language]('invite.email.notConfigured') }),
+        t[language]('invite.email.errorLine', { email: 'bob@example.com', message: t[language]('errors.inviteLinkFailed') })
+      ].join(' | '));
+      renderIn('fr');
+      fireEvent.click(await screen.findByRole('button', { name: t.fr('invite.email.send') }));
+      expect(await screen.findByText(line('fr'))).toBeInTheDocument();
+
+      switchTo('en');
+
+      expect(screen.getByText(line('en'))).toBeInTheDocument();
+      expect(screen.queryByText(line('fr'))).toBeNull();
+    });
   });
 });

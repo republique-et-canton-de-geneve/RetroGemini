@@ -1,6 +1,8 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isTopDialog, pushDialog } from './modalDialogStack';
 import { useReturnFocus } from './useReturnFocus';
+import { EFFECT_LENGTH_MS, motionAllowed } from './motion/effects';
+import { FOCUSABLE_SELECTOR, isVisible } from './focusable';
 
 /**
  * The shared modal shell.
@@ -15,35 +17,11 @@ import { useReturnFocus } from './useReturnFocus';
  * the accessible name, Escape, a focus trap, and returning focus to whatever
  * opened it. Call sites keep their own `overlayClassName`/`panelClassName`, so
  * adopting this changes behaviour without touching a single pixel of layout.
+ *
+ * A hidden control stays out of the trap's cycle: `focusable.ts` holds what
+ * can take the focus and the ancestor walk that says whether it is drawn,
+ * shared with the one-time notes.
  */
-
-const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'textarea:not([disabled])',
-  'input:not([disabled]):not([type="hidden"])',
-  'select:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])'
-].join(', ');
-
-/**
- * A hidden control must stay out of the trap's cycle (a collapsed section, a
- * step of a wizard). Deliberately walks the ancestors rather than reading
- * `offsetParent` or `getClientRects()`: those need a layout engine, so in the
- * test environment they report *every* control as hidden and the trap silently
- * does nothing — which is how a focus trap ships broken with a green suite.
- */
-const isVisible = (element: HTMLElement, root: HTMLElement): boolean => {
-  let node: HTMLElement | null = element;
-  while (node) {
-    if (node.hasAttribute('hidden')) return false;
-    const style = window.getComputedStyle(node);
-    if (style.display === 'none' || style.visibility === 'hidden') return false;
-    if (node === root) return true;
-    node = node.parentElement;
-  }
-  return true;
-};
 
 export interface ModalDialogProps {
   /** Accessible name. Use `labelledBy` instead when the content already has a title. */
@@ -63,20 +41,101 @@ export interface ModalDialogProps {
   panelClassName?: string;
   /** `data-testid` for the backdrop, for call sites whose tests select on it. */
   overlayTestId?: string;
+  /**
+   * How the panel enters. `rise` (the default) lifts it a few pixels while it
+   * fades in; `fade` only fades it, for a panel holding a `position: fixed`
+   * child: a transformed panel is the containing block of its fixed
+   * descendants, so the child would ride with the panel instead of staying in
+   * the screen's corner while the animation runs.
+   */
+  entrance?: DialogEntrance;
   children: React.ReactNode;
 }
+
+export type DialogEntrance = 'rise' | 'fade';
+
+/** The veil and the panel of the product's dialogs, for a call site with nothing of its own to add. */
+export const DIALOG_OVERLAY_CLASS = 'fixed inset-0 bg-slate-900/45 flex items-center justify-center z-50 p-4';
+export const DIALOG_PANEL_CLASS = 'bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full';
+
+/**
+ * The entrance effects (`index.css`, under `prefers-reduced-motion:
+ * no-preference`). They fill backwards only, so nothing of the transform
+ * remains once they have run. A reader who asked for less motion, or a browser
+ * that cannot say (no `matchMedia`), is never given them: the same rule as
+ * every other effect (`motionAllowed`), not a class the stylesheet keeps still.
+ */
+export const VEIL_ENTRANCE_CLASS = 'fx-veil-in';
+const PANEL_ENTRANCE_CLASS: Record<DialogEntrance, string> = {
+  rise: 'fx-dialog-in',
+  // The veil's own fade: opacity only, no transform.
+  fade: 'fx-veil-in'
+};
+
+/**
+ * Past this, an entrance class is taken off even if its animation never ended
+ * (ms): a second, or the longest entrance and a margin should one ever last
+ * longer (280 ms today; `EFFECT_LENGTH_MS`, which motionEffects.test.ts holds
+ * to the stylesheet). An animation that is interrupted sends no
+ * `animationend` — its element hidden meanwhile, motion turned off between
+ * this script's check and the stylesheet's — and the class it left would play
+ * again the next time the element is shown.
+ */
+const ENTRANCE_NET_MS = Math.max(
+  1000,
+  Math.max(...[VEIL_ENTRANCE_CLASS, ...Object.values(PANEL_ENTRANCE_CLASS)].map((name) => EFFECT_LENGTH_MS[name] ?? 0)) + 250
+);
+
+/**
+ * Whether an element still carries its entrance class. It comes off when that
+ * element's own animation ends, never on an animation of a
+ * descendant, whose events bubble up to it, and after `ENTRANCE_NET_MS` at
+ * the latest.
+ */
+const useEntrance = (ref: React.RefObject<HTMLElement | null>) => {
+  const [entering, setEntering] = useState(motionAllowed);
+  // A native listener rather than React's `onAnimationEnd`: React picks the
+  // event's name once, from what the environment supports, and a mismatch
+  // there would leave the class on for good with nothing reporting it. A
+  // layout effect, so the listener is there in the commit that puts the class
+  // on: a passive effect runs after it, and an end sent in between was lost.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const settle = (e: Event) => {
+      if (e.target === element) setEntering(false);
+    };
+    element.addEventListener('animationend', settle);
+    const net = setTimeout(() => setEntering(false), ENTRANCE_NET_MS);
+    return () => {
+      element.removeEventListener('animationend', settle);
+      clearTimeout(net);
+    };
+  }, [ref]);
+  return entering;
+};
+
+const withClass = (base: string, extra: string, on: boolean) => (on ? `${base} ${extra}` : base);
 
 const ModalDialog: React.FC<ModalDialogProps> = ({
   label,
   labelledBy,
   onClose,
   closeOnBackdropClick = true,
-  overlayClassName = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4',
-  panelClassName = 'bg-white rounded-2xl shadow-2xl max-w-lg w-full',
+  overlayClassName = DIALOG_OVERLAY_CLASS,
+  panelClassName = DIALOG_PANEL_CLASS,
   overlayTestId,
+  entrance = 'rise',
   children
 }) => {
+  // The entrance runs once, when the dialog mounts: a re-render, or another
+  // dialog opening over this one, does not replay it. Nothing animates on the
+  // way out — call sites unmount the dialog, and an exit would have to keep a
+  // closed dialog's focus trap alive and give focus back late.
+  const veilRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const veilEntering = useEntrance(veilRef);
+  const panelEntering = useEntrance(panelRef);
   const idRef = useRef<symbol>(Symbol('modal-dialog'));
   // Read through a ref so the effect below can register **once**. Call sites
   // pass inline arrows, so `onClose` has a new identity every render; making
@@ -171,7 +230,8 @@ const ModalDialog: React.FC<ModalDialogProps> = ({
 
   return (
     <div
-      className={overlayClassName}
+      ref={veilRef}
+      className={withClass(overlayClassName, VEIL_ENTRANCE_CLASS, veilEntering)}
       data-testid={overlayTestId}
       onClick={(e) => {
         if (!onClose || !closeOnBackdropClick) return;
@@ -186,7 +246,7 @@ const ModalDialog: React.FC<ModalDialogProps> = ({
         aria-label={labelledBy ? undefined : label}
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        className={panelClassName}
+        className={withClass(panelClassName, PANEL_ENTRANCE_CLASS[entrance], panelEntering)}
       >
         {children}
       </div>

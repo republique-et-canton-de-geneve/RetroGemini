@@ -95,7 +95,7 @@ const ColumnMoveButtons: React.FC<Props> = ({
   // 24px is the WCAG 2.2 minimum target. Stacked, the pair is 48px: the height
   // of the Settings builder's rows, and it sets that of the new-retro editor's.
   const size = orientation === 'vertical' ? 'w-7 h-6' : 'w-7 h-7';
-  const buttonClass = `${size} rounded-sm flex items-center justify-center text-slate-600 hover:bg-slate-100 hover:text-slate-800 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed shrink-0`;
+  const buttonClass = `${size} rounded-md flex items-center justify-center text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed shrink-0`;
 
   return (
     <div className={`flex ${orientation === 'vertical' ? 'flex-col' : 'flex-row'} ${className}`}>
@@ -108,7 +108,7 @@ const ColumnMoveButtons: React.FC<Props> = ({
         title={previousLabel}
         className={buttonClass}
       >
-        <span className="material-symbols-outlined text-lg" aria-hidden="true">{icons.previous}</span>
+        <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">{icons.previous}</span>
       </button>
       <button
         ref={nextRef}
@@ -119,7 +119,7 @@ const ColumnMoveButtons: React.FC<Props> = ({
         title={nextLabel}
         className={buttonClass}
       >
-        <span className="material-symbols-outlined text-lg" aria-hidden="true">{icons.next}</span>
+        <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">{icons.next}</span>
       </button>
       <span className="sr-only" role="status">{announcement}</span>
     </div>

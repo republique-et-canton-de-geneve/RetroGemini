@@ -58,11 +58,11 @@ const ClosePhase: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col h-full p-8 bg-slate-900 text-white overflow-y-auto">
-      <h1 className="text-3xl font-bold mb-2 text-center">{t('phases.close.title')}</h1>
+      <h1 className="text-3xl font-semibold tracking-tight mb-2 text-center">{t('phases.close.title')}</h1>
       <p className="text-slate-300 mb-8 text-center">{t('phases.close.thanks')}</p>
 
       <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 max-w-5xl w-full text-center mx-auto">
-        <h3 className="text-xl font-bold mb-6">{t('phases.close.rotiTitle')}</h3>
+        <h3 className="text-xl font-semibold mb-6">{t('phases.close.rotiTitle')}</h3>
         <div className="flex justify-center space-x-2 mb-8">
           {[1, 2, 3, 4, 5].map((score) => (
             <button
@@ -70,7 +70,11 @@ const ClosePhase: React.FC<Props> = ({
               onClick={() => updateSession((draft) => {
                 draft.roti[currentUser.id] = score;
               })}
-              className={`w-10 h-10 rounded-full font-bold transition ${myRoti === score ? 'bg-retro-primary text-white scale-110' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+              aria-pressed={myRoti === score}
+              // The score chosen takes the brand's fill and a light ring, which
+              // says it apart from the others without colour; it no longer
+              // grows. `rounded-full` stays: the e2e flows find the five by it.
+              className={`w-10 h-10 rounded-full font-mono font-bold transition ${myRoti === score ? 'bg-indigo-600 text-white ring-2 ring-indigo-300 ring-offset-2 ring-offset-slate-800' : 'bg-slate-700 text-slate-200 hover:bg-slate-600 hover:text-white'}`}
             >
               {score}
             </button>
@@ -79,7 +83,7 @@ const ClosePhase: React.FC<Props> = ({
 
         {!session.settings.revealRoti ? (
           <div className="mb-4">
-            <div className="text-slate-300 font-bold mb-4">
+            <div className="text-slate-300 font-semibold tabular-nums mb-4">
               {t('phases.close.membersVoted', { voted: voterCount, total: participantsCount })}
             </div>
             {isFacilitator && (
@@ -89,7 +93,7 @@ const ClosePhase: React.FC<Props> = ({
                     draft.settings.revealRoti = true;
                   })
                 }
-                className="text-indigo-300 hover:text-white font-bold underline"
+                className="text-indigo-300 hover:text-white font-semibold underline rounded-sm"
               >
                 {t('phases.shared.revealResults')}
               </button>
@@ -100,25 +104,24 @@ const ClosePhase: React.FC<Props> = ({
             <div className="flex items-end justify-center h-24 space-x-3 mb-2">
               {histogram.map((count, index) => (
                 <div key={index} className="flex flex-col items-center justify-end h-full">
-                  {count > 0 && <span className="text-xs font-bold mb-1">{count}</span>}
+                  {count > 0 && <span className="text-xs font-mono font-semibold mb-1">{count}</span>}
+                  {/* An empty score keeps a stub in a dark token, not a fade: drawn
+                      as the health check's close draws it (healthCheckLook.test.tsx). */}
                   <div
-                    className="w-8 bg-indigo-500 rounded-t relative transition-all duration-500"
-                    style={{
-                      height: count > 0 ? `${(count / maxVal) * 100}%` : '4px',
-                      opacity: count > 0 ? 1 : 0.2
-                    }}
+                    className={`w-8 rounded-t-md relative motion-safe:transition-all motion-safe:duration-500 ${count > 0 ? 'bg-indigo-500' : 'bg-slate-600'}`}
+                    style={{ height: count > 0 ? `${(count / maxVal) * 100}%` : '4px' }}
                   />
                 </div>
               ))}
             </div>
-            <div className="flex justify-center space-x-3 text-xs text-slate-300 border-t border-slate-700 pt-1">
+            <div className="flex justify-center space-x-3 text-xs font-mono text-slate-300 border-t border-slate-700 pt-1">
               {[1, 2, 3, 4, 5].map((value) => (
                 <div key={value} className="w-8">
                   {value}
                 </div>
               ))}
             </div>
-            <div className="mt-4 text-2xl font-black text-indigo-300">{average} / 5</div>
+            <div className="mt-4 text-2xl font-bold tabular-nums text-indigo-300">{average} / 5</div>
           </div>
         )}
 
@@ -145,11 +148,11 @@ const ClosePhase: React.FC<Props> = ({
 
       <div className="mx-auto">
         {isFacilitator ? (
-          <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">
+          <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-semibold hover:bg-slate-200 transition">
             {t('phases.close.returnToDashboard')}
           </button>
         ) : (
-          <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-bold hover:bg-slate-200">
+          <button onClick={handleExit} className="mt-8 bg-white text-slate-900 px-8 py-3 rounded-lg font-semibold hover:bg-slate-200 transition">
             {t('phases.close.leave')}
           </button>
         )}

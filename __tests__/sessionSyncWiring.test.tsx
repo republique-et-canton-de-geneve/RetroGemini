@@ -211,7 +211,8 @@ const addCard = (text: string) => {
 };
 
 const rate = (value: number) => fireEvent.click(screen.getByRole('button', { name: String(value) }));
-const isSelected = (value: number) => screen.getByRole('button', { name: String(value) }).className.includes('bg-retro-primary');
+// The chosen score says so (aria-pressed), whatever colour draws it.
+const isSelected = (value: number) => screen.getByRole('button', { name: String(value) }).getAttribute('aria-pressed') === 'true';
 
 describe('session sync wiring', () => {
   beforeEach(() => {

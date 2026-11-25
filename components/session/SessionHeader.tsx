@@ -7,7 +7,7 @@ import { SessionSyncChip } from './SessionConnectionStatus';
 import SessionTimer from './SessionTimer';
 import { getRetroPhaseDefaultTimerSeconds } from './retroTips';
 import { DEFAULT_TIMER_SECONDS } from '../../utils/sessionTimer';
-import { avatarColorClasses } from '../../utils/participantColors';
+import ViewerAvatarButton from './ViewerAvatarButton';
 import { isOpenBoard } from '../../utils/openBoard';
 
 interface Props {
@@ -19,7 +19,6 @@ interface Props {
   // Used by the timer alone: its changes go through the session's own write.
   updateSession: (updater: (session: RetroSession) => void) => void;
   localParticipantsPanelCollapsed: boolean;
-  setLocalParticipantsPanelCollapsed: (collapsed: boolean) => void;
   participantsCount: number;
   currentUser: User;
   onInvite: () => void;
@@ -29,6 +28,14 @@ interface Props {
   // Non-null once the server refused the socket join (audit H12): the chip then
   // says "signed out" rather than "reconnecting", which would never resolve.
   joinDeniedReason?: string | null;
+  /** The viewer's picture in this session (`sessionAvatarOf`), or null for initials. */
+  viewerAvatarId?: string | null;
+  /** Opens the avatar picker from the viewer's own avatar. */
+  onOpenAvatarPicker?: () => void;
+  /** True while the one-time avatar hint shows under the header: the viewer's avatar carries its dot. */
+  viewerAvatarMarked?: boolean;
+  /** The viewer's avatar button, which the hint focuses before it opens the picker. */
+  viewerAvatarRef?: React.Ref<HTMLButtonElement>;
 }
 
 const SessionHeader: React.FC<Props> = ({
@@ -39,14 +46,17 @@ const SessionHeader: React.FC<Props> = ({
   setPhase,
   updateSession,
   localParticipantsPanelCollapsed,
-  setLocalParticipantsPanelCollapsed,
   participantsCount,
   currentUser,
   onInvite,
   isRetroTipsOpen,
   onToggleRetroTips,
   isLive = true,
-  joinDeniedReason = null
+  joinDeniedReason = null,
+  viewerAvatarId = null,
+  onOpenAvatarPicker = () => {},
+  viewerAvatarMarked = false,
+  viewerAvatarRef
 }) => {
   const { t, language } = useTranslation();
   // When the bar is narrower than its phases it scrolls, and nothing would
@@ -93,15 +103,19 @@ const SessionHeader: React.FC<Props> = ({
         visible and tappable — the timer is the next element, and a tap meant for
         "back" that lands on it would pause everyone's timer. */}
     <div className="flex items-center h-full min-w-9">
-      <button onClick={handleExit} aria-label={t('phases.header.leave')} className="shrink-0 mr-2 sm:mr-3 text-slate-500 hover:text-slate-700">
-        <span className="material-symbols-outlined">arrow_back</span>
+      <button
+        onClick={handleExit}
+        aria-label={t('phases.header.leave')}
+        className="grid place-items-center shrink-0 w-8 h-8 sm:w-9 sm:h-9 mr-0.5 sm:mr-2 rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+      >
+        <span className="material-symbols-outlined" aria-hidden="true">arrow_back</span>
       </button>
       {board ? (
         <div className="hidden lg:flex h-full items-center min-w-0">
-          <span className="truncate text-sm font-bold text-slate-700" title={session.name}>{session.name}</span>
+          <span className="truncate text-sm font-semibold text-slate-900" title={session.name}>{session.name}</span>
         </div>
       ) : (
-      <div ref={phaseBarRef} className="hidden lg:flex h-full items-center space-x-1 min-w-0 overflow-x-auto [scrollbar-width:none]">
+      <div ref={phaseBarRef} className="hidden lg:flex h-full items-center min-w-0 overflow-x-auto [scrollbar-width:none]">
         {phases.map((phase) => (
           <button
             key={phase}
@@ -110,9 +124,23 @@ const SessionHeader: React.FC<Props> = ({
             // enabled for participants once the session closed, yet the click
             // did nothing: a control that looks live and is not.
             disabled={!isFacilitator}
-            className={`phase-nav-btn h-full shrink-0 whitespace-nowrap px-1 2xl:px-2 text-[10px] font-bold uppercase ${session.phase === phase ? 'active' : 'text-slate-500 disabled:opacity-50'}`}
+            // The phase the session is in says so as a state, not by its fill
+            // alone; the health check's bar says it the same way.
+            aria-current={session.phase === phase ? 'step' : undefined}
+            // Each phase is a pill centred in the bar; the current one is filled
+            // (its classes alone paint it: no rule of index.css styles the pill's
+            // colours, so the contrast tests measure what is drawn). A phase
+            // a participant cannot press is greyer: it is disabled, which the
+            // audit does not hold to the text floor, and stays readable.
+            className={`phase-nav-btn h-8 shrink-0 whitespace-nowrap px-1.5 2xl:px-2.5 text-[13px] leading-none ${
+              session.phase === phase
+                ? 'active bg-indigo-100 text-indigo-700 font-bold'
+                : 'font-medium text-slate-600 enabled:hover:bg-slate-100 enabled:hover:text-slate-900 disabled:text-slate-400'
+            }`}
           >
-            {phaseLabel(phase)}
+            {/* The dictionary holds the names in capitals, which the other
+                screens and the tests read; the bar draws them in mixed case. */}
+            <span className="inline-block lowercase first-letter:uppercase">{phaseLabel(phase)}</span>
           </button>
         ))}
       </div>
@@ -126,7 +154,7 @@ const SessionHeader: React.FC<Props> = ({
       isLive={isLive}
       onUpdate={(mutate) => updateSession((draft) => mutate(draft.settings))}
     />
-    <div className="flex shrink-0 justify-end items-center space-x-1 sm:space-x-3">
+    <div className="flex shrink-0 justify-end items-center gap-1 sm:gap-2">
       <button
         type="button"
         onClick={onToggleRetroTips}
@@ -134,17 +162,18 @@ const SessionHeader: React.FC<Props> = ({
         title={t('phases.tips.title')}
         // The tips panel is a desktop aid; below md the button's width is worth
         // more to the controls that must stay on screen.
-        className={`hidden md:flex items-center rounded-lg border px-2 py-1 transition ${
+        // An amber tile with the bulb; open, it is a shade deeper and framed.
+        className={`hidden md:flex items-center justify-center gap-1 h-9 min-w-9 px-2 rounded-lg transition ${
           isRetroTipsOpen
-            ? 'border-amber-300 bg-amber-100 text-amber-800'
-            : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+            ? 'bg-amber-200 text-amber-900 ring-1 ring-amber-400'
+            : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
         }`}
       >
-        <span className="material-symbols-outlined text-lg">tips_and_updates</span>
+        <span className="material-symbols-outlined text-xl! leading-none" aria-hidden="true">tips_and_updates</span>
         {/* Like the participants chip's caption, the label steps aside while the
             phase bar is on screen (lg to 2xl); the button keeps its icon and
             its accessible name. */}
-        <span className="ml-1 hidden text-xs font-bold 2xl:inline">{t('phases.header.tips')}</span>
+        <span className="hidden text-xs font-semibold 2xl:inline">{t('phases.header.tips')}</span>
       </button>
 
       {/* On the narrowest phones the reassuring "live" chip steps aside; a lost
@@ -152,14 +181,15 @@ const SessionHeader: React.FC<Props> = ({
           decides that itself, since only it knows the sync health. */}
       <SessionSyncChip isLive={isLive} joinDeniedReason={joinDeniedReason} />
 
+      {/* A count, never a control: below lg the panel is not drawn, and from
+          lg the collapsed panel's rail has its own button, which the keyboard
+          reaches and which keeps the focus as it toggles. A click here used to
+          expand the panel from lg and do nothing below it. Both headers draw
+          the same chip (healthCheckLook.test.tsx). */}
       {(localParticipantsPanelCollapsed || window.innerWidth < 1024) && (
-        <div
-          className="flex items-center bg-slate-100 px-1.5 sm:px-3 py-1 rounded-sm cursor-pointer hover:bg-slate-200 transition"
-          onClick={() => setLocalParticipantsPanelCollapsed(false)}
-          title={t('phases.header.expandParticipants')}
-        >
-          <span className="material-symbols-outlined text-lg mr-1 text-slate-600">groups</span>
-          <span className="text-xs font-bold text-slate-700">
+        <div className="flex items-center gap-0.5 sm:gap-1 h-8 rounded-full border border-slate-200 bg-white px-1.5 sm:px-2.5">
+          <span className="material-symbols-outlined text-lg! leading-none text-slate-600" aria-hidden="true">groups</span>
+          <span className="text-xs font-semibold tabular-nums text-slate-700">
             {board
               ? participantsCount
               : session.phase === 'WELCOME'
@@ -170,8 +200,10 @@ const SessionHeader: React.FC<Props> = ({
           </span>
           {/* The caption waits for 2xl: below it the timer shortcuts, the sync
               label and then the phase bar need the room ("ont terminé" is the
-              widest of them), and the count alone keeps the chip legible. */}
-          <span className="text-[10px] text-slate-500 ml-1 hidden 2xl:inline">
+              widest of them), and the count alone keeps the chip legible. It
+              steps out of sight only: read after the number, it says in words
+              what the number counts, at every width (WCAG 2.5.3). */}
+          <span className="text-xs text-slate-500 sr-only 2xl:not-sr-only">
             {board
               ? t('phases.header.progressConnected')
               : session.phase === 'CLOSE' ? t('phases.header.progressVoted') : t('phases.header.progressFinished')}
@@ -180,8 +212,13 @@ const SessionHeader: React.FC<Props> = ({
       )}
 
       {isFacilitator && (
-        <button onClick={onInvite} className="flex items-center text-slate-500 hover:text-retro-primary" title={t('phases.header.invite')} aria-label={t('phases.header.invite')}>
-          <span className="material-symbols-outlined text-xl">qr_code_2</span>
+        <button
+          onClick={onInvite}
+          className="grid place-items-center shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-indigo-700"
+          title={t('phases.header.invite')}
+          aria-label={t('phases.header.invite')}
+        >
+          <span className="material-symbols-outlined" aria-hidden="true">qr_code_2</span>
         </button>
       )}
       {/* The switcher is always inline: guests reach it here without leaving
@@ -191,15 +228,21 @@ const SessionHeader: React.FC<Props> = ({
       <LanguageSwitcher className="shrink-0" />
       {/* The name waits for 2xl: below it the phase bar needs the room, and the
           participants panel names everyone anyway. */}
-      <div className="hidden 2xl:flex flex-col items-end mr-2 min-w-0">
-        <span className="text-[10px] font-bold text-slate-500 uppercase">{t('phases.header.user')}</span>
-        <span className="max-w-32 truncate text-sm font-bold text-slate-700" title={currentUser.name}>{currentUser.name}</span>
+      <div className="hidden 2xl:flex flex-col items-end min-w-0 leading-tight">
+        <span className="text-xs font-medium text-slate-500">{t('phases.header.user')}</span>
+        <span className="max-w-32 truncate text-sm font-semibold text-slate-900" title={currentUser.name}>{currentUser.name}</span>
       </div>
-      {/* The name and initials show from sm up; on a phone their width goes to
-          the controls (the participants panel still names everyone). */}
-      <div className={`w-8 h-8 shrink-0 rounded-full ${avatarColorClasses(currentUser.color)} hidden sm:flex items-center justify-center text-xs font-bold shadow-md`}>
-        {currentUser.name.substring(0, 2).toUpperCase()}
-      </div>
+      {/* The viewer's own avatar opens the avatar picker (AGENTS.md, *Avatars*): at
+          every width for a participant, from 360px for a facilitator, whose
+          header also carries the invite button and play. */}
+      <ViewerAvatarButton
+        user={currentUser}
+        avatarId={viewerAvatarId}
+        onClick={onOpenAvatarPicker}
+        visibilityClass={isFacilitator ? 'hidden min-[360px]:flex' : 'flex'}
+        marked={viewerAvatarMarked}
+        ref={viewerAvatarRef}
+      />
     </div>
   </header>
   );

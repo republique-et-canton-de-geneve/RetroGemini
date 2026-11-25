@@ -33,7 +33,12 @@ interface Props {
   onInvite: () => void;
   /** Facilitator marks a participant as having left the retro (or as returned) */
   onToggleLeft?: (userId: string) => void;
-  getMemberDisplay: (member: User) => { displayName: string; initials: string };
+  // `avatarId`: the picture to draw (`sessionAvatarOf`), absent or null for initials.
+  getMemberDisplay: (member: User) => { displayName: string; initials: string; avatarId?: string | null };
+  /** The viewer's own connection: the panel animates nothing while it is down, nor just after (SessionParticipantsPanel). */
+  isLive?: boolean;
+  /** The server's first roster since the session was last live has been applied (SessionParticipantsPanel). */
+  rosterReceived?: boolean;
 }
 
 const ParticipantsPanel: React.FC<Props> = ({
@@ -48,7 +53,9 @@ const ParticipantsPanel: React.FC<Props> = ({
   onToggleCollapse,
   onInvite,
   onToggleLeft,
-  getMemberDisplay
+  getMemberDisplay,
+  isLive,
+  rosterReceived
 }) => {
   const { t, tp } = useTranslation();
 
@@ -73,7 +80,10 @@ const ParticipantsPanel: React.FC<Props> = ({
         activityUsers={activityUsers}
         typingKind={typingKind}
         memberStatus={() => null}
-        heading={t('phases.participants.connectedTitle', { count: connected.length })}
+        headingKey="phases.participants.connectedTitle"
+        isLive={isLive}
+        rosterReceived={rosterReceived}
+        motionScope={session.phase}
         footer={t('phases.participants.footerConnected')}
         onToggleCollapse={onToggleCollapse}
         onInvite={onInvite}
@@ -195,6 +205,9 @@ const ParticipantsPanel: React.FC<Props> = ({
       memberStatus={memberStatus}
       memberLine={memberLine}
       footer={footer}
+      isLive={isLive}
+      rosterReceived={rosterReceived}
+      motionScope={session.phase}
       onToggleCollapse={onToggleCollapse}
       onInvite={onInvite}
       onToggleLeft={onToggleLeft}

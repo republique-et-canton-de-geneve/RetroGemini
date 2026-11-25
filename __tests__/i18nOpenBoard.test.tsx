@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import Session from '../components/Session';
 import LanguageProvider from '../i18n/LanguageProvider';
+import { LANGUAGE_STORAGE_KEY } from '../i18n/languages';
+import { en, fr } from '../i18n/messages';
+import type { MessageKey } from '../i18n/translate';
 import { RetroSession, Team, User } from '../types';
 
 /**
@@ -20,6 +23,7 @@ vi.mock('../services/dataService', () => ({
     getTeam: vi.fn(() => null),
     updateSession: vi.fn(),
     persistParticipants: vi.fn(),
+    getSessionToken: vi.fn(() => 'token-1'),
   },
 }));
 
@@ -85,9 +89,9 @@ const board = (overrides: Partial<RetroSession> = {}): RetroSession => ({
   ...overrides,
 });
 
-const renderInFrench = (session: RetroSession) =>
+const renderIn = (language: 'en' | 'fr', session: RetroSession) =>
   render(
-    <LanguageProvider initialLanguage="fr">
+    <LanguageProvider initialLanguage={language}>
       <Session
         team={{ id: 'team-1', name: 'Équipe', passwordHash: 'h', members: [facilitator, alice], customTemplates: [], retrospectives: [session], globalActions: [] } as Team}
         sessionId="session-1"
@@ -96,6 +100,8 @@ const renderInFrench = (session: RetroSession) =>
       />
     </LanguageProvider>
   );
+
+const renderInFrench = (session: RetroSession) => renderIn('fr', session);
 
 describe('Open board — in French', () => {
   beforeEach(() => {
@@ -179,5 +185,41 @@ describe('Open board — in French', () => {
     renderInFrench(board({ phase: 'BRAINSTORM' }));
 
     expect(await screen.findByRole('combobox', { name: 'Couleur par\u00a0:' })).toBeTruthy();
+  });
+
+  // A message on screen is stored as what to say, never as the sentence
+  // (AGENTS.md, *Internationalisation*). The assistant's dialog is modal, so
+  // the language reaches it from another tab of the app, which the provider
+  // follows: kept as a sentence, its error stayed in the old language, and a
+  // failed request showed the browser's own words.
+  it.each([
+    ['fr', 'en', 'session.aiGroups.analyzeFailed', () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'ai_error' }) })],
+    ['en', 'fr', 'session.aiGroups.requestFailed', () => Promise.reject(new TypeError('Failed to fetch'))],
+  ] as const)('says the assistant’s failure in the language the reader switches to while it shows (%s to %s, %s)', async (from, to, key, answer) => {
+    global.fetch = vi.fn((url: string) =>
+      String(url).includes('/api/ai/suggest-groups')
+        ? answer()
+        : Promise.resolve({ ok: true, json: () => Promise.resolve({ enabled: String(url).includes('/api/ai-status') }) }),
+    ) as unknown as typeof fetch;
+    const say = (language: 'en' | 'fr', message: MessageKey) => (language === 'fr' ? fr : en)[message];
+    renderIn(from, board({
+      tickets: [
+        { id: 't1', colId: 'todo', text: 'Déploiements', authorId: 'alice', groupId: null, votes: [] },
+        { id: 't2', colId: 'todo', text: 'Revues de code', authorId: 'fac', groupId: null, votes: [] },
+      ],
+    }));
+    fireEvent.click(await screen.findByRole('button', { name: say(from, 'session.board.suggestGroups') }));
+    const dialog = await screen.findByRole('dialog', { name: say(from, 'session.aiGroups.dialogLabel') });
+    expect(await within(dialog).findByText(say(from, key))).toBeTruthy();
+
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: LANGUAGE_STORAGE_KEY, newValue: to }));
+    });
+
+    const switched = screen.getByRole('dialog', { name: say(to, 'session.aiGroups.dialogLabel') });
+    expect(within(switched).getByText(say(to, 'session.aiGroups.errorTitle'))).toBeTruthy();
+    expect(within(switched).getByText(say(to, key))).toBeTruthy();
+    expect(within(switched).queryByText(say(from, key))).toBeNull();
+    expect(within(switched).queryByText(/Failed to fetch/)).toBeNull();
   });
 });

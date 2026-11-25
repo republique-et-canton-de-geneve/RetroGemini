@@ -8,6 +8,7 @@ import {
 } from '../components/session/SessionConnectionStatus';
 import LanguageProvider from '../i18n/LanguageProvider';
 import { syncService, type SyncHealth } from '../services/syncService';
+import { effectivePair } from './helpers/tailwindTheme';
 
 /**
  * Audit H12. A refused `join-denied` used to reuse the offline affordance, so a
@@ -276,5 +277,93 @@ describe('SessionSyncChip while sync is stalled', () => {
     render(<SessionSyncChip isLive joinDeniedReason="unauthenticated" />);
     expect(screen.getByText(/Signed out/i)).toBeTruthy();
     expect(screen.queryByText('Not saving')).toBeNull();
+  });
+});
+
+/**
+ * The look (45.0): every state of the chip is a pill on a tint of its own
+ * hue, every banner a band on a lighter tint with its action as a small
+ * button. What is measured is what is painted: each state's words at 4.5:1,
+ * its icon at 3:1, and no animation that ignores a request for less motion.
+ */
+describe('the chips and banners as painted', () => {
+  const chips = () => [
+    { state: 'live', ui: <SessionSyncChip isLive joinDeniedReason={null} />, label: 'Live', icon: 'wifi' },
+    { state: 'offline', ui: <SessionSyncChip isLive={false} joinDeniedReason={null} />, label: 'Reconnecting…', icon: 'cloud_off' },
+    { state: 'signed out', ui: <SessionSyncChip isLive joinDeniedReason="unauthenticated" />, label: 'Signed out', icon: 'lock' }
+  ];
+  const noBarePulse = (root: HTMLElement) => {
+    const animated = [...root.querySelectorAll('*'), root].filter((el) =>
+      (el.getAttribute('class') ?? '').split(/\s+/).some((token) => token === 'animate-pulse')
+    );
+    expect(animated, 'an animation that ignores prefers-reduced-motion').toEqual([]);
+  };
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(chips().map((chip) => [chip.state, chip] as const))('the %s chip reads on its pill', (_state, chip) => {
+    const { container } = render(chip.ui);
+    const label = screen.getByText(chip.label);
+    const text = effectivePair(label);
+    expect(text.ratio, `${text.fg} on ${text.bg}`).toBeGreaterThanOrEqual(4.5);
+    const icon = screen.getByText(chip.icon);
+    expect(icon).toHaveAttribute('aria-hidden', 'true');
+    expect(effectivePair(icon).ratio).toBeGreaterThanOrEqual(3);
+    expect(label.parentElement!.className).toContain('rounded-full');
+    noBarePulse(container);
+  });
+
+  // Below md the words step out of sight to save room, but the icon is
+  // aria-hidden, so they must stay in the accessibility tree: hidden by
+  // `display: none` the chip said nothing to a screen reader from 400px to md.
+  it.each([...chips(), { state: 'stalled', ui: null, label: 'Not saving', icon: 'sync_problem' }].map(
+    (chip) => [chip.state, chip] as const
+  ))('keeps the %s chip named at every width', (state, chip) => {
+    if (state === 'stalled') {
+      vi.spyOn(syncService, 'getSyncHealth').mockReturnValue('stalled');
+      vi.spyOn(syncService, 'onSyncHealth').mockImplementation(() => () => {});
+    }
+    render(chip.ui ?? <SessionSyncChip isLive joinDeniedReason={null} />);
+    const label = screen.getByText(chip.label);
+    const tokens = label.className.split(/\s+/);
+    expect(tokens).not.toContain('hidden');
+    expect(tokens).toEqual(expect.arrayContaining(['sr-only', 'md:not-sr-only']));
+    // Nothing above it takes the words out of the tree either.
+    for (let el: HTMLElement | null = label; el; el = el.parentElement) {
+      expect(el).not.toHaveAttribute('aria-hidden', 'true');
+    }
+  });
+
+  it('keeps the live chip still at rest', () => {
+    // A pulse that never stops says nothing new; "Live" is the state where
+    // nothing is happening.
+    const { container } = render(<SessionSyncChip isLive joinDeniedReason={null} />);
+    expect(container.querySelector('[class*="animate-"]')).toBeNull();
+  });
+
+  it('reads the stalled chip on its pill too', () => {
+    vi.spyOn(syncService, 'getSyncHealth').mockReturnValue('stalled');
+    vi.spyOn(syncService, 'onSyncHealth').mockImplementation(() => () => {});
+    render(<SessionSyncChip isLive joinDeniedReason={null} />);
+    const pair = effectivePair(screen.getByText('Not saving'));
+    expect(pair.ratio, `${pair.fg} on ${pair.bg}`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('writes both banners, and their action, in colours that read on them', () => {
+    const offline = render(<SessionConnectionBanner isLive={false} joinDeniedReason={null} onReturnToLogin={() => undefined} />);
+    const status = screen.getByRole('status');
+    const words = effectivePair(screen.getByText(/Nothing you already submitted is lost/i));
+    expect(words.ratio, `${words.fg} on ${words.bg}`).toBeGreaterThanOrEqual(4.5);
+    noBarePulse(status);
+    offline.unmount();
+
+    render(<SessionConnectionBanner isLive joinDeniedReason="unauthenticated" onReturnToLogin={() => undefined} />);
+    const alert = screen.getByRole('alert');
+    // The header-fit e2e finds the banner by its icon's ligature.
+    expect(alert.textContent).toContain('lock');
+    const action = effectivePair(screen.getByRole('button', { name: 'Log in again' }));
+    expect(action.ratio, `${action.fg} on ${action.bg}`).toBeGreaterThanOrEqual(4.5);
+    const copy = effectivePair(screen.getByText(/expired/i));
+    expect(copy.ratio, `${copy.fg} on ${copy.bg}`).toBeGreaterThanOrEqual(4.5);
   });
 });

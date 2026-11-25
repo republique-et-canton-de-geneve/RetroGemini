@@ -172,7 +172,7 @@ const JiraParentField: React.FC<Props> = ({
   const fieldError = keyError ?? (sendError?.on === 'key' ? sendError.notice : null);
   const typeError = sendError?.on === 'type' ? sendError.notice : null;
   const choosingType = needsTypeChoice(value, targetIssueTypeId) && !!checkedHere && checkedHere.subtaskTypes.length > 0;
-  const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 aria-invalid:border-red-500';
+  const inputClass = 'w-full rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-600 focus:outline-hidden focus:ring-4 focus:ring-indigo-600/15 aria-invalid:border-rose-600';
   const describedBy = [fieldError ? ids.error : null, ids.hint, ids.status].filter(Boolean).join(' ');
 
   return (
@@ -204,13 +204,13 @@ const JiraParentField: React.FC<Props> = ({
           }}
           className={inputClass}
         />
-        {fieldError && <p id={ids.error} className="text-xs text-red-700">{noticeText(fieldError, t)}</p>}
+        {fieldError && <p id={ids.error} className="text-xs text-rose-700">{noticeText(fieldError, t)}</p>}
         <p id={ids.hint} className="text-xs text-slate-600">
           {mode === 'parent'
             ? t('jira.batch.parent.hintParentMode', { parent: targetParentKey ?? '' })
             : t('jira.batch.parent.hintSessionParent')}
         </p>
-        <p id={ids.status} role="status" className={shownCheck?.phase === 'error' ? 'text-xs text-red-700' : 'text-xs text-slate-600'}>
+        <p id={ids.status} role="status" className={shownCheck?.phase === 'error' ? 'text-xs text-rose-700' : 'text-xs text-slate-600'}>
           {status}
         </p>
       </div>
@@ -236,7 +236,7 @@ const JiraParentField: React.FC<Props> = ({
             <option value="">{t('jira.target.chooseType')}</option>
             {checkedHere.subtaskTypes.map(type => <option key={type.id} value={type.id}>{type.name}</option>)}
           </select>
-          {typeError && <p id={ids.typeError} className="text-xs text-red-700">{noticeText(typeError, t)}</p>}
+          {typeError && <p id={ids.typeError} className="text-xs text-rose-700">{noticeText(typeError, t)}</p>}
         </div>
       )}
 
@@ -246,7 +246,7 @@ const JiraParentField: React.FC<Props> = ({
             <input
               id={ids.replace}
               type="checkbox"
-              className="mt-0.5"
+              className="mt-0.5 accent-indigo-600"
               checked={replace.checked}
               onChange={(e) => replace.onChange(e.target.checked)}
               aria-describedby={ids.replaceList}

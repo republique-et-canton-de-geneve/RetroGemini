@@ -18,6 +18,8 @@ export interface NavigatorColumn {
   title: string;
   /** `lang` of a title the app wrote, as the column header marks it. */
   lang?: string;
+  /** The ink of the column's hue (utils/cardTones.ts), for its dot; none for a column with no hue. */
+  ink?: string | null;
 }
 
 interface Props {
@@ -44,10 +46,12 @@ const BoardColumnNavigator: React.FC<Props> = ({
   const shown = columns.filter((column) => visible.has(column.id)).length;
 
   const arrowClass = (enabled: boolean) =>
-    `shrink-0 w-8 h-8 flex items-center justify-center rounded-full border transition ${
+    // Off, its arrow is still drawn at 3:1 or more, a control that says where
+    // the board ends: slate-500 on its white button measures 5.41:1.
+    `shrink-0 w-8 h-8 flex items-center justify-center rounded-full border transition-colors ${
       enabled
-        ? 'border-indigo-300 bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs'
-        : 'border-slate-200 bg-white text-slate-400 cursor-not-allowed'
+        ? 'border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs'
+        : 'border-slate-200 bg-white text-slate-500 cursor-not-allowed'
     }`;
 
   return (
@@ -64,7 +68,7 @@ const BoardColumnNavigator: React.FC<Props> = ({
         title={t('session.board.previousColumns')}
         className={arrowClass(canScrollLeft)}
       >
-        <span className="material-symbols-outlined text-lg" aria-hidden="true">chevron_left</span>
+        <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">chevron_left</span>
       </button>
       <ul className="flex items-center gap-1.5 min-w-0 overflow-x-auto [scrollbar-width:none] py-0.5">
         {columns.map((column, index) => {
@@ -74,9 +78,9 @@ const BoardColumnNavigator: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={() => onReveal(column.id)}
-                className={`flex items-center gap-1 max-w-48 px-2.5 py-1 rounded-full border text-xs font-bold transition ${
+                className={`flex items-center gap-1 max-w-48 px-2.5 py-1 rounded-full border text-xs font-semibold transition-colors ${
                   inView
-                    ? 'border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100'
+                    ? 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50'
                     : 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
                 }`}
                 data-testid={`board-column-chip-${column.id}`}
@@ -84,12 +88,16 @@ const BoardColumnNavigator: React.FC<Props> = ({
               >
                 {/* The spaces are for the accessible name ("5. Start Doing
                     (off screen)"); a flex row renders none of them. */}
+                {/* The column's hue, as its cards and its head show it. */}
+                {column.ink && (
+                  <span className="w-2 h-2 shrink-0 rounded-full" style={{ backgroundColor: column.ink }} aria-hidden="true" />
+                )}
                 <span className="tabular-nums">{index + 1}.</span>{' '}
                 <span className="truncate" lang={column.lang}>{column.title}</span>
                 {!inView && (
                   <>
                     {' '}
-                    <span className="material-symbols-outlined text-sm" aria-hidden="true">visibility_off</span>
+                    <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">visibility_off</span>
                     <span className="sr-only">{` ${t('session.board.columnOffScreen')}`}</span>
                   </>
                 )}
@@ -106,7 +114,7 @@ const BoardColumnNavigator: React.FC<Props> = ({
         title={t('session.board.nextColumns')}
         className={arrowClass(canScrollRight)}
       >
-        <span className="material-symbols-outlined text-lg" aria-hidden="true">chevron_right</span>
+        <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">chevron_right</span>
       </button>
       <span className="ml-auto shrink-0 text-xs text-slate-600 whitespace-nowrap hidden sm:inline">
         {t('session.board.columnsInView', { shown, total: columns.length })}

@@ -606,8 +606,12 @@ describe('the super-admin console in French', () => {
     expect(screen.getByText(`${localizeDecimal('1.5', FR_LOCALE)} Ko`)).toBeTruthy();
     expect(screen.getByText('512 o')).toBeTruthy();
     expect(screen.getByText(new Date('2026-09-01T06:00:00.000Z').toLocaleString(FR_LOCALE))).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: 'Télécharger la sauvegarde' })).toHaveLength(3);
-    expect(screen.getAllByRole('button', { name: 'Restaurer la sauvegarde' })).toHaveLength(3);
+    // One per row. Counted in the table: the whole-store download above the
+    // tabs says the same words in French, now that its icon is not read as
+    // part of its name.
+    const backupTable = screen.getByRole('table');
+    expect(within(backupTable).getAllByRole('button', { name: 'Télécharger la sauvegarde' })).toHaveLength(3);
+    expect(within(backupTable).getAllByRole('button', { name: 'Restaurer la sauvegarde' })).toHaveLength(3);
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Supprimer la sauvegarde' })[0]);
     expect(confirmSpy).toHaveBeenCalledWith('Supprimer la sauvegarde «\u00a0Démarrage du serveur\u00a0»\u202f?');

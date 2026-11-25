@@ -378,7 +378,7 @@ const JiraBatchDialog: React.FC<Props> = ({
     <ModalDialog
       labelledBy={ids.title}
       onClose={busy ? undefined : onClose}
-      panelClassName="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+      panelClassName="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
     >
       <div className="flex flex-col gap-4 p-6">
         <h2 id={ids.title} className="text-lg font-bold text-slate-800">{t('jira.batch.title')}</h2>
@@ -440,7 +440,7 @@ const JiraBatchDialog: React.FC<Props> = ({
                   <JiraTargetFields teamId={teamId} value={draft} onChange={setDraft} idPrefix={`${baseId}-override`} />
                 </fieldset>
               )}
-              {targetError && <p role="alert" className="text-xs text-red-700">{noticeText(targetError, t)}</p>}
+              {targetError && <p role="alert" className="text-xs text-rose-700">{noticeText(targetError, t)}</p>}
             </section>
 
             {subtaskMode && (
@@ -595,7 +595,7 @@ const JiraBatchDialog: React.FC<Props> = ({
               ref={closeRef}
               type="button"
               onClick={onClose}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 btn-brand-glow"
             >
               {t('jira.batch.close')}
             </button>
@@ -605,7 +605,7 @@ const JiraBatchDialog: React.FC<Props> = ({
                 type="button"
                 onClick={onClose}
                 disabled={busy}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {t('jira.batch.cancel')}
               </button>
@@ -613,7 +613,7 @@ const JiraBatchDialog: React.FC<Props> = ({
                 type="button"
                 onClick={() => { void send(); }}
                 aria-disabled={busy ? true : undefined}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 aria-disabled:cursor-wait aria-disabled:opacity-70"
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 btn-brand-glow aria-disabled:cursor-wait aria-disabled:opacity-70"
               >
                 {busy ? t('jira.creating') : force ? t('jira.action.createAnyway') : tp('jira.batch.confirm', issueCount)}
               </button>

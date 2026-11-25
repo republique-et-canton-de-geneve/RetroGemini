@@ -13,7 +13,6 @@ const healthCheck: Record<keyof typeof en, string> = {
   'healthCheck.comment.ownName': '{name} (vous)',
 
   'healthCheck.header.leave': 'Quitter le bilan de santé',
-  'healthCheck.header.expandParticipants': 'Cliquer pour déployer le panneau des participants',
   'healthCheck.header.finishedLabel': 'ont terminé',
   'healthCheck.header.votedLabel': 'ont voté',
   'healthCheck.header.participantsLabel': 'participants',

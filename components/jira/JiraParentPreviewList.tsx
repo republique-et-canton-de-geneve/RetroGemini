@@ -126,7 +126,7 @@ const JiraParentPreviewList: React.FC<Props> = ({
         <label className="inline-flex items-start gap-2 text-sm text-slate-700">
           <input
             type="checkbox"
-            className="mt-0.5"
+            className="mt-0.5 accent-indigo-600"
             checked={forceParent}
             onChange={(e) => onForceParentChange(e.target.checked)}
           />

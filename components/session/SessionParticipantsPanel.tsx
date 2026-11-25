@@ -3,8 +3,11 @@ import { useTranslation } from '../../i18n/I18nContext';
 import { MessageKey, Translator } from '../../i18n/translate';
 import { ParticipantActivity, SessionInvitee, User } from '../../types';
 import { pendingInvitees as selectPendingInvitees } from './sessionInvitees';
-import { avatarColorClasses, DEPARTED_AVATAR_CLASSES, participantColorClass } from '../../utils/participantColors';
+import { avatarColorClasses, DEPARTED_AVATAR_CLASSES, participantColorClass, participantToneHex } from '../../utils/participantColors';
+import Avatar from '../common/Avatar';
 import { joinNames, splitTypingNames, typingMembers } from '../../utils/typingNow';
+import { usePanelMotion } from './usePanelMotion';
+import { motionAllowed } from '../common/motion/effects';
 
 /**
  * The participants panel of every live session — a retrospective or a health
@@ -66,13 +69,29 @@ interface Props {
   memberLine?: (member: User) => ParticipantRowLine | null;
   /** The progress line under the roster. */
   footer: React.ReactNode;
-  /** The panel's title, when "Participants (n)" is not what the list is. */
-  heading?: string;
+  /** The panel's title, with `{count}` for the people listed who have not left, when "Participants (n)" is not what the list is. */
+  headingKey?: MessageKey;
+  /**
+   * The viewer's own connection. Nothing animates while it is down, nor for
+   * three seconds after it comes back (every roster is delivered again then).
+   * Omit for a panel that counts as live.
+   */
+  isLive?: boolean;
+  /**
+   * The server's first roster since the session was last live has been
+   * applied: until then the rows come from the cached session, or from before
+   * the outage, and nothing animates, and the quiet seconds open when it
+   * lands. Omit for a panel that counts as ready from its mount.
+   */
+  rosterReceived?: boolean;
+  /** Changes when a change of the whole panel is not news: the phase. Omit for none. */
+  motionScope?: string;
   onToggleCollapse: () => void;
   onInvite: () => void;
   /** Facilitator marks a participant as having left (or as returned). */
   onToggleLeft?: (userId: string) => void;
-  getMemberDisplay: (member: User) => { displayName: string; initials: string };
+  // `avatarId`: the picture to draw (`sessionAvatarOf`), absent or null for initials.
+  getMemberDisplay: (member: User) => { displayName: string; initials: string; avatarId?: string | null };
 }
 
 // Chosen by comparison, never looked up in an object: an unchecked value
@@ -107,13 +126,13 @@ const TypingIndicator: React.FC<{ activity: ParticipantActivity }> = ({ activity
   const { t } = useTranslation();
   const label = t(activityLabelKey(activity));
   return (
-    <div className="flex items-center text-[11px] leading-4 font-semibold text-retro-primary min-w-0" title={label}>
+    <div className="flex items-center text-xs leading-4 font-semibold text-indigo-700 min-w-0" title={label}>
       <span className="material-symbols-outlined text-sm! leading-none mr-1 shrink-0" aria-hidden="true">{activityIcon(activity)}</span>
       <span className="truncate">{label}</span>
-      <span className="flex items-center ml-1 space-x-0.5 shrink-0" aria-hidden="true">
-        <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '0ms' }} />
-        <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '150ms' }} />
-        <span className="typing-dot w-1 h-1 rounded-full bg-retro-primary" style={{ animationDelay: '300ms' }} />
+      <span className="flex items-center ml-1.5 gap-0.5 shrink-0" aria-hidden="true">
+        <span className="typing-dot w-1 h-1 rounded-full bg-indigo-600" style={{ animationDelay: '0ms' }} />
+        <span className="typing-dot w-1 h-1 rounded-full bg-indigo-600" style={{ animationDelay: '150ms' }} />
+        <span className="typing-dot w-1 h-1 rounded-full bg-indigo-600" style={{ animationDelay: '300ms' }} />
       </span>
     </div>
   );
@@ -126,16 +145,16 @@ const TypingIndicator: React.FC<{ activity: ParticipantActivity }> = ({ activity
 // collapse into a "+N" chip; the exact total is always available on hover.
 const MAX_DOTS = 9;
 
-// One height whatever the count (10px): the 'no tickets' line used to be 15px
-// against the dots' 8px, so a first card shrank its author's row by 7px and
-// moved every row below it.
+// One height whatever the count (12px, the 12px words' line): the 'no tickets'
+// line used to be 15px against the dots' 8px, so a first card shrank its
+// author's row by 7px and moved every row below it.
 const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ count, colorClass }) => {
   const { t, tp } = useTranslation();
   if (count <= 0) {
     return (
-      <div className="flex items-center gap-1.5 mt-1.5 min-h-2.5 text-slate-600" title={t('phases.participants.noTicketsTitle')}>
-        <span className="w-2 h-2 rounded-full border border-dashed border-slate-300 shrink-0" />
-        <span className="text-[10px] leading-none font-medium tracking-wide">{t('phases.participants.noTickets')}</span>
+      <div className="flex items-center gap-1.5 mt-1 min-h-3 text-slate-600" title={t('phases.participants.noTicketsTitle')}>
+        <span className="w-2 h-2 rounded-full border border-dashed border-slate-400 shrink-0" aria-hidden="true" />
+        <span className="text-xs leading-none">{t('phases.participants.noTickets')}</span>
       </div>
     );
   }
@@ -144,29 +163,30 @@ const ContributionDots: React.FC<{ count: number; colorClass: string }> = ({ cou
   const hidden = count - visibleDots;
   return (
     <div
-      className="flex items-center gap-1 mt-1.5 min-h-2.5"
+      className="flex items-center gap-1 mt-1 min-h-3"
       title={tp('phases.participants.ticketsAdded', count)}
     >
       {Array.from({ length: visibleDots }).map((_, index) => (
         <span key={index} className={`w-2 h-2 rounded-full shrink-0 ${colorClass}`} />
       ))}
       {overflowing && (
-        <span className="text-[10px] font-bold text-slate-600 leading-none ml-0.5 shrink-0">+{hidden}</span>
+        <span className="text-xs font-semibold text-slate-600 leading-none ml-0.5 shrink-0 tabular-nums">+{hidden}</span>
       )}
     </div>
   );
 };
 
 // Every status is announced by what it means, never by the icon font's ligature:
-// a screen reader would otherwise read "check_circle". The check is the only sign
-// on the row that its person is done, so it clears 1.4.11's 3:1 on white and on
-// the reader's indigo-50 row: emerald-700 (strong) and emerald-600 (soft), where
-// emerald-500 and -400 measured 1.73 to 2.46:1 (avatarInitialsContrast.test.tsx).
-const RowStatus: React.FC<{ status: ParticipantRowStatus }> = ({ status }) => {
+// a screen reader would otherwise read "check". The check is the only sign on
+// the row that its person is done: a green disc whose edge clears 1.4.11's 3:1
+// on white and on the reader's indigo-100 row, emerald-700 (strong) and
+// emerald-600 (soft), the white tick on it too (avatarInitialsContrast.test.tsx).
+// `popping` springs it in when its person just finished (usePanelMotion).
+const RowStatus: React.FC<{ status: ParticipantRowStatus; popping?: boolean }> = ({ status, popping = false }) => {
   switch (status.kind) {
     case 'progress':
       return (
-        <span className="text-[11px] font-bold text-slate-600 ml-2 shrink-0 self-start leading-5" title={status.title}>
+        <span className="text-xs font-semibold text-slate-600 shrink-0 self-start leading-5 tabular-nums" title={status.title}>
           {status.done}/{status.total}
         </span>
       );
@@ -175,10 +195,11 @@ const RowStatus: React.FC<{ status: ParticipantRowStatus }> = ({ status }) => {
         <span
           role="img"
           aria-label={status.title}
-          className={`material-symbols-outlined text-lg ml-2 shrink-0 self-start ${status.tone === 'strong' ? 'text-emerald-700' : 'text-emerald-600'}`}
+          data-row-check={status.tone}
+          className={`w-5 h-5 mt-0.5 shrink-0 self-start rounded-full grid place-items-center text-white ${status.tone === 'strong' ? 'bg-emerald-700' : 'bg-emerald-600'} ${popping ? 'fx-pop' : ''}`}
           title={status.title}
         >
-          check_circle
+          <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">check</span>
         </span>
       );
     default: {
@@ -192,8 +213,8 @@ const RowStatus: React.FC<{ status: ParticipantRowStatus }> = ({ status }) => {
 
 // Words in place of the role, at the role line's height, so the row keeps its
 // size when the line goes back to the role. Plain text with no role, aria-label
-// or title: the words are its name, and nothing in it needs a hover. It paints
-// its own background, so it reads the same on the current user's indigo row.
+// or title: the words are its name, and nothing in it needs a hover. In the
+// brand's ink, measured on white and on the reader's own indigo-100 row.
 const RowLine: React.FC<{ line: ParticipantRowLine }> = ({ line }) => {
   switch (line.kind) {
     case 'votesLeft':
@@ -201,7 +222,7 @@ const RowLine: React.FC<{ line: ParticipantRowLine }> = ({ line }) => {
         <div className="flex min-w-0">
           <span
             data-testid="votes-left"
-            className="inline-flex min-w-0 max-w-full items-center gap-0.5 rounded-full bg-indigo-50 px-1 text-[11px] font-bold leading-4 text-indigo-700 ring-1 ring-inset ring-indigo-200 tabular-nums"
+            className="inline-flex min-w-0 max-w-full items-center gap-1 text-xs font-semibold leading-4 text-indigo-700 tabular-nums"
           >
             <span className="material-symbols-outlined shrink-0 text-xs! leading-none" aria-hidden="true">how_to_vote</span>
             <span className="min-w-0 truncate">{line.label}</span>
@@ -233,7 +254,10 @@ const SessionParticipantsPanel: React.FC<Props> = ({
   memberStatus,
   memberLine,
   footer,
-  heading,
+  headingKey = 'phases.participants.title',
+  isLive = true,
+  rosterReceived = true,
+  motionScope,
   onToggleCollapse,
   onInvite,
   onToggleLeft,
@@ -279,25 +303,50 @@ const SessionParticipantsPanel: React.FC<Props> = ({
     };
   })();
 
+  // What just happened, for the motion (usePanelMotion): who came online, who
+  // just finished, and the title's count. Read from the same lists the rows are
+  // drawn from, so an effect never names a row that is not there.
+  const statusOf = new Map(orderedParticipants.map((member) => [member.id, leftSet.has(member.id) ? null : memberStatus(member)]));
+  const motion = usePanelMotion({
+    presentIds: participants.filter((p) => connectedUsers.has(p.id)).map((p) => p.id),
+    activeIds: activeParticipants.map((p) => p.id),
+    checkedIds: activeParticipants.filter((p) => statusOf.get(p.id)?.kind === 'check').map((p) => p.id),
+    count: activeParticipants.length,
+    isCollapsed,
+    isLive,
+    ready: rosterReceived,
+    scope: motionScope,
+    currentUserId: currentUser.id,
+  });
+  const collapseLabel = isCollapsed ? t('phases.participants.expand') : t('phases.participants.collapse');
+
   return (
     <div
       data-testid="participants-panel"
-      className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex transition-all ${isCollapsed ? 'w-12' : 'w-64'}`}
+      className={`bg-white border-l border-slate-200 flex flex-col shrink-0 hidden lg:flex motion-safe:transition-[width] motion-safe:duration-200 ${isCollapsed ? 'w-12' : 'w-64'}`}
     >
-      <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+      <div className={`border-b border-slate-200 flex items-center py-3 ${isCollapsed ? 'justify-center px-2' : 'justify-between gap-2 pl-4 pr-2.5'}`}>
         {!isCollapsed && (
-          <h3 className="text-sm font-bold text-slate-700 flex items-center">
-            <span className="material-symbols-outlined mr-2 text-lg" aria-hidden="true">groups</span>
-            {heading ?? t('phases.participants.title', { count: activeParticipants.length })}
+          <h3 className="min-w-0 text-sm font-semibold text-slate-900 flex items-center gap-2">
+            <span className="material-symbols-outlined shrink-0 text-xl! leading-none text-slate-600" aria-hidden="true">groups</span>
+            {/* The whole title bumps, from its left edge, when its count changes:
+                the number is inside one translated sentence, and tests and
+                people find the panel by that sentence. Keyed, so a second
+                change restarts it. It wraps rather than cuts: cut, "Connectés en ce
+                moment (3)" lost its count. */}
+            <span key={motion.bump} className={`min-w-0 inline-block origin-left leading-5 tabular-nums ${motion.bump ? 'fx-bump' : ''}`}>
+              {t(headingKey, { count: activeParticipants.length })}
+            </span>
           </h3>
         )}
         <button
+          type="button"
           onClick={onToggleCollapse}
-          className="text-slate-500 hover:text-slate-700 transition"
-          title={isCollapsed ? t('phases.participants.expand') : t('phases.participants.collapse')}
-          aria-label={isCollapsed ? t('phases.participants.expand') : t('phases.participants.collapse')}
+          className="shrink-0 w-8 h-8 grid place-items-center rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+          title={collapseLabel}
+          aria-label={collapseLabel}
         >
-          <span className="material-symbols-outlined text-lg" aria-hidden="true">
+          <span className="material-symbols-outlined text-xl! leading-none" aria-hidden="true">
             {isCollapsed ? 'chevron_left' : 'chevron_right'}
           </span>
         </button>
@@ -310,10 +359,10 @@ const SessionParticipantsPanel: React.FC<Props> = ({
           role="img"
           aria-label={typingCount}
           title={typingCount}
-          className="flex flex-col items-center gap-0.5 py-2 text-indigo-700"
+          className="flex flex-col items-center gap-0.5 py-2.5 text-indigo-700"
         >
           <span className="material-symbols-outlined text-base! leading-none" aria-hidden="true">{activityIcon(typingKind)}</span>
-          <span className="text-xs font-bold leading-4 tabular-nums">{typists.length}</span>
+          <span className="font-mono text-xs font-semibold leading-4 tabular-nums">{typists.length}</span>
         </div>
       )}
       {!isCollapsed && (
@@ -325,9 +374,16 @@ const SessionParticipantsPanel: React.FC<Props> = ({
               in English (review of 43.0).
               Not a live region: other people's typing changes too often to be announced. */}
           {typingKind && typingLine && (
-            <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-4 py-2">
-              <p className="flex items-start gap-1.5 text-xs leading-4">
-                <span className="material-symbols-outlined shrink-0 text-base! leading-none text-indigo-700" aria-hidden="true">{activityIcon(typingKind)}</span>
+            <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-2.5">
+              <p className="flex items-start gap-2 text-xs leading-4">
+                {/* The pencil moves while someone writes (fx-write), and only then,
+                    and never for a reader who asked for less motion (motionAllowed). */}
+                <span
+                  className={`material-symbols-outlined shrink-0 text-base! leading-none ${typists.length > 0 ? `text-indigo-700${motionAllowed() ? ' fx-write' : ''}` : 'text-slate-500'}`}
+                  aria-hidden="true"
+                >
+                  {activityIcon(typingKind)}
+                </span>
                 <span
                   data-testid="typing-now"
                   title={typingLine.title}
@@ -338,32 +394,44 @@ const SessionParticipantsPanel: React.FC<Props> = ({
               </p>
             </div>
           )}
-          <div className="grow overflow-y-auto p-3">
+          {/* No horizontal scroll: an arriving row slides in from 18px to the right. */}
+          <div className="grow overflow-y-auto overflow-x-hidden p-2">
             {orderedParticipants.map((member) => {
-              const { displayName, initials } = getMemberDisplay(member);
+              const { displayName, initials, avatarId } = getMemberDisplay(member);
               const hasLeft = leftSet.has(member.id);
               const isCurrentUser = member.id === currentUser.id;
               const isOnline = connectedUsers.has(member.id);
-              const status = hasLeft ? null : memberStatus(member);
+              const status = statusOf.get(member.id) ?? null;
               const line = hasLeft ? null : memberLine?.(member) ?? null;
+              const arriving = motion.arriving.has(member.id);
               return (
                 <div
                   key={member.id}
                   data-testid="participant-row"
                   data-participant-left={hasLeft ? 'true' : undefined}
-                  className={`flex items-center p-2 rounded-lg mb-1 group/row ${isCurrentUser ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}
+                  // Relative and isolated so an arrival's wash (fx-person-in::before,
+                  // in the person's own tone) sits behind the row's content. An
+                  // arrival moves the row sideways only: its y and height are
+                  // measured (e2e/retro-full-flow.spec.ts).
+                  className={`relative isolate flex items-center gap-3 px-2.5 py-2 rounded-xl mb-0.5 group/row ${isCurrentUser ? 'bg-indigo-100' : 'hover:bg-slate-50'} ${arriving ? 'fx-person-in' : ''}`}
+                  style={arriving ? ({ '--av-bg': participantToneHex(member.color).bg } as React.CSSProperties) : undefined}
                 >
-                  {/* A departed participant's avatar turns neutral grey; the
-                      "Left the session" chip says why. Nothing here is faded:
+                  {/* A departed participant's avatar turns neutral grey, as
+                      initials, never their picture; the "Left the session"
+                      chip says why. Nothing here is faded:
                       fading the row, then the avatar, each put text below
                       4.5:1 (utils/participantColors.ts). */}
-                  <div className="relative mr-3 shrink-0">
-                    <div className={`w-8 h-8 rounded-full ${hasLeft ? DEPARTED_AVATAR_CLASSES : avatarColorClasses(member.color)} flex items-center justify-center text-xs font-bold`}>
-                      {initials}
-                    </div>
+                  <div className="relative shrink-0">
+                    <span className={`block rounded-full ${arriving ? 'fx-pop' : ''}`}>
+                      <Avatar colorClasses={hasLeft ? DEPARTED_AVATAR_CLASSES : avatarColorClasses(member.color)} initials={initials} size={36} avatarId={hasLeft ? null : avatarId} />
+                    </span>
+                    {/* Ringed in the row's own surface, so it reads as a dot on the avatar's edge.
+                        A picture has no disc and reaches its box's edge, so the dot
+                        sits further out there, on the corner, rather than over the art. */}
                     {isOnline && !hasLeft && (
                       <div
-                        className="absolute -top-0.5 -left-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white"
+                        data-presence-dot
+                        className={`absolute ${avatarId ? '-bottom-1 -right-1.5' : '-bottom-0.5 -right-0.5'} w-3 h-3 rounded-full bg-emerald-600 border-2 ${isCurrentUser ? 'border-indigo-100' : 'border-white'} ${arriving ? 'fx-halo' : ''}`}
                         title={t('phases.participants.online')}
                       >
                         <span className="sr-only">{t('phases.participants.online')}</span>
@@ -371,16 +439,16 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                     )}
                   </div>
                   <div className="grow min-w-0">
-                    <div className={`text-sm font-medium truncate ${isCurrentUser ? 'text-indigo-700' : hasLeft ? 'text-slate-500' : 'text-slate-700'}`}>
+                    <div className={`text-sm font-semibold leading-5 truncate ${hasLeft ? 'text-slate-500' : 'text-slate-900'}`}>
                       {displayName}
-                      {isCurrentUser && <span className="text-xs text-indigo-600 ml-1">{t('phases.participants.you')}</span>}
+                      {isCurrentUser && <span className="text-xs font-normal text-slate-600 ml-1">{t('phases.participants.you')}</span>}
                     </div>
                     {hasLeft ? (
                       <div
-                        className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-full px-1.5 py-0.5 mt-0.5"
+                        className="inline-flex items-center gap-1 text-xs font-semibold leading-4 text-slate-700 bg-slate-100 border border-slate-200 rounded-full px-2 mt-0.5"
                         title={t('phases.participants.leftTitle')}
                       >
-                        <span className="material-symbols-outlined text-xs leading-none" aria-hidden="true">logout</span>
+                        <span className="material-symbols-outlined text-xs! leading-none" aria-hidden="true">logout</span>
                         {t('phases.participants.left')}
                       </div>
                     ) : line ? (
@@ -388,7 +456,7 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                     ) : typingKind && typistIds.has(member.id) ? (
                       <TypingIndicator activity={typingKind} />
                     ) : (
-                      <div className="text-xs text-slate-600 capitalize">{roleLabel(member.role, t)}</div>
+                      <div className="text-xs leading-4 text-slate-600 capitalize">{roleLabel(member.role, t)}</div>
                     )}
                     {contributionCounts && !hasLeft && (
                       <ContributionDots count={contributionCounts[member.id] || 0} colorClass={participantColorClass(member.color)} />
@@ -401,10 +469,10 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                       // Hidden until hover only where hovering exists: a touch
                       // screen wide enough to show the panel (a tablet) has no
                       // hover, and an invisible control there can still be tapped.
-                      className={`ml-2 shrink-0 self-start rounded p-1 min-w-6 min-h-6 transition ${
+                      className={`shrink-0 self-start rounded-md p-0.5 min-w-6 min-h-6 grid place-items-center transition hover:bg-white focus-visible:outline-2 focus-visible:outline-indigo-600 ${
                         hasLeft
-                          ? 'text-slate-500 hover:text-emerald-700'
-                          : 'text-slate-500 hover:text-amber-600 [@media(hover:hover)]:opacity-0 group-hover/row:opacity-100 focus:opacity-100'
+                          ? 'text-slate-600 hover:text-emerald-700'
+                          : 'text-slate-600 hover:text-amber-700 [@media(hover:hover)]:opacity-0 group-hover/row:opacity-100 focus:opacity-100'
                       }`}
                       title={hasLeft
                         ? t('phases.participants.markReturned', { name: displayName })
@@ -413,38 +481,38 @@ const SessionParticipantsPanel: React.FC<Props> = ({
                         ? t('phases.participants.markReturned', { name: displayName })
                         : t('phases.participants.markLeft', { name: displayName })}
                     >
-                      <span className="material-symbols-outlined text-lg" aria-hidden="true">{hasLeft ? 'undo' : 'logout'}</span>
+                      <span className="material-symbols-outlined text-lg! leading-none" aria-hidden="true">{hasLeft ? 'undo' : 'logout'}</span>
                     </button>
                   )}
-                  {status && <RowStatus status={status} />}
+                  {status && <RowStatus status={status} popping={motion.finishing.has(member.id)} />}
                 </div>
               );
             })}
 
             {pendingInvitees.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-dashed border-slate-200" data-testid="invited-section">
-                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center">
-                  <span className="material-symbols-outlined text-sm mr-1" aria-hidden="true">schedule</span>
+              <div className="mt-2 pt-3 px-1 border-t border-dashed border-slate-300" data-testid="invited-section">
+                <div className="px-1.5 text-xs font-semibold text-slate-600 mb-1.5 flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm! leading-none" aria-hidden="true">schedule</span>
                   {t('phases.participants.invitedHeading', { count: pendingInvitees.length })}
                 </div>
                 {!anonymous && pendingInvitees.map((invitee) => (
                   <div
                     key={invitee.id}
                     data-testid="invited-row"
-                    className="flex items-center p-2 rounded-lg mb-1"
+                    className="flex items-center gap-3 px-1.5 py-2 rounded-xl mb-0.5"
                   >
-                    <div className="w-8 h-8 rounded-full border-2 border-dashed border-slate-300 text-slate-500 flex items-center justify-center text-xs font-bold mr-3 shrink-0">
+                    <div className="w-9 h-9 rounded-full border-2 border-dashed border-slate-400 text-slate-600 flex items-center justify-center text-xs font-semibold shrink-0" aria-hidden="true">
                       {invitee.name.substring(0, 2).toUpperCase()}
                     </div>
                     <div className="grow min-w-0">
-                      <div className="text-sm font-medium truncate text-slate-500">{invitee.name}</div>
+                      <div className="text-sm font-semibold leading-5 truncate text-slate-600">{invitee.name}</div>
                       <div
-                        className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-full px-1.5 py-0.5 mt-0.5"
+                        className="inline-flex items-center gap-1 text-xs font-semibold leading-4 text-indigo-700 bg-indigo-50 rounded-full px-2 mt-0.5"
                         title={invitee.email
                           ? t('phases.participants.invitationSentTo', { email: invitee.email })
                           : t('phases.participants.invitationSent')}
                       >
-                        <span className="material-symbols-outlined text-xs leading-none" aria-hidden="true">mail</span>
+                        <span className="material-symbols-outlined text-xs! leading-none" aria-hidden="true">mail</span>
                         {t('phases.participants.invited')}
                       </div>
                     </div>
@@ -453,19 +521,18 @@ const SessionParticipantsPanel: React.FC<Props> = ({
               </div>
             )}
           </div>
-          <div className="p-3 border-t border-slate-200 bg-slate-50">
-            <div className="text-xs text-slate-500 text-center">{footer}</div>
-          </div>
-          {isFacilitator && (
-            <div className="p-3 border-t border-slate-200">
+          <div className="p-3 border-t border-slate-200 flex flex-col gap-2.5">
+            <div className="text-xs text-slate-600 text-center tabular-nums">{footer}</div>
+            {isFacilitator && (
               <button
+                type="button"
                 onClick={onInvite}
-                className="w-full bg-retro-primary text-white py-2 rounded-lg font-bold text-sm hover:bg-retro-primaryHover"
+                className="w-full bg-indigo-600 text-white py-2 rounded-lg font-semibold text-sm hover:bg-indigo-700 btn-brand-glow transition enabled:active:bg-indigo-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
               >
                 {t('phases.participants.invite')}
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </>
       )}
     </div>

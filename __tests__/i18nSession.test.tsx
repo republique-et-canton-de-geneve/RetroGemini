@@ -259,7 +259,6 @@ describe('Session dialogs and chips — French interface', () => {
           onDeleteComment={() => {}}
           onClose={() => {}}
           cardBgHex={null}
-          cardTextColor="text-slate-900"
           isAnonymous={false}
         />
       </LanguageProvider>

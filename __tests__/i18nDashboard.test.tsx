@@ -1,7 +1,9 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import LanguageProvider from '../i18n/LanguageProvider';
+import { LANGUAGE_STORAGE_KEY } from '../i18n/languages';
+import { en, fr } from '../i18n/messages';
 import Dashboard from '../components/Dashboard';
 import ReleaseAnalysisModal from '../components/dashboard/ReleaseAnalysisModal';
 import { localizeDecimal } from '../i18n/formatNumber';
@@ -200,7 +202,7 @@ describe('Dashboard in French', () => {
     expect(within(dialog).getByLabelText('Nom de la session')).toBeInTheDocument();
     expect(within(dialog).getByText('Mode anonyme')).toBeInTheDocument();
     expect(within(dialog).getByText('Masquer le nom des auteurs sur les cartes de cette rétro.')).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Activer ou désactiver le mode anonyme' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('switch', { name: 'Activer ou désactiver le mode anonyme' })).toHaveAttribute('aria-checked', 'false');
     expect(within(dialog).getByText('Modèles enregistrés')).toBeInTheDocument();
     // A saved template's name is content.
     expect(within(dialog).getByRole('button', { name: 'Our format' })).toBeInTheDocument();
@@ -321,6 +323,41 @@ describe('ReleaseAnalysisModal in French', () => {
 
     expect(screen.queryByText('Release retrospective analysis')).not.toBeInTheDocument();
     expect(screen.queryByText(/selected$/)).not.toBeInTheDocument();
+  });
+
+  // A message on screen is stored as what to say, never as the sentence
+  // (AGENTS.md, *Internationalisation*). The dialog is modal, so the language
+  // reaches it from another tab of the app, which the provider follows: kept
+  // as a sentence, the error stayed in the old language under the new screen.
+  it.each([
+    ['fr', 'en', 'dashboard.releaseAnalysis.errorNotEnabled', async () => ({ ok: false, status: 404, json: async () => ({ error: 'ai_not_enabled' }) })],
+    ['en', 'fr', 'dashboard.releaseAnalysis.errorFailed', async () => ({ ok: false, status: 500, json: async () => ({ error: 'ai_error' }) })],
+    ['fr', 'en', 'dashboard.releaseAnalysis.errorEmpty', async () => ({ ok: true, status: 200, json: async () => ({ analysis: '  ' }) })],
+    ['en', 'fr', 'dashboard.releaseAnalysis.errorUnreachable', async () => { throw new TypeError('Failed to fetch'); }]
+  ] as const)('says a failure in the language the reader switches to while it shows (%s to %s, %s)', async (from, to, key, answer) => {
+    const originalFetch = globalThis.fetch;
+    onTestFinished(() => { globalThis.fetch = originalFetch; });
+    globalThis.fetch = vi.fn(answer) as unknown as typeof fetch;
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    onTestFinished(() => { vi.mocked(console.error).mockRestore(); });
+    render(
+      <LanguageProvider initialLanguage={from}>
+        <ReleaseAnalysisModal retrospectives={[retro({ id: 'r1', name: 'AFC 2606-Sprint 169' })]} onClose={vi.fn()} />
+      </LanguageProvider>
+    );
+    fireEvent.change(screen.getByTestId('release-analysis-keyword'), { target: { value: '2606' } });
+    fireEvent.click(screen.getByTestId('release-analysis-generate'));
+    const before = from === 'fr' ? fr[key] : en[key];
+    const after = to === 'fr' ? fr[key] : en[key];
+    expect(await screen.findByText(before)).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: LANGUAGE_STORAGE_KEY, newValue: to }));
+    });
+
+    expect(screen.getByRole('dialog', { name: to === 'fr' ? fr['dashboard.releaseAnalysis.label'] : en['dashboard.releaseAnalysis.label'] })).toBeInTheDocument();
+    expect(screen.getByText(after)).toBeInTheDocument();
+    expect(screen.queryByText(before)).toBeNull();
   });
 });
 

@@ -2,53 +2,16 @@ import React, { useId, useMemo, useRef, useState } from 'react';
 import type { JiraStatus } from '../../types';
 import { useTranslation } from '../../i18n/I18nContext';
 import type { MessageKey } from '../../i18n/translate';
+import { hasSeenUser, nextFocusAfterDismiss, rememberSeenUser } from '../common/seenOnce';
 import { jiraAvailability } from './jiraAvailability';
 
-/** Where each browser remembers who dismissed the note: a JSON array of user ids. */
+/**
+ * Where each browser remembers who dismissed the note: a JSON array of user
+ * ids, read and written through the one-time notes' shared seen list
+ * (`components/common/seenOnce.ts`: the fifty most recent, and a storage that
+ * fails shows the note).
+ */
 export const JIRA_NOTE_STORAGE_KEY = 'retro-jira-note-seen';
-
-// A browser shared by a whole team (a meeting-room laptop) keeps the people who
-// dismissed it most recently; anyone pushed out simply sees the note once more.
-const MAX_REMEMBERED_USERS = 50;
-
-// Every read and write is guarded: storage can be missing or throw in a
-// private window, with blocked site data, or when another tab left something
-// that is not a list. The note is then shown, which is the safe way to be
-// wrong: "at least once" is the promise (spec §5).
-const readSeen = (): string[] => {
-  try {
-    const raw = window.localStorage.getItem(JIRA_NOTE_STORAGE_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
-  } catch {
-    return [];
-  }
-};
-
-const rememberSeen = (userId: string): void => {
-  try {
-    const seen = [...readSeen().filter(id => id !== userId), userId].slice(-MAX_REMEMBERED_USERS);
-    window.localStorage.setItem(JIRA_NOTE_STORAGE_KEY, JSON.stringify(seen));
-  } catch {
-    // Dismissed for this mount only; see readSeen.
-  }
-};
-
-const FOCUSABLE = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled]):not([type="hidden"])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])'
-].join(', ');
-
-// The first control after the note in document order: where the keyboard goes
-// when the note, and the button that dismissed it, disappear.
-const nextFocusableAfter = (root: HTMLElement): HTMLElement | null =>
-  Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).find(element =>
-    !root.contains(element) && (root.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
-  ) ?? null;
 
 interface Props {
   status: JiraStatus | null | undefined;
@@ -73,7 +36,7 @@ const JiraDiscoveryNote: React.FC<Props> = ({ status, isFacilitator, userId }) =
   const { t } = useTranslation();
   const titleId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
-  const alreadySeen = useMemo(() => readSeen().includes(userId), [userId]);
+  const alreadySeen = useMemo(() => hasSeenUser(JIRA_NOTE_STORAGE_KEY, userId), [userId]);
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
 
   const availability = jiraAvailability(status);
@@ -86,13 +49,12 @@ const JiraDiscoveryNote: React.FC<Props> = ({ status, isFacilitator, userId }) =
     else lastSentence = 'jira.note.facilitatorSetUp';
   }
 
-  const dismiss = () => {
-    const root = rootRef.current;
-    const active = document.activeElement;
-    // Only when the keyboard was here: someone who clicked "Got it" without
-    // focusing it (Safari) keeps wherever they were.
-    const next = root && (root.contains(active) || active === document.body) ? nextFocusableAfter(root) : null;
-    rememberSeen(userId);
+  const dismiss = (event: React.MouseEvent<HTMLButtonElement>) => {
+    // Only when the keyboard pressed it: a pointer leaves the focus where the
+    // browser put it, and someone typing elsewhere who clicks "Got it" keeps
+    // their place.
+    const next = nextFocusAfterDismiss(rootRef.current, event);
+    rememberSeenUser(JIRA_NOTE_STORAGE_KEY, userId);
     setDismissedFor(userId);
     next?.focus();
   };

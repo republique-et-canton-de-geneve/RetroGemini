@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import LanguageProvider from '../i18n/LanguageProvider';
 import LanguageSwitcher from '../components/common/LanguageSwitcher';
-import { createTranslator } from '../i18n/translate';
+import { createPluralTranslator, createTranslator } from '../i18n/translate';
 import { SUPPORTED_LANGUAGES } from '../i18n/languages';
 import type { Translator } from '../i18n/translate';
 import { getGroupingAriaLabel, getGroupingButtonText } from '../components/session/groupingKeyboard';
@@ -99,6 +99,19 @@ describe('label in name (WCAG 2.5.3)', () => {
     const failures = boardPairs(createTranslator(language))
       .filter(([, visible, name]) => !containsLabel(visible, name))
       .map(([control, visible, name]) => `${control}: "${visible}" not in "${name}"`);
+    expect(failures).toEqual([]);
+  });
+
+  // A control that shows only a number (a card's comments, a proposal's votes)
+  // is named by that number and what it counts. The number must be a word of
+  // the name in both languages, at one and at several.
+  it.each(SUPPORTED_LANGUAGES)('every counted control carries the number it shows (%s)', (language) => {
+    const tp = createPluralTranslator(language);
+    const keys = ['session.ticket.commentsCount', 'phases.proposal.votesFor', 'phases.proposal.votesNeutral', 'phases.proposal.votesAgainst'] as const;
+    const failures = keys
+      .flatMap((key) => [1, 2, 12].map((count) => [key, String(count), tp(key, count)] as const))
+      .filter(([, visible, name]) => !containsLabel(visible, name))
+      .map(([key, visible, name]) => `${key}: "${visible}" not in "${name}"`);
     expect(failures).toEqual([]);
   });
 

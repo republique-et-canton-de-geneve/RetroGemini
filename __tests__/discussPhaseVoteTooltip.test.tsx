@@ -436,10 +436,11 @@ describe('DiscussPhase - Vote Status Tooltip', () => {
       />
     );
 
-    // Find the proposal row (it should have an inline style with a gradient)
+    // Find the proposal row (it should have an inline style with a gradient,
+    // as its background image: the row keeps its own fill under it)
     const proposalRows = container.querySelectorAll('[style]');
     const rowWithGradient = Array.from(proposalRows).find(el =>
-      (el as HTMLElement).style.background?.includes('linear-gradient')
+      (el as HTMLElement).style.backgroundImage?.includes('linear-gradient')
     );
     expect(rowWithGradient).toBeTruthy();
   });

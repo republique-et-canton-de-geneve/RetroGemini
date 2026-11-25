@@ -20,6 +20,7 @@ const login: Record<keyof typeof en, string> = {
   'login.list.empty': 'Aucune équipe trouvée. Créez-en une pour commencer\u202f!',
   'login.list.searchPlaceholder': 'Rechercher une équipe...',
   'login.list.clearSearch': 'Effacer la recherche',
+  'login.list.noMatch': 'Aucune équipe ne correspond à «\u00a0{query}\u00a0».',
   'login.list.favorites': 'Favoris',
   'login.list.allTeams': 'Toutes les équipes',
   'login.list.addFavorite': 'Ajouter {teamName} aux favoris',

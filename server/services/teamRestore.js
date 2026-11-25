@@ -61,7 +61,9 @@ import { isTeamShape } from './archiveShape.js';
  * `jiraClaims` records the issues being created right now; rolled back, an
  * issue in flight could be created a second time. `jiraParentClaims` is the
  * same for the parent issues of `sessionParent` mode. (`jiraParents` is not
- * kept whole: it is carried, `carryJiraParents`.)
+ * kept whole: it is carried, `carryJiraParents`.) `memberAvatars` holds each
+ * person's own choice of avatar, dated by the server: rolled back, an older
+ * avatar would come back on everyone's screen.
  */
 const KEPT_FROM_CURRENT = Object.freeze([
   'name',
@@ -73,7 +75,8 @@ const KEPT_FROM_CURRENT = Object.freeze([
   'lastConnectionDate',
   'jiraTarget',
   'jiraClaims',
-  'jiraParentClaims'
+  'jiraParentClaims',
+  'memberAvatars'
 ]);
 
 /** The two lists whose entries are also `session:{id}` rows. */

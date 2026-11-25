@@ -15,12 +15,12 @@ export type TicketGroupingBannerVariant = 'drop-target' | 'selected';
 
 const BANNER: Record<TicketGroupingBannerVariant, { className: string; icon: string; label: MessageKey }> = {
   'drop-target': {
-    className: 'bg-indigo-500',
+    className: 'bg-indigo-700',
     icon: 'merge',
     label: 'session.groupingBanner.dropTarget'
   },
   selected: {
-    className: 'bg-blue-500',
+    className: 'bg-indigo-600',
     icon: 'touch_app',
     label: 'session.groupingBanner.selected'
   }
@@ -31,9 +31,11 @@ const TicketGroupingBanner: React.FC<{ variant: TicketGroupingBannerVariant }> =
   const { className, icon, label } = BANNER[variant];
   return (
     <div
-      className={`-mx-3 -mt-3 mb-2 ${className} flex items-center justify-center rounded-t font-bold text-white text-xs py-1 pointer-events-none`}
+      // The card's radius less its 1px border, so the banner fills its top
+      // corners. The brand colour, under white words: 4.5:1 at 12px.
+      className={`-mx-3 -mt-3 mb-2 ${className} flex items-center justify-center rounded-t-[calc(var(--radius-xl)-1px)] font-semibold text-white text-xs py-1 pointer-events-none`}
     >
-      <span className="material-symbols-outlined text-sm mr-1">{icon}</span> {t(label)}
+      <span className="material-symbols-outlined text-sm! leading-none mr-1" aria-hidden="true">{icon}</span> {t(label)}
     </div>
   );
 };

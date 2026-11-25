@@ -4,6 +4,11 @@ French translation of `CHANGELOG.md`, shown in the "What's New" list to readers
 whose interface is in French. `CHANGELOG.md` is the source; this file only
 translates the releases it already lists.
 
+## [45.0] - 2026-11-19
+
+### Added
+- Profitez d'une toute nouvelle apparence sur tous les écrans, avec des cartes aux teintes douces, une nouvelle police, des icônes plus rondes et de légères animations quand quelqu'un rejoint la session, qu'une carte arrive ou qu'un vote est donné ; et choisissez votre avatar parmi 120 dessins, affiché sur vos cartes et dans le panneau des participants
+
 ## [44.0] - 2026-11-18
 
 ### Added
